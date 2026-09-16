@@ -29,7 +29,7 @@ class DashboardController extends Controller
         $employeeId = $user && $user->employee_id ? $user->employee_id : $request->query('employee_id');
 
         $isStoreAdmin = in_array($role, ['Store Administrator', 'Store Admin']);
-        $branch = ($isStoreAdmin && $user && $user->employee) ? ($user->employee->branch ?: 'Main Branch') : ($request->query('branch', 'All'));
+        $branch = ($isStoreAdmin && $user && $user->employee) ? ($user->employee->branch_id ?: null) : ($request->query('branch', 'All'));
 
         $today = date('Y-m-d');
         $currentMonth = date('m');
@@ -44,9 +44,9 @@ class DashboardController extends Controller
         // 1. Sales Queries
         $salesQuery = SaleTransaction::query();
         if ($isStoreAdmin || ($branch !== 'All' && !empty($branch))) {
-            $b = $isStoreAdmin ? ($user->employee ? $user->employee->branch : 'Main Branch') : $branch;
+            $b = $isStoreAdmin ? ($user->employee ? $user->employee->branch_id : null) : $branch;
             $salesQuery->whereHas('processedBy.employee', function ($eq) use ($b) {
-                $eq->where('branch', $b);
+                $eq->where('branch_id', $b);
             });
         }
         $totalSales = (float)(clone $salesQuery)->sum('total_amount');
@@ -59,12 +59,12 @@ class DashboardController extends Controller
         // 2. Collections (Payments + Down Payments)
         $paymentQuery = Payment::query();
         if ($isStoreAdmin || ($branch !== 'All' && !empty($branch))) {
-            $b = $isStoreAdmin ? ($user->employee ? $user->employee->branch : 'Main Branch') : $branch;
+            $b = $isStoreAdmin ? ($user->employee ? $user->employee->branch_id : null) : $branch;
             $paymentQuery->where(function ($q) use ($b) {
                 $q->whereHas('installmentAccount.sale.processedBy.employee', function ($eq) use ($b) {
-                    $eq->where('branch', $b);
+                    $eq->where('branch_id', $b);
                 })->orWhereHas('receivedBy.employee', function ($eq) use ($b) {
-                    $eq->where('branch', $b);
+                    $eq->where('branch_id', $b);
                 });
             });
         }
@@ -75,9 +75,9 @@ class DashboardController extends Controller
         // 3. Installment Accounts & Outstanding Balance
         $instQuery = InstallmentAccount::with('payments');
         if ($isStoreAdmin || ($branch !== 'All' && !empty($branch))) {
-            $b = $isStoreAdmin ? ($user->employee ? $user->employee->branch : 'Main Branch') : $branch;
+            $b = $isStoreAdmin ? ($user->employee ? $user->employee->branch_id : null) : $branch;
             $instQuery->whereHas('sale.processedBy.employee', function ($eq) use ($b) {
-                $eq->where('branch', $b);
+                $eq->where('branch_id', $b);
             });
         }
         $allInsts = (clone $instQuery)->get();
@@ -99,7 +99,7 @@ class DashboardController extends Controller
 
         // 5. Customers & Branches
         $totalCustomers = Customer::count();
-        $branchesList = Employee::whereNotNull('branch')->where('branch', '!=', '')->distinct()->pluck('branch')->toArray();
+        $branchesList = \App\Models\BranchProfile::pluck('name')->toArray();
         if (empty($branchesList)) {
             $branchesList = ['Main Branch', 'North Branch', 'South Branch'];
         }
@@ -108,7 +108,7 @@ class DashboardController extends Controller
         // 6. Employees & Attendance
         $empQuery = Employee::query();
         if ($isStoreAdmin) {
-            $empQuery->where('branch', $branch);
+            $empQuery->where('branch_id', $branch);
         }
         $totalEmployees = $empQuery->count();
         $activeEmployees = (clone $empQuery)->where('status', 'Active')->count();
@@ -116,7 +116,7 @@ class DashboardController extends Controller
         $attQuery = Attendance::with('employee')->where('attendance_date', $today);
         if ($isStoreAdmin) {
             $attQuery->whereHas('employee', function ($eq) use ($branch) {
-                $eq->where('branch', $branch);
+                $eq->where('branch_id', $branch);
             });
         }
         $todayAttendance = $attQuery->get();
@@ -125,7 +125,7 @@ class DashboardController extends Controller
             $fallbackQuery = Attendance::with('employee')->where('attendance_date', $latestDate);
             if ($isStoreAdmin) {
                 $fallbackQuery->whereHas('employee', function ($eq) use ($branch) {
-                    $eq->where('branch', $branch);
+                    $eq->where('branch_id', $branch);
                 });
             }
             $todayAttendance = $fallbackQuery->get();
@@ -140,7 +140,7 @@ class DashboardController extends Controller
         $payrollQuery = Payroll::query();
         if ($isStoreAdmin) {
             $payrollQuery->whereHas('employee', function ($eq) use ($branch) {
-                $eq->where('branch', $branch);
+                $eq->where('branch_id', $branch);
             });
         }
         $lastClosedPayroll = (float)(clone $payrollQuery)->where('status', 'Paid')->sum('net_pay');
@@ -249,7 +249,7 @@ class DashboardController extends Controller
 
         $isStoreAdmin = $user && in_array($user->role, ['Store Administrator', 'Store Admin']);
         if ($isStoreAdmin) {
-            $branch = $user->employee ? ($user->employee->branch ?: 'Main Branch') : 'Main Branch';
+            $branch = $user->employee ? ($user->employee->branch_id ?: null) : null;
         }
 
         // Calculate Date Range based on timeframe
@@ -280,7 +280,7 @@ class DashboardController extends Controller
 
         if ($branch !== 'All' && !empty($branch)) {
             $salesQuery->whereHas('processedBy.employee', function ($eq) use ($branch) {
-                $eq->where('branch', $branch);
+                $eq->where('branch_id', $branch);
             });
         }
 
@@ -299,9 +299,9 @@ class DashboardController extends Controller
         if ($branch !== 'All' && !empty($branch)) {
             $paymentQuery->where(function ($q) use ($branch) {
                 $q->whereHas('installmentAccount.sale.processedBy.employee', function ($eq) use ($branch) {
-                    $eq->where('branch', $branch);
+                    $eq->where('branch_id', $branch);
                 })->orWhereHas('receivedBy.employee', function ($eq) use ($branch) {
-                    $eq->where('branch', $branch);
+                    $eq->where('branch_id', $branch);
                 });
             });
         }
@@ -317,7 +317,7 @@ class DashboardController extends Controller
         $instQuery = InstallmentAccount::with('payments');
         if ($branch !== 'All' && !empty($branch)) {
             $instQuery->whereHas('sale.processedBy.employee', function ($eq) use ($branch) {
-                $eq->where('branch', $branch);
+                $eq->where('branch_id', $branch);
             });
         }
         $allInsts = $instQuery->get();
@@ -363,26 +363,25 @@ class DashboardController extends Controller
      */
     public function branchComparison(Request $request)
     {
-        $branches = Employee::whereNotNull('branch')->where('branch', '!=', '')->distinct()->pluck('branch')->toArray();
-        if (empty($branches)) {
-            $branches = ['Main Branch', 'North Branch', 'South Branch'];
-        }
+        $branchProfiles = \App\Models\BranchProfile::all();
+        $branches = $branchProfiles->pluck('name')->toArray();
 
         $comparison = [];
-        foreach ($branches as $branch) {
+        foreach ($branchProfiles as $bp) {
+            $branch = $bp->name;
             // Sales
             $sales = (float)SaleTransaction::whereHas('processedBy.employee', function ($eq) use ($branch) {
-                $eq->where('branch', $branch);
+                $eq->where('branch_id', $branch);
             })->sum('total_amount');
 
             // Collections
             $collections = (float)Payment::whereHas('installmentAccount.sale.processedBy.employee', function ($eq) use ($branch) {
-                $eq->where('branch', $branch);
+                $eq->where('branch_id', $branch);
             })->sum('amount');
 
             // Installment Accounts
             $insts = InstallmentAccount::with('payments')->whereHas('sale.processedBy.employee', function ($eq) use ($branch) {
-                $eq->where('branch', $branch);
+                $eq->where('branch_id', $branch);
             })->get();
 
             $instSales = (float)$insts->sum('total_payable');
@@ -391,7 +390,14 @@ class DashboardController extends Controller
             $overdueCount = $insts->where('status', 'Overdue')->count();
 
             $comparison[] = [
+                'id' => $bp->id,
                 'branch' => $branch,
+                'location' => $bp->location,
+                'manager' => $bp->manager_name,
+                'contact' => $bp->contact_number,
+                'status' => $bp->status,
+                'color' => $bp->color,
+                'image' => $bp->image_url,
                 'sales' => $sales,
                 'collections' => $collections,
                 'installment_sales' => $instSales,
@@ -412,7 +418,7 @@ class DashboardController extends Controller
     {
         $user = $request->user();
         $isStoreAdmin = $user && in_array($user->role, ['Store Administrator', 'Store Admin']);
-        $branch = $isStoreAdmin ? ($user->employee ? $user->employee->branch : 'Main Branch') : 'All';
+        $branch = $isStoreAdmin ? ($user->employee ? $user->employee->branch_id : null) : 'All';
 
         $alerts = [];
 
@@ -445,7 +451,7 @@ class DashboardController extends Controller
         // 3. Overdue Installments Alert
         $instQuery = InstallmentAccount::where('status', 'Overdue');
         if ($isStoreAdmin) {
-            $instQuery->whereHas('sale.processedBy.employee', fn($eq) => $eq->where('branch', $branch));
+            $instQuery->whereHas('sale.processedBy.employee', fn($eq) => $eq->where('branch_id', $branch));
         }
         $overdueCount = $instQuery->count();
         if ($overdueCount > 0) {
@@ -528,8 +534,9 @@ class DashboardController extends Controller
         $branchSales = DB::table('sale_transactions')
             ->join('users', 'sale_transactions.processed_by', '=', 'users.user_id')
             ->join('employees', 'users.employee_id', '=', 'employees.employee_id')
-            ->selectRaw("COALESCE(employees.branch, 'Main Branch') as branch, SUM(sale_transactions.total_amount) as total_sales")
-            ->groupBy('employees.branch')
+            ->leftJoin('branch_profiles', 'employees.branch_id', '=', 'branch_profiles.id')
+            ->selectRaw("COALESCE(branch_profiles.name, 'Main Branch') as branch, SUM(sale_transactions.total_amount) as total_sales")
+            ->groupBy('branch_profiles.name')
             ->get();
 
         return response()->json([
@@ -554,7 +561,7 @@ class DashboardController extends Controller
                     'sale_id' => $s->sale_id,
                     'invoice_no' => $s->invoice_no,
                     'customer_name' => $s->customer ? "{$s->customer->first_name} {$s->customer->last_name}" : 'Walk-in',
-                    'branch' => $emp ? ($emp->branch ?: 'Main Branch') : 'Main Branch',
+                    'branch' => $emp && $emp->branch ? $emp->branch->name : null,
                     'sale_date' => date('Y-m-d', strtotime($s->sale_date)),
                     'payment_method' => $s->payment_method,
                     'total_amount' => (float)$s->total_amount,
@@ -576,7 +583,7 @@ class DashboardController extends Controller
                     'account_no' => $inst->account_no,
                     'customer_name' => $inst->customer ? "{$inst->customer->first_name} {$inst->customer->last_name}" : 'Customer',
                     'customer_phone' => $inst->customer ? $inst->customer->phone : '',
-                    'branch' => $emp ? ($emp->branch ?: 'Main Branch') : 'Main Branch',
+                    'branch' => $emp && $emp->branch ? $emp->branch->name : null,
                     'total_payable' => (float)$inst->total_payable,
                     'paid' => $paid,
                     'balance' => $balance,
@@ -612,3 +619,4 @@ class DashboardController extends Controller
         ]);
     }
 }
+

@@ -247,7 +247,7 @@ export default function AttendancePage() {
     // Check if getUserMedia is supported
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
       if (window.isSecureContext === false) {
-        setCameraError('🚨 INSECURE CONNECTION (HTTP) 🚨\nYour browser is permanently blocking the camera because you are not using HTTPS. You MUST restart your terminal (stop npm run dev and start it again) to enable the SSL plugin, then open the https:// URL.')
+        setCameraError('⚠ INSECURE CONNECTION (HTTP) ⚠\n\nYour browser is blocking camera access because this app is running over HTTP.\n\nTo fix it, restart the terminal/server, reopen the app with the HTTPS URL, and then retry camera access.')
         return false
       }
       setCameraError('Camera API is not supported in this browser. Please ensure you are using HTTPS.')
@@ -347,22 +347,12 @@ export default function AttendancePage() {
         device_info: `${navigator.platform} (${navigator.userAgent})`,
       })
 
-      if (res.success && res.employee) {
-        if (res.available_actions && res.available_actions.includes('COMPLETED')) {
-          playTone('error')
-          showToast('Attendance already completed for today.', 'error')
-          setVerifyingQr(false)
-          return
-        }
+      if (res.success && res.status === 'PENDING') {
         setScannedQrToken(token)
         setIdentifiedEmployee(res.employee)
-        setAvailableActions(res.available_actions || ['TIME_IN'])
-        setSelectedAction(res.available_actions ? res.available_actions[0] : 'TIME_IN')
-        setEnteredPin('')
-        setPinError('')
-        setIsLockedOut(false)
+        setPunchResult({ ...res, log_id: res.scan_log_id }) // Store log_id
         await stopCamera()
-        setStationStep('pin')
+        setStationStep('waiting') // Move to polling state
         showToast(`Employee Identified: ${res.employee.name}`, 'success')
       } else {
         playTone('error')
@@ -382,6 +372,40 @@ export default function AttendancePage() {
       setVerifyingQr(false)
     }
   }
+
+  // --- NEW: Poll Backend while waiting for Employee PIN ---
+  useEffect(() => {
+    let interval
+    if (stationStep === 'waiting' && punchResult?.log_id) {
+      interval = setInterval(async () => {
+        try {
+          const res = await api.attendance.checkVerification(punchResult.log_id)
+          if (res.status === 'SUCCESS') {
+            clearInterval(interval)
+            playTone('success')
+            setPunchResult({
+              ...punchResult,
+              action: res.action.replace('ATTENDANCE_', ''),
+              time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+              date: new Date().toLocaleDateString(),
+              message: `ATTENDANCE SUCCESS`,
+            })
+            setStationStep('result')
+          } else if (res.status === 'FAILED') {
+            clearInterval(interval)
+            playTone('error')
+            setPinError(res.log.failure_reason || 'Verification failed')
+            showToast('Employee verification failed or rejected.', 'error')
+            setStationStep('scan')
+            startCamera()
+          }
+        } catch (err) {
+          console.error('Polling error:', err)
+        }
+      }, 2000)
+    }
+    return () => clearInterval(interval)
+  }, [stationStep, punchResult?.log_id])
 
   const handleManualTokenSubmit = (e) => {
     e?.preventDefault()
@@ -440,7 +464,7 @@ export default function AttendancePage() {
       const res = await api.attendance.verifyPin({
         qr_token: scannedQrToken,
         pin: enteredPin,
-        action: selectedAction,
+        action: availableActions[0] || selectedAction,
         device_info: `${navigator.platform} (${navigator.userAgent})`,
       })
 
@@ -495,6 +519,24 @@ export default function AttendancePage() {
     setIsLockedOut(false)
     setPunchResult(null)
     setManualTokenInput('')
+  }
+
+  const startEmployeeSelfPunch = (action) => {
+    if (!myProfile?.qr_token) return
+
+    setScannedQrToken(myProfile.qr_token)
+    setIdentifiedEmployee({
+      name: `${myProfile.first_name || ''} ${myProfile.last_name || ''}`.trim() || myProfile.name || 'Employee',
+      employee_code: myProfile.employee_code || '',
+      branch: myProfile.branch || userBranch,
+    })
+    setAvailableActions([action])
+    setSelectedAction(action)
+    setEnteredPin('')
+    setPinError('')
+    setIsLockedOut(false)
+    setPunchResult(null)
+    setStationStep('pin')
   }
 
   const handleDownloadMyQr = () => {
@@ -671,7 +713,7 @@ export default function AttendancePage() {
 
               {cameraError && (
                 <div className="p-4 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-500 text-xs font-semibold text-center mx-auto max-w-sm mb-4 space-y-3">
-                  <div>{cameraError}</div>
+                  <div className="whitespace-pre-line">{cameraError}</div>
                   <div className="flex items-center justify-center gap-3">
                     <button 
                       type="button" 
@@ -770,142 +812,28 @@ export default function AttendancePage() {
             </Card>
           )}
 
-          {/* STEP 2: EMPLOYEE IDENTIFIED & PERSONAL PIN REQUIRED */}
-          {stationStep === 'pin' && identifiedEmployee && (
-            <div className="space-y-4 max-w-lg mx-auto">
-              {/* Employee Identified Card */}
-              <Card className="p-5 border border-border shadow-lg space-y-3">
-                <div className="flex items-center justify-between border-b border-border pb-2.5">
-                  <div className="flex items-center gap-2">
-                    <div className="w-8 h-8 rounded-lg bg-emerald-500/10 text-emerald-500 flex items-center justify-center font-bold">
-                      <FiUser />
-                    </div>
-                    <div>
-                      <span className="text-[10px] font-bold text-emerald-500 uppercase">EMPLOYEE IDENTIFIED</span>
-                      <h3 className="text-sm font-bold text-foreground">{identifiedEmployee.name}</h3>
-                    </div>
-                  </div>
-                  <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-500 border border-emerald-500/30">
-                    <FiCheckCircle /> QR: ACTIVE
-                  </span>
-                </div>
+          {/* STEP 2: WAITING FOR EMPLOYEE PIN */}
+          {stationStep === 'waiting' && punchResult && (
+            <Card className="p-8 border border-border shadow-2xl max-w-lg mx-auto text-center space-y-5 animate-fadeIn">
+              <div className="w-16 h-16 rounded-full bg-primary/20 text-primary border-2 border-primary/40 flex items-center justify-center mx-auto text-3xl shadow-lg">
+                <FiRefreshCw className="animate-spin" />
+              </div>
 
-                <div className="grid grid-cols-2 gap-2 text-xs">
-                  <div className="p-2.5 rounded-xl bg-muted/30 border border-border">
-                    <span className="text-[10px] text-muted-foreground uppercase font-bold block">Employee Code</span>
-                    <span className="font-mono font-bold text-primary">{identifiedEmployee.employee_code}</span>
-                  </div>
-                  <div className="p-2.5 rounded-xl bg-muted/30 border border-border">
-                    <span className="text-[10px] text-muted-foreground uppercase font-bold block">Branch</span>
-                    <span className="font-semibold text-emerald-600 dark:text-emerald-400">{identifiedEmployee.branch || userBranch}</span>
-                  </div>
-                </div>
-              </Card>
-
-              {/* PIN Keypad */}
-              <Card className="p-6 border border-border shadow-xl space-y-4 text-center">
-                <div>
-                  <span className="text-[10px] uppercase font-bold tracking-wider text-amber-500">Step 2 of 2</span>
-                  <h3 className="text-base font-bold text-foreground flex items-center justify-center gap-1.5 mt-0.5">
-                    <FiLock className="text-primary" /> PERSONAL PIN REQUIRED
-                  </h3>
-                  <p className="text-xs text-muted-foreground mt-0.5">
-                    The employee must enter their 4 to 6 digit security PIN.
-                  </p>
-                </div>
-
-                {availableActions.length > 0 && (
-                  <div className="flex flex-wrap justify-center gap-2 mb-2">
-                    {availableActions.map(action => (
-                      <button
-                        key={action}
-                        type="button"
-                        onClick={() => setSelectedAction(action)}
-                        className={`px-4 py-2 rounded-xl text-xs font-bold border transition-colors ${selectedAction === action ? 'bg-primary text-primary-foreground border-primary shadow-md' : 'bg-card text-foreground border-border hover:bg-muted'}`}
-                      >
-                        {action.replace('_', ' ')}
-                      </button>
-                    ))}
-                  </div>
-                )}
-
-                {pinError && (
-                  <div className="p-2.5 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-500 text-xs font-semibold animate-shake">
-                    {pinError}
-                  </div>
-                )}
-
-                {/* PIN Mask Field */}
-                <div className="flex items-center justify-center gap-2">
-                  <input
-                    type={showPin ? 'text' : 'password'}
-                    maxLength={6}
-                    value={enteredPin}
-                    onChange={(e) => setEnteredPin(e.target.value.replace(/\D/g, ''))}
-                    placeholder="••••"
-                    className="w-48 text-center text-2xl font-mono tracking-widest py-2 px-4 rounded-xl border-2 border-primary/50 bg-card text-foreground font-bold outline-none"
-                    autoFocus
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowPin(!showPin)}
-                    className="p-2.5 rounded-xl border border-border bg-card text-muted-foreground hover:text-foreground"
-                  >
-                    {showPin ? <FiEyeOff /> : <FiEye />}
-                  </button>
-                </div>
-
-                {/* Touch Keypad */}
-                <div className="max-w-xs mx-auto grid grid-cols-3 gap-2 pt-1">
-                  {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((num) => (
-                    <button
-                      key={num}
-                      type="button"
-                      onClick={() => handlePinDigit(num.toString())}
-                      className="py-3 bg-muted/40 hover:bg-muted active:scale-95 text-foreground font-bold text-base rounded-xl border border-border transition cursor-pointer"
-                    >
-                      {num}
-                    </button>
-                  ))}
-                  <button
-                    type="button"
-                    onClick={handlePinClear}
-                    className="py-3 bg-muted/40 hover:bg-rose-500/10 text-rose-500 font-semibold text-xs rounded-xl border border-border transition cursor-pointer"
-                  >
-                    CLEAR
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handlePinDigit('0')}
-                    className="py-3 bg-muted/40 hover:bg-muted active:scale-95 text-foreground font-bold text-base rounded-xl border border-border transition cursor-pointer"
-                  >
-                    0
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handlePinDelete}
-                    className="py-3 bg-muted/40 hover:bg-muted text-foreground font-semibold text-xs rounded-xl border border-border transition cursor-pointer flex items-center justify-center"
-                  >
-                    ⌫
-                  </button>
-                </div>
-
-                <div className="pt-2 flex gap-3 max-w-xs mx-auto">
-                  <Btn variant="outline" className="flex-1" onClick={resetStation} disabled={verifyingPin}>
-                    Cancel
-                  </Btn>
-                  <Btn
-                    variant="primary"
-                    className="flex-1"
-                    onClick={handleVerifyPin}
-                    disabled={verifyingPin || enteredPin.length < 4}
-                    icon={<FiCheck />}
-                  >
-                    {verifyingPin ? 'Verifying...' : 'VERIFY'}
-                  </Btn>
-                </div>
-              </Card>
-            </div>
+              <div>
+                <h2 className="text-xl font-black text-foreground uppercase">
+                  WAITING FOR EMPLOYEE
+                </h2>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Employee {punchResult.employee?.name} must enter their PIN on their own device to complete the attendance.
+                </p>
+              </div>
+              
+              <div className="pt-2">
+                <Btn variant="outline" size="lg" className="w-full" onClick={() => { setStationStep('scan'); startCamera(); }} icon={<FiCamera />}>
+                  Cancel & Scan Next Employee
+                </Btn>
+              </div>
+            </Card>
           )}
 
           {/* STEP 3: SUCCESS RESULT */}
@@ -979,20 +907,17 @@ export default function AttendancePage() {
           {myProfileLoading ? (
             <LoadingState message="Loading your permanent attendance QR..." />
           ) : (myProfile?.qr_status === 'ACTIVE' && myProfile?.qr_token && myProfile?.qr_active) ? (
-            /* STATE 5: ACTIVE */
             <div className="flex flex-col items-center space-y-6">
-              {/* Ready Banner */}
               <div className="w-full text-center space-y-1.5 p-4 rounded-2xl bg-emerald-500/10 border border-emerald-500/20">
                 <div className="inline-flex items-center gap-1 text-xs font-mono font-bold px-3 py-0.5 rounded-full bg-emerald-500/20 text-emerald-500 border border-emerald-500/30">
                   <FiCheckCircle className="w-3.5 h-3.5" /> QR Status: ACTIVE
                 </div>
                 <h3 className="text-base font-bold text-emerald-600 dark:text-emerald-400">Attendance QR Code Ready</h3>
                 <p className="text-xs text-muted-foreground">
-                  "Your account has been verified and your permanent QR code has been issued by the Administrator."
+                  Your account has been verified and your permanent QR code has been issued by the Administrator.
                 </p>
               </div>
 
-              {/* ID Card Badge */}
               <div className="w-80 bg-gradient-to-b from-slate-900 via-slate-800 to-slate-950 text-white rounded-3xl shadow-2xl border border-slate-700 overflow-hidden flex flex-col items-center p-6 text-center relative">
                 <div className="w-12 h-1 bg-amber-400 rounded-full mb-3" />
                 <span className="text-[10px] uppercase tracking-widest text-amber-300 font-bold">PERMANENT ATTENDANCE BADGE</span>
@@ -1012,7 +937,6 @@ export default function AttendancePage() {
                   {myProfile.employee_code}
                 </div>
 
-                {/* QR Code Graphic */}
                 <div className="mt-4 p-4 bg-white rounded-2xl shadow-xl border-2 border-slate-200">
                   <QRCodeSVG
                     id="my-employee-qr"
@@ -1031,7 +955,6 @@ export default function AttendancePage() {
                 </div>
               </div>
 
-              {/* Action Buttons */}
               <div className="w-full max-w-sm space-y-3">
                 <div className="flex gap-3">
                   <button
@@ -1052,7 +975,6 @@ export default function AttendancePage() {
               </div>
             </div>
           ) : myProfile?.qr_status === 'REQUESTED' ? (
-            /* STATE 2: REQUESTED */
             <Card noPad className="p-8 text-center space-y-5 border border-border bg-card shadow-xl max-w-lg mx-auto">
               <div className="w-16 h-16 rounded-2xl bg-blue-500/10 text-blue-500 flex items-center justify-center mx-auto border border-blue-500/20 text-3xl">
                 <FiClock />
@@ -1064,7 +986,7 @@ export default function AttendancePage() {
                 </div>
                 <h3 className="text-lg font-bold text-foreground mt-2">QR Request Submitted</h3>
                 <p className="text-xs text-muted-foreground max-w-md mx-auto leading-relaxed">
-                  "Your QR code request has been submitted to the Administrator. Your account is currently waiting for verification."
+                  Your QR code request has been submitted to the Administrator. Your account is currently waiting for verification.
                 </p>
               </div>
               <div className="pt-2">
@@ -1074,7 +996,6 @@ export default function AttendancePage() {
               </div>
             </Card>
           ) : myProfile?.qr_status === 'UNDER_REVIEW' ? (
-            /* STATE 3: UNDER REVIEW */
             <Card noPad className="p-8 text-center space-y-5 border border-border bg-card shadow-xl max-w-lg mx-auto">
               <div className="w-16 h-16 rounded-2xl bg-indigo-500/10 text-indigo-500 flex items-center justify-center mx-auto border border-indigo-500/20 text-3xl">
                 <FiShield />
@@ -1086,12 +1007,11 @@ export default function AttendancePage() {
                 </div>
                 <h3 className="text-lg font-bold text-foreground mt-2">Account Verification in Progress</h3>
                 <p className="text-xs text-muted-foreground max-w-md mx-auto leading-relaxed">
-                  "An Administrator is currently verifying your account information."
+                  An Administrator is currently verifying your account information.
                 </p>
               </div>
             </Card>
           ) : myProfile?.qr_status === 'REJECTED' ? (
-            /* STATE 4: REJECTED */
             <Card noPad className="p-8 text-center space-y-5 border border-rose-500/30 bg-card shadow-xl max-w-lg mx-auto">
               <div className="w-16 h-16 rounded-2xl bg-rose-500/10 text-rose-500 flex items-center justify-center mx-auto border border-rose-500/20 text-3xl">
                 <FiXCircle />
@@ -1118,7 +1038,6 @@ export default function AttendancePage() {
               </div>
             </Card>
           ) : (
-            /* STATE 1: NOT GENERATED */
             <Card noPad className="p-8 text-center space-y-5 border border-border bg-card shadow-xl max-w-lg mx-auto">
               <div className="w-16 h-16 rounded-2xl bg-amber-500/10 text-amber-500 flex items-center justify-center mx-auto border border-amber-500/20 text-3xl">
                 <FiSmartphone />
@@ -1289,7 +1208,6 @@ export default function AttendancePage() {
                         <th className="py-3 px-4 text-left">Branch</th>
                         <th className="py-3 px-4 text-left">Department</th>
                         <th className="py-3 px-4 text-left">Time In</th>
-                        <th className="py-3 px-4 text-left">Break (Out-In)</th>
                         <th className="py-3 px-4 text-left">Lunch (Out-In)</th>
                         <th className="py-3 px-4 text-left">Time Out</th>
                         <th className="py-3 px-4 text-right">Actual Hrs</th>
@@ -1309,9 +1227,6 @@ export default function AttendancePage() {
                           <td className="py-3 px-4">
                             <div className="font-mono">{a.time_in ? a.time_in.substring(0,5) : '—'}</div>
                             {a.status === 'Late' && <div className="text-[10px] text-rose-500 font-bold uppercase tracking-wider mt-0.5">Late Arrival</div>}
-                          </td>
-                          <td className="py-3 px-4 font-mono text-xs">
-                            {a.break_out ? `${a.break_out.substring(0,5)} - ${a.break_in ? a.break_in.substring(0,5) : '?'}` : '—'}
                           </td>
                           <td className="py-3 px-4 font-mono text-xs">
                             {a.lunch_out ? `${a.lunch_out.substring(0,5)} - ${a.lunch_in ? a.lunch_in.substring(0,5) : '?'}` : '—'}

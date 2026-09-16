@@ -8,7 +8,7 @@ import {
 import {
   Btn, Badge, StatusBadge, Input, Select, Textarea, Modal,
   Table, TR, TD, SearchBar, PageHeader, StatCard, Card, CardHeader, Pagination, showToast,
-  LoadingState, ErrorAlert, TableSkeleton, EmptyState,
+  LoadingState, ErrorAlert, TableSkeleton, EmptyState, showLoading, closeLoading
 } from '../components/ui'
 import { fmt, fmtDate } from '../lib/utils'
 import { useAuth } from '../context/AuthContext'
@@ -161,6 +161,7 @@ export default function PaymentsPage() {
     }
 
     setSaving(true)
+    showLoading('Recording payment...')
     try {
       const res = await api.payments.create({
         installment_id: parseInt(selectedInstId),
@@ -187,6 +188,7 @@ export default function PaymentsPage() {
       showToast(err.message || 'Failed to record payment', 'error')
     } finally {
       setSaving(false)
+      closeLoading()
     }
   }
 

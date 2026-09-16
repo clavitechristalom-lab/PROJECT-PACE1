@@ -12,7 +12,7 @@ const cleanParams = (params) => {
 
 async function request(endpoint, options = {}) {
   const url = `${API_BASE}${endpoint}`;
-  
+
   let token = null;
   try {
     const raw = sessionStorage.getItem('pace_session') || localStorage.getItem('pace_session');
@@ -20,11 +20,11 @@ async function request(endpoint, options = {}) {
       const parsed = JSON.parse(raw);
       token = parsed.token;
     }
-  } catch (e) {}
-  
+  } catch (e) { }
+
   const headers = {
     'Accept': 'application/json',
-    ...(options.body ? { 'Content-Type': 'application/json' } : {}),
+    ...(options.body && !(options.body instanceof FormData) ? { 'Content-Type': 'application/json' } : {}),
     ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
     ...options.headers,
   };
@@ -67,27 +67,52 @@ async function request(endpoint, options = {}) {
 }
 
 export const api = {
+  // ─── Branches ───
+  branches: {
+    getAll: () => request('/branches'),
+    create: (data) => request('/branches', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+    update: (id, data) => request(`/branches/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+    uploadImage: (id, formData) => request(`/branches/${id}/image`, {
+      method: 'POST',
+      body: formData,
+    }),
+    delete: (id) => request(`/branches/${id}`, {
+      method: 'DELETE',
+    }),
+  },
+
   // ─── Auth ───
   auth: {
-    login: (username, password, role) =>
+    login: (username, password) =>
       request('/login', {
         method: 'POST',
-        body: JSON.stringify({ username, password, role }),
+        body: JSON.stringify({ username, password }),
       }),
     register: (data) =>
       request('/register', {
         method: 'POST',
         body: JSON.stringify(data),
       }),
+    registrationOptions: () => request('/registration-options'),
     me: (userId) => request(`/me?user_id=${userId}`),
     logout: (userId) =>
       request('/logout', {
         method: 'POST',
         body: JSON.stringify({ user_id: userId }),
       }),
+    uploadProfileImage: (formData) =>
+      request('/user/profile-image', {
+        method: 'POST',
+        body: formData,
+      }),
   },
 
-  // ─── Dashboard ───
   dashboard: {
     getStats: (params = {}) => {
       const qs = new URLSearchParams(cleanParams(params)).toString();
@@ -141,6 +166,12 @@ export const api = {
         body: JSON.stringify(data),
       }),
     delete: (id) => request(`/customers/${id}`, { method: 'DELETE' }),
+    // Admin only: assign or unassign a branch (branchId = null to unassign)
+    assignBranch: (id, branchId) =>
+      request(`/customers/${id}/branch`, {
+        method: 'PUT',
+        body: JSON.stringify({ branch_id: branchId }),
+      }),
   },
 
   // ─── Transactions (Unified History) ───
@@ -291,9 +322,20 @@ export const api = {
       request(`/employees/${id}/unverify`, {
         method: 'POST',
       }),
+    
+    // Financials
+    getFinancials: (id) => request(`/employees/${id}/financials`),
+    addAllowance: (id, data) => request(`/employees/${id}/allowances`, { method: 'POST', body: JSON.stringify(data) }),
+    deleteAllowance: (itemId) => request(`/employees/allowances/${itemId}`, { method: 'DELETE' }),
+    addDeduction: (id, data) => request(`/employees/${id}/deductions`, { method: 'POST', body: JSON.stringify(data) }),
+    deleteDeduction: (itemId) => request(`/employees/deductions/${itemId}`, { method: 'DELETE' }),
+    addLoan: (id, data) => request(`/employees/${id}/loans`, { method: 'POST', body: JSON.stringify(data) }),
+    deleteLoan: (itemId) => request(`/employees/loans/${itemId}`, { method: 'DELETE' }),
+
+    unverify: (id) => request(`/employees/${id}/unverify`, {
+      method: 'POST',
+    }),
     getMeAttendance: () => request('/employee/me/attendance'),
-    getMePayroll: () => request('/employee/me/payroll'),
-    getMePayslip: (id) => request(`/employee/me/payslip/${id}`),
   },
 
   // ─── Attendance ───
@@ -325,8 +367,9 @@ export const api = {
         method: 'POST',
         body: JSON.stringify(data),
       }),
-    verifyPin: (data) =>
-      request('/attendance/verify-pin', {
+    pendingVerifications: () => request('/employee/me/pending-verifications'),
+    approveVerification: (data) =>
+      request('/employee/me/verify-attendance-pin', {
         method: 'POST',
         body: JSON.stringify(data),
       }),
@@ -348,6 +391,11 @@ export const api = {
 
   // ─── Payroll ───
   payroll: {
+    getMePayroll: (params = {}) => {
+      const qs = new URLSearchParams(cleanParams(params)).toString();
+      return request(`/employee/me/payroll${qs ? `?${qs}` : ''}`);
+    },
+    getMePayslip: (id) => request(`/employee/me/payslip/${id}`),
     getAll: (params = {}) => {
       const qs = new URLSearchParams(cleanParams(params)).toString();
       return request(`/payroll${qs ? `?${qs}` : ''}`);
@@ -515,6 +563,12 @@ export const api = {
       }),
   },
 
+  // ─── Customer App ───
+  customerApp: {
+    getDashboard: () => request('/customer/dashboard'),
+    getInstallments: () => request('/customer/installments'),
+  },
+
   search: (query) => request(`/search?q=${encodeURIComponent(query)}`),
 };
 
@@ -525,7 +579,7 @@ export const downloadCsv = async (endpoint, params = {}) => {
   qsParams.export_csv = 'true';
   const qs = new URLSearchParams(qsParams).toString();
   const url = `${API_BASE}${endpoint}${qs ? `?${qs}` : ''}`;
-  
+
   let token = null;
   try {
     const raw = sessionStorage.getItem('pace_session') || localStorage.getItem('pace_session');
@@ -533,7 +587,7 @@ export const downloadCsv = async (endpoint, params = {}) => {
       const parsed = JSON.parse(raw);
       token = parsed.token;
     }
-  } catch (e) {}
+  } catch (e) { }
 
   const headers = {
     ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
@@ -546,13 +600,13 @@ export const downloadCsv = async (endpoint, params = {}) => {
     try {
       const data = await response.json();
       if (data?.message) errorMsg = data.message;
-    } catch (e) {}
+    } catch (e) { }
     throw new Error(errorMsg);
   }
 
   const blob = await response.blob();
   const downloadUrl = window.URL.createObjectURL(blob);
-  
+
   // Extract filename from Content-Disposition if available
   let filename = 'export.csv';
   const disposition = response.headers.get('content-disposition');

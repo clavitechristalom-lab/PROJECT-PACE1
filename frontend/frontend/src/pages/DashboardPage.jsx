@@ -8,16 +8,22 @@ import {
   FiCreditCard, FiPackage, FiAlertTriangle,
   FiTrendingUp, FiTrendingDown, FiShoppingCart, FiUsers,
   FiLayers, FiActivity, FiClock, FiEye, FiPlus, FiCheckCircle,
-  FiX, FiCamera, FiBarChart2, FiFileText, FiSmartphone, FiInfo, FiShield
+  FiX, FiCamera, FiBarChart2, FiFileText, FiSmartphone, FiInfo, FiShield, FiPrinter
 } from 'react-icons/fi'
 import { useAuth } from '../context/AuthContext'
 import {
-  Btn, StatCard, Card, CardHeader, PageHeader, StatusBadge, Badge, ProgressBar, showToast,
-  LoadingState, ErrorAlert, StatSkeleton, Modal, Table, TR, TD, TabBar,
+  Btn, Badge, StatusBadge, Input, Select, Modal,
+  Table, TR, TD, PageHeader, StatCard, Card, CardHeader, Pagination, showToast, showLoading, closeLoading, confirmAction, LoadingState, ErrorAlert, TableSkeleton, EmptyState,
+  StatSkeleton, ProgressBar, TabBar
 } from '../components/ui'
+import EmployeePayslipModal from '../components/payslip/EmployeePayslipModal'
 import { fmt, fmtDate } from '../lib/utils'
 import { api } from '../lib/api'
 import { TbCurrencyPeso } from 'react-icons/tb'
+
+import BranchCarousel from '../components/branches/BranchCarousel'
+import BranchDetailsView from '../components/branches/BranchDetailsView'
+import CreateBranchModal from '../components/branches/CreateBranchModal'
 
 const PIE_COLORS = ['#10b981', '#ef4444', '#2563eb', '#f59e0b', '#8b5cf6']
 
@@ -87,6 +93,7 @@ function AdminBusinessDashboard() {
   // Branch Detail Drilldown Modal
   const [selectedBranchDetail, setSelectedBranchDetail] = useState(null)
   const [qrRequestSummary, setQrRequestSummary] = useState(null)
+  const [showCreateBranchModal, setShowCreateBranchModal] = useState(false)
   const [showQrWidgetModal, setShowQrWidgetModal] = useState(false)
 
   const loadData = async () => {
@@ -104,12 +111,14 @@ function AdminBusinessDashboard() {
       setCharts(chartsData)
       setRecent(recentData)
       setAlerts(alertsData?.alerts || [])
-      setBranchComp(branchData?.branches || [])
+
+      const liveBranches = branchData?.branches || [];
+      setBranchComp(liveBranches)
 
       if (isAdmin) {
         api.qrRequests.getAll({ per_page: 1 }).then(res => {
           if (res.summary) setQrRequestSummary(res.summary)
-        }).catch(() => {})
+        }).catch(() => { })
       }
     } catch (err) {
       console.error('Failed to load admin business dashboard:', err)
@@ -130,16 +139,26 @@ function AdminBusinessDashboard() {
       const data = await api.dashboard.getBusinessPerformance(params)
       setPerfData(data)
     } catch (err) {
-      console.error('Failed to load performance metrics:', err)
+      console.error('Failed to load performance:', err)
     } finally {
       setPerfLoading(false)
     }
   }
 
+  // Auto-refresh Dashboard data every 30 seconds
   useEffect(() => {
     loadData()
-    loadPerformance('this_month')
+    loadPerformance()
+    
+    const interval = setInterval(() => {
+      loadData()
+      loadPerformance()
+    }, 30000)
+    
+    return () => clearInterval(interval)
   }, [])
+
+
 
   const handleTimeframeChange = (tf) => {
     setTimeframe(tf)
@@ -160,7 +179,7 @@ function AdminBusinessDashboard() {
   if (loading) {
     return (
       <div className="space-y-4">
-        <PageHeader title="Business Monitoring Dashboard" subtitle={`Organization-wide real-time operations`} />
+        <PageHeader title="DASHBOARD MONITORING" subtitle={`Organization-wide real-time operations`} />
         <StatSkeleton count={5} />
         <LoadingState message="Querying live sales, collections, and installment accounts..." />
       </div>
@@ -169,7 +188,7 @@ function AdminBusinessDashboard() {
 
   const quickActions = [
     ...(isAdmin ? [{ label: 'QR Requests', icon: <FiShield className="w-4 h-4" />, action: () => setShowQrWidgetModal(true), color: 'bg-amber-600', badge: qrRequestSummary?.pending || 0 }] : []),
-    { label: 'Create Sale', icon: <FiShoppingCart className="w-4 h-4" />, path: '/sales', color: 'bg-emerald-600' },
+    { label: 'View Sales', icon: <FiShoppingCart className="w-4 h-4" />, path: '/sales', color: 'bg-emerald-600' },
     { label: 'Record Payment', icon: <TbCurrencyPeso className="w-4 h-4" />, path: '/payments', color: 'bg-blue-600' },
     { label: 'Installment Accounts', icon: <FiCreditCard className="w-4 h-4" />, path: '/installments', color: 'bg-indigo-600' },
     { label: 'Overdue Monitoring', icon: <FiAlertTriangle className="w-4 h-4" />, path: '/installments?tab=overdue', color: 'bg-rose-600' },
@@ -177,26 +196,52 @@ function AdminBusinessDashboard() {
     { label: 'Business Reports', icon: <FiBarChart2 className="w-4 h-4" />, path: '/reports', color: 'bg-purple-600' },
   ]
 
+  // The Branch Details Modal is rendered inline at the bottom.
+  // We removed the early return here.
+
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Business Monitoring Dashboard"
-        subtitle={`Real-time overview across all operational branches · ${fmtDate(new Date())}`}
+        title="DASHBOARD MONITORING"
+        subtitle={`Improve and make a simple to Learn and secured · ${fmtDate(new Date())}`}
         action={
-          <div className="flex gap-2">
-
-            <button
-              onClick={() => navigate('/sales')}
-              className="flex items-center gap-2 px-4 py-2 bg-primary hover:bg-primary/90 text-primary-foreground font-semibold text-xs rounded-xl shadow-xs transition-all cursor-pointer"
-            >
-              <FiPlus className="w-4 h-4" />
-              <span>New Sale Transaction</span>
-            </button>
-          </div>
+          <button
+            onClick={() => setShowCreateBranchModal(true)}
+            className="flex items-center gap-2 px-4 py-2 bg-primary hover:bg-primary/90 text-primary-foreground font-semibold text-xs rounded-xl shadow-xs transition-all cursor-pointer"
+          >
+            <FiPlus className="w-4 h-4" />
+            <span>Create Branch</span>
+          </button>
         }
       />
 
       {error && <ErrorAlert message={error} onRetry={loadData} />}
+
+      {/* ─── CREATE BRANCH MODAL ─── */}
+      <CreateBranchModal
+        isOpen={showCreateBranchModal}
+        onClose={() => setShowCreateBranchModal(false)}
+        onCreate={async (formData, imageFile) => {
+          showLoading('Creating branch...')
+          try {
+            const res = await api.branches.create(formData)
+            
+            if (imageFile && res.branch?.id) {
+              const fileData = new FormData()
+              fileData.append('image', imageFile)
+              await api.branches.uploadImage(res.branch.id, fileData)
+            }
+            
+            showToast('Branch successfully created!', 'success')
+            setShowCreateBranchModal(false)
+            loadData() // Refresh dashboard
+          } catch (err) {
+            showToast(err.message || 'Failed to create branch', 'error')
+          } finally {
+            closeLoading()
+          }
+        }}
+      />
 
 
 
@@ -251,6 +296,15 @@ function AdminBusinessDashboard() {
           </div>
         </Modal>
       )}
+
+      {/* ─── ADMIN BRANCH CAROUSEL ─── */}
+      <div className="flex flex-col items-center justify-center py-4">
+        <BranchCarousel
+          branches={branchComp}
+          selectedBranch={selectedBranchDetail}
+          onSelect={setSelectedBranchDetail}
+        />
+      </div>
 
       {/* ─── SECTION 1: CORE BUSINESS STATS ─── */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
@@ -310,11 +364,10 @@ function AdminBusinessDashboard() {
               <button
                 key={t.id}
                 onClick={() => handleTimeframeChange(t.id)}
-                className={`px-3 py-1.5 rounded-xl text-xs font-semibold cursor-pointer transition-all ${
-                  timeframe === t.id
-                    ? 'bg-primary text-primary-foreground shadow-xs'
-                    : 'bg-card border border-border text-muted-foreground hover:text-foreground'
-                }`}
+                className={`px-3 py-1.5 rounded-xl text-xs font-semibold cursor-pointer transition-all ${timeframe === t.id
+                  ? 'bg-primary text-primary-foreground shadow-xs'
+                  : 'bg-card border border-border text-muted-foreground hover:text-foreground'
+                  }`}
               >
                 {t.label}
               </button>
@@ -489,7 +542,7 @@ function AdminBusinessDashboard() {
               <BarChart data={charts?.sales_trend || []}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#88888820" />
                 <XAxis dataKey="month" tick={{ fontSize: 11 }} />
-                <YAxis tick={{ fontSize: 11 }} tickFormatter={v => `₱${(v/1000).toFixed(0)}k`} />
+                <YAxis tick={{ fontSize: 11 }} tickFormatter={v => `₱${(v / 1000).toFixed(0)}k`} />
                 <Tooltip formatter={v => fmt(v)} />
                 <Legend />
                 <Bar dataKey="sales" fill="#10b981" name="Sales (PHP)" radius={[4, 4, 0, 0]} />
@@ -547,70 +600,27 @@ function AdminBusinessDashboard() {
         ))}
       </div>
 
-      {/* Branch Detail Drilldown Modal */}
+      {/* ─── BRANCH DETAILS MODAL ─── */}
       {selectedBranchDetail && (
         <Modal
           isOpen={true}
           onClose={() => setSelectedBranchDetail(null)}
-          title={`Branch Performance — ${selectedBranchDetail.branch}`}
-          size="md"
+          title={`Branch Drilldown: ${selectedBranchDetail.branch}`}
+          size="xl"
         >
-          <div className="space-y-4 text-xs">
-            <div className="grid grid-cols-2 gap-3">
-              <div className="p-3 bg-muted/30 rounded-xl border border-border">
-                <div className="text-[10px] text-muted-foreground uppercase font-bold">Total Sales</div>
-                <div className="text-base font-mono font-bold text-emerald-600 mt-0.5">{fmt(selectedBranchDetail.sales)}</div>
-              </div>
-              <div className="p-3 bg-muted/30 rounded-xl border border-border">
-                <div className="text-[10px] text-muted-foreground uppercase font-bold">Collections</div>
-                <div className="text-base font-mono font-bold text-blue-600 mt-0.5">{fmt(selectedBranchDetail.collections)}</div>
-              </div>
-              <div className="p-3 bg-muted/30 rounded-xl border border-border">
-                <div className="text-[10px] text-muted-foreground uppercase font-bold">Installment Sales</div>
-                <div className="text-base font-mono font-bold text-purple-600 mt-0.5">{fmt(selectedBranchDetail.installment_sales)}</div>
-              </div>
-              <div className="p-3 bg-muted/30 rounded-xl border border-border">
-                <div className="text-[10px] text-muted-foreground uppercase font-bold">Outstanding Balance</div>
-                <div className="text-base font-mono font-bold text-rose-600 mt-0.5">{fmt(selectedBranchDetail.outstanding_balance)}</div>
-              </div>
-            </div>
-
-            <div className="p-3 rounded-xl border border-border bg-card flex justify-between items-center">
-              <div>
-                <div className="font-bold text-foreground">Overdue Accounts</div>
-                <div className="text-muted-foreground">Installments with past-due schedules in this branch</div>
-              </div>
-              <Badge
-                text={`${selectedBranchDetail.overdue_accounts} Overdue`}
-                variant={selectedBranchDetail.overdue_accounts > 0 ? 'danger' : 'success'}
-              />
-            </div>
-
-            <div className="flex justify-end gap-2 pt-2 border-t border-border">
-              <button
-                type="button"
-                onClick={() => setSelectedBranchDetail(null)}
-                className="flex items-center gap-1 px-3.5 py-1.5 rounded-xl border border-border hover:bg-muted font-semibold cursor-pointer"
-              >
-                <FiX className="w-3.5 h-3.5" />
-                <span>Close</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  const branch = selectedBranchDetail.branch;
-                  setSelectedBranchDetail(null);
-                  navigate(`/installments?branch=${encodeURIComponent(branch)}`);
-                }}
-                className="flex items-center gap-1.5 px-4 py-1.5 rounded-xl bg-primary text-primary-foreground font-bold cursor-pointer"
-              >
-                <FiEye className="w-3.5 h-3.5" />
-                <span>View Branch Installments →</span>
-              </button>
-            </div>
-          </div>
+          <BranchDetailsView
+            branchData={selectedBranchDetail}
+            onBack={(deleted) => {
+              setSelectedBranchDetail(null)
+              if (deleted) {
+                // Refresh dashboard stats if branch was deleted
+                loadData()
+              }
+            }}
+          />
         </Modal>
       )}
+
     </div>
   )
 }
@@ -707,9 +717,8 @@ function StoreAdminBusinessDashboard() {
               <button
                 key={t}
                 onClick={() => setTimeframe(t)}
-                className={`px-3 py-1.5 rounded-xl text-xs font-semibold cursor-pointer transition-all ${
-                  timeframe === t ? 'bg-primary text-primary-foreground shadow-xs' : 'bg-card border border-border text-muted-foreground'
-                }`}
+                className={`px-3 py-1.5 rounded-xl text-xs font-semibold cursor-pointer transition-all ${timeframe === t ? 'bg-primary text-primary-foreground shadow-xs' : 'bg-card border border-border text-muted-foreground'
+                  }`}
               >
                 {t.replace('_', ' ').toUpperCase()}
               </button>
@@ -794,6 +803,21 @@ export function EmployeeDashboard() {
   const [stats, setStats] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [payslip, setPayslip] = useState(null)
+
+  const openPayslip = async (id) => {
+    try {
+      if (user?.role === 'Employee') {
+        const data = await api.payroll.getMePayslip(id)
+        setPayslip(data.record)
+      } else {
+        const data = await api.payroll.getPayslip(id)
+        setPayslip(data.record)
+      }
+    } catch (err) {
+      showToast(err.message || 'Failed to fetch payslip details', 'error')
+    }
+  }
 
   const loadData = async () => {
     setLoading(true)
@@ -899,7 +923,18 @@ export function EmployeeDashboard() {
 
         {/* Latest Payroll */}
         <Card>
-          <div className="text-xs font-bold uppercase tracking-wider text-foreground mb-4">Latest Payroll</div>
+          <div className="flex justify-between items-center mb-4">
+            <div className="text-xs font-bold uppercase tracking-wider text-foreground">Latest Payroll</div>
+            {myPayroll && (
+              <button
+                onClick={() => openPayslip(myPayroll.payroll_id)}
+                className="text-xs text-primary font-semibold hover:underline flex items-center gap-1 cursor-pointer"
+              >
+                <FiFileText className="w-3.5 h-3.5" />
+                <span>View Full Payslip</span>
+              </button>
+            )}
+          </div>
           {myPayroll ? (
             <div className="space-y-2.5 text-xs">
               <div className="flex justify-between">
@@ -965,6 +1000,90 @@ export function EmployeeDashboard() {
           </table>
         </div>
       </Card>
+
+      {/* Payslip Modal */}
+      {payslip && user?.role === 'Employee' && (
+        <EmployeePayslipModal payslip={payslip} onClose={() => setPayslip(null)} />
+      )}
+
+      {payslip && user?.role !== 'Employee' && (
+        <Modal
+          isOpen={true}
+          title={`Payslip: ${payslip.employee_name} (${payslip.period_name})`}
+          onClose={() => setPayslip(null)}
+          size="lg"
+        >
+          <div className="space-y-4 text-xs">
+            <div className="text-center border-b border-border pb-2">
+              <h3 className="font-bold text-sm text-foreground">Z-LICS STORE</h3>
+              <p className="text-[11px] text-muted-foreground">Official Employee Pay Advice · Period: {payslip.period_name}</p>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2 p-3 bg-muted/20 rounded-xl border border-border">
+              <div><span className="text-muted-foreground">Employee:</span> <span className="font-bold text-foreground">{payslip.employee_name} ({payslip.employee_code})</span></div>
+              <div><span className="text-muted-foreground">Department:</span> <span className="text-foreground">{payslip.department}</span></div>
+              <div><span className="text-muted-foreground">Position:</span> <span className="text-foreground">{payslip.position}</span></div>
+              <div><span className="text-muted-foreground">Status:</span> <span><StatusBadge status={payslip.status} /></span></div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3 pt-1">
+              {/* Earnings */}
+              <div className="border border-border rounded-xl p-3 bg-card space-y-1.5">
+                <span className="font-bold text-emerald-600 uppercase tracking-wide block border-b border-border pb-1 text-[11px]">Earnings</span>
+                <div className="flex justify-between"><span>Basic Pay</span><span className="font-mono">{fmt(payslip.basic_salary)}</span></div>
+                <div className="flex justify-between"><span>Overtime Pay ({payslip.overtime_hours}h)</span><span className="font-mono">{fmt(payslip.overtime_pay)}</span></div>
+                <div className="flex justify-between"><span>Allowance</span><span className="font-mono">{fmt(payslip.allowance)}</span></div>
+                <div className="flex justify-between font-bold border-t border-border pt-1 text-foreground">
+                  <span>Total Gross</span>
+                  <span className="font-mono text-emerald-600">{fmt(payslip.gross_pay)}</span>
+                </div>
+              </div>
+
+              {/* Deductions */}
+              <div className="border border-border rounded-xl p-3 bg-card space-y-1.5">
+                <span className="font-bold text-rose-600 uppercase tracking-wide block border-b border-border pb-1 text-[11px]">Statutory Deductions</span>
+                {payslip.deductions?.length > 0 ? payslip.deductions.map(d => (
+                  <div key={d.deduction_id} className="flex justify-between items-center p-0.5 rounded">
+                    <span className="font-medium">{d.description || d.deduction_type}</span>
+                    <span className="font-mono text-rose-600 font-bold">{fmt(d.amount)}</span>
+                  </div>
+                )) : (
+                  <div className="text-muted-foreground italic text-center py-2">No deductions</div>
+                )}
+                <div className="flex justify-between font-bold border-t border-border pt-1 text-foreground">
+                  <span>Total Deductions</span>
+                  <span className="font-mono text-rose-600">{fmt(payslip.total_deductions)}</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="border border-border p-3.5 rounded-xl flex justify-between items-center bg-muted/20">
+              <span className="font-bold text-sm text-foreground">NET TAKE-HOME PAY</span>
+              <span className="text-xl font-bold font-mono text-emerald-600">{fmt(payslip.net_pay)}</span>
+            </div>
+
+            <div className="flex justify-between items-center pt-2 border-t border-border">
+              <button
+                type="button"
+                onClick={() => window.print()}
+                className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl border border-border hover:bg-muted font-semibold cursor-pointer"
+              >
+                <FiPrinter className="w-3.5 h-3.5" />
+                <span>Print Payslip</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setPayslip(null)}
+                className="flex items-center gap-1 px-4 py-1.5 rounded-xl border border-border hover:bg-muted font-semibold cursor-pointer"
+              >
+                <FiX className="w-3.5 h-3.5" />
+                <span>Close</span>
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
     </div>
   )
 }

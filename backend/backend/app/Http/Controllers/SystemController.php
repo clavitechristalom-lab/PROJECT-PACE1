@@ -19,14 +19,16 @@ class SystemController extends Controller
     // ─── Users ──────────────────────────────────────────────────────────────────
     public function users(Request $request)
     {
-        $users = User::with(['employee', 'verifiedBy'])->orderBy('user_id')->get()->map(function ($u) {
+        $users = User::with(['employee', 'customer.branch', 'verifiedBy'])->orderBy('user_id')->get()->map(function ($u) {
             $emp = $u->employee;
+            $cust = $u->customer;
             $verifiedBy = $u->verifiedBy;
             $verifiedByName = $verifiedBy ? ($verifiedBy->employee ? trim("{$verifiedBy->employee->first_name} {$verifiedBy->employee->last_name}") : $verifiedBy->username) : ($u->account_verified ? 'Administrator' : null);
 
             return [
                 'user_id' => $u->user_id,
                 'employee_id' => $u->employee_id,
+                'customer_id' => $u->customer_id,
                 'username' => $u->username,
                 'role' => $u->role,
                 'is_active' => (bool)$u->is_active,
@@ -47,12 +49,24 @@ class SystemController extends Controller
                     'marital_status' => $emp->marital_status,
                     'position' => $emp->position,
                     'department' => $emp->department,
-                    'branch' => $emp->branch,
+                    'branch' => $emp->branch ? $emp->branch->name : null,
                     'pay_type' => $emp->pay_type,
                     'phone' => $emp->phone,
                     'email' => $emp->email,
                     'address' => $emp->address,
                     'status' => $emp->status,
+                ] : null,
+                'customer' => $cust ? [
+                    'customer_id' => $cust->customer_id,
+                    'customer_code' => $cust->customer_code,
+                    'first_name' => $cust->first_name,
+                    'last_name' => $cust->last_name,
+                    'phone' => $cust->phone,
+                    'email' => $cust->email,
+                    'address' => $cust->address,
+                    'status' => $cust->status,
+                    'branch_id' => $cust->branch_id,
+                    'branch_name' => $cust->branch ? $cust->branch->name : null,
                 ] : null,
             ];
         });
@@ -65,8 +79,9 @@ class SystemController extends Controller
 
     public function showUser(Request $request, $id)
     {
-        $u = User::with(['employee', 'verifiedBy'])->findOrFail($id);
+        $u = User::with(['employee', 'customer.branch', 'verifiedBy'])->findOrFail($id);
         $emp = $u->employee;
+        $cust = $u->customer;
         $verifiedBy = $u->verifiedBy;
         $verifiedByName = $verifiedBy ? ($verifiedBy->employee ? trim("{$verifiedBy->employee->first_name} {$verifiedBy->employee->last_name}") : $verifiedBy->username) : ($u->account_verified ? 'Administrator' : null);
 
@@ -74,6 +89,7 @@ class SystemController extends Controller
             'user' => [
                 'user_id' => $u->user_id,
                 'employee_id' => $u->employee_id,
+                'customer_id' => $u->customer_id,
                 'username' => $u->username,
                 'role' => $u->role,
                 'is_active' => (bool)$u->is_active,
@@ -94,12 +110,24 @@ class SystemController extends Controller
                     'marital_status' => $emp->marital_status,
                     'position' => $emp->position,
                     'department' => $emp->department,
-                    'branch' => $emp->branch,
+                    'branch' => $emp->branch ? $emp->branch->name : null,
                     'pay_type' => $emp->pay_type,
                     'phone' => $emp->phone,
                     'email' => $emp->email,
                     'address' => $emp->address,
                     'status' => $emp->status,
+                ] : null,
+                'customer' => $cust ? [
+                    'customer_id' => $cust->customer_id,
+                    'customer_code' => $cust->customer_code,
+                    'first_name' => $cust->first_name,
+                    'last_name' => $cust->last_name,
+                    'phone' => $cust->phone,
+                    'email' => $cust->email,
+                    'address' => $cust->address,
+                    'status' => $cust->status,
+                    'branch_id' => $cust->branch_id,
+                    'branch_name' => $cust->branch ? $cust->branch->name : null,
                 ] : null,
             ]
         ]);

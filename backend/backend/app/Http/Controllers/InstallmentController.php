@@ -28,7 +28,7 @@ class InstallmentController extends Controller
         // Determine branch
         $branch = 'Main Branch';
         if ($inst->sale && $inst->sale->processedBy && $inst->sale->processedBy->employee) {
-            $branch = $inst->sale->processedBy->employee->branch ?: 'Main Branch';
+            $branch = $inst->sale->processedBy->employee->branch_id ?: null;
         }
 
         // Next Due Schedule
@@ -134,18 +134,28 @@ class InstallmentController extends Controller
             'paymentSchedules'
         ]);
 
-        // Branch scoping for Store Administrator
+        // Branch scoping for Store Administrator — use customer.branch_id for direct relationship
         if ($user && in_array($user->role, ['Store Administrator', 'Store Admin'])) {
-            $userBranch = $user->employee ? $user->employee->branch : 'Main Branch';
-            $query->where(function ($q) use ($userBranch) {
-                $q->whereHas('sale.processedBy.employee', function ($eq) use ($userBranch) {
-                    $eq->where('branch', $userBranch);
+            $userBranch = $user->employee ? $user->employee->branch_id : null;
+            if ($userBranch) {
+                $query->where(function ($q) use ($userBranch) {
+                    $q->whereHas('customer', function ($cq) use ($userBranch) {
+                        $cq->where('branch_id', $userBranch);
+                    })->orWhereHas('sale', function ($sq) use ($userBranch) {
+                        $sq->where('branch_id', $userBranch);
+                    });
                 });
-            });
+            } else {
+                $query->where('installment_id', -1); // No branch — return empty
+            }
         } elseif ($request->filled('branch') && $request->query('branch') !== 'All') {
             $branch = $request->query('branch');
-            $query->whereHas('sale.processedBy.employee', function ($eq) use ($branch) {
-                $eq->where('branch', $branch);
+            $query->where(function ($q) use ($branch) {
+                $q->whereHas('customer', function ($cq) use ($branch) {
+                    $cq->where('branch_id', $branch);
+                })->orWhereHas('sale', function ($sq) use ($branch) {
+                    $sq->where('branch_id', $branch);
+                });
             });
         }
 
@@ -254,6 +264,9 @@ class InstallmentController extends Controller
     public function store(Request $request)
     {
         $user = $request->user();
+        if ($user && $user->role === 'Administrator') {
+            return response()->json(['success' => false, 'message' => 'Admin is not authorized to create installment accounts.'], 403);
+        }
         $today = date('Y-m-d');
 
         $validated = $request->validate([
@@ -505,14 +518,14 @@ class InstallmentController extends Controller
 
         // Store Admin branch scoping
         if ($user && in_array($user->role, ['Store Administrator', 'Store Admin'])) {
-            $userBranch = $user->employee ? $user->employee->branch : 'Main Branch';
+            $userBranch = $user->employee ? $user->employee->branch_id : null;
             $query->whereHas('sale.processedBy.employee', function ($eq) use ($userBranch) {
-                $eq->where('branch', $userBranch);
+                $eq->where('branch_id', $userBranch);
             });
         } elseif ($request->filled('branch') && $request->query('branch') !== 'All') {
             $branch = $request->query('branch');
             $query->whereHas('sale.processedBy.employee', function ($eq) use ($branch) {
-                $eq->where('branch', $branch);
+                $eq->where('branch_id', $branch);
             });
         }
 
@@ -541,7 +554,7 @@ class InstallmentController extends Controller
 
             $branch = 'Main Branch';
             if ($inst->sale && $inst->sale->processedBy && $inst->sale->processedBy->employee) {
-                $branch = $inst->sale->processedBy->employee->branch ?: 'Main Branch';
+                $branch = $inst->sale->processedBy->employee->branch_id ?: null;
             }
 
             $productName = 'Appliance / Furniture';
@@ -597,10 +610,10 @@ class InstallmentController extends Controller
 
         // Security check for Store Administrator
         if ($user && in_array($user->role, ['Store Administrator', 'Store Admin'])) {
-            $userBranch = $user->employee ? $user->employee->branch : 'Main Branch';
+            $userBranch = $user->employee ? $user->employee->branch_id : null;
             $accBranch = 'Main Branch';
             if ($account->sale && $account->sale->processedBy && $account->sale->processedBy->employee) {
-                $accBranch = $account->sale->processedBy->employee->branch ?: 'Main Branch';
+                $accBranch = $account->sale->processedBy->employee->branch_id ?: null;
             }
             if ($userBranch !== $accBranch) {
                 return response()->json(['message' => 'Unauthorized access to installment account in another branch.'], 403);
@@ -614,7 +627,7 @@ class InstallmentController extends Controller
         // Branch
         $branch = 'Main Branch';
         if ($account->sale && $account->sale->processedBy && $account->sale->processedBy->employee) {
-            $branch = $account->sale->processedBy->employee->branch ?: 'Main Branch';
+            $branch = $account->sale->processedBy->employee->branch_id ?: null;
         }
 
         // Sale Items
@@ -828,3 +841,4 @@ class InstallmentController extends Controller
         });
     }
 }
+

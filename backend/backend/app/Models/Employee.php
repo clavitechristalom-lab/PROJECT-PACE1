@@ -10,7 +10,7 @@ class Employee extends Model
     protected $fillable = [
         'employee_code', 'first_name', 'middle_name', 'last_name', 'gender',
         'birth_date', 'date_of_birth', 'marital_status', 'tin_number', 'sss_number', 
-        'philhealth_number', 'pagibig_number', 'position', 'department', 'branch',
+        'philhealth_number', 'pagibig_number', 'position', 'department', 'branch_id',
         'pay_type', 'ewallet_provider', 'ewallet_account_no', 'bank_name', 'bank_account_no',
         'basic_salary', 'daily_rate', 'hourly_rate', 'phone', 'email', 
         'address', 'hire_date', 'working_hours', 'emergency_contact_name', 
@@ -64,6 +64,11 @@ class Employee extends Model
     public function attendances()
     {
         return $this->hasMany(Attendance::class, 'employee_id', 'employee_id');
+    }
+
+    public function branch()
+    {
+        return $this->belongsTo(BranchProfile::class, 'branch_id', 'id');
     }
 
     public function payrolls()

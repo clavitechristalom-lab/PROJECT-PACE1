@@ -1,10 +1,32 @@
-import { useState, useEffect, useRef, Component } from 'react'
+import React, { useState, useEffect, useRef, Component } from 'react'
+import { Link } from 'react-router-dom'
 import { TbCurrencyPeso } from 'react-icons/tb'
 import {
   FiCheckCircle, FiAlertCircle, FiAlertTriangle, FiInfo, FiX,
   FiChevronLeft, FiChevronRight, FiSearch, FiBell, FiClock, FiCreditCard, FiPackage, FiUser, FiShield,
-  FiActivity, FiInbox, FiSettings, FiShoppingCart, FiFileText
+  FiActivity, FiInbox, FiSettings, FiShoppingCart, FiFileText, FiFilter, FiXCircle
 } from 'react-icons/fi'
+import {
+  showToast as swalToast,
+  showSuccess,
+  showError,
+  showWarning,
+  showLoading,
+  closeLoading,
+  confirmAction,
+  confirmDelete
+} from '../lib/swal'
+
+export {
+  swalToast,
+  showSuccess,
+  showError,
+  showWarning,
+  showLoading,
+  closeLoading,
+  confirmAction,
+  confirmDelete
+}
 
 // ─── Error Boundary ───────────────────────────────────────────────────────────
 export class ErrorBoundary extends Component {
@@ -384,12 +406,12 @@ export function PageHeader({ title, subtitle, action }) {
 // ─── Stat Card ────────────────────────────────────────────────────────────────
 export function StatCard({ title, value, sub, icon, color = 'blue' }) {
   const colors = {
-    blue: 'bg-blue-50 text-blue-600 dark:bg-blue-950/40 dark:text-blue-400 border border-blue-200 dark:border-blue-800',
-    green: 'bg-emerald-50 text-emerald-600 dark:bg-emerald-950/40 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800',
-    red: 'bg-rose-50 text-rose-600 dark:bg-rose-950/40 dark:text-rose-400 border border-rose-200 dark:border-rose-800',
-    yellow: 'bg-amber-50 text-amber-600 dark:bg-amber-950/40 dark:text-amber-400 border border-amber-200 dark:border-amber-800',
-    purple: 'bg-purple-50 text-purple-600 dark:bg-purple-950/40 dark:text-purple-400 border border-purple-200 dark:border-purple-800',
-    indigo: 'bg-indigo-50 text-indigo-600 dark:bg-indigo-950/40 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-800',
+    blue: 'bg-blue-50 text-blue-600 border border-blue-200',
+    green: 'bg-emerald-50 text-emerald-600 border border-emerald-200',
+    red: 'bg-rose-50 text-rose-600 border border-rose-200',
+    yellow: 'bg-amber-50 text-amber-600 border border-amber-200',
+    purple: 'bg-purple-50 text-purple-600 border border-purple-200',
+    indigo: 'bg-indigo-50 text-indigo-600 border border-indigo-200',
   }
   return (
     <div className="bg-card rounded-2xl border border-border p-4 hover:shadow-sm transition-all">
@@ -560,53 +582,11 @@ let toastId = 0
 const toastListeners = []
 
 export function showToast(message, type = 'success') {
-  const t = { id: ++toastId, message, type }
-  toastListeners.forEach(fn => fn(t))
+  swalToast(message, type)
 }
 
 export function ToastContainer() {
-  const [toasts, setToasts] = useState([])
-
-  useEffect(() => {
-    const fn = (t) => {
-      setToasts(prev => [...prev, t])
-      setTimeout(() => setToasts(prev => prev.filter(x => x.id !== t.id)), 3500)
-    }
-    toastListeners.push(fn)
-    return () => {
-      const i = toastListeners.indexOf(fn)
-      if (i > -1) toastListeners.splice(i, 1)
-    }
-  }, [])
-
-  return (
-    <div className="fixed bottom-4 right-4 z-[100] flex flex-col gap-2 max-w-sm">
-      {toasts.map(t => {
-        let Icon = FiCheckCircle
-        let bgClass = 'bg-emerald-600 text-white'
-        if (t.type === 'error') {
-          Icon = FiAlertCircle
-          bgClass = 'bg-rose-600 text-white'
-        } else if (t.type === 'warning') {
-          Icon = FiAlertTriangle
-          bgClass = 'bg-amber-600 text-white'
-        } else if (t.type === 'info') {
-          Icon = FiInfo
-          bgClass = 'bg-blue-600 text-white'
-        }
-
-        return (
-          <div
-            key={t.id}
-            className={`${bgClass} text-xs font-medium px-4 py-3 rounded-2xl shadow-xl animate-[slideUp_0.2s_ease] flex items-center gap-2.5 border border-white/10`}
-          >
-            <Icon className="w-4 h-4 shrink-0" />
-            <span className="flex-1 leading-snug">{t.message}</span>
-          </div>
-        )
-      })}
-    </div>
-  )
+  return null
 }
 
 // ─── Empty State ──────────────────────────────────────────────────────────────

@@ -7,8 +7,8 @@ import {
 } from 'react-icons/fi'
 import {
   Btn, Badge, StatusBadge, Input, Select, Textarea, Modal,
-  Table, TR, TD, SearchBar, PageHeader, StatCard, Card, Pagination, showToast,
-  LoadingState, ErrorAlert, TableSkeleton, EmptyState,
+  Table, TR, TD, SearchBar, PageHeader, StatCard, Card, CardHeader, Pagination, showToast,
+  LoadingState, ErrorAlert, TableSkeleton, EmptyState, TabBar, showLoading, closeLoading
 } from '../components/ui'
 import { fmt, fmtDate, filterBySearch } from '../lib/utils'
 import { useAuth } from '../context/AuthContext'
@@ -16,8 +16,9 @@ import api, { downloadCsv } from '../lib/api'
 import { TbCurrencyPeso } from 'react-icons/tb'
 import MySalesChart from '../components/MySalesChart'
 
-export default function SalesPage() {
+export default function SalesPage({ branchFilter, embedded }) {
   const { user } = useAuth()
+  const isAdmin = user?.role === 'Administrator'
   const [sales, setSales] = useState([])
   const [products, setProducts] = useState([])
   const [customers, setCustomers] = useState([])
@@ -53,9 +54,10 @@ export default function SalesPage() {
           search: search || undefined,
           payment_method: methodFilter !== 'All' ? methodFilter : undefined,
           status: statusFilter !== 'All' ? statusFilter : undefined,
+          branch: branchFilter || undefined,
         }),
-        api.products.getAll(),
-        api.customers.getAll({ status: 'Active' }),
+        api.products.getAll({ branch: branchFilter || undefined }),
+        api.customers.getAll({ status: 'Active', branch: branchFilter || undefined }),
       ])
       setSales(salesRes.sales || [])
       setProducts(productsRes.products || [])
@@ -70,7 +72,7 @@ export default function SalesPage() {
 
   useEffect(() => {
     loadData()
-  }, [methodFilter, statusFilter])
+  }, [methodFilter, statusFilter, branchFilter])
 
   const openViewSale = async (s) => {
     try {
@@ -124,6 +126,7 @@ export default function SalesPage() {
     }
 
     setSaving(true)
+    showLoading('Processing sale...')
     try {
       const payload = {
         customer_id: parseInt(customerId),
@@ -161,6 +164,7 @@ export default function SalesPage() {
       showToast(err.message || 'Failed to process sale', 'error')
     } finally {
       setSaving(false)
+      closeLoading()
     }
   }
 
@@ -184,9 +188,7 @@ export default function SalesPage() {
       await downloadCsv('/sales', {
         search: search || undefined,
         status: statusFilter !== 'All' ? statusFilter : undefined,
-        payment_method: paymentMethodFilter !== 'All' ? paymentMethodFilter : undefined,
-        date_from: dateFrom || undefined,
-        date_to: dateTo || undefined,
+        branch: branchFilter || undefined,
       })
       showToast('Sales exported successfully', 'success')
     } catch (err) {
@@ -197,30 +199,34 @@ export default function SalesPage() {
   }
 
   return (
-    <div className="space-y-6">
-      <PageHeader
-        title="Sales Transactions"
-        subtitle="Process new sales, cash receipts, and installment contracts"
-        action={
-          <div className="flex items-center gap-2">
-            <button
-              onClick={handleExportCSV}
-              disabled={exporting}
-              className="flex items-center gap-2 px-4 py-2 bg-muted hover:bg-muted/80 text-foreground font-semibold text-xs rounded-xl shadow-xs transition-all cursor-pointer disabled:opacity-50"
-            >
-              {exporting ? <FiAlertTriangle className="w-4 h-4 animate-spin" /> : <FiDownload className="w-4 h-4" />}
-              <span>{exporting ? 'Exporting...' : 'Export CSV'}</span>
-            </button>
-            <button
-              onClick={() => setNewSaleModal(true)}
-              className="flex items-center gap-2 px-4 py-2 bg-primary hover:bg-primary/90 text-primary-foreground font-semibold text-xs rounded-xl shadow-xs transition-all cursor-pointer"
-            >
-              <FiPlus className="w-4 h-4" />
-              <span>New Sale Transaction</span>
-            </button>
-          </div>
-        }
-      />
+    <div className={embedded ? "" : "space-y-6"}>
+      {!embedded && (
+        <PageHeader
+          title="Sales Transactions"
+          subtitle="Process new sales, cash receipts, and installment contracts"
+          action={
+            <div className="flex items-center gap-2">
+              <button
+                onClick={handleExportCSV}
+                disabled={exporting}
+                className="flex items-center gap-2 px-4 py-2 bg-muted hover:bg-muted/80 text-foreground font-semibold text-xs rounded-xl shadow-xs transition-all cursor-pointer disabled:opacity-50"
+              >
+                {exporting ? <FiAlertTriangle className="w-4 h-4 animate-spin" /> : <FiDownload className="w-4 h-4" />}
+                <span>{exporting ? 'Exporting...' : 'Export CSV'}</span>
+              </button>
+              {!isAdmin && (
+                <button
+                  onClick={() => setNewSaleModal(true)}
+                  className="flex items-center gap-2 px-4 py-2 bg-primary hover:bg-primary/90 text-primary-foreground font-semibold text-xs rounded-xl shadow-xs transition-all cursor-pointer"
+                >
+                  <FiPlus className="w-4 h-4" />
+                  <span>New Sale</span>
+                </button>
+              )}
+            </div>
+          }
+        />
+      )}
 
       <MySalesChart />
 
@@ -290,13 +296,15 @@ export default function SalesPage() {
             title="No sales transactions found"
             description={search || methodFilter !== 'All' ? 'Try adjusting your search filters' : 'Create your first sale to get started'}
             action={
-              <button
-                onClick={() => setNewSaleModal(true)}
-                className="flex items-center gap-1.5 px-3.5 py-1.5 bg-primary text-primary-foreground font-bold text-xs rounded-xl cursor-pointer"
-              >
-                <FiPlus className="w-4 h-4" />
-                <span>New Sale</span>
-              </button>
+              !isAdmin ? (
+                <button
+                  onClick={() => setNewSaleModal(true)}
+                  className="flex items-center gap-1.5 px-3.5 py-1.5 bg-primary text-primary-foreground font-bold text-xs rounded-xl cursor-pointer"
+                >
+                  <FiPlus className="w-4 h-4" />
+                  <span>New Sale</span>
+                </button>
+              ) : null
             }
           />
         ) : (

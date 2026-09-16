@@ -1,8 +1,8 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import {
   FiUser, FiShield, FiCheckCircle, FiAlertTriangle, FiEdit,
   FiSave, FiX, FiPhone, FiMail, FiMapPin, FiCreditCard, FiCalendar, FiClock, FiActivity, FiKey,
-  FiSmartphone, FiPrinter, FiDownload, FiInfo, FiChevronDown
+  FiSmartphone, FiPrinter, FiDownload, FiInfo, FiChevronDown, FiCamera, FiUploadCloud
 } from 'react-icons/fi'
 import {
   Btn, Badge, Input, Modal, TabBar, showToast, LoadingState, ErrorAlert
@@ -15,13 +15,15 @@ import { TbCurrencyPeso } from 'react-icons/tb'
 
 export default function ProfileModal({ open, isOpen, onClose }) {
   const isVisible = open || isOpen
-  const { user } = useAuth()
+  const { user, verifySession } = useAuth()
+  const fileInputRef = useRef(null)
   const isAdmin = user?.role === 'Administrator'
   const [employee, setEmployee] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [isEditing, setIsEditing] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [isUploadingImage, setIsUploadingImage] = useState(false)
   const [activeTab, setActiveTab] = useState('profile')
   const [showDisplayQrModal, setShowDisplayQrModal] = useState(false)
 
@@ -50,38 +52,72 @@ export default function ProfileModal({ open, isOpen, onClose }) {
     emergency_contact_phone: '',
   })
 
+  const [branchesList, setBranchesList] = useState([])
+
+  useEffect(() => {
+    if (isVisible) {
+      api.branches.getAll()
+        .then(res => {
+          setBranchesList(res.branches || res.data || res || [])
+        })
+        .catch(err => console.error("Error fetching branches:", err))
+    }
+  }, [isVisible])
+
   const loadProfile = async () => {
     if (!isVisible) return
     setLoading(true)
     setError('')
     try {
-      const res = await api.employees.getMe()
-      if (res?.employee) {
-        setEmployee(res.employee)
-        setEditForm({
-          phone: res.employee.phone || '',
-          email: res.employee.email || '',
-          address: res.employee.address || '',
-          pay_type: res.employee.pay_type || 'Cash',
-          ewallet_provider: res.employee.ewallet_provider || 'Gcash',
-          ewallet_account_no: res.employee.ewallet_account_no || res.employee.phone || '',
-          bank_name: res.employee.bank_name || 'BDO',
-          bank_account_no: res.employee.bank_account_no || '',
-          emergency_contact_name: res.employee.emergency_contact_name || '',
-          emergency_contact_relation: res.employee.emergency_contact_relation || '',
-          emergency_contact_phone: res.employee.emergency_contact_phone || '',
-        })
+      if (isCustomer && user?.customer_id) {
+        const res = await api.customers.getById(user.customer_id)
+        if (res?.customer || res) {
+          const custData = res.customer || res
+          setEmployee(custData)
+          setEditForm({
+            customer_code: custData.customer_code || '',
+            first_name: custData.first_name || '',
+            middle_name: custData.middle_name || '',
+            last_name: custData.last_name || '',
+            status: custData.status || 'Active',
+            notes: custData.notes || '',
+            branch_id: custData.branch_id || custData.branch || '',
+            phone: custData.phone || '',
+            email: custData.email || '',
+            address: custData.address || '',
+          })
+        } else {
+          setError('Customer information was not found.')
+        }
       } else {
-        setError('Employee information was not found.')
+        const res = await api.employees.getMe()
+        if (res?.employee) {
+          setEmployee(res.employee)
+          setEditForm({
+            phone: res.employee.phone || '',
+            email: res.employee.email || '',
+            address: res.employee.address || '',
+            pay_type: res.employee.pay_type || 'Cash',
+            ewallet_provider: res.employee.ewallet_provider || 'Gcash',
+            ewallet_account_no: res.employee.ewallet_account_no || res.employee.phone || '',
+            bank_name: res.employee.bank_name || 'BDO',
+            bank_account_no: res.employee.bank_account_no || '',
+            emergency_contact_name: res.employee.emergency_contact_name || '',
+            emergency_contact_relation: res.employee.emergency_contact_relation || '',
+            emergency_contact_phone: res.employee.emergency_contact_phone || '',
+          })
+        } else {
+          setError('Employee information was not found.')
+        }
       }
     } catch (err) {
       console.error('Failed to load profile:', err)
       if (err.status === 401) {
         setError('Your session has expired. Please log in again.')
       } else if (err.status === 404) {
-        setError('Employee information was not found for this account.')
+        setError(isCustomer ? 'Customer information was not found.' : 'Employee information was not found for this account.')
       } else {
-        setError(err.message || 'Unable to load employee information.')
+        setError(err.message || 'Unable to load profile information.')
       }
     } finally {
       setLoading(false)
@@ -140,7 +176,12 @@ export default function ProfileModal({ open, isOpen, onClose }) {
     e?.preventDefault()
     setSaving(true)
     try {
-      const res = await api.employees.updateMe(editForm)
+      let res;
+      if (isCustomer && user?.customer_id) {
+        res = await api.customers.update(user.customer_id, editForm)
+      } else {
+        res = await api.employees.updateMe(editForm)
+      }
       showToast(res.message || 'Profile details updated successfully.', 'success')
       setEmployee(prev => ({
         ...prev,
@@ -151,6 +192,36 @@ export default function ProfileModal({ open, isOpen, onClose }) {
       showToast(err.message || 'Failed to update profile', 'error')
     } finally {
       setSaving(false)
+    }
+  }
+
+  const handleImageUpload = async (e) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    if (!file.type.startsWith('image/')) {
+      showToast('Please select a valid image file', 'error')
+      return
+    }
+
+    if (file.size > 5 * 1024 * 1024) {
+      showToast('Image size should be less than 5MB', 'error')
+      return
+    }
+
+    setIsUploadingImage(true)
+    const formData = new FormData()
+    formData.append('image', file)
+
+    try {
+      const res = await api.auth.uploadProfileImage(formData)
+      showToast(res.message || 'Profile image updated', 'success')
+      await verifySession() // Refresh user payload with new image URL
+    } catch (err) {
+      showToast(err.message || 'Failed to upload image', 'error')
+    } finally {
+      setIsUploadingImage(false)
+      if (fileInputRef.current) fileInputRef.current.value = ''
     }
   }
 
@@ -172,9 +243,11 @@ export default function ProfileModal({ open, isOpen, onClose }) {
     }
   }
 
+  const isCustomer = user?.role === 'Customer'
+
   const isVerified = Boolean(
-    employee?.account_verified || 
-    employee?.information_verified || 
+    employee?.account_verified ||
+    employee?.information_verified ||
     employee?.is_verified
   )
   const verifiedTimestamp = employee?.account_verified_at || employee?.information_verified_at || employee?.verified_at
@@ -196,16 +269,34 @@ export default function ProfileModal({ open, isOpen, onClose }) {
                 <>
                   <Btn variant="outline" size="sm" onClick={() => {
                     if (employee) {
-                      setEditForm({
-                        phone: employee.phone || '',
-                        email: employee.email || '',
-                        address: employee.address || '',
-                        pay_type: employee.pay_type || 'Cash',
-                        ewallet_provider: employee.ewallet_provider || 'Gcash',
-                        ewallet_account_no: employee.ewallet_account_no || employee.phone || '',
-                        bank_name: employee.bank_name || 'BDO',
-                        bank_account_no: employee.bank_account_no || '',
-                      })
+                      if (isCustomer) {
+                        setEditForm({
+                          customer_code: employee.customer_code || '',
+                          first_name: employee.first_name || '',
+                          middle_name: employee.middle_name || '',
+                          last_name: employee.last_name || '',
+                          status: employee.status || 'Active',
+                          notes: employee.notes || '',
+                          branch: employee.branch || '',
+                          phone: employee.phone || '',
+                          email: employee.email || '',
+                          address: employee.address || '',
+                        })
+                      } else {
+                        setEditForm({
+                          phone: employee.phone || '',
+                          email: employee.email || '',
+                          address: employee.address || '',
+                          pay_type: employee.pay_type || 'Cash',
+                          ewallet_provider: employee.ewallet_provider || 'Gcash',
+                          ewallet_account_no: employee.ewallet_account_no || employee.phone || '',
+                          bank_name: employee.bank_name || 'BDO',
+                          bank_account_no: employee.bank_account_no || '',
+                          emergency_contact_name: employee.emergency_contact_name || '',
+                          emergency_contact_relation: employee.emergency_contact_relation || '',
+                          emergency_contact_phone: employee.emergency_contact_phone || '',
+                        })
+                      }
                     }
                     setIsEditing(false)
                   }} disabled={saving} icon={<FiX className="w-3.5 h-3.5" />}>
@@ -243,30 +334,59 @@ export default function ProfileModal({ open, isOpen, onClose }) {
           </div>
         ) : (
           <div className="space-y-4 text-xs">
-            {/* Tab Navigation */}
-            <TabBar
-              tabs={[
-                { id: 'profile', label: 'My Profile Information', icon: <FiUser className="w-3.5 h-3.5" /> },
-                { id: 'attendance_qr', label: 'Attendance QR', icon: <FiSmartphone className="w-3.5 h-3.5" /> },
-              ]}
-              activeTab={activeTab}
-              onChange={setActiveTab}
-            />
+            {/* Tab Navigation for Employees Only */}
+            {!isCustomer && (
+              <TabBar
+                tabs={[
+                  { id: 'profile', label: 'My Profile Information', icon: <FiUser className="w-3.5 h-3.5" /> },
+                  { id: 'attendance_qr', label: 'Attendance QR', icon: <FiSmartphone className="w-3.5 h-3.5" /> },
+                ]}
+                activeTab={activeTab}
+                onChange={setActiveTab}
+              />
+            )}
 
             {/* TAB 1: PROFILE INFORMATION */}
             {activeTab === 'profile' && (
               <div className="space-y-4">
                 {/* Quick Profile Summary Header */}
                 <div className="flex items-center gap-4 p-4 bg-muted/20 rounded-2xl border border-border">
-                  <div className="w-14 h-14 rounded-2xl bg-primary/10 border border-primary/20 flex items-center justify-center text-primary text-2xl shrink-0 shadow-2xs">
-                    <FiUser className="w-7 h-7" />
+                  <div className="relative group shrink-0">
+                    <div className="w-16 h-16 rounded-2xl bg-primary/10 border border-primary/20 flex items-center justify-center text-primary text-2xl shadow-2xs overflow-hidden relative">
+                      {user?.profile_image ? (
+                        <img src={user.profile_image} alt="Profile" className="w-full h-full object-cover" />
+                      ) : (
+                        <FiUser className="w-8 h-8" />
+                      )}
+
+                      {/* Upload Overlay */}
+                      <label className="absolute inset-0 bg-black/50 text-white flex flex-col items-center justify-center opacity-0 group-hover:opacity-100 cursor-pointer transition-opacity">
+                        {isUploadingImage ? (
+                          <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                        ) : (
+                          <>
+                            <FiCamera className="w-5 h-5 mb-0.5" />
+                            <span className="text-[9px] font-bold uppercase tracking-wider">Change</span>
+                          </>
+                        )}
+                        <input
+                          type="file"
+                          accept="image/*"
+                          className="hidden"
+                          ref={fileInputRef}
+                          onChange={handleImageUpload}
+                          disabled={isUploadingImage}
+                        />
+                      </label>
+                    </div>
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
                       <h3 className="font-bold text-base text-foreground truncate">
                         {employee.first_name} {employee.middle_name ? `${employee.middle_name} ` : ''}{employee.last_name}
                       </h3>
-                      {isVerified ? (
+                      {!isCustomer && (
+                        isVerified ? (
                         <span className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-700 dark:text-emerald-300 bg-emerald-100 dark:bg-emerald-950/50 border border-emerald-300 dark:border-emerald-800 px-2.5 py-0.5 rounded-full shadow-2xs">
                           <FiCheckCircle className="w-3 h-3" />
                           <span>Verified</span>
@@ -276,65 +396,66 @@ export default function ProfileModal({ open, isOpen, onClose }) {
                           <FiAlertTriangle className="w-3 h-3" />
                           <span>Not Verified</span>
                         </span>
-                      )}
+                      ))}
                     </div>
                     <p className="text-xs text-muted-foreground font-medium mt-0.5">
-                      {employee.position} · {employee.department} · {employee.branch}
+                      {employee.position} · {employee.department} · {branchesList.find(b => b.id == employee.branch_id)?.name || employee.branch?.name || employee.branch || '—'}
                     </p>
                     <div className="mt-2 flex items-center gap-2 flex-wrap">
                       <span className="font-mono text-[11px] font-bold bg-muted px-2 py-0.5 rounded-lg border border-border">
-                        ID: {employee.employee_code}
+                        {isCustomer ? `Role: Customer` : `ID: ${employee.employee_code}`}
                       </span>
                       <Badge text={employee.status || 'Active'} variant="success" icon={<FiCheckCircle className="w-3 h-3" />} />
                     </div>
                   </div>
                 </div>
 
-                {/* Account Verification Banner */}
-                <div className={`p-4 rounded-2xl border ${
-                  isVerified 
-                    ? 'bg-emerald-50/40 dark:bg-emerald-950/20 border-emerald-200 dark:border-emerald-900/60' 
-                    : 'bg-amber-50/40 dark:bg-amber-950/20 border-amber-200 dark:border-amber-900/60'
-                }`}>
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="flex items-start gap-2.5">
-                      {isVerified ? (
-                        <FiCheckCircle className="w-5 h-5 text-emerald-600 dark:text-emerald-400 shrink-0 mt-0.5" />
-                      ) : (
-                        <FiAlertTriangle className="w-5 h-5 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
-                      )}
-                      <div>
-                        <h4 className="font-bold text-foreground text-xs uppercase tracking-wider">Account Verification</h4>
-                        <p className="text-xs text-muted-foreground mt-0.5">
-                          {isVerified 
-                            ? `This user account is verified and linked to employee record (${employee.employee_code}).`
-                            : 'Your account is pending administrator review and verification.'
-                          }
-                        </p>
-                        {verifiedTimestamp && (
-                          <p className="text-[11px] text-muted-foreground font-mono mt-1">
-                            Verified Date: {fmtDate(verifiedTimestamp)}
+                {/* Account Verification Banner - Employee Only */}
+                {!isCustomer && (
+                  <div className={`p-4 rounded-2xl border ${isVerified
+                      ? 'bg-emerald-50/40 dark:bg-emerald-950/20 border-emerald-200 dark:border-emerald-900/60'
+                      : 'bg-amber-50/40 dark:bg-amber-950/20 border-amber-200 dark:border-amber-900/60'
+                    }`}>
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex items-start gap-2.5">
+                        {isVerified ? (
+                          <FiCheckCircle className="w-5 h-5 text-emerald-600 dark:text-emerald-400 shrink-0 mt-0.5" />
+                        ) : (
+                          <FiAlertTriangle className="w-5 h-5 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+                        )}
+                        <div>
+                          <h4 className="font-bold text-foreground text-xs uppercase tracking-wider">Account Verification</h4>
+                          <p className="text-xs text-muted-foreground mt-0.5">
+                            {isVerified
+                              ? `This user account is verified and linked to employee record (${employee.employee_code}).`
+                              : 'Your account is pending administrator review and verification.'
+                            }
                           </p>
+                          {verifiedTimestamp && (
+                            <p className="text-[11px] text-muted-foreground font-mono mt-1">
+                              Verified Date: {fmtDate(verifiedTimestamp)}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="flex gap-2 shrink-0">
+                        {isVerified && (
+                          <button
+                            onClick={() => setVerificationDetailsOpen(true)}
+                            className="px-3 py-1.5 text-xs font-semibold rounded-xl border border-border bg-card hover:bg-muted text-foreground cursor-pointer flex items-center gap-1.5 transition-colors"
+                          >
+                            <FiShield className="w-3.5 h-3.5 text-emerald-500" />
+                            <span>Details</span>
+                          </button>
                         )}
                       </div>
                     </div>
-
-                    <div className="flex gap-2 shrink-0">
-                      {isVerified && (
-                        <button
-                          onClick={() => setVerificationDetailsOpen(true)}
-                          className="px-3 py-1.5 text-xs font-semibold rounded-xl border border-border bg-card hover:bg-muted text-foreground cursor-pointer flex items-center gap-1.5 transition-colors"
-                        >
-                          <FiShield className="w-3.5 h-3.5 text-emerald-500" />
-                          <span>Details</span>
-                        </button>
-                      )}
-                    </div>
                   </div>
-                </div>
+                )}
 
                 {/* Form & Profile Sections */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className={`grid grid-cols-1 ${isCustomer ? 'md:grid-cols-1' : 'md:grid-cols-2'} gap-4`}>
                   {/* Personal Information */}
                   <div className="p-4 bg-card rounded-2xl border border-border space-y-3">
                     <h4 className="font-bold uppercase tracking-wider text-muted-foreground text-[11px] flex items-center gap-1.5 border-b border-border pb-2">
@@ -344,60 +465,121 @@ export default function ProfileModal({ open, isOpen, onClose }) {
                     <div className="grid grid-cols-2 gap-4">
                       <div>
                         <div className="text-[10px] text-muted-foreground uppercase tracking-wider font-bold mb-0.5">Gender</div>
-                        <div className="font-semibold text-foreground">{employee.gender || '—'}</div>
+                        {isEditing && !isCustomer ? (
+                          <div className="relative">
+                            <select
+                              value={editForm.gender || ''}
+                              onChange={e => setEditForm(p => ({ ...p, gender: e.target.value }))}
+                              className="w-full px-3 py-2 rounded-xl border border-border bg-black/5 text-foreground text-sm font-medium focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition-all appearance-none"
+                            >
+                              <option value="">Select...</option>
+                              <option value="Male">Male</option>
+                              <option value="Female">Female</option>
+                            </select>
+                            <FiChevronDown className="w-3.5 h-3.5 text-muted-foreground absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                          </div>
+                        ) : (
+                          <div className="font-semibold text-foreground">{employee.gender || '—'}</div>
+                        )}
                       </div>
                       <div>
                         <div className="text-[10px] text-muted-foreground uppercase tracking-wider font-bold mb-0.5">Birthdate</div>
-                        <div className="font-semibold text-foreground">{employee.birth_date || employee.date_of_birth ? fmtDate(employee.birth_date || employee.date_of_birth).split(',')[0] : '—'}</div>
+                        {isEditing && !isCustomer ? (
+                          <input
+                            type="date"
+                            value={editForm.birth_date || editForm.date_of_birth ? new Date(editForm.birth_date || editForm.date_of_birth).toISOString().split('T')[0] : ''}
+                            onChange={e => setEditForm(p => ({ ...p, birth_date: e.target.value, date_of_birth: e.target.value }))}
+                            className="w-full px-3 py-2 rounded-xl border border-border bg-black/5 text-foreground text-sm font-medium focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition-all"
+                          />
+                        ) : (
+                          <div className="font-semibold text-foreground">{employee.birth_date || employee.date_of_birth ? fmtDate(employee.birth_date || employee.date_of_birth).split(',')[0] : '—'}</div>
+                        )}
                       </div>
-                      <div>
-                        <div className="text-[10px] text-muted-foreground uppercase tracking-wider font-bold mb-0.5">Marital Status</div>
-                        <div className="font-semibold text-foreground">{employee.marital_status || '—'}</div>
-                      </div>
-                      <div>
-                        <div className="text-[10px] text-muted-foreground uppercase tracking-wider font-bold mb-0.5">Position</div>
-                        <div className="font-semibold text-foreground">{employee.position || '—'}</div>
-                      </div>
+                      {!isCustomer && (
+                        <>
+                          <div>
+                            <div className="text-[10px] text-muted-foreground uppercase tracking-wider font-bold mb-0.5">Marital Status</div>
+                            {isEditing ? (
+                              <div className="relative">
+                                <select
+                                  value={editForm.marital_status || ''}
+                                  onChange={e => setEditForm(p => ({ ...p, marital_status: e.target.value }))}
+                                  className="w-full px-3 py-2 rounded-xl border border-border bg-black/5 text-foreground text-sm font-medium focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition-all appearance-none"
+                                >
+                                  <option value="">Select...</option>
+                                  <option value="Single">Single</option>
+                                  <option value="Married">Married</option>
+                                  <option value="Divorced">Divorced</option>
+                                  <option value="Widowed">Widowed</option>
+                                </select>
+                                <FiChevronDown className="w-3.5 h-3.5 text-muted-foreground absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                              </div>
+                            ) : (
+                              <div className="font-semibold text-foreground">{employee.marital_status || '—'}</div>
+                            )}
+                          </div>
+                          <div>
+                            <div className="text-[10px] text-muted-foreground uppercase tracking-wider font-bold mb-0.5">Position</div>
+                            <div className="font-semibold text-foreground">{employee.position || '—'}</div>
+                          </div>
+                        </>
+                      )}
                     </div>
                   </div>
 
                   {/* Employment Information */}
-                  <div className="p-4 bg-card rounded-2xl border border-border space-y-3">
-                    <h4 className="font-bold uppercase tracking-wider text-muted-foreground text-[11px] flex items-center gap-1.5 border-b border-border pb-2">
-                      <FiActivity className="w-3.5 h-3.5 text-primary" />
-                      <span>Employment Information</span>
-                    </h4>
-                    <div className="grid grid-cols-2 gap-4">
-                      <div>
-                        <div className="text-[10px] text-muted-foreground uppercase tracking-wider font-bold mb-0.5">Employee ID</div>
-                        <div className="font-bold text-foreground font-mono">{employee.employee_code}</div>
-                      </div>
-                      <div>
-                        <div className="text-[10px] text-muted-foreground uppercase tracking-wider font-bold mb-0.5">Branch</div>
-                        <div className="font-semibold text-foreground">{employee.branch || '—'}</div>
-                      </div>
-                      <div>
-                        <div className="text-[10px] text-muted-foreground uppercase tracking-wider font-bold mb-0.5">Department</div>
-                        <div className="font-semibold text-foreground">{employee.department || '—'}</div>
-                      </div>
-                      <div>
-                        <div className="text-[10px] text-muted-foreground uppercase tracking-wider font-bold mb-0.5">Working Hours</div>
-                        <div className="font-semibold text-foreground">{employee.working_hours || '—'}</div>
-                      </div>
-                      <div>
-                        <div className="text-[10px] text-muted-foreground uppercase tracking-wider font-bold mb-0.5">Position</div>
-                        <div className="font-semibold text-foreground">{employee.position || '—'}</div>
-                      </div>
-                      <div>
-                        <div className="text-[10px] text-muted-foreground uppercase tracking-wider font-bold mb-0.5">Salary</div>
-                        <div className="font-semibold text-foreground">{employee.basic_salary ? <span className="flex items-center gap-0.5"><TbCurrencyPeso className="w-3.5 h-3.5" /> {fmt(employee.basic_salary)}</span> : '—'}</div>
-                      </div>
-                      <div className="col-span-2">
-                        <div className="text-[10px] text-muted-foreground uppercase tracking-wider font-bold mb-0.5">Pay Type</div>
-                        <div className="font-semibold text-foreground">{employee.pay_type || '—'}</div>
+                  {!isCustomer && (
+                    <div className="p-4 bg-card rounded-2xl border border-border space-y-3">
+                      <h4 className="font-bold uppercase tracking-wider text-muted-foreground text-[11px] flex items-center gap-1.5 border-b border-border pb-2">
+                        <FiActivity className="w-3.5 h-3.5 text-primary" />
+                        <span>Employment Information</span>
+                      </h4>
+                      <div className="grid grid-cols-2 gap-4">
+                        <div>
+                          <div className="text-[10px] text-muted-foreground uppercase tracking-wider font-bold mb-0.5">Employee ID</div>
+                          <div className="font-bold text-foreground font-mono">{employee.employee_code}</div>
+                        </div>
+                        <div>
+                          <div className="text-[10px] text-muted-foreground uppercase tracking-wider font-bold mb-0.5">Branch</div>
+                          <div className="font-semibold text-foreground">{branchesList.find(b => b.id == employee.branch_id)?.name || employee.branch?.name || employee.branch || '—'}</div>
+                        </div>
+                        <div>
+                          <div className="text-[10px] text-muted-foreground uppercase tracking-wider font-bold mb-0.5">Department</div>
+                          <div className="font-semibold text-foreground">{employee.department || '—'}</div>
+                        </div>
+                        <div>
+                          <div className="text-[10px] text-muted-foreground uppercase tracking-wider font-bold mb-0.5">Working Hours</div>
+                          <div className="font-semibold text-foreground">{employee.working_hours || '—'}</div>
+                        </div>
+                        <div>
+                          <div className="text-[10px] text-muted-foreground uppercase tracking-wider font-bold mb-0.5">Position</div>
+                          <div className="font-semibold text-foreground">{employee.position || '—'}</div>
+                        </div>
+                        <div>
+                          <div className="text-[10px] text-muted-foreground uppercase tracking-wider font-bold mb-0.5">Salary</div>
+                          {isEditing ? (
+                            <div className="relative">
+                              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">₱</span>
+                              <input
+                                type="number"
+                                min="0"
+                                step="0.01"
+                                value={editForm.basic_salary || ''}
+                                onChange={e => setEditForm(p => ({ ...p, basic_salary: e.target.value }))}
+                                className="w-full pl-7 pr-3 py-2 rounded-xl border border-border bg-black/5 text-foreground text-sm font-medium focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition-all"
+                              />
+                            </div>
+                          ) : (
+                            <div className="font-semibold text-foreground">{employee.basic_salary ? <span className="flex items-center gap-0.5"><TbCurrencyPeso className="w-3.5 h-3.5" /> {fmt(employee.basic_salary)}</span> : '—'}</div>
+                          )}
+                        </div>
+                        <div className="col-span-2">
+                          <div className="text-[10px] text-muted-foreground uppercase tracking-wider font-bold mb-0.5">Pay Type</div>
+                          <div className="font-semibold text-foreground">{employee.pay_type || '—'}</div>
+                        </div>
                       </div>
                     </div>
-                  </div>
+                  )}
                 </div>
 
                 {/* Contact Details (Editable) */}
@@ -409,6 +591,32 @@ export default function ProfileModal({ open, isOpen, onClose }) {
 
                   {isEditing ? (
                     <div className="space-y-4">
+                      {/* Row 0: Name (Customer Only) */}
+                      {isCustomer && (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                          <div>
+                            <label className="block text-[11px] font-bold text-muted-foreground mb-1.5">First Name *</label>
+                            <input
+                              type="text"
+                              required
+                              value={editForm.first_name || ''}
+                              onChange={e => setEditForm(p => ({ ...p, first_name: e.target.value }))}
+                              className="w-full px-3 py-2.5 rounded-xl border border-border bg-black/5  text-foreground text-sm font-medium focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition-all"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-[11px] font-bold text-muted-foreground mb-1.5">Last Name *</label>
+                            <input
+                              type="text"
+                              required
+                              value={editForm.last_name || ''}
+                              onChange={e => setEditForm(p => ({ ...p, last_name: e.target.value }))}
+                              className="w-full px-3 py-2.5 rounded-xl border border-border bg-black/5  text-foreground text-sm font-medium focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition-all"
+                            />
+                          </div>
+                        </div>
+                      )}
+
                       {/* Row 1: Contact & Email */}
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                         <div>
@@ -417,7 +625,7 @@ export default function ProfileModal({ open, isOpen, onClose }) {
                             type="text"
                             value={editForm.phone}
                             onChange={e => setEditForm(p => ({ ...p, phone: e.target.value }))}
-                            className="w-full px-3 py-2.5 rounded-xl border border-border bg-black/5 dark:bg-black/20 text-foreground text-sm font-medium focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition-all"
+                            className="w-full px-3 py-2.5 rounded-xl border border-border bg-black/5  text-foreground text-sm font-medium focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition-all"
                           />
                         </div>
                         <div>
@@ -426,85 +634,129 @@ export default function ProfileModal({ open, isOpen, onClose }) {
                             type="email"
                             value={editForm.email}
                             onChange={e => setEditForm(p => ({ ...p, email: e.target.value }))}
-                            className="w-full px-3 py-2.5 rounded-xl border border-border bg-black/5 dark:bg-black/20 text-foreground text-sm font-medium focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition-all"
+                            className="w-full px-3 py-2.5 rounded-xl border border-border bg-black/5  text-foreground text-sm font-medium focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition-all"
                           />
                         </div>
                       </div>
 
-                      {/* Row 2: Address */}
-                      <div>
-                        <label className="block text-[11px] font-bold text-muted-foreground mb-1.5">Home Address</label>
-                        <input
-                          type="text"
-                          value={editForm.address}
-                          onChange={e => setEditForm(p => ({ ...p, address: e.target.value }))}
-                          className="w-full px-3 py-2.5 rounded-xl border border-border bg-black/5 dark:bg-black/20 text-foreground text-sm font-medium focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition-all"
-                        />
+                      {/* Row 2: Address and Branch */}
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-[11px] font-bold text-muted-foreground mb-1.5">Home Address</label>
+                          <input
+                            type="text"
+                            value={editForm.address}
+                            onChange={e => setEditForm(p => ({ ...p, address: e.target.value }))}
+                            className="w-full px-3 py-2.5 rounded-xl border border-border bg-black/5  text-foreground text-sm font-medium focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition-all"
+                          />
+                        </div>
+                        {isCustomer && (
+                          <div>
+                            <label className="block text-[11px] font-bold text-muted-foreground mb-1.5">Branch</label>
+                            <div className="relative">
+                              <select
+                                name="branch_id"
+                                value={editForm.branch_id || ''}
+                                onChange={e => setEditForm(p => ({ ...p, branch_id: e.target.value }))}
+                                className="w-full px-3 py-2.5 rounded-xl border border-border bg-black/5  text-foreground text-sm font-medium focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition-all appearance-none"
+                              >
+                                <option value="">Select a Branch...</option>
+                                {branchesList.map(branch => (
+                                  <option key={branch.id} value={branch.id}>{branch.name}</option>
+                                ))}
+                              </select>
+                              <FiChevronDown className="w-3.5 h-3.5 text-muted-foreground absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                            </div>
+                          </div>
+                        )}
                       </div>
 
-                      {/* Row 3: Payment & Time (Read-only in Edit Mode) */}
-                      <div className="grid grid-cols-1 sm:grid-cols-5 gap-4">
-                        <div>
-                          <label className="block text-[11px] font-bold text-muted-foreground mb-1.5">Pay Type</label>
-                          <div className="relative">
-                            <select
-                              value={editForm.pay_type}
-                              onChange={e => setEditForm(p => ({ ...p, pay_type: e.target.value }))}
-                              className="w-full px-3 py-2.5 rounded-xl border border-border bg-black/5 dark:bg-black/20 text-foreground text-sm font-medium focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition-all appearance-none"
-                            >
-                              <option value="Cash">Cash</option>
-                              <option value="GCash">GCash</option>
-                              <option value="Bank Transfer">Bank Transfer</option>
-                            </select>
-                            <FiChevronDown className="w-3.5 h-3.5 text-muted-foreground absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
-                          </div>
-                        </div>
-                        <div>
-                          <label className="block text-[11px] font-bold text-muted-foreground mb-1.5">Account/Reference</label>
-                          {editForm.pay_type === 'GCash' ? (
-                            <input
-                              type="text"
-                              value={editForm.ewallet_account_no}
-                              onChange={e => setEditForm(p => ({ ...p, ewallet_account_no: e.target.value }))}
-                              placeholder="GCash Number"
-                              className="w-full px-3 py-2.5 rounded-xl border border-border bg-black/5 dark:bg-black/20 text-foreground text-sm font-medium focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition-all"
-                            />
-                          ) : editForm.pay_type === 'Bank Transfer' ? (
-                            <input
-                              type="text"
-                              value={editForm.bank_account_no}
-                              onChange={e => setEditForm(p => ({ ...p, bank_account_no: e.target.value }))}
-                              placeholder="Bank Account No."
-                              className="w-full px-3 py-2.5 rounded-xl border border-border bg-black/5 dark:bg-black/20 text-foreground text-sm font-medium focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition-all"
-                            />
-                          ) : (
-                            <div className="w-full px-3 py-2.5 rounded-xl border border-border bg-black/5 dark:bg-black/20 text-foreground text-sm font-medium cursor-not-allowed">
-                              N/A
+                      {/* Row 3: Payment & Time */}
+                      {!isCustomer && (
+                        <div className="grid grid-cols-1 sm:grid-cols-5 gap-4">
+                          <div>
+                            <label className="block text-[11px] font-bold text-muted-foreground mb-1.5">Pay Type</label>
+                            <div className="relative">
+                              <select
+                                value={editForm.pay_type || ''}
+                                onChange={e => setEditForm(p => ({ ...p, pay_type: e.target.value }))}
+                                className="w-full px-3 py-2.5 rounded-xl border border-border bg-black/5 text-foreground text-sm font-medium focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition-all appearance-none"
+                              >
+                                <option value="Cash">Cash</option>
+                                <option value="GCash">GCash</option>
+                                <option value="Bank Transfer">Bank Transfer</option>
+                                <option value="PayMaya">PayMaya</option>
+                              </select>
+                              <FiChevronDown className="w-3.5 h-3.5 text-muted-foreground absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
                             </div>
-                          )}
-                        </div>
-                        <div>
-                          <div className="text-[11px] font-bold text-muted-foreground mb-1.5">Time In</div>
-                          <div className="w-full px-3 py-2.5 rounded-xl border border-border bg-black/5 dark:bg-black/20 text-foreground text-sm font-medium flex justify-between items-center cursor-not-allowed">
-                            <span>{employee.today_attendance?.time_in ? new Date(`2000-01-01T${employee.today_attendance.time_in}`).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }) : '—'}</span>
-                            <FiClock className="w-3.5 h-3.5 text-muted-foreground" />
+                          </div>
+                          <div>
+                            <label className="block text-[11px] font-bold text-muted-foreground mb-1.5">Account/Reference</label>
+                            {editForm.pay_type === 'GCash' || editForm.pay_type === 'PayMaya' ? (
+                              <input
+                                type="text"
+                                value={editForm.ewallet_account_no || ''}
+                                onChange={e => setEditForm(p => ({ ...p, ewallet_account_no: e.target.value }))}
+                                placeholder={`${editForm.pay_type} Number`}
+                                className="w-full px-3 py-2.5 rounded-xl border border-border bg-black/5 text-foreground text-sm font-medium focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition-all"
+                              />
+                            ) : editForm.pay_type === 'Bank Transfer' ? (
+                              <input
+                                type="text"
+                                value={editForm.bank_account_no || ''}
+                                onChange={e => setEditForm(p => ({ ...p, bank_account_no: e.target.value }))}
+                                placeholder="Bank Account No."
+                                className="w-full px-3 py-2.5 rounded-xl border border-border bg-black/5 text-foreground text-sm font-medium focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition-all"
+                              />
+                            ) : (
+                              <div className="w-full px-3 py-2.5 rounded-xl border border-border bg-black/5 text-foreground text-sm font-medium cursor-not-allowed text-muted-foreground">
+                                N/A
+                              </div>
+                            )}
+                          </div>
+                          <div>
+                            <label className="block text-[11px] font-bold text-muted-foreground mb-1.5">Time In</label>
+                            <div className="relative">
+                              <input
+                                type="time"
+                                value={editForm.time_in || ''}
+                                onChange={e => setEditForm(p => ({ ...p, time_in: e.target.value }))}
+                                className="w-full px-3 py-2.5 rounded-xl border border-border bg-black/5 text-foreground text-sm font-medium focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition-all appearance-none [&::-webkit-calendar-picker-indicator]:opacity-0 [&::-webkit-calendar-picker-indicator]:absolute [&::-webkit-calendar-picker-indicator]:right-0 [&::-webkit-calendar-picker-indicator]:w-full [&::-webkit-calendar-picker-indicator]:h-full [&::-webkit-calendar-picker-indicator]:cursor-pointer"
+                              />
+                              <FiClock className="w-3.5 h-3.5 text-muted-foreground absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                            </div>
+                          </div>
+                          <div>
+                            <label className="block text-[11px] font-bold text-muted-foreground mb-1.5">Time Out</label>
+                            <div className="relative">
+                              <input
+                                type="time"
+                                value={editForm.time_out || ''}
+                                onChange={e => setEditForm(p => ({ ...p, time_out: e.target.value }))}
+                                className="w-full px-3 py-2.5 rounded-xl border border-border bg-black/5 text-foreground text-sm font-medium focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition-all appearance-none [&::-webkit-calendar-picker-indicator]:opacity-0 [&::-webkit-calendar-picker-indicator]:absolute [&::-webkit-calendar-picker-indicator]:right-0 [&::-webkit-calendar-picker-indicator]:w-full [&::-webkit-calendar-picker-indicator]:h-full [&::-webkit-calendar-picker-indicator]:cursor-pointer"
+                              />
+                              <FiClock className="w-3.5 h-3.5 text-muted-foreground absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                            </div>
+                          </div>
+                          <div>
+                            <label className="block text-[11px] font-bold text-muted-foreground mb-1.5">Branch</label>
+                            <div className="relative">
+                              <select
+                                name="branch_id"
+                                value={editForm.branch_id || ''}
+                                onChange={e => setEditForm(p => ({ ...p, branch_id: e.target.value }))}
+                                className="w-full px-3 py-2.5 rounded-xl border border-border bg-black/5 text-foreground text-sm font-medium focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition-all appearance-none"
+                              >
+                                <option value="">Select a Branch...</option>
+                                {branchesList.map(branch => (
+                                  <option key={branch.id} value={branch.id}>{branch.name}</option>
+                                ))}
+                              </select>
+                              <FiChevronDown className="w-3.5 h-3.5 text-muted-foreground absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                            </div>
                           </div>
                         </div>
-                        <div>
-                          <div className="text-[11px] font-bold text-muted-foreground mb-1.5">Time Out</div>
-                          <div className="w-full px-3 py-2.5 rounded-xl border border-border bg-black/5 dark:bg-black/20 text-foreground text-sm font-medium flex justify-between items-center cursor-not-allowed">
-                            <span>{employee.today_attendance?.time_out ? new Date(`2000-01-01T${employee.today_attendance.time_out}`).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }) : '—'}</span>
-                            <FiClock className="w-3.5 h-3.5 text-muted-foreground" />
-                          </div>
-                        </div>
-                        <div>
-                          <div className="text-[11px] font-bold text-muted-foreground mb-1.5">Branch</div>
-                          <div className="w-full px-3 py-2.5 rounded-xl border border-border bg-black/5 dark:bg-black/20 text-foreground text-sm font-medium flex justify-between items-center overflow-hidden cursor-not-allowed">
-                            <span className="truncate pr-2">{employee.branch || '—'}</span>
-                            <FiChevronDown className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
-                          </div>
-                        </div>
-                      </div>
+                      )}
                     </div>
                   ) : (
                     <div className="space-y-4">
@@ -512,65 +764,77 @@ export default function ProfileModal({ open, isOpen, onClose }) {
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                         <div>
                           <div className="text-[11px] font-bold text-muted-foreground mb-1.5">Contact Phone</div>
-                          <div className="w-full px-3 py-2.5 rounded-xl border border-border bg-black/5 dark:bg-black/20 text-foreground text-sm font-medium">
+                          <div className="w-full px-3 py-2.5 rounded-xl border border-border bg-black/5  text-foreground text-sm font-medium">
                             {employee.phone || '—'}
                           </div>
                         </div>
                         <div>
                           <div className="text-[11px] font-bold text-muted-foreground mb-1.5">Email Address</div>
-                          <div className="w-full px-3 py-2.5 rounded-xl border border-border bg-black/5 dark:bg-black/20 text-foreground text-sm font-medium">
+                          <div className="w-full px-3 py-2.5 rounded-xl border border-border bg-black/5  text-foreground text-sm font-medium">
                             {employee.email || '—'}
                           </div>
                         </div>
                       </div>
 
-                      {/* Row 2: Address */}
-                      <div>
-                        <div className="text-[11px] font-bold text-muted-foreground mb-1.5">Home Address</div>
-                        <div className="w-full px-3 py-2.5 rounded-xl border border-border bg-black/5 dark:bg-black/20 text-foreground text-sm font-medium">
-                          {employee.address || '—'}
+                      {/* Row 2: Address and Branch */}
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                          <div className="text-[11px] font-bold text-muted-foreground mb-1.5">Home Address</div>
+                          <div className="w-full px-3 py-2.5 rounded-xl border border-border bg-black/5  text-foreground text-sm font-medium">
+                            {employee.address || '—'}
+                          </div>
                         </div>
+                        {isCustomer && (
+                          <div>
+                            <div className="text-[11px] font-bold text-muted-foreground mb-1.5">Branch</div>
+                            <div className="w-full px-3 py-2.5 rounded-xl border border-border bg-black/5  text-foreground text-sm font-medium">
+                              {employee.branch?.name || '—'}
+                            </div>
+                          </div>
+                        )}
                       </div>
 
                       {/* Row 3: Payment & Time */}
-                      <div className="grid grid-cols-1 sm:grid-cols-5 gap-4">
-                        <div>
-                          <div className="text-[11px] font-bold text-muted-foreground mb-1.5">Pay Type</div>
-                          <div className="w-full px-3 py-2.5 rounded-xl border border-border bg-black/5 dark:bg-black/20 text-foreground text-sm font-medium flex justify-between items-center">
-                            <span>{employee.pay_type || '—'}</span>
-                            <FiChevronDown className="w-3.5 h-3.5 text-muted-foreground" />
+                      {!isCustomer && (
+                        <div className="grid grid-cols-1 sm:grid-cols-5 gap-4">
+                          <div>
+                            <div className="text-[11px] font-bold text-muted-foreground mb-1.5">Pay Type</div>
+                            <div className="w-full px-3 py-2.5 rounded-xl border border-border bg-black/5  text-foreground text-sm font-medium flex justify-between items-center">
+                              <span>{employee.pay_type || '—'}</span>
+                              <FiChevronDown className="w-3.5 h-3.5 text-muted-foreground" />
+                            </div>
+                          </div>
+                          <div>
+                            <div className="text-[11px] font-bold text-muted-foreground mb-1.5">Account/Reference</div>
+                            <div className="w-full px-3 py-2.5 rounded-xl border border-border bg-black/5  text-foreground text-sm font-medium">
+                              {employee.pay_type === 'GCash' ? (employee.ewallet_account_no || '—')
+                                : employee.pay_type === 'Bank Transfer' ? (employee.bank_account_no || '—')
+                                  : employee.pay_type === 'Cash' ? 'N/A' : '—'}
+                            </div>
+                          </div>
+                          <div>
+                            <div className="text-[11px] font-bold text-muted-foreground mb-1.5">Time In</div>
+                            <div className="w-full px-3 py-2.5 rounded-xl border border-border bg-black/5  text-foreground text-sm font-medium flex justify-between items-center">
+                              <span>{employee.today_attendance?.time_in ? new Date(`2000-01-01T${employee.today_attendance.time_in}`).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }) : '—'}</span>
+                              <FiClock className="w-3.5 h-3.5 text-muted-foreground" />
+                            </div>
+                          </div>
+                          <div>
+                            <div className="text-[11px] font-bold text-muted-foreground mb-1.5">Time Out</div>
+                            <div className="w-full px-3 py-2.5 rounded-xl border border-border bg-black/5  text-foreground text-sm font-medium flex justify-between items-center">
+                              <span>{employee.today_attendance?.time_out ? new Date(`2000-01-01T${employee.today_attendance.time_out}`).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }) : '—'}</span>
+                              <FiClock className="w-3.5 h-3.5 text-muted-foreground" />
+                            </div>
+                          </div>
+                          <div>
+                            <div className="text-[11px] font-bold text-muted-foreground mb-1.5">Branch</div>
+                            <div className="w-full px-3 py-2.5 rounded-xl border border-border bg-black/5  text-foreground text-sm font-medium flex justify-between items-center overflow-hidden">
+                              <span className="truncate pr-2">{employee.branch?.name || '—'}</span>
+                              <FiChevronDown className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+                            </div>
                           </div>
                         </div>
-                        <div>
-                          <div className="text-[11px] font-bold text-muted-foreground mb-1.5">Account/Reference</div>
-                          <div className="w-full px-3 py-2.5 rounded-xl border border-border bg-black/5 dark:bg-black/20 text-foreground text-sm font-medium">
-                            {employee.pay_type === 'GCash' ? (employee.ewallet_account_no || '—') 
-                              : employee.pay_type === 'Bank Transfer' ? (employee.bank_account_no || '—') 
-                              : employee.pay_type === 'Cash' ? 'N/A' : '—'}
-                          </div>
-                        </div>
-                        <div>
-                          <div className="text-[11px] font-bold text-muted-foreground mb-1.5">Time In</div>
-                          <div className="w-full px-3 py-2.5 rounded-xl border border-border bg-black/5 dark:bg-black/20 text-foreground text-sm font-medium flex justify-between items-center">
-                            <span>{employee.today_attendance?.time_in ? new Date(`2000-01-01T${employee.today_attendance.time_in}`).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }) : '—'}</span>
-                            <FiClock className="w-3.5 h-3.5 text-muted-foreground" />
-                          </div>
-                        </div>
-                        <div>
-                          <div className="text-[11px] font-bold text-muted-foreground mb-1.5">Time Out</div>
-                          <div className="w-full px-3 py-2.5 rounded-xl border border-border bg-black/5 dark:bg-black/20 text-foreground text-sm font-medium flex justify-between items-center">
-                            <span>{employee.today_attendance?.time_out ? new Date(`2000-01-01T${employee.today_attendance.time_out}`).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }) : '—'}</span>
-                            <FiClock className="w-3.5 h-3.5 text-muted-foreground" />
-                          </div>
-                        </div>
-                        <div>
-                          <div className="text-[11px] font-bold text-muted-foreground mb-1.5">Branch</div>
-                          <div className="w-full px-3 py-2.5 rounded-xl border border-border bg-black/5 dark:bg-black/20 text-foreground text-sm font-medium flex justify-between items-center overflow-hidden">
-                            <span className="truncate pr-2">{employee.branch || '—'}</span>
-                            <FiChevronDown className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
-                          </div>
-                        </div>
-                      </div>
+                      )}
                     </div>
                   )}
                 </div>
@@ -592,7 +856,7 @@ export default function ProfileModal({ open, isOpen, onClose }) {
                       </div>
                       <h3 className="text-base font-bold text-emerald-600 dark:text-emerald-400">Attendance QR Code Ready</h3>
                       <p className="text-xs text-muted-foreground">
-                        "Your account has been verified and your permanent QR code has been issued by the Administrator."
+                        Your account has been verified and your permanent QR code has been issued by the Administrator.
                       </p>
                     </div>
 
@@ -621,7 +885,7 @@ export default function ProfileModal({ open, isOpen, onClose }) {
                       <div>
                         <h4 className="font-bold text-sm text-foreground">{employee.first_name} {employee.last_name}</h4>
                         <p className="font-mono text-xs font-bold text-primary">{employee.employee_code}</p>
-                        <p className="text-[11px] text-muted-foreground mt-0.5">{employee.position} · {employee.branch || 'Main Branch'}</p>
+                        <p className="text-[11px] text-muted-foreground mt-0.5">{employee.position} · {employee.branch?.name || 'Main Branch'}</p>
                       </div>
                     </div>
                   </div>
@@ -663,7 +927,7 @@ export default function ProfileModal({ open, isOpen, onClose }) {
                     </div>
                     <h3 className="text-base font-bold text-foreground">Account Verification in Progress</h3>
                     <p className="text-xs text-muted-foreground max-w-md mx-auto leading-relaxed">
-                      "An Administrator is currently verifying your account information."
+                      An Administrator is currently verifying your account information.
                     </p>
                   </div>
                 ) : employee.qr_status === 'REJECTED' ? (
@@ -781,7 +1045,7 @@ export default function ProfileModal({ open, isOpen, onClose }) {
                 </div>
                 <div>
                   <span className="text-[10px] text-muted-foreground uppercase font-bold block">Branch</span>
-                  <span className="font-semibold text-foreground">{employee.branch || 'Main Branch'}</span>
+                  <span className="font-semibold text-foreground">{employee.branch?.name || 'Main Branch'}</span>
                 </div>
                 <div>
                   <span className="text-[10px] text-muted-foreground uppercase font-bold block">Phone</span>
@@ -816,7 +1080,7 @@ export default function ProfileModal({ open, isOpen, onClose }) {
             <div>
               <h3 className="text-base font-black text-foreground">{employee.first_name} {employee.last_name}</h3>
               <p className="font-mono text-xs font-bold text-primary">{employee.employee_code}</p>
-              <p className="text-xs text-muted-foreground">{employee.position} · {employee.branch || 'Main Branch'}</p>
+              <p className="text-xs text-muted-foreground">{employee.position} · {employee.branch?.name || 'Main Branch'}</p>
             </div>
             <div className="p-2.5 rounded-xl bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 text-[11px] font-medium">
               Present this permanent QR code to the Store Administrator terminal scanner for attendance verification.

@@ -43,7 +43,7 @@ class SearchController extends Controller
         $isAdmin = ($role === 'Administrator');
         $isStoreAdmin = in_array($role, ['Store Administrator', 'Store Admin']);
         $isEmployee = ($role === 'Employee');
-        $userBranch = ($user && $user->employee && $user->employee->branch) ? $user->employee->branch : 'Main Branch';
+        $userBranch = ($user && $user->employee && $user->employee->branch_id) ? $user->employee->branch_id : null;
 
         $results = [];
 
@@ -97,7 +97,7 @@ class SearchController extends Controller
         if ($isAdmin || $isStoreAdmin) {
             $empQuery = Employee::query();
             if (!$isAdmin) {
-                $empQuery->where('branch', $userBranch);
+                $empQuery->where('branch_id', $userBranch);
             }
             $employees = $empQuery->where(function($query) use ($q) {
                 $query->where('first_name', 'like', "%{$q}%")
@@ -106,7 +106,7 @@ class SearchController extends Controller
                       ->orWhere('employee_code', 'like', "%{$q}%")
                       ->orWhere('position', 'like', "%{$q}%")
                       ->orWhere('department', 'like', "%{$q}%")
-                      ->orWhere('branch', 'like', "%{$q}%")
+                      ->orwhere('branch_id', 'like', "%{$q}%")
                       ->orWhere('phone', 'like', "%{$q}%")
                       ->orWhere('email', 'like', "%{$q}%")
                       ->orWhere('tin_number', 'like', "%{$q}%")
@@ -127,7 +127,7 @@ class SearchController extends Controller
                     'module' => 'Employees',
                     'title' => trim("{$emp->first_name} {$emp->last_name}"),
                     'subtitle' => "{$emp->employee_code} · {$emp->position} · {$emp->department}",
-                    'description' => "Branch: {$emp->branch} · " . ($isVer ? 'Verified' : 'Not Verified') . " · Status: {$emp->status}",
+                    'description' => "Branch: ' . ($emp->branch ? $emp->branch->name : 'Unassigned') . ' · " . ($isVer ? 'Verified' : 'Not Verified') . " · Status: {$emp->status}",
                     'url' => "/employees?id={$emp->employee_id}",
                     'route' => "/employees?id={$emp->employee_id}",
                     'icon' => 'employee',
@@ -199,7 +199,7 @@ class SearchController extends Controller
         if ($isAdmin || $isStoreAdmin) {
             $salesQuery = SaleTransaction::with('customer');
             if (!$isAdmin) {
-                $salesQuery->whereHas('processedBy.employee', fn($eq) => $eq->where('branch', $userBranch));
+                $salesQuery->whereHas('processedBy.employee', fn($eq) => $eq->where('branch_id', $userBranch));
             }
             $sales = $salesQuery->where(function($query) use ($q) {
                 $query->where('invoice_no', 'like', "%{$q}%")
@@ -235,7 +235,7 @@ class SearchController extends Controller
         if ($isAdmin || $isStoreAdmin) {
             $instQuery = InstallmentAccount::with('customer');
             if (!$isAdmin) {
-                $instQuery->whereHas('sale.processedBy.employee', fn($eq) => $eq->where('branch', $userBranch));
+                $instQuery->whereHas('sale.processedBy.employee', fn($eq) => $eq->where('branch_id', $userBranch));
             }
             $installments = $instQuery->where(function($query) use ($q) {
                 $query->where('account_no', 'like', "%{$q}%")
@@ -270,7 +270,7 @@ class SearchController extends Controller
         if ($isAdmin || $isStoreAdmin) {
             $paymentQuery = Payment::with(['installmentAccount.customer']);
             if (!$isAdmin) {
-                $paymentQuery->whereHas('installmentAccount.sale.processedBy.employee', fn($eq) => $eq->where('branch', $userBranch));
+                $paymentQuery->whereHas('installmentAccount.sale.processedBy.employee', fn($eq) => $eq->where('branch_id', $userBranch));
             }
             $payments = $paymentQuery->where(function($query) use ($q) {
                 $query->where('receipt_no', 'like', "%{$q}%")
@@ -310,7 +310,7 @@ class SearchController extends Controller
         if ($isAdmin) {
             // All attendances across business
         } elseif ($isStoreAdmin) {
-            $attendanceQuery->whereHas('employee', fn($eq) => $eq->where('branch', $userBranch));
+            $attendanceQuery->whereHas('employee', fn($eq) => $eq->where('branch_id', $userBranch));
         } else {
             // Employee role: own records only
             $attendanceQuery->where('employee_id', $user->employee_id ?: 0);
@@ -352,7 +352,7 @@ class SearchController extends Controller
         if ($isAdmin) {
             // All payrolls
         } elseif ($isStoreAdmin) {
-            $payrollQuery->whereHas('employee', fn($eq) => $eq->where('branch', $userBranch));
+            $payrollQuery->whereHas('employee', fn($eq) => $eq->where('branch_id', $userBranch));
         } else {
             // Employee: own payslips only
             $payrollQuery->where('employee_id', $user->employee_id ?: 0);
@@ -471,3 +471,4 @@ class SearchController extends Controller
         ]);
     }
 }
+

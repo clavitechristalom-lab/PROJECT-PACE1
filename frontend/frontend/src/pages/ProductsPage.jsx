@@ -8,7 +8,7 @@ import {
 import {
   Btn, Badge, StatusBadge, Input, Select, Textarea, Modal, ConfirmDialog,
   Table, TR, TD, SearchBar, PageHeader, StatCard, Card, Pagination, showToast,
-  LoadingState, ErrorAlert, StatSkeleton, TableSkeleton, EmptyState,
+  LoadingState, ErrorAlert, StatSkeleton, TableSkeleton, EmptyState, confirmAction
 } from '../components/ui'
 import { fmt, filterBySearch } from '../lib/utils'
 import api, { downloadCsv } from '../lib/api'
@@ -16,10 +16,14 @@ import { FiDownload } from 'react-icons/fi'
 import { TbCurrencyPeso } from 'react-icons/tb'
 import MySalesChart from '../components/MySalesChart'
 
+import { useAuth } from '../context/AuthContext'
+
 const CATEGORIES = ['All', 'Appliances', 'Furniture']
 const STOCK_STATUSES = ['All', 'In Stock', 'Low Stock', 'Out of Stock']
 
-export default function ProductsPage() {
+export default function ProductsPage({ branchFilter, embedded }) {
+  const { user } = useAuth()
+  const isAdmin = user?.role === 'Administrator'
   const [searchParams] = useSearchParams()
   const [products, setProducts] = useState([])
   const [loading, setLoading] = useState(true)
@@ -45,6 +49,7 @@ export default function ProductsPage() {
         search: search || undefined,
         category: category !== 'All' ? category : undefined,
         stock_status: stockStatus !== 'All' ? stockStatus : undefined,
+        branch: branchFilter || undefined,
       })
       showToast('Products exported successfully', 'success')
     } catch (err) {
@@ -71,6 +76,7 @@ export default function ProductsPage() {
         search: search || undefined,
         category: category !== 'All' ? category : undefined,
         stock_status: stockStatus !== 'All' ? stockStatus : undefined,
+        branch: branchFilter || undefined,
       })
       setProducts(data.products || [])
     } catch (err) {
@@ -142,6 +148,9 @@ export default function ProductsPage() {
 
   const handleDelete = async () => {
     if (!deleteItem) return
+    const confirmed = await confirmAction('Delete Product?', `Are you sure you want to delete ${deleteItem.product_name}? This cannot be undone.`, 'Yes, Delete')
+    if (!confirmed) return
+
     setSaving(true)
     try {
       await api.products.delete(deleteItem.product_id)
@@ -188,30 +197,34 @@ export default function ProductsPage() {
   const totalValue = products.reduce((acc, p) => acc + ((p.unit_price || 0) * (p.stock_quantity || 0)), 0)
 
   return (
-    <div className="space-y-6">
-      <PageHeader
-        title="Products & Inventory"
-        subtitle="Manage product catalog, pricing, and stock levels"
-        action={
-          <div className="flex gap-2">
-            <button
-              onClick={handleExport}
-              disabled={exporting}
-              className="flex items-center gap-2 px-4 py-2 bg-muted hover:bg-muted/80 text-foreground font-semibold text-xs rounded-xl shadow-xs transition-all cursor-pointer disabled:opacity-50"
-            >
-              {exporting ? <FiAlertTriangle className="w-4 h-4 animate-spin" /> : <FiDownload className="w-4 h-4" />}
-              <span>{exporting ? 'Exporting...' : 'Export CSV'}</span>
-            </button>
-            <button
-              onClick={() => { setEditItem(null); setForm(emptyForm); setAddModal(true) }}
-              className="flex items-center gap-2 px-4 py-2 bg-primary hover:bg-primary/90 text-primary-foreground font-semibold text-xs rounded-xl shadow-xs transition-all cursor-pointer"
-            >
-              <FiPlus className="w-4 h-4" />
-              <span>Add Product</span>
-            </button>
-          </div>
-        }
-      />
+    <div className={embedded ? "" : "space-y-6"}>
+      {!embedded && (
+        <PageHeader
+          title="Products & Inventory"
+          subtitle="Manage product catalog, pricing, and stock levels"
+          action={
+            <div className="flex gap-2">
+              <button
+                onClick={handleExport}
+                disabled={exporting}
+                className="flex items-center gap-2 px-4 py-2 bg-muted hover:bg-muted/80 text-foreground font-semibold text-xs rounded-xl shadow-xs transition-all cursor-pointer disabled:opacity-50"
+              >
+                {exporting ? <FiAlertTriangle className="w-4 h-4 animate-spin" /> : <FiDownload className="w-4 h-4" />}
+                <span>{exporting ? 'Exporting...' : 'Export CSV'}</span>
+              </button>
+              {isAdmin && (
+                <button
+                  onClick={() => { setEditItem(null); setForm(emptyForm); setAddModal(true) }}
+                  className="flex items-center gap-2 px-4 py-2 bg-primary hover:bg-primary/90 text-primary-foreground font-semibold text-xs rounded-xl shadow-xs transition-all cursor-pointer"
+                >
+                  <FiPlus className="w-4 h-4" />
+                  <span>Add Product</span>
+                </button>
+              )}
+            </div>
+          }
+        />
+      )}
 
       <MySalesChart />
 
@@ -276,13 +289,15 @@ export default function ProductsPage() {
             title="No products found"
             description={search || category !== 'All' || stockStatus !== 'All' ? 'Try adjusting your search or filters' : 'Add your first product to get started'}
             action={
-              <button
-                onClick={() => { setEditItem(null); setForm(emptyForm); setAddModal(true) }}
-                className="flex items-center gap-1.5 px-3.5 py-1.5 bg-primary text-primary-foreground font-bold text-xs rounded-xl cursor-pointer"
-              >
-                <FiPlus className="w-4 h-4" />
-                <span>Add Product</span>
-              </button>
+              !isAdmin ? (
+                <button
+                  onClick={() => { setEditItem(null); setForm(emptyForm); setAddModal(true) }}
+                  className="flex items-center gap-1.5 px-3.5 py-1.5 bg-primary text-primary-foreground font-bold text-xs rounded-xl cursor-pointer"
+                >
+                  <FiPlus className="w-4 h-4" />
+                  <span>Add Product</span>
+                </button>
+              ) : null
             }
           />
         ) : (

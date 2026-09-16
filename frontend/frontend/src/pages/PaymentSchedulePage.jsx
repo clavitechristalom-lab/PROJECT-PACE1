@@ -11,7 +11,7 @@ import { fmt, filterBySearch } from '../lib/utils'
 import { api } from '../lib/api'
 import { TbCurrencyPeso } from 'react-icons/tb'
 
-export default function PaymentSchedulePage() {
+export default function PaymentSchedulePage({ branchFilter: propBranchFilter, embedded }) {
   const [schedules, setSchedules] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -21,6 +21,9 @@ export default function PaymentSchedulePage() {
   const [page, setPage] = useState(1)
   const pageSize = 12
 
+  const [localBranchFilter, setLocalBranchFilter] = useState('All')
+  const branchFilter = propBranchFilter || localBranchFilter
+
   const loadSchedules = async () => {
     setLoading(true)
     setError('')
@@ -28,6 +31,7 @@ export default function PaymentSchedulePage() {
       const data = await api.payments.getSchedules({
         search: search || undefined,
         status: statusFilter !== 'All' ? statusFilter : undefined,
+        branch: branchFilter || undefined,
       })
       setSchedules(data.schedules || [])
     } catch (err) {
@@ -40,7 +44,7 @@ export default function PaymentSchedulePage() {
 
   useEffect(() => {
     loadSchedules()
-  }, [statusFilter])
+  }, [statusFilter, branchFilter])
 
   const filtered = useMemo(() => {
     return filterBySearch(schedules, search, ['account_no', 'customer_name', 'due_date'])
@@ -56,11 +60,13 @@ export default function PaymentSchedulePage() {
   const paidCount = schedules.filter(s => s.status === 'Paid').length
 
   return (
-    <div className="space-y-6">
-      <PageHeader
-        title="Payment Schedules & Amortization"
-        subtitle="Global schedule tracker across all customer installment accounts"
-      />
+    <div className={embedded ? "" : "space-y-6"}>
+      {!embedded && (
+        <PageHeader
+          title="Payment Schedules & Amortization"
+          subtitle="Global schedule tracker across all customer installment accounts"
+        />
+      )}
 
       {/* Stats */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">

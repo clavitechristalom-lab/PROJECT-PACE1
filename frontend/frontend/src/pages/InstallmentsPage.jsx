@@ -9,7 +9,7 @@ import {
 import {
   Btn, Badge, StatusBadge, Modal, PageHeader, StatCard, Card,
   CardHeader, ProgressBar, Pagination, showToast, TabBar,
-  LoadingState, ErrorAlert, TableSkeleton, EmptyState
+  LoadingState, ErrorAlert, TableSkeleton, EmptyState, confirmAction
 } from '../components/ui'
 import { fmt, fmtDate } from '../lib/utils'
 import { useAuth } from '../context/AuthContext'
@@ -17,10 +17,11 @@ import api, { downloadCsv } from '../lib/api'
 import { TbCurrencyPeso } from 'react-icons/tb'
 import { FiDownload } from 'react-icons/fi'
 
-export default function InstallmentsPage() {
+export default function InstallmentsPage({ branchFilter: propBranchFilter, embedded }) {
   const [searchParams] = useSearchParams()
   const { user } = useAuth()
   const isStoreAdmin = user?.role === 'Store Administrator' || user?.role === 'Store Admin'
+  const isAdmin = user?.role === 'Administrator'
 
   const [activeTab, setActiveTab] = useState(searchParams.get('tab') || 'all')
   const [installments, setInstallments] = useState([])
@@ -32,7 +33,8 @@ export default function InstallmentsPage() {
   // Filters (Immediate reactive search & status)
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState('All')
-  const [branchFilter, setBranchFilter] = useState(isStoreAdmin ? (user?.employee?.branch || 'Main Branch') : 'All')
+  const [localBranchFilter, setLocalBranchFilter] = useState(isStoreAdmin ? (user?.employee?.branch || 'Main Branch') : 'All')
+  const branchFilter = propBranchFilter || localBranchFilter
   const [page, setPage] = useState(1)
   const pageSize = 10
 
@@ -43,7 +45,6 @@ export default function InstallmentsPage() {
   const [detailLoading, setDetailLoading] = useState(false)
   const [detailTab, setDetailTab] = useState('schedules')
   const [payModalItem, setPayModalItem] = useState(null)
-  const [deleteModalItem, setDeleteModalItem] = useState(null)
   const [saving, setSaving] = useState(false)
 
   // ─── ADD ACCOUNT FORM STATE ──────────────────────────────────────────────────
@@ -333,18 +334,18 @@ export default function InstallmentsPage() {
   }
 
   // ─── DELETE ACCOUNT (AUTOMATIC REACT STATE UPDATE) ────────────────────────────
-  const handleDeleteAccount = async () => {
-    if (!deleteModalItem) return
+  const handleDeleteAccount = async (account) => {
+    const confirmed = await confirmAction('Delete Account?', `Are you sure you want to delete account ${account.account_no} for ${account.customer_name}? This will permanently remove the account and its schedules.`, 'Yes, Delete Account')
+    if (!confirmed) return
 
     setSaving(true)
     try {
-      const res = await api.installments.delete(deleteModalItem.installment_id)
+      const res = await api.installments.delete(account.installment_id)
 
       // AUTOMATIC STATE UPDATE: Remove item from React state immediately
-      setInstallments(prev => prev.filter(item => item.installment_id !== deleteModalItem.installment_id))
+      setInstallments(prev => prev.filter(item => item.installment_id !== account.installment_id))
 
       showToast(res.message || 'Installment account deleted successfully', 'success')
-      setDeleteModalItem(null)
     } catch (err) {
       showToast(err.message || 'Failed to delete installment account', 'error')
     } finally {
@@ -469,35 +470,39 @@ export default function InstallmentsPage() {
   ]
 
   return (
-    <div className="space-y-6 animate-fadeIn">
+    <div className={embedded ? "animate-fadeIn" : "space-y-6 animate-fadeIn"}>
       {/* ─── PAGE HEADER WITH ADD ACCOUNT BUTTON (NO REFRESH BUTTON) ─── */}
-      <PageHeader
-        title="Customer Installment Accounts"
-        subtitle={
-          isStoreAdmin
-            ? `Store Branch Ledger (${user?.employee?.branch || 'Main Branch'})`
-            : 'Manage customer credit contracts, payment amortization schedules, and receivables'
-        }
-        action={
-          <div className="flex gap-2">
-            <button
-              onClick={handleExportCSV}
-              disabled={exporting}
-              className="flex items-center gap-2 px-4 py-2 bg-muted hover:bg-muted/80 text-foreground font-semibold text-xs rounded-xl shadow-xs transition-all cursor-pointer disabled:opacity-50"
-            >
-              {exporting ? <FiAlertTriangle className="w-4 h-4 animate-spin" /> : <FiDownload className="w-4 h-4" />}
-              <span>{exporting ? 'Exporting...' : 'Export CSV'}</span>
-            </button>
-            <button
-              onClick={() => setAddModalOpen(true)}
-              className="flex items-center gap-2 px-4 py-2 bg-primary hover:bg-primary/90 text-primary-foreground font-semibold text-xs rounded-xl shadow-sm transition-all cursor-pointer hover:shadow-md active:scale-98"
-            >
-              <FiPlus className="w-4 h-4" />
-              <span>Add Customer Account</span>
-            </button>
-          </div>
-        }
-      />
+      {!embedded && (
+        <PageHeader
+          title="Customer Installment Accounts"
+          subtitle={
+            isStoreAdmin
+              ? `Store Branch Ledger (${user?.employee?.branch || 'Main Branch'})`
+              : 'Manage customer credit contracts, payment amortization schedules, and receivables'
+          }
+          action={
+            <div className="flex gap-2">
+              <button
+                onClick={handleExportCSV}
+                disabled={exporting}
+                className="flex items-center gap-2 px-4 py-2 bg-muted hover:bg-muted/80 text-foreground font-semibold text-xs rounded-xl shadow-xs transition-all cursor-pointer disabled:opacity-50"
+              >
+                {exporting ? <FiAlertTriangle className="w-4 h-4 animate-spin" /> : <FiDownload className="w-4 h-4" />}
+                <span>{exporting ? 'Exporting...' : 'Export CSV'}</span>
+              </button>
+              {!isAdmin && (
+                <button
+                  onClick={() => setAddModalOpen(true)}
+                  className="flex items-center gap-2 px-4 py-2 bg-primary hover:bg-primary/90 text-primary-foreground font-semibold text-xs rounded-xl shadow-xs transition-all cursor-pointer"
+                >
+                  <FiPlus className="w-4 h-4" />
+                  <span>New Account</span>
+                </button>
+              )}
+            </div>
+          }
+        />
+      )}
 
       {error && <ErrorAlert message={error} onRetry={loadInitialData} />}
 
@@ -594,9 +599,9 @@ export default function InstallmentsPage() {
           <div>
             <select
               value={branchFilter}
-              disabled={isStoreAdmin}
+              disabled={isStoreAdmin || embedded}
               onChange={e => {
-                setBranchFilter(e.target.value)
+                setLocalBranchFilter(e.target.value)
                 setPage(1)
               }}
               className="w-full px-3 py-2 text-xs rounded-xl border border-border bg-card text-foreground cursor-pointer disabled:opacity-70 disabled:bg-muted font-medium focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all"
@@ -748,7 +753,7 @@ export default function InstallmentsPage() {
                             </button>
 
                             {/* Record Payment Action */}
-                            {inst.balance > 0 && (
+                            {!isAdmin && inst.balance > 0 && (
                               <button
                                 onClick={() => openPaymentModal(inst)}
                                 title="Record Installment Payment"
@@ -769,7 +774,7 @@ export default function InstallmentsPage() {
 
                             {/* Delete Action */}
                             <button
-                              onClick={() => setDeleteModalItem(inst)}
+                              onClick={() => handleDeleteAccount(inst)}
                               title="Delete Account"
                               className="p-1.5 rounded-lg border border-border hover:bg-rose-50 hover:text-rose-600 dark:hover:bg-rose-950/40 text-muted-foreground transition-colors cursor-pointer"
                             >
@@ -1190,46 +1195,6 @@ export default function InstallmentsPage() {
               </button>
             </div>
           </form>
-        </Modal>
-      )}
-
-      {/* ─── 3. DELETE ACCOUNT CONFIRMATION MODAL ─── */}
-      {deleteModalItem && (
-        <Modal
-          isOpen={true}
-          onClose={() => setDeleteModalItem(null)}
-          title="Delete Installment Account"
-          size="sm"
-        >
-          <div className="space-y-3 text-xs">
-            <div className="p-3 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900 rounded-xl text-rose-800 dark:text-rose-300 flex items-start gap-2.5">
-              <FiAlertTriangle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
-              <div>
-                <div className="font-bold text-sm">Are you sure you want to delete this account?</div>
-                <div className="text-xs mt-1 opacity-90">
-                  Account <strong>{deleteModalItem.account_no}</strong> for <strong>{deleteModalItem.customer_name}</strong> will be permanently removed.
-                </div>
-              </div>
-            </div>
-
-            <div className="flex justify-end gap-2 pt-2">
-              <button
-                type="button"
-                onClick={() => setDeleteModalItem(null)}
-                className="px-3.5 py-1.5 rounded-xl border border-border hover:bg-muted font-semibold cursor-pointer"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={handleDeleteAccount}
-                disabled={saving}
-                className="px-4 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold cursor-pointer"
-              >
-                {saving ? 'Deleting...' : 'Delete Account'}
-              </button>
-            </div>
-          </div>
         </Modal>
       )}
 

@@ -43,23 +43,19 @@ class ProductController extends Controller
 
         if ($request->boolean('export_csv')) {
             $user = $request->user();
-            if ($user && in_array($user->role, ['Store Administrator', 'Store Admin'])) {
-                $branch = $user->employee ? $user->employee->branch : 'Main Branch';
-                $query->where('branch', $branch);
-            }
             
             SystemLog::create([
                 'user_id' => $user ? $user->user_id : null,
                 'action' => 'EXPORT',
                 'module' => 'Products',
-                'description' => 'Exported Products to CSV',
+                'description' => 'Exported product catalog',
                 'ip_address' => $request->ip(),
-                'user_agent' => $request->userAgent(),
+                'created_at' => now(),
             ]);
 
             return $this->exportCsv(
                 'products_export_' . date('Y-m-d') . '.csv',
-                ['Product ID', 'Product Code', 'Product Name', 'Brand', 'Category', 'Description', 'Price', 'Cost', 'Stock', 'Reorder Level', 'Status', 'Branch', 'Created Date'],
+                ['Product ID', 'Product Code', 'Product Name', 'Brand', 'Category', 'Description', 'Price', 'Cost', 'Stock', 'Reorder Level', 'Status', 'Created Date'],
                 $query->orderBy('product_name'),
                 function ($p) {
                     return [
@@ -69,12 +65,11 @@ class ProductController extends Controller
                         $p->brand,
                         $p->category,
                         $p->description,
-                        $p->price,
-                        $p->cost,
+                        $p->unit_price,
+                        $p->cost_price,
                         $p->stock_quantity,
                         $p->reorder_level,
                         $p->status,
-                        $p->branch,
                         $p->created_at ? $p->created_at->format('Y-m-d H:i:s') : ''
                     ];
                 }
@@ -97,6 +92,10 @@ class ProductController extends Controller
 
     public function store(Request $request)
     {
+        if ($request->user() && $request->user()->role === 'Administrator') {
+            return response()->json(['success' => false, 'message' => 'Admin is not authorized to create products. Monitor/View only.'], 403);
+        }
+
         $validated = $request->validate([
             'product_code' => 'nullable|string|unique:products,product_code',
             'product_name' => 'required|string|max:255',

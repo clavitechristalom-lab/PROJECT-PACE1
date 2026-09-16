@@ -75,9 +75,9 @@ export function AuthProvider({ children }) {
     return () => window.removeEventListener('auth:expired', handleExpired)
   }, [verifySession])
 
-  const login = async (username, password, role, remember = true) => {
+  const login = async (username, password, remember = true) => {
     try {
-      const data = await api.auth.login(username, password, role)
+      const data = await api.auth.login(username, password)
       if (data?.user) {
         setUser(data.user)
         const sessionPayload = JSON.stringify({
@@ -102,7 +102,7 @@ export function AuthProvider({ children }) {
       return { success: true, user: data.user }
     } catch (error) {
       console.error('Register error:', error)
-      return { success: false, message: error.message || 'Registration failed' }
+      return { success: false, message: error.message || 'Registration failed', errors: error.data?.errors || {} }
     }
   }
 

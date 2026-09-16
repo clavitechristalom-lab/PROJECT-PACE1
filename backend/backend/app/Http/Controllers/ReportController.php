@@ -26,10 +26,10 @@ class ReportController extends Controller
         if ($user && $user->role === 'Employee') {
             $query->where('employee_id', $user->employee_id);
         } elseif ($user && in_array($user->role, ['Store Administrator', 'Store Admin'])) {
-            $branch = $user->employee ? $user->employee->branch : 'Main Branch';
-            $query->where('branch', $branch);
-        } elseif ($request->filled('branch') && $request->query('branch') !== 'All') {
-            $query->where('branch', $request->query('branch'));
+            $branchId = $user->employee ? $user->employee->branch_id : -1;
+            $query->where('branch_id', $branchId);
+        } elseif ($request->filled('branch_id') && $request->query('branch_id') !== 'All') {
+            $query->where('branch_id', $request->query('branch_id'));
         }
 
         if ($request->filled('department') && $request->query('department') !== 'All') {
@@ -53,7 +53,7 @@ class ReportController extends Controller
             });
         }
 
-        $allEmployees = $query->orderBy('employee_id')->get();
+        $allEmployees = $query->with('branch')->orderBy('employee_id')->get();
 
         $totalEmployees = $allEmployees->count();
         $activeEmployees = $allEmployees->where('status', 'Active')->count();
@@ -65,8 +65,10 @@ class ReportController extends Controller
             return ['department' => $dept ?: 'Unassigned', 'count' => $group->count()];
         })->values();
 
-        $byBranch = $allEmployees->groupBy('branch')->map(function ($group, $branch) {
-            return ['branch' => $branch ?: 'Main Branch', 'count' => $group->count()];
+        $byBranch = $allEmployees->groupBy(function($emp) {
+            return $emp->branch ? $emp->branch->name : 'Unassigned Branch';
+        })->map(function ($group, $branchName) {
+            return ['branch' => $branchName, 'count' => $group->count()];
         })->values();
 
         $byPosition = $allEmployees->groupBy('position')->map(function ($group, $pos) {
@@ -80,7 +82,7 @@ class ReportController extends Controller
                 'name' => "{$emp->first_name} {$emp->last_name}",
                 'department' => $emp->department,
                 'position' => $emp->position,
-                'branch' => $emp->branch,
+                'branch' => $emp->branch ? $emp->branch->name : 'Unassigned',
                 'pay_type' => $emp->pay_type,
                 'basic_salary' => (float)$emp->basic_salary,
                 'status' => $emp->status,
@@ -113,14 +115,14 @@ class ReportController extends Controller
         if ($user && $user->role === 'Employee') {
             $query->where('employee_id', $user->employee_id);
         } elseif ($user && in_array($user->role, ['Store Administrator', 'Store Admin'])) {
-            $branch = $user->employee ? $user->employee->branch : 'Main Branch';
+            $branch = $user->employee ? $user->employee->branch_id : null;
             $query->whereHas('employee', function ($eq) use ($branch) {
-                $eq->where('branch', $branch);
+                $eq->where('branch_id', $branch);
             });
         } elseif ($request->filled('branch') && $request->query('branch') !== 'All') {
             $branch = $request->query('branch');
             $query->whereHas('employee', function ($eq) use ($branch) {
-                $eq->where('branch', $branch);
+                $eq->where('branch_id', $branch);
             });
         }
 
@@ -172,7 +174,7 @@ class ReportController extends Controller
                 'employee_name' => $emp ? "{$emp->first_name} {$emp->last_name}" : 'Employee',
                 'employee_code' => $emp ? $emp->employee_code : '',
                 'department' => $emp ? $emp->department : '',
-                'branch' => $emp ? $emp->branch : '',
+                'branch' => $emp && $emp->branch ? $emp->branch->name : '',
                 'attendance_date' => $a->attendance_date,
                 'time_in' => $a->time_in ? date('H:i', strtotime($a->time_in)) : '—',
                 'time_out' => $a->time_out ? date('H:i', strtotime($a->time_out)) : '—',
@@ -209,14 +211,14 @@ class ReportController extends Controller
         if ($user && $user->role === 'Employee') {
             $query->where('employee_id', $user->employee_id);
         } elseif ($user && in_array($user->role, ['Store Administrator', 'Store Admin'])) {
-            $branch = $user->employee ? $user->employee->branch : 'Main Branch';
-            $query->whereHas('employee', function ($eq) use ($branch) {
-                $eq->where('branch', $branch);
+            $branchId = $user->employee ? $user->employee->branch_id : -1;
+            $query->whereHas('employee', function ($eq) use ($branchId) {
+                $eq->where('branch_id', $branchId);
             });
-        } elseif ($request->filled('branch') && $request->query('branch') !== 'All') {
-            $branch = $request->query('branch');
-            $query->whereHas('employee', function ($eq) use ($branch) {
-                $eq->where('branch', $branch);
+        } elseif ($request->filled('branch_id') && $request->query('branch_id') !== 'All') {
+            $branchId = $request->query('branch_id');
+            $query->whereHas('employee', function ($eq) use ($branchId) {
+                $eq->where('branch_id', $branchId);
             });
         }
 
@@ -253,7 +255,7 @@ class ReportController extends Controller
                 'employee_name' => $emp ? "{$emp->first_name} {$emp->last_name}" : 'Employee',
                 'employee_code' => $emp ? $emp->employee_code : '',
                 'department' => $emp ? $emp->department : '',
-                'branch' => $emp ? $emp->branch : '',
+                'branch' => $emp && $emp->branch ? $emp->branch->name : '',
                 'period_name' => $p->period ? $p->period->period_name : "Period #{$p->period_id}",
                 'basic_salary' => (float)$p->basic_salary,
                 'overtime_pay' => (float)$p->overtime_pay,
@@ -289,6 +291,14 @@ class ReportController extends Controller
         $dateTo = $request->query('date_to');
 
         $query = SaleTransaction::with('customer');
+
+        $user = $request->user();
+        if ($user && in_array($user->role, ['Store Administrator', 'Store Admin'])) {
+            $branchId = $user->employee ? $user->employee->branch_id : -1;
+            $query->where('branch_id', $branchId);
+        } elseif ($request->filled('branch_id') && $request->query('branch_id') !== 'All') {
+            $query->where('branch_id', $request->query('branch_id'));
+        }
 
         if ($dateFrom) {
             $query->whereDate('sale_date', '>=', $dateFrom);
@@ -390,3 +400,4 @@ class ReportController extends Controller
         ]);
     }
 }
+

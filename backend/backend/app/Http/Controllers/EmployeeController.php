@@ -15,16 +15,16 @@ class EmployeeController extends Controller
     public function index(Request $request)
     {
         $user = $request->user();
-        $query = Employee::query();
+        $query = Employee::with('branch');
 
         // Role-based Access Control
         if ($user && $user->role === 'Employee') {
             $query->where('employee_id', $user->employee_id);
         } elseif ($user && in_array($user->role, ['Store Administrator', 'Store Admin'])) {
-            $branch = $user->employee ? $user->employee->branch : 'Main Branch';
-            $query->where('branch', $branch);
-        } elseif ($request->filled('branch') && $request->query('branch') !== 'All') {
-            $query->where('branch', $request->query('branch'));
+            $branchId = $user->employee ? $user->employee->branch_id : -1;
+            $query->where('branch_id', $branchId);
+        } elseif ($request->filled('branch_id') && $request->query('branch_id') !== 'All') {
+            $query->where('branch_id', $request->query('branch_id'));
         }
 
         if ($request->filled('search')) {
@@ -96,7 +96,7 @@ class EmployeeController extends Controller
         }
 
         if ($user && in_array($user->role, ['Store Administrator', 'Store Admin'])) {
-            $userBranch = $user->employee ? $user->employee->branch : 'Main Branch';
+            $userBranch = $user->employee ? $user->employee->branch_id : null;
             if ($employee->branch !== $userBranch) {
                 return response()->json(['message' => 'Unauthorized access to employee in another branch.'], 403);
             }
@@ -142,6 +142,10 @@ class EmployeeController extends Controller
 
     public function store(Request $request)
     {
+        if ($request->user() && $request->user()->role === 'Administrator') {
+            return response()->json(['success' => false, 'message' => 'Admin is not authorized to create employees.'], 403);
+        }
+
         $validated = $request->validate([
             'employee_code' => 'nullable|string|unique:employees,employee_code',
             'first_name' => 'required|string|max:255',
@@ -157,8 +161,8 @@ class EmployeeController extends Controller
             'pagibig_number' => 'nullable|string',
             'position' => 'required|string|max:255',
             'department' => 'nullable|string|max:255',
-            'branch' => 'nullable|string|max:255',
-            'pay_type' => 'required|string|in:Monthly,Daily',
+            'branch_id' => 'nullable|integer|exists:branch_profiles,id',
+            'pay_type' => 'required|string',
             'basic_salary' => 'required|numeric|min:0',
             'phone' => 'nullable|string|max:50',
             'email' => 'nullable|email|max:255',
@@ -174,6 +178,13 @@ class EmployeeController extends Controller
             'attendance_pin' => 'nullable|string|min:4|max:6',
         ]);
 
+        $user = auth()->user();
+        if ($user && $user->role === 'Store Administrator') {
+            if ($user->employee && $user->employee->branch_id) {
+                $validated['branch_id'] = $user->employee->branch_id;
+            }
+        }
+
         if (isset($validated['documents'])) {
             $validated['documents'] = json_encode($validated['documents']);
         }
@@ -188,13 +199,9 @@ class EmployeeController extends Controller
         }
 
         $salary = (float)$validated['basic_salary'];
-        if ($validated['pay_type'] === 'Monthly') {
-            $validated['daily_rate'] = round($salary / 26, 2);
-            $validated['hourly_rate'] = round($validated['daily_rate'] / 8, 2);
-        } else {
-            $validated['daily_rate'] = $salary;
-            $validated['hourly_rate'] = round($salary / 8, 2);
-        }
+        // Assume basic_salary is always Monthly as per UI
+        $validated['daily_rate'] = round($salary / 26, 2);
+        $validated['hourly_rate'] = round($validated['daily_rate'] / 8, 2);
 
         // QR is NOT generated automatically upon creation; only when Admin issues QR
         $validated['qr_token'] = null;
@@ -243,8 +250,8 @@ class EmployeeController extends Controller
             'pagibig_number' => 'nullable|string',
             'position' => 'required|string|max:255',
             'department' => 'nullable|string|max:255',
-            'branch' => 'nullable|string|max:255',
-            'pay_type' => 'required|string|in:Monthly,Daily',
+            'branch_id' => 'nullable|integer|exists:branch_profiles,id',
+            'pay_type' => 'required|string',
             'basic_salary' => 'required|numeric|min:0',
             'phone' => 'nullable|string|max:50',
             'email' => 'nullable|email|max:255',
@@ -269,18 +276,21 @@ class EmployeeController extends Controller
         }
 
         $salary = (float)$validated['basic_salary'];
-        if ($validated['pay_type'] === 'Monthly') {
-            $validated['daily_rate'] = round($salary / 26, 2);
-            $validated['hourly_rate'] = round($validated['daily_rate'] / 8, 2);
-        } else {
-            $validated['daily_rate'] = $salary;
-            $validated['hourly_rate'] = round($salary / 8, 2);
-        }
+        // Assume basic_salary is always Monthly as per UI
+        $validated['daily_rate'] = round($salary / 26, 2);
+        $validated['hourly_rate'] = round($validated['daily_rate'] / 8, 2);
 
         if (!empty($validated['attendance_pin'])) {
             $validated['attendance_pin'] = Hash::make($validated['attendance_pin']);
         } else {
             unset($validated['attendance_pin']);
+        }
+
+        $user = auth()->user();
+        if ($user && $user->role === 'Store Administrator') {
+            if ($user->employee && $user->employee->branch_id) {
+                $validated['branch_id'] = $user->employee->branch_id;
+            }
         }
 
         $employee->update($validated);
@@ -365,7 +375,7 @@ class EmployeeController extends Controller
                 'name' => "{$employee->first_name} {$employee->last_name}",
                 'position' => $employee->position,
                 'department' => $employee->department,
-                'branch' => $employee->branch,
+                'branch' => $employee->branch ? $employee->branch->name : null,
                 'gender' => $employee->gender,
                 'working_hours' => $employee->working_hours,
             ]
@@ -411,7 +421,7 @@ class EmployeeController extends Controller
                 'name' => "{$employee->first_name} {$employee->last_name}",
                 'position' => $employee->position,
                 'department' => $employee->department,
-                'branch' => $employee->branch,
+                'branch' => $employee->branch ? $employee->branch->name : null,
             ],
             'qr_token' => $employee->qr_token,
             'qr_active' => (bool)$employee->qr_active,
@@ -592,7 +602,7 @@ class EmployeeController extends Controller
                     'employee_id' => $l->employee_id,
                     'employee_name' => $emp ? "{$emp->first_name} {$emp->last_name}" : 'Unidentified',
                     'employee_code' => $emp ? $emp->employee_code : 'N/A',
-                    'branch' => $l->branch ?: ($emp ? $emp->branch : 'Main Branch'),
+                    'branch' => $l->branch ?: ($emp ? $emp->branch : null),
                     'department' => $emp ? $emp->department : '—',
                     'action_type' => $l->action_type,
                     'status' => $l->status,
@@ -751,7 +761,7 @@ class EmployeeController extends Controller
                 'marital_status' => $employee->marital_status,
                 'position' => $employee->position,
                 'department' => $employee->department,
-                'branch' => $employee->branch,
+                'branch' => $employee->branch ? $employee->branch->name : null,
                 'pay_type' => $employee->pay_type,
                 'ewallet_provider' => $employee->ewallet_provider,
                 'ewallet_account_no' => $employee->ewallet_account_no,
@@ -846,7 +856,17 @@ class EmployeeController extends Controller
             'emergency_contact_name' => 'nullable|string|max:255',
             'emergency_contact_relation' => 'nullable|string|max:100',
             'emergency_contact_phone' => 'nullable|string|max:50',
+            'branch_id' => 'nullable|exists:branch_profiles,id',
+            'notes' => 'nullable|string',
+            'basic_salary' => 'nullable|numeric|min:0',
         ]);
+
+        $user = auth()->user();
+        if ($user && $user->role === 'Store Administrator') {
+            if ($user->employee && $user->employee->branch_id) {
+                $validated['branch_id'] = $user->employee->branch_id;
+            }
+        }
 
         if (!empty($validated['pay_type'])) {
             $pt = strtolower($validated['pay_type']);
@@ -859,6 +879,12 @@ class EmployeeController extends Controller
             $ep = strtolower($validated['ewallet_provider']);
             if ($ep === 'gcash') $validated['ewallet_provider'] = 'Gcash';
             elseif ($ep === 'maya') $validated['ewallet_provider'] = 'Maya';
+        }
+
+        if (isset($validated['basic_salary'])) {
+            $salary = (float)$validated['basic_salary'];
+            $validated['daily_rate'] = round($salary / 26, 2);
+            $validated['hourly_rate'] = round($validated['daily_rate'] / 8, 2);
         }
 
         $employee->update($validated);

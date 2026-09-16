@@ -7,6 +7,10 @@ use App\Models\Payroll;
 use App\Models\PayrollPeriod;
 use App\Models\PayrollDeduction;
 use App\Models\Employee;
+use App\Models\EmployeeAllowance;
+use App\Models\EmployeeBonus;
+use App\Models\EmployeeDeduction;
+use App\Models\EmployeeLoan;
 use App\Models\Attendance;
 use App\Models\SystemLog;
 use Illuminate\Support\Facades\DB;
@@ -26,14 +30,14 @@ class PayrollController extends Controller
         if ($user && $user->role === 'Employee') {
             $query->where('employee_id', $user->employee_id);
         } elseif ($user && in_array($user->role, ['Store Administrator', 'Store Admin'])) {
-            $branch = $user->employee ? $user->employee->branch : 'Main Branch';
+            $branch = $user->employee ? $user->employee->branch_id : null;
             $query->whereHas('employee', function ($eq) use ($branch) {
-                $eq->where('branch', $branch);
+                $eq->where('branch_id', $branch);
             });
         } elseif ($request->filled('branch') && $request->query('branch') !== 'All') {
             $branch = $request->query('branch');
             $query->whereHas('employee', function ($eq) use ($branch) {
-                $eq->where('branch', $branch);
+                $eq->where('branch_id', $branch);
             });
         }
 
@@ -53,6 +57,20 @@ class PayrollController extends Controller
 
         if ($request->filled('status') && $request->query('status') !== 'All') {
             $query->where('status', $request->query('status'));
+        }
+
+        if ($request->filled('from_date')) {
+            $query->whereHas('period', function($q) use ($request) {
+                $q->where('start_date', '>=', $request->from_date)
+                  ->orWhere('end_date', '>=', $request->from_date);
+            });
+        }
+        
+        if ($request->filled('to_date')) {
+            $query->whereHas('period', function($q) use ($request) {
+                $q->where('start_date', '<=', $request->to_date)
+                  ->orWhere('end_date', '<=', $request->to_date);
+            });
         }
 
         if ($request->filled('department') && $request->query('department') !== 'All') {
@@ -114,8 +132,8 @@ class PayrollController extends Controller
         }
 
         if ($user && in_array($user->role, ['Store Administrator', 'Store Admin'])) {
-            $userBranch = $user->employee ? $user->employee->branch : 'Main Branch';
-            $empBranch = $payroll->employee ? $payroll->employee->branch : '';
+            $userBranch = $user->employee ? $user->employee->branch_id : null;
+            $empBranch = $payroll->employee ? $payroll->employee->branch_id : '';
             if ($userBranch !== $empBranch) {
                 return response()->json(['message' => 'Unauthorized access to employee payslip outside your branch.'], 403);
             }
@@ -173,14 +191,41 @@ class PayrollController extends Controller
             return response()->json(['payroll' => [], 'total' => 0, 'summary' => null]);
         }
 
-        $records = Payroll::with(['period', 'deductions', 'approvedBy.employee'])
-            ->where('employee_id', $user->employee_id)
-            ->orderByDesc('payroll_id')
+        $query = Payroll::with(['period', 'deductions', 'approvedBy.employee'])
+            ->where('employee_id', $user->employee_id);
+
+        if ($request->filled('period_id')) {
+            $query->where('period_id', $request->period_id);
+        }
+
+        if ($request->filled('status')) {
+            $query->where('status', $request->status);
+        }
+
+        if ($request->filled('from_date')) {
+            $query->whereHas('period', function($q) use ($request) {
+                $q->where('start_date', '>=', $request->from_date)
+                  ->orWhere('end_date', '>=', $request->from_date);
+            });
+        }
+        
+        if ($request->filled('to_date')) {
+            $query->whereHas('period', function($q) use ($request) {
+                $q->where('start_date', '<=', $request->to_date)
+                  ->orWhere('end_date', '<=', $request->to_date);
+            });
+        }
+
+        $records = $query->orderByDesc('payroll_id')
             ->get()
             ->map(function ($p) {
                 return [
                     'payroll_id' => $p->payroll_id,
                     'period_id' => $p->period_id,
+                    'employee_name' => $p->employee ? $p->employee->first_name . ' ' . $p->employee->last_name : 'Employee',
+                    'employee_code' => $p->employee ? $p->employee->employee_code : 'EMP-000',
+                    'department' => $p->employee ? $p->employee->department : '',
+                    'position' => $p->employee ? $p->employee->position : '',
                     'period_name' => $p->period ? $p->period->period_name : "Period #{$p->period_id}",
                     'period_dates' => $p->period ? "{$p->period->start_date} to {$p->period->end_date}" : '',
                     'basic_salary' => (float)$p->basic_salary,
@@ -201,6 +246,70 @@ class PayrollController extends Controller
             'payroll' => $records,
             'total' => $records->count(),
             'latest' => $latest,
+        ]);
+    }
+
+    /**
+     * Fetch a specific payslip for the logged-in employee (Security: verifies ownership).
+     */
+    public function mePayslip(Request $request, $id)
+    {
+        $user = $request->user();
+        if (!$user || !$user->employee_id) {
+            return response()->json(['message' => 'Unauthorized'], 403);
+        }
+
+        $payroll = Payroll::with(['employee', 'period', 'deductions', 'approvedBy.employee'])
+            ->where('employee_id', $user->employee_id)
+            ->where('payroll_id', $id)
+            ->first();
+
+        if (!$payroll) {
+            return response()->json(['message' => 'Payslip not found or unauthorized access'], 404);
+        }
+
+        $emp = $payroll->employee;
+        $approverName = 'System';
+        if ($payroll->approvedBy && $payroll->approvedBy->employee) {
+            $approverName = $payroll->approvedBy->employee->first_name . ' ' . $payroll->approvedBy->employee->last_name;
+        }
+
+        $deductions = $payroll->deductions->map(function ($d) {
+            return [
+                'deduction_id' => $d->deduction_id,
+                'deduction_type' => $d->deduction_type,
+                'description' => $d->description,
+                'amount' => (float)$d->amount,
+            ];
+        });
+
+        return response()->json([
+            'record' => [
+                'payroll_id' => $payroll->payroll_id,
+                'period_id' => $payroll->period_id,
+                'period_name' => $payroll->period ? $payroll->period->period_name : "Period #{$payroll->period_id}",
+                'period_dates' => $payroll->period ? "{$payroll->period->start_date} to {$payroll->period->end_date}" : '',
+                'pay_date' => $payroll->period ? $payroll->period->pay_date : null,
+                'employee_id' => $emp ? $emp->employee_id : null,
+                'employee_code' => $emp ? $emp->employee_code : 'EMP-000',
+                'employee_name' => $emp ? $emp->first_name . ' ' . $emp->last_name : 'Unknown',
+                'department' => $emp ? $emp->department : 'General',
+                'position' => $emp ? $emp->position : 'Staff',
+                'branch' => $emp && $emp->branch ? $emp->branch->name : null,
+                'pay_type' => $emp ? $emp->pay_type : 'Monthly',
+                'manager' => $emp ? $emp->manager : 'N/A', // fallback if exists
+                'basic_salary' => (float)$payroll->basic_salary,
+                'regular_hours' => (float)$payroll->regular_hours,
+                'overtime_hours' => (float)$payroll->overtime_hours,
+                'overtime_pay' => (float)$payroll->overtime_pay,
+                'allowance' => (float)$payroll->allowance,
+                'gross_pay' => (float)$payroll->gross_pay,
+                'total_deductions' => (float)$payroll->total_deductions,
+                'net_pay' => (float)$payroll->net_pay,
+                'status' => $payroll->status,
+                'approved_by' => $approverName,
+                'deductions' => $deductions,
+            ]
         ]);
     }
 
@@ -226,8 +335,8 @@ class PayrollController extends Controller
 
         // If Store Admin generates, scope to their branch
         if ($user && in_array($user->role, ['Store Administrator', 'Store Admin'])) {
-            $branch = $user->employee ? $user->employee->branch : 'Main Branch';
-            $empQuery->where('branch', $branch);
+            $branch = $user->employee ? $user->employee->branch_id : null;
+            $empQuery->where('branch_id', $branch);
         }
 
         $activeEmployees = $empQuery->get();
@@ -275,14 +384,36 @@ class PayrollController extends Controller
                     $periodBasePay = round($regularHours * $hourlyRate, 2);
                 }
 
-                $allowance = 1000.00;
+                $empAllowances = EmployeeAllowance::where('employee_id', $emp->employee_id)->where('is_active', true)->sum('amount');
+                $allowance = (float)$empAllowances;
                 $gross = round($periodBasePay + $allowance + $overtimePay, 2);
 
-                // 4. Compute Standard Statutory Deductions
+                // 4. Compute Standard Statutory Deductions & Custom Deductions
                 $sss = round($periodBasePay * 0.045, 2);
                 $philhealth = round($periodBasePay * 0.025, 2);
                 $pagibig = 100.00;
-                $totalDeds = round($sss + $philhealth + $pagibig, 2);
+                
+                $empDeductions = EmployeeDeduction::where('employee_id', $emp->employee_id)->where('is_active', true)->get();
+                $customDeductionsSum = (float)$empDeductions->sum('amount');
+                
+                // Active Loans
+                $empLoans = EmployeeLoan::where('employee_id', $emp->employee_id)->where('status', 'Active')->get();
+                $loanDeductionsSum = 0;
+                $loanDeductionsArray = [];
+                
+                foreach ($empLoans as $loan) {
+                    $remaining = $loan->total_amount - $loan->amount_paid;
+                    $deduct = min($loan->monthly_deduction, $remaining);
+                    if ($deduct > 0) {
+                        $loanDeductionsSum += $deduct;
+                        $loanDeductionsArray[] = [
+                            'loan' => $loan,
+                            'amount' => $deduct
+                        ];
+                    }
+                }
+
+                $totalDeds = round($sss + $philhealth + $pagibig + $customDeductionsSum + $loanDeductionsSum, 2);
                 $net = max(0, round($gross - $totalDeds, 2));
 
                 // 5. Create Payroll Entry
@@ -302,6 +433,7 @@ class PayrollController extends Controller
                     'generated_at' => now(),
                 ]);
 
+                // Record Deductions
                 PayrollDeduction::create([
                     'payroll_id' => $payroll->payroll_id,
                     'deduction_type' => 'SSS',
@@ -320,6 +452,33 @@ class PayrollController extends Controller
                     'amount' => $pagibig,
                     'notes' => 'Pag-IBIG Contribution',
                 ]);
+
+                foreach ($empDeductions as $ded) {
+                    PayrollDeduction::create([
+                        'payroll_id' => $payroll->payroll_id,
+                        'deduction_type' => 'Custom',
+                        'amount' => $ded->amount,
+                        'notes' => $ded->name,
+                    ]);
+                }
+
+                foreach ($loanDeductionsArray as $ld) {
+                    $loan = $ld['loan'];
+                    $amt = $ld['amount'];
+                    PayrollDeduction::create([
+                        'payroll_id' => $payroll->payroll_id,
+                        'deduction_type' => 'Loan',
+                        'amount' => $amt,
+                        'notes' => $loan->name . ' Deduction',
+                    ]);
+                    
+                    // Update loan
+                    $loan->amount_paid += $amt;
+                    if ($loan->amount_paid >= $loan->total_amount) {
+                        $loan->status = 'Paid';
+                    }
+                    $loan->save();
+                }
 
                 $generatedCount++;
             }
@@ -531,3 +690,4 @@ class PayrollController extends Controller
         return response()->json(['message' => 'Payroll period closed successfully', 'period' => $period]);
     }
 }
+

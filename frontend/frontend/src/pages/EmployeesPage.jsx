@@ -8,25 +8,32 @@ import {
   FiFileText, FiSmartphone
 } from 'react-icons/fi'
 import {
-  Btn, Badge, StatusBadge, Input, Select, Textarea, Modal, ConfirmDialog,
-  Table, TR, TD, SearchBar, PageHeader, StatCard, Card, Pagination, showToast,
-  TabBar, LoadingState, ErrorAlert, TableSkeleton, EmptyState,
+  Table, TR, TD, Badge, Btn, Modal, Input, Select, Textarea, ConfirmDialog,
+  PageHeader, StatCard, Card, Pagination, showToast, StatusBadge,
+  TabBar, LoadingState, ErrorAlert, TableSkeleton, EmptyState, confirmAction,
 } from '../components/ui'
 import { fmt, fmtDate, filterBySearch } from '../lib/utils'
 import { api } from '../lib/api'
 import { QRCodeSVG } from 'qrcode.react'
+import EmployeeFinancialsTab from '../components/employees/EmployeeFinancialsTab'
 import { TbCurrencyPeso } from 'react-icons/tb'
+import { useAuth } from '../context/AuthContext'
 
-const DEPARTMENTS = ['All', 'Operations', 'Sales', 'Finance', 'Logistics']
-const BRANCHES = [
-  'Cagayan de Oro', 'Iligan City', 'Dipolog', 'San Francisco', 'Ozamis', 
-  'Trento', 'Valencia', 'Manolo Fortich', 'Gingoog', 'Pagadian', 'Kalilangan'
-]
-
-export default function EmployeesPage() {
+export default function EmployeesPage({ branchFilter, embedded }) {
+  const { user } = useAuth()
+  const isAdmin = user?.role === 'Administrator'
+  const isStoreAdmin = user?.role === 'Store Administrator' || user?.role === 'Store Admin'
+  const isEmployee = user?.role === 'Employee'
   const [searchParams] = useSearchParams()
   const [employees, setEmployees] = useState([])
+  const [branchesList, setBranchesList] = useState([])
   const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    api.branches.getAll()
+      .then(data => setBranchesList(data.branches || []))
+      .catch(err => console.error(err))
+  }, [])
   const [error, setError] = useState('')
   const [search, setSearch] = useState('')
   const [deptFilter, setDeptFilter] = useState('All')
@@ -61,10 +68,10 @@ export default function EmployeesPage() {
     employee_code: '', first_name: '', middle_name: '', last_name: '',
     gender: 'Male', birth_date: '', date_of_birth: '', marital_status: 'Single',
     tin_number: '', sss_number: '', philhealth_number: '', pagibig_number: '',
-    position: '', department: 'Sales', branch: 'Cagayan de Oro',
+    position: '', branch_id: '',
     pay_type: 'Cash', ewallet_provider: 'Gcash', ewallet_account_no: '', bank_name: 'BDO', bank_account_no: '',
     basic_salary: '', phone: '', email: '',
-    address: '', hire_date: '', working_hours: '8 AM to 5 PM', 
+    address: '', hire_date: '', working_hours: '8 AM to 5 PM',
     status: 'Active', notes: '', attendance_pin: '',
     emergency_contact_name: '', emergency_contact_relation: '', emergency_contact_phone: ''
   }
@@ -76,8 +83,9 @@ export default function EmployeesPage() {
     try {
       const data = await api.employees.getAll({
         search: search || undefined,
-        department: deptFilter !== 'All' ? deptFilter : undefined,
+        
         status: statusFilter !== 'All' ? statusFilter : undefined,
+        branch_id: branchFilter || undefined,
       })
       setEmployees(data.employees || [])
     } catch (err) {
@@ -148,6 +156,9 @@ export default function EmployeesPage() {
 
   const handleDelete = async () => {
     if (!deleteItem) return
+    const confirmed = await confirmAction('Delete Employee?', `Are you sure you want to delete ${deleteItem.first_name} ${deleteItem.last_name}? This cannot be undone.`, 'Yes, Delete')
+    if (!confirmed) return
+
     setSaving(true)
     try {
       await api.employees.delete(deleteItem.employee_id)
@@ -177,8 +188,8 @@ export default function EmployeesPage() {
       philhealth_number: emp.philhealth_number || '',
       pagibig_number: emp.pagibig_number || '',
       position: emp.position || '',
-      department: emp.department || 'Sales',
-      branch: emp.branch || 'Cagayan de Oro',
+      
+      branch_id: emp.branch_id || '',
       pay_type: emp.pay_type || 'Cash',
       ewallet_provider: emp.ewallet_provider || 'Gcash',
       ewallet_account_no: emp.ewallet_account_no || emp.phone || '',
@@ -239,9 +250,8 @@ export default function EmployeesPage() {
   }
 
   const handleRevokeQrAdmin = async (emp) => {
-    if (!window.confirm(`Are you sure you want to REVOKE the attendance QR code for ${emp.first_name} ${emp.last_name}? Attendance scanning will be blocked.`)) {
-      return
-    }
+    const confirmed = await confirmAction('Revoke QR Code?', `Are you sure you want to REVOKE the attendance QR code for ${emp.first_name} ${emp.last_name}? Attendance scanning will be blocked.`, 'Yes, Revoke')
+    if (!confirmed) return
     setQrActionLoading(true)
     try {
       const res = await api.employees.revokeQr(emp.employee_id)
@@ -255,9 +265,8 @@ export default function EmployeesPage() {
   }
 
   const handleReissueQrAdmin = async (emp) => {
-    if (!window.confirm(`Are you sure you want to ISSUE A NEW permanent QR code for ${emp.first_name} ${emp.last_name}? The previous QR code will immediately be invalidated.`)) {
-      return
-    }
+    const confirmed = await confirmAction('Generate New QR?', `Are you sure you want to ISSUE A NEW permanent QR code for ${emp.first_name} ${emp.last_name}? The previous QR code will immediately be invalidated.`, 'Yes, Generate')
+    if (!confirmed) return
     setQrActionLoading(true)
     try {
       const res = await api.employees.reissueQr(emp.employee_id)
@@ -299,9 +308,8 @@ export default function EmployeesPage() {
 
   const handleRegenerateQr = async () => {
     if (!detailItem?.employee) return
-    if (!window.confirm(`Are you sure you want to regenerate this QR code? The previous QR code will immediately become invalid.`)) {
-      return
-    }
+    const confirmed = await confirmAction('Regenerate QR Code?', `Are you sure you want to regenerate this QR code? The previous QR code will immediately become invalid.`, 'Yes, Regenerate')
+    if (!confirmed) return
 
     setQrActionLoading(true)
     try {
@@ -443,7 +451,7 @@ export default function EmployeesPage() {
   }
 
   const filtered = useMemo(() => {
-    return filterBySearch(employees, search, ['first_name', 'last_name', 'employee_code', 'position', 'department'])
+    return filterBySearch(employees, search, ['first_name', 'last_name', 'employee_code', 'position', 'branch_id'])
   }, [employees, search])
 
   const total = filtered.length
@@ -453,23 +461,27 @@ export default function EmployeesPage() {
   const totalEmployees = employees.length
   const activeCount = employees.filter(e => e.status === 'Active').length
   const totalPayrollBase = employees.filter(e => e.status === 'Active').reduce((acc, e) => acc + (parseFloat(e.basic_salary) || 0), 0)
-  const uniqueDepts = new Set(employees.map(e => e.department).filter(Boolean)).size
+  const uniqueBranches = new Set(employees.map(e => e.branch_id).filter(Boolean)).size
 
   return (
-    <div className="space-y-6">
-      <PageHeader
-        title="Employee Management"
-        subtitle="Manage organizational personnel, permanent QR badges, attendance PINs, and payroll assignments"
-        action={
-          <button
-            onClick={() => { setEditItem(null); setForm(emptyForm); setAddModal(true) }}
-            className="flex items-center gap-2 px-4 py-2 bg-primary hover:bg-primary/90 text-primary-foreground font-semibold text-xs rounded-xl shadow-xs transition-all cursor-pointer"
-          >
-            <FiPlus className="w-4 h-4" />
-            <span>Add Employee</span>
-          </button>
-        }
-      />
+    <div className={`space-y-6 ${embedded ? 'pb-2 animate-fadeIn' : 'pb-12 animate-fadeIn'}`}>
+      {!embedded && (
+        <PageHeader
+          title="Employee Management"
+          subtitle="Manage organizational personnel, permanent QR badges, attendance PINs, and payroll assignments"
+          action={
+            (isAdmin || isStoreAdmin) && (
+              <button
+                onClick={() => { setEditItem(null); setFormTab('personal'); setForm(emptyForm); setAddModal(true) }}
+                className="flex items-center gap-2 px-4 py-2 bg-primary hover:bg-primary/90 text-primary-foreground font-semibold text-xs rounded-xl shadow-xs transition-all cursor-pointer hover:shadow-md active:scale-98"
+              >
+                <FiPlus className="w-4 h-4" />
+                <span>Add Employee</span>
+              </button>
+            )
+          }
+        />
+      )}
 
       <TabBar
         tabs={[
@@ -485,7 +497,7 @@ export default function EmployeesPage() {
         <StatCard title="Total Staff" value={totalEmployees.toString()} sub="registered personnel" icon={<FiUsers className="w-5 h-5" />} color="blue" />
         <StatCard title="Active Employees" value={activeCount.toString()} sub="on active duty" icon={<FiCheckCircle className="w-5 h-5 text-emerald-500" />} color="green" />
         <StatCard title="Total Monthly Base" value={fmt(totalPayrollBase)} sub="active payroll base" icon={<TbCurrencyPeso className="w-5 h-5 text-indigo-500" />} color="indigo" />
-        <StatCard title="Departments" value={uniqueDepts.toString()} sub="active departments" icon={<FiLayers className="w-5 h-5 text-purple-500" />} color="purple" />
+        <StatCard title="Branches" value={uniqueBranches.toString()} sub="active branches" icon={<FiLayers className="w-5 h-5 text-purple-500" />} color="purple" />
       </div>
 
       {error && <ErrorAlert message={error} onRetry={loadEmployees} />}
@@ -499,7 +511,7 @@ export default function EmployeesPage() {
               type="text"
               value={search}
               onChange={e => { setSearch(e.target.value); setPage(1); }}
-              placeholder={pageTab === 'qr_management' ? "Search by employee code, name, branch, position..." : "Search employee code, name, department, position..."}
+              placeholder="Search by employee code, name, branch, position..."
               className="w-full pl-9 pr-8 py-2 rounded-xl border border-border bg-card text-foreground text-xs focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all placeholder:text-muted-foreground/70"
             />
             {search && (
@@ -518,7 +530,8 @@ export default function EmployeesPage() {
               onChange={e => { setDeptFilter(e.target.value); setPage(1) }}
               className="border border-border rounded-xl px-3 py-2 text-xs font-semibold text-foreground bg-card cursor-pointer"
             >
-              {DEPARTMENTS.map(d => <option key={d} value={d}>{d === 'All' ? 'All Departments' : d}</option>)}
+              <option value="All">All Branches</option>
+              {branchesList.map(b => <option key={b.branch_id} value={b.branch_id}>{b.name}</option>)}
             </select>
             <select
               value={statusFilter}
@@ -552,14 +565,14 @@ export default function EmployeesPage() {
                     <th className="py-3 px-4 text-left">Employee ID</th>
                     <th className="py-3 px-4 text-left">Employee Name</th>
                     <th className="py-3 px-4 text-left">Position</th>
-                    <th className="py-3 px-4 text-left">Department</th>
+                    
                     <th className="py-3 px-4 text-left">Branch</th>
                     <th className="py-3 px-4 text-center">QR Status</th>
                     <th className="py-3 px-4 text-left">Issued Date</th>
                     <th className="py-3 px-4 text-left">Issued By</th>
                     <th className="py-3 px-4 text-left">Last Scan</th>
                     <th className="py-3 px-4 text-center">Attendance Status</th>
-                    <th className="py-3 px-4 text-center">Actions</th>
+                    {!isEmployee && <th className="py-3 px-4 text-center">Actions</th>}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border">
@@ -577,8 +590,8 @@ export default function EmployeesPage() {
                           {emp.first_name} {emp.last_name}
                         </td>
                         <td className="py-3 px-4 text-muted-foreground">{emp.position}</td>
-                        <td className="py-3 px-4 text-muted-foreground">{emp.department || '—'}</td>
-                        <td className="py-3 px-4 font-medium text-foreground">{emp.branch || 'Main Branch'}</td>
+                        
+                        <td className="py-3 px-4 font-medium text-foreground">{emp.branch?.name || 'Unassigned'}</td>
                         <td className="py-3 px-4 text-center">
                           {isQrActive && (
                             <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-500 border border-emerald-500/30">
@@ -604,7 +617,7 @@ export default function EmployeesPage() {
                         </td>
                         <td className="py-3 px-4 text-center">
                           <div className="flex items-center justify-center gap-1.5 flex-wrap">
-                            {isNotGenerated && (
+                            {isNotGenerated && isAdmin && (
                               <button
                                 type="button"
                                 onClick={() => handleOpenGenerateModal(emp)}
@@ -613,7 +626,7 @@ export default function EmployeesPage() {
                                 Generate QR
                               </button>
                             )}
-                            {isQrActive && (
+                            {isQrActive && isAdmin && (
                               <>
                                 <button
                                   type="button"
@@ -638,7 +651,7 @@ export default function EmployeesPage() {
                                 </button>
                               </>
                             )}
-                            {isQrRevoked && (
+                            {isQrRevoked && isAdmin && (
                               <button
                                 type="button"
                                 onClick={() => handleReissueQrAdmin(emp)}
@@ -668,13 +681,15 @@ export default function EmployeesPage() {
               title="No employees found"
               description={search || deptFilter !== 'All' ? 'Try adjusting your search query or filters' : 'Add your first employee to get started'}
               action={
-                <button
-                  onClick={() => { setEditItem(null); setForm(emptyForm); setAddModal(true) }}
-                  className="flex items-center gap-1.5 px-3.5 py-1.5 bg-primary text-primary-foreground font-bold text-xs rounded-xl cursor-pointer"
-                >
-                  <FiPlus className="w-4 h-4" />
-                  <span>Add Employee</span>
-                </button>
+                !isAdmin ? (
+                  <button
+                    onClick={() => { setEditItem(null); setFormTab('personal'); setForm(emptyForm); setAddModal(true) }}
+                    className="flex items-center gap-1.5 px-3.5 py-1.5 bg-primary text-primary-foreground font-bold text-xs rounded-xl cursor-pointer"
+                  >
+                    <FiPlus className="w-4 h-4" />
+                    <span>Add Employee</span>
+                  </button>
+                ) : null
               }
             />
           ) : (
@@ -686,12 +701,12 @@ export default function EmployeesPage() {
                       <th className="py-3 px-4 text-left">Code</th>
                       <th className="py-3 px-4 text-left">Employee Name</th>
                       <th className="py-3 px-4 text-left">Position</th>
-                      <th className="py-3 px-4 text-left">Department</th>
+                      
                       <th className="py-3 px-4 text-center">Permanent QR & PIN</th>
                       <th className="py-3 px-4 text-center">Verification</th>
                       <th className="py-3 px-4 text-right">Basic Salary</th>
                       <th className="py-3 px-4 text-center">Status</th>
-                      <th className="py-3 px-4 text-center">Actions</th>
+                      {!isEmployee && <th className="py-3 px-4 text-center">Actions</th>}
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-border">
@@ -710,7 +725,7 @@ export default function EmployeesPage() {
                           </div>
                         </td>
                         <td className="py-3 px-4 font-medium text-foreground">{emp.position}</td>
-                        <td className="py-3 px-4"><Badge text={emp.department || 'General'} variant="neutral" /></td>
+                        <td className="py-3 px-4"><Badge text={emp.branch?.name || 'Unassigned'} variant="neutral" /></td>
                         <td className="py-3 px-4 text-center">
                           <div className="flex items-center justify-center gap-1.5 flex-wrap">
                             {!emp.qr_token ? (
@@ -748,15 +763,18 @@ export default function EmployeesPage() {
                         <td className="py-3 px-4 text-center">
                           <StatusBadge status={emp.status} />
                         </td>
+                        {!isEmployee && (
                         <td className="py-3 px-4 text-center">
                           <div className="flex items-center justify-center gap-1">
-                            <button
-                              onClick={() => openQrBadge(emp)}
-                              title="View Permanent QR Badge"
-                              className="p-1.5 rounded-lg border border-border hover:bg-muted text-foreground transition-colors cursor-pointer"
-                            >
-                              <FiCamera className="w-3.5 h-3.5 text-primary" />
-                            </button>
+                            {isAdmin && (
+                              <button
+                                onClick={() => openQrBadge(emp)}
+                                title="View Permanent QR Badge"
+                                className="p-1.5 rounded-lg border border-border hover:bg-muted text-foreground transition-colors cursor-pointer"
+                              >
+                                <FiCamera className="w-3.5 h-3.5 text-primary" />
+                              </button>
+                            )}
                             <button
                               onClick={() => openDetail(emp)}
                               title="View profile ledger"
@@ -780,7 +798,8 @@ export default function EmployeesPage() {
                             </button>
                           </div>
                         </td>
-                      </tr>
+                      )}
+                    </tr>
                     ))}
                   </tbody>
                 </table>
@@ -988,14 +1007,7 @@ export default function EmployeesPage() {
                     />
                   </div>
                   <div>
-                    <label className="block font-bold text-muted-foreground mb-1">Department *</label>
-                    <select
-                      value={form.department}
-                      onChange={e => setForm(f => ({ ...f, department: e.target.value }))}
-                      className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground font-semibold"
-                    >
-                      {DEPARTMENTS.filter(d => d !== 'All').map(d => <option key={d} value={d}>{d}</option>)}
-                    </select>
+                    
                   </div>
                 </div>
 
@@ -1003,11 +1015,12 @@ export default function EmployeesPage() {
                   <div>
                     <label className="block font-bold text-muted-foreground mb-1">Branch Location</label>
                     <select
-                      value={form.branch}
-                      onChange={e => setForm(f => ({ ...f, branch: e.target.value }))}
-                      className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground font-semibold"
+                      value={form.branch_id}
+                      onChange={e => setForm(f => ({ ...f, branch_id: e.target.value }))}
+                      className="w-full bg-muted/50 border border-border rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-primary transition-colors appearance-none"
                     >
-                      {BRANCHES.map(b => <option key={b} value={b}>{b}</option>)}
+                      <option value="">Unassigned</option>
+                      {branchesList.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
                     </select>
                   </div>
                   <div>
@@ -1200,10 +1213,18 @@ export default function EmployeesPage() {
                   { id: 'qr', label: 'Permanent QR Badge', icon: <FiCamera className="w-3.5 h-3.5" /> },
                   { id: 'attendance', label: `Attendance (${detailItem.attendance?.length || 0})`, icon: <FiClock className="w-3.5 h-3.5" /> },
                   { id: 'payroll', label: `Payroll (${detailItem.payroll?.length || 0})`, icon: <TbCurrencyPeso className="w-3.5 h-3.5" /> },
+                  { id: 'financials', label: 'Financial Settings', icon: <TbCurrencyPeso className="w-3.5 h-3.5" /> },
                 ]}
                 active={detailTab}
                 onChange={setDetailTab}
               />
+
+              {/* Financial Settings Tab */}
+              {detailTab === 'financials' && (
+                <div className="pt-2">
+                  <EmployeeFinancialsTab employeeId={detailItem.employee.employee_id} />
+                </div>
+              )}
 
               {/* QR & Security Badge Tab */}
               {detailTab === 'qr' && (
@@ -1223,21 +1244,23 @@ export default function EmployeesPage() {
                         </p>
                       </div>
                       <div>
-                        <button
-                          onClick={handleGenerateQr}
-                          disabled={qrActionLoading}
-                          className="inline-flex items-center gap-1.5 px-4 py-2 bg-primary text-primary-foreground font-bold text-xs rounded-xl shadow-xs cursor-pointer"
-                        >
-                          <FiCamera className="w-4 h-4" />
-                          <span>{qrActionLoading ? 'Generating...' : 'Generate Permanent QR Badge'}</span>
-                        </button>
+                        {isAdmin && (
+                          <button
+                            onClick={handleGenerateQr}
+                            disabled={qrActionLoading}
+                            className="inline-flex items-center gap-1.5 px-4 py-2 bg-primary text-primary-foreground font-bold text-xs rounded-xl shadow-xs cursor-pointer"
+                          >
+                            <FiCamera className="w-4 h-4" />
+                            <span>{qrActionLoading ? 'Generating...' : 'Generate Permanent QR Badge'}</span>
+                          </button>
+                        )}
                       </div>
                     </div>
                   ) : (
                     <div className="grid grid-cols-1 md:grid-cols-12 gap-5 items-start">
                       {/* Printable ID Card Badge */}
                       <div className="md:col-span-6 flex justify-center">
-                        <div 
+                        <div
                           ref={printBadgeRef}
                           className="w-72 bg-gradient-to-b from-slate-900 via-slate-800 to-slate-950 text-white rounded-2xl shadow-xl border border-slate-700 overflow-hidden flex flex-col items-center p-5 text-center relative"
                         >
@@ -1253,7 +1276,7 @@ export default function EmployeesPage() {
                             {detailItem.employee.first_name} {detailItem.employee.last_name}
                           </h3>
                           <p className="text-xs text-amber-300 font-semibold mt-0.5">{detailItem.employee.position}</p>
-                          <p className="text-[11px] text-slate-400">{detailItem.employee.department} · {detailItem.employee.branch}</p>
+                          <p className="text-[11px] text-slate-400">{detailItem.employee.department} · {detailItem.employee.branch?.name || 'Unassigned'}</p>
                           <div className="mt-1 font-mono text-xs font-bold text-slate-300 bg-slate-800 px-2.5 py-0.5 rounded-full border border-slate-700">
                             {detailItem.employee.employee_code}
                           </div>
@@ -1330,27 +1353,31 @@ export default function EmployeesPage() {
                               </button>
                             </div>
 
-                            <button
-                              type="button"
-                              onClick={handleToggleQr}
-                              disabled={qrActionLoading}
-                              className={`flex items-center justify-center gap-1 px-3 py-1.5 rounded-xl font-bold cursor-pointer ${
-                                detailItem.employee.qr_active ? 'bg-rose-600 text-white' : 'bg-emerald-600 text-white'
-                              }`}
-                            >
-                              {detailItem.employee.qr_active ? <FiSlash className="w-3.5 h-3.5" /> : <FiCheckCircle className="w-3.5 h-3.5" />}
-                              <span>{detailItem.employee.qr_active ? 'Disable QR Access' : 'Enable QR Access'}</span>
-                            </button>
+                            {isAdmin && (
+                              <button
+                                type="button"
+                                onClick={handleToggleQr}
+                                disabled={qrActionLoading}
+                                className={`flex items-center justify-center gap-1 px-3 py-1.5 rounded-xl font-bold cursor-pointer ${detailItem.employee.qr_active ? 'bg-rose-600 text-white' : 'bg-emerald-600 text-white'
+                                  }`}
+                              >
+                                {detailItem.employee.qr_active ? <FiSlash className="w-3.5 h-3.5" /> : <FiCheckCircle className="w-3.5 h-3.5" />}
+                                <span>{detailItem.employee.qr_active ? 'Disable QR Access' : 'Enable QR Access'}</span>
+                              </button>
+                            )}
 
-                            <button
-                              type="button"
-                              onClick={handleRegenerateQr}
-                              disabled={qrActionLoading}
-                              className="flex items-center justify-center gap-1 px-3 py-1.5 rounded-xl border border-border hover:bg-muted font-semibold text-muted-foreground hover:text-foreground cursor-pointer"
-                            >
-                              <FiRefreshCw className="w-3.5 h-3.5" />
-                              <span>Regenerate QR UUID</span>
-                            </button>
+                            {/* Refresh UUID Action */}
+                            {isAdmin && (
+                              <button
+                                onClick={handleRegenerateQr}
+                                disabled={qrActionLoading}
+                                title="Regenerate QR UUID"
+                                className="flex items-center justify-center gap-1 px-3 py-1.5 rounded-xl border border-border hover:bg-muted font-semibold text-muted-foreground hover:text-foreground cursor-pointer"
+                              >
+                                <FiRefreshCw className="w-3.5 h-3.5" />
+                                <span>Regenerate QR UUID</span>
+                              </button>
+                            )}
                           </div>
                         </div>
                       </div>
@@ -1366,8 +1393,8 @@ export default function EmployeesPage() {
                       <FiUser className="w-7 h-7" />
                     </div>
                     <div className="flex-1">
-                      <h3 className="text-base font-bold text-foreground">{detailItem.employee.first_name} {detailItem.employee.middle_name ? `${detailItem.employee.middle_name}. ` : ''}{detailItem.employee.last_name}</h3>
-                      <p className="text-muted-foreground text-xs mt-0.5 font-medium">{detailItem.employee.position} · {detailItem.employee.department} · {detailItem.employee.branch}</p>
+                      <p className="font-bold text-base text-foreground leading-tight uppercase">{detailItem.employee.first_name} {detailItem.employee.last_name}</p>
+                      <p className="text-muted-foreground text-xs mt-0.5 font-medium">{detailItem.employee.position} · {detailItem.employee.department} · {detailItem.employee.branch?.name || 'Unassigned'}</p>
                       <div className="mt-1.5 flex items-center gap-2">
                         <StatusBadge status={detailItem.employee.status} />
                         <Badge text={`${detailItem.employee.pay_type} Rate`} variant="neutral" />
@@ -1376,29 +1403,26 @@ export default function EmployeesPage() {
                   </div>
 
                   {/* Verification Control */}
-                  <div className={`p-3 rounded-xl border flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2.5 ${
-                    detailItem.employee.information_verified 
-                      ? 'bg-emerald-50/80 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-900 text-emerald-900 dark:text-emerald-200' 
+                  <div className={`p-3 rounded-xl border flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2.5 ${detailItem.employee.information_verified
+                      ? 'bg-emerald-50/80 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-900 text-emerald-900 dark:text-emerald-200'
                       : 'bg-amber-50/80 dark:bg-amber-950/30 border-amber-200 dark:border-amber-900 text-amber-900 dark:text-amber-200'
-                  }`}>
+                    }`}>
                     <div className="flex items-center gap-2.5">
-                      <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${
-                        detailItem.employee.information_verified ? 'bg-emerald-200 text-emerald-900' : 'bg-amber-200 text-amber-900'
-                      }`}>
+                      <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${detailItem.employee.information_verified ? 'bg-emerald-200 text-emerald-900' : 'bg-amber-200 text-amber-900'
+                        }`}>
                         {detailItem.employee.information_verified ? <FiCheckCircle className="w-4 h-4" /> : <FiAlertTriangle className="w-4 h-4" />}
                       </div>
                       <div>
                         <div className="flex items-center gap-1.5">
                           <span className="font-bold text-xs">Account Verification:</span>
-                          <span className={`text-[10px] font-bold px-2 py-0.2 rounded-full ${
-                            detailItem.employee.information_verified ? 'bg-emerald-200 text-emerald-900' : 'bg-amber-200 text-amber-900'
-                          }`}>
+                          <span className={`text-[10px] font-bold px-2 py-0.2 rounded-full ${detailItem.employee.information_verified ? 'bg-emerald-200 text-emerald-900' : 'bg-amber-200 text-amber-900'
+                            }`}>
                             {detailItem.employee.information_verified ? 'Officially Verified' : 'Pending Verification'}
                           </span>
                         </div>
                         <p className="text-[10px] opacity-80 mt-0.5">
-                          {detailItem.employee.information_verified && detailItem.employee.information_verified_at 
-                            ? `Verified by Administrator on ${fmtDate(detailItem.employee.information_verified_at)}` 
+                          {detailItem.employee.information_verified && detailItem.employee.information_verified_at
+                            ? `Verified by Administrator on ${fmtDate(detailItem.employee.information_verified_at)}`
                             : 'Only authorized administrators can verify employee accounts.'}
                         </p>
                       </div>
@@ -1621,13 +1645,10 @@ export default function EmployeesPage() {
                 <span className="text-slate-400">Position:</span>
                 <span className="font-semibold text-slate-200">{generateModalEmp.position}</span>
               </div>
-              <div className="flex justify-between py-1 border-b border-slate-800/60">
-                <span className="text-slate-400">Department:</span>
-                <span className="font-semibold text-slate-200">{generateModalEmp.department || '—'}</span>
-              </div>
-              <div className="flex justify-between py-1">
+              
+              <div className="flex justify-between items-center bg-muted/30 p-2.5 rounded-lg border border-border text-xs">
                 <span className="text-slate-400">Branch:</span>
-                <span className="font-semibold text-emerald-400">{generateModalEmp.branch || 'Main Branch'}</span>
+                <span className="font-semibold text-emerald-400">{generateModalEmp.branch?.name || 'Unassigned'}</span>
               </div>
             </div>
 
@@ -1662,7 +1683,7 @@ export default function EmployeesPage() {
               <div className="text-[10px] font-black uppercase tracking-widest text-slate-500 border-b border-slate-200 pb-2">
                 Official Permanent Attendance Badge
               </div>
-              
+
               <div className="p-3 bg-white rounded-xl inline-block shadow-inner border border-slate-100">
                 <QRCodeSVG
                   value={viewQrEmp.qr_token || 'NO_TOKEN'}
@@ -1675,7 +1696,7 @@ export default function EmployeesPage() {
               <div>
                 <h3 className="text-base font-black text-slate-900">{viewQrEmp.first_name} {viewQrEmp.last_name}</h3>
                 <p className="text-xs font-mono font-bold text-primary-600">{viewQrEmp.employee_code}</p>
-                <p className="text-[11px] text-slate-600 font-semibold mt-0.5">{viewQrEmp.position} • {viewQrEmp.branch || 'Main Branch'}</p>
+                <p className="text-[11px] text-slate-600 font-semibold mt-0.5">{viewQrEmp.position} • {viewQrEmp.branch?.name || 'Unassigned'}</p>
               </div>
 
               <div className="pt-2 border-t border-slate-200 text-[10px] text-slate-500 font-mono">

@@ -8,7 +8,7 @@ import {
 import { api } from '../lib/api'
 import {
   Card, StatCard, Badge, StatusBadge, SearchBar,
-  Table, TR, TD, TableSkeleton, EmptyState, Btn, Modal, showToast, PageHeader, Pagination
+  Table, TR, TD, TableSkeleton, EmptyState, Btn, Modal, showToast, PageHeader, Pagination, showLoading, closeLoading
 } from '../components/ui'
 import { useAuth } from '../context/AuthContext'
 
@@ -150,6 +150,7 @@ export default function QrRequestsPage() {
   const handleConfirmApprove = async () => {
     if (!selectedRequest) return
     setApproving(true)
+    showLoading('Approving QR request...')
     try {
       const res = await api.qrRequests.approve(selectedRequest.request_id, checklist)
       if (res.success) {
@@ -164,6 +165,7 @@ export default function QrRequestsPage() {
       showToast(err.message || 'Failed to approve QR request', 'error')
     } finally {
       setApproving(false)
+      closeLoading()
     }
   }
 
@@ -180,6 +182,7 @@ export default function QrRequestsPage() {
     }
 
     setRejecting(true)
+    showLoading('Rejecting QR request...')
     try {
       const res = await api.qrRequests.reject(selectedRequest.request_id, rejectionReason.trim())
       if (res.success) {
@@ -194,6 +197,7 @@ export default function QrRequestsPage() {
       showToast(err.message || 'Failed to reject QR request', 'error')
     } finally {
       setRejecting(false)
+      closeLoading()
     }
   }
 
@@ -216,11 +220,6 @@ export default function QrRequestsPage() {
       <PageHeader
         title="QR Attendance Request Management"
         subtitle="Review account information, perform 7-point security verification, and issue permanent attendance QR badges."
-        action={
-          <Btn variant="outline" size="sm" onClick={loadData} icon={<FiRefreshCw className={loading ? 'animate-spin' : ''} />}>
-            Refresh Requests
-          </Btn>
-        }
       />
 
       {/* 5 Real Database Metric Cards */}

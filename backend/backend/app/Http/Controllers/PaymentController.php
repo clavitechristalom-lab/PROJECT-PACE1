@@ -23,18 +23,22 @@ class PaymentController extends Controller
 
         // Scoping
         if ($user && in_array($user->role, ['Store Administrator', 'Store Admin'])) {
-            $userBranch = $user->employee ? $user->employee->branch : 'Main Branch';
-            $query->where(function ($q) use ($userBranch) {
-                $q->whereHas('installmentAccount.sale.processedBy.employee', function ($eq) use ($userBranch) {
-                    $eq->where('branch', $userBranch);
-                })->orWhereHas('receivedBy.employee', function ($eq) use ($userBranch) {
-                    $eq->where('branch', $userBranch);
+            $userBranch = $user->employee ? $user->employee->branch_id : null;
+            if ($userBranch) {
+                $query->where(function ($q) use ($userBranch) {
+                    $q->whereHas('installmentAccount.sale', function ($sq) use ($userBranch) {
+                        $sq->where('branch_id', $userBranch);
+                    })->orWhereHas('installmentAccount.customer', function ($cq) use ($userBranch) {
+                        $cq->where('branch_id', $userBranch);
+                    });
                 });
-            });
+            } else {
+                $query->where('payment_id', -1); // No branch — return empty
+            }
         } elseif ($request->filled('branch') && $request->query('branch') !== 'All') {
             $branch = $request->query('branch');
-            $query->whereHas('installmentAccount.sale.processedBy.employee', function ($eq) use ($branch) {
-                $eq->where('branch', $branch);
+            $query->whereHas('installmentAccount.sale', function ($eq) use ($branch) {
+                $eq->where('branch_id', $branch);
             });
         }
 
@@ -87,9 +91,9 @@ class PaymentController extends Controller
                     
                     $branch = 'Main Branch';
                     if ($inst && $inst->sale && $inst->sale->processedBy && $inst->sale->processedBy->employee) {
-                        $branch = $inst->sale->processedBy->employee->branch ?: 'Main Branch';
+                        $branch = $inst->sale->processedBy->employee->branch_id ?: null;
                     } elseif ($p->receivedBy && $p->receivedBy->employee) {
-                        $branch = $p->receivedBy->employee->branch ?: 'Main Branch';
+                        $branch = $p->receivedBy->employee->branch_id ?: null;
                     }
 
                     $receivedBy = $p->receivedBy ? ($p->receivedBy->employee ? "{$p->receivedBy->employee->first_name} {$p->receivedBy->employee->last_name}" : $p->receivedBy->username) : 'Staff';
@@ -119,9 +123,9 @@ class PaymentController extends Controller
 
             $branch = 'Main Branch';
             if ($inst && $inst->sale && $inst->sale->processedBy && $inst->sale->processedBy->employee) {
-                $branch = $inst->sale->processedBy->employee->branch ?: 'Main Branch';
+                $branch = $inst->sale->processedBy->employee->branch_id ?: null;
             } elseif ($p->receivedBy && $p->receivedBy->employee) {
-                $branch = $p->receivedBy->employee->branch ?: 'Main Branch';
+                $branch = $p->receivedBy->employee->branch_id ?: null;
             }
 
             $receivedBy = $p->receivedBy ? ($p->receivedBy->employee ? "{$p->receivedBy->employee->first_name} {$p->receivedBy->employee->last_name}" : $p->receivedBy->username) : 'Staff';
@@ -165,14 +169,14 @@ class PaymentController extends Controller
         $query = Payment::with(['installmentAccount.sale.processedBy.employee']);
 
         if ($user && in_array($user->role, ['Store Administrator', 'Store Admin'])) {
-            $userBranch = $user->employee ? $user->employee->branch : 'Main Branch';
+            $userBranch = $user->employee ? $user->employee->branch_id : null;
             $query->whereHas('installmentAccount.sale.processedBy.employee', function ($eq) use ($userBranch) {
-                $eq->where('branch', $userBranch);
+                $eq->where('branch_id', $userBranch);
             });
         } elseif ($request->filled('branch') && $request->query('branch') !== 'All') {
             $branch = $request->query('branch');
             $query->whereHas('installmentAccount.sale.processedBy.employee', function ($eq) use ($branch) {
-                $eq->where('branch', $branch);
+                $eq->where('branch_id', $branch);
             });
         }
 
@@ -232,7 +236,7 @@ class PaymentController extends Controller
 
         $branch = 'Main Branch';
         if ($inst && $inst->sale && $inst->sale->processedBy && $inst->sale->processedBy->employee) {
-            $branch = $inst->sale->processedBy->employee->branch ?: 'Main Branch';
+            $branch = $inst->sale->processedBy->employee->branch_id ?: null;
         }
 
         return response()->json([
@@ -262,6 +266,9 @@ class PaymentController extends Controller
     public function store(Request $request)
     {
         $user = $request->user();
+        if ($user && $user->role === 'Administrator') {
+            return response()->json(['success' => false, 'message' => 'Admin is not authorized to record payments.'], 403);
+        }
 
         $validated = $request->validate([
             'installment_id' => 'required|exists:installment_accounts,installment_id',
@@ -278,10 +285,10 @@ class PaymentController extends Controller
 
             // Security authorization check for Store Administrator
             if ($user && in_array($user->role, ['Store Administrator', 'Store Admin'])) {
-                $userBranch = $user->employee ? $user->employee->branch : 'Main Branch';
+                $userBranch = $user->employee ? $user->employee->branch_id : null;
                 $accBranch = 'Main Branch';
                 if ($inst->sale && $inst->sale->processedBy && $inst->sale->processedBy->employee) {
-                    $accBranch = $inst->sale->processedBy->employee->branch ?: 'Main Branch';
+                    $accBranch = $inst->sale->processedBy->employee->branch_id ?: null;
                 }
                 if ($userBranch !== $accBranch) {
                     return response()->json(['message' => 'Unauthorized: Cannot record payments for an account belonging to another branch.'], 403);
@@ -451,14 +458,14 @@ class PaymentController extends Controller
         $query = PaymentSchedule::with(['installmentAccount.customer', 'installmentAccount.sale.processedBy.employee']);
 
         if ($user && in_array($user->role, ['Store Administrator', 'Store Admin'])) {
-            $userBranch = $user->employee ? $user->employee->branch : 'Main Branch';
+            $userBranch = $user->employee ? $user->employee->branch_id : null;
             $query->whereHas('installmentAccount.sale.processedBy.employee', function ($eq) use ($userBranch) {
-                $eq->where('branch', $userBranch);
+                $eq->where('branch_id', $userBranch);
             });
         } elseif ($request->filled('branch') && $request->query('branch') !== 'All') {
             $branch = $request->query('branch');
             $query->whereHas('installmentAccount.sale.processedBy.employee', function ($eq) use ($branch) {
-                $eq->where('branch', $branch);
+                $eq->where('branch_id', $branch);
             });
         }
 
@@ -517,3 +524,4 @@ class PaymentController extends Controller
         ]);
     }
 }
+

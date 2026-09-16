@@ -2,11 +2,14 @@ import { useState, useEffect } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import {
   FiSun, FiMoon, FiMail, FiLock, FiUser, FiEye, FiEyeOff,
-  FiX, FiAlertTriangle, FiCheckCircle, FiLogIn, FiUserPlus
+  FiX, FiAlertTriangle, FiCheckCircle, FiLogIn, FiUserPlus,
+  FiShield, FiHome, FiBriefcase, FiUsers, FiEdit3
 } from 'react-icons/fi'
+import { showSuccess, showError, showLoading, closeLoading } from '../lib/swal'
 import { useAuth } from '../context/AuthContext'
 import { useTheme } from '../context/ThemeContext'
 import { Spinner } from '../components/ui'
+import { api } from '../lib/api'
 import heroImg from '../assets/furniture-hero.png'
 import darkLandscape from '../assets/furnatue.webp'
 
@@ -21,7 +24,6 @@ export default function LoginPage() {
   const [password, setPassword] = useState('')
   const [showPw, setShowPw] = useState(false)
   const [remember, setRemember] = useState(false)
-  const [loginRole, setLoginRole] = useState('Employee')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [fieldErrors, setFieldErrors] = useState({
@@ -29,14 +31,20 @@ export default function LoginPage() {
     password: '',
   })
   const [signUpSuccess, setSignUpSuccess] = useState('')
+  const [roleModalOpen, setRoleModalOpen] = useState(false)
+  const [registrationOptions, setRegistrationOptions] = useState({ branches: [], departments: [] })
 
   const [signUpData, setSignUpData] = useState({
     name: '',
     email: '',
+    username: '',
+    employee_id: '',
+    branch_id: '',
+    department: '',
     password: '',
     confirmPassword: '',
     agree: true,
-    role: 'Employee',
+    role: 'Customer',
   })
 
   const [signUpErrors, setSignUpErrors] = useState({})
@@ -54,6 +62,26 @@ export default function LoginPage() {
       navigate(from, { replace: true })
     }
   }, [user, checkingAuth, navigate, location])
+
+  useEffect(() => {
+    if (isLoginModalOpen && activeTab === 'signup') {
+      api.auth.registrationOptions()
+        .then((data) => setRegistrationOptions({
+          branches: data.branches || [],
+          departments: data.departments || [],
+        }))
+        .catch(() => {})
+    }
+  }, [isLoginModalOpen, activeTab])
+
+  useEffect(() => {
+    if (!roleModalOpen) return undefined
+    const handleEscape = (event) => {
+      if (event.key === 'Escape') setRoleModalOpen(false)
+    }
+    window.addEventListener('keydown', handleEscape)
+    return () => window.removeEventListener('keydown', handleEscape)
+  }, [roleModalOpen])
 
 
   const handleSubmit = async (e) => {
@@ -81,25 +109,29 @@ export default function LoginPage() {
     if (hasError) return
 
     setError('')
-    setLoading(true)
+    showLoading('Signing in...')
 
     const res = await login(
       username.trim(),
       password,
-      loginRole,
       remember
     )
 
+    closeLoading()
     setLoading(false)
 
     if (res.success) {
+      showSuccess('Login Successful', 'Welcome back to Project PACE!')
       const dest =
-        res.user?.role === 'Employee'
-          ? '/employee/dashboard'
-          : '/dashboard'
+        res.user?.role === 'Customer'
+          ? '/customer/dashboard'
+          : res.user?.role === 'Employee'
+            ? '/employee/dashboard'
+            : '/dashboard'
 
       navigate(dest, { replace: true })
     } else {
+      showError('Login Failed', res.message || 'Invalid username or password. Please try again.')
       setError(
         res.message ||
         'Invalid username or password. Please try again.'
@@ -120,6 +152,18 @@ export default function LoginPage() {
       errors.email = 'Email address is required'
     }
 
+    if (signUpData.role !== 'Customer' && !signUpData.username?.trim()) {
+      errors.username = 'Username is required'
+    }
+
+
+
+    if ((signUpData.role === 'Store Admin' || signUpData.role === 'Employee') && !signUpData.branch_id) {
+      errors.branch_id = 'Please select a valid branch'
+    }
+
+
+
     if (!signUpData.password) {
       errors.password = 'Password is required'
     }
@@ -135,32 +179,46 @@ export default function LoginPage() {
 
     if (Object.keys(errors).length > 0) return
 
+    showLoading('Creating your account...')
     setLoading(true)
     setError('')
 
-    const res = await register(signUpData)
-
-    setLoading(false)
+    const res = await register({
+      ...signUpData,
+      username: signUpData.role === 'Customer' ? signUpData.email.trim() : signUpData.username.trim(),
+    })
 
     if (res.success) {
-      setSignUpSuccess(
-        'Account created successfully! You can now log in.'
-      )
+      // Auto-login
+      const finalUsername = signUpData.role === 'Customer' ? signUpData.email.trim() : signUpData.username.trim()
+      const loginRes = await login(finalUsername, signUpData.password, false)
 
-      setSignUpData({
-        name: '',
-        email: '',
-        password: '',
-        confirmPassword: '',
-        agree: true,
-        role: 'Employee',
-      })
+      closeLoading()
+      setLoading(false)
 
-      setTimeout(() => {
+      if (loginRes.success) {
+        showSuccess('Welcome!', 'Account created and logged in successfully.')
+        
+        const dest =
+          loginRes.user?.role === 'Customer'
+            ? '/customer/dashboard'
+            : loginRes.user?.role === 'Employee'
+              ? '/employee/dashboard'
+              : '/dashboard'
+
+        navigate(dest, { replace: true })
+      } else {
+        showSuccess('Account Created', 'Your account has been created successfully! You can now log in.')
+        setSignUpSuccess('Account created successfully! You can now log in.')
         setActiveTab('login')
         setSignUpSuccess('')
-      }, 3500)
+      }
     } else {
+      closeLoading()
+      setLoading(false)
+      
+      setSignUpErrors(res.errors || {})
+      showError('Registration Failed', res.message || 'Something went wrong during sign up.')
       setError(res.message)
     }
   }
@@ -238,8 +296,8 @@ export default function LoginPage() {
             <a href="#about" className="hover:text-black transition">
               ABOUT
             </a>
-            <a href="#contact" className="hover:text-black transition">
-              CONTACT
+            <a href="#support" className="hover:text-black transition">
+              SUPPORT
             </a>
             <a href="#appliances" className="hover:text-black transition">
               APPLIANCES
@@ -370,6 +428,17 @@ export default function LoginPage() {
             >
               <FiX className="w-5 h-5" />
             </button>
+
+            {activeTab === 'signup' && (
+              <button
+                type="button"
+                onClick={() => setRoleModalOpen(true)}
+                className="absolute top-5 right-14 w-8 h-8 rounded-full border-2 border-slate-400 text-slate-300 hover:text-white hover:border-white transition-colors flex items-center justify-center z-20 font-bold text-sm bg-transparent shadow-lg"
+                title="Select Account Role"
+              >
+                {signUpData.role === 'Administrator' ? 'A' : signUpData.role === 'Store Admin' ? 'S' : signUpData.role === 'Employee' ? 'E' : 'C'}
+              </button>
+            )}
 
             <div className="hidden md:flex md:col-span-6 relative flex-col justify-between p-8 sm:p-10 overflow-hidden select-none">
               <img src="https://images.squarespace-cdn.com/content/v1/56903df91115e0dc632ab13f/93c5fd36-1652-49e0-9ac0-8cd4969d0c55/Madeline+Sofa+by+Rowe+Fine+Furniture"
@@ -597,21 +666,6 @@ export default function LoginPage() {
                       )}
                     </div>
 
-                    <div className="mb-4">
-                      <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                        Role
-                      </label>
-                      <select
-                        value={loginRole}
-                        onChange={(e) => setLoginRole(e.target.value)}
-                        className="w-full bg-[#121c29] border border-slate-800 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:ring-2 focus:border-blue-500 focus:ring-blue-500/20 transition-all cursor-pointer"
-                      >
-                        <option value="Administrator">Admin</option>
-                        <option value="Store Administrator">Store Admin</option>
-                        <option value="Employee">Employee</option>
-                      </select>
-                    </div>
-
                     <div className="flex items-center justify-between pt-1">
                       <label className="flex items-center gap-2.5 cursor-pointer select-none">
                         <input
@@ -634,7 +688,7 @@ export default function LoginPage() {
                     <button
                       type="submit"
                       disabled={loading}
-                      className="w-full bg-gray-600 hover:bg-gray-500 text-white font-semibold py-3.5 rounded-xl transition-all duration-200 disabled:opacity-60 disabled:cursor-not-allowed cursor-pointer flex items-center justify-center gap-2 shadow-lg shadow-blue-600/25 active:scale-[0.99] mt-2"
+                      className="w-full bg-blue-600 hover:bg-blue-500 text-white font-semibold py-3.5 rounded-xl transition-all duration-200 disabled:opacity-60 disabled:cursor-not-allowed cursor-pointer flex items-center justify-center gap-2 shadow-lg shadow-blue-600/25 active:scale-[0.99] mt-2"
                     >
                       {loading ? (
                         <>
@@ -654,6 +708,7 @@ export default function LoginPage() {
                     className="space-y-3.5"
                     noValidate
                   >
+
                     <div>
                       <label className="block text-xs font-semibold text-slate-300 mb-1">
                         Name
@@ -736,6 +791,47 @@ export default function LoginPage() {
                       )}
                     </div>
 
+                    {signUpData.role !== 'Customer' && (
+                      <>
+                        <div>
+                          <label className="block text-xs font-semibold text-slate-300 mb-1">Username</label>
+                          <div className="relative">
+                            <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none">
+                              <FiUser className="w-4 h-4" />
+                            </span>
+                            <input
+                              type="text"
+                              value={signUpData.username}
+                              onChange={(e) => setSignUpData({ ...signUpData, username: e.target.value })}
+                              placeholder="Username"
+                              className={`w-full bg-[#121c29] border rounded-xl pl-10 pr-4 py-2.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 transition-all ${signUpErrors.username ? 'border-rose-500/80 focus:ring-rose-500/30' : 'border-slate-800 focus:border-blue-500 focus:ring-blue-500/20'}`}
+                              autoComplete="username"
+                            />
+                          </div>
+                          {signUpErrors.username && <p className="text-[11px] text-rose-400 mt-1">{signUpErrors.username}</p>}
+                        </div>
+
+
+                        {(signUpData.role === 'Store Admin' || signUpData.role === 'Employee') && (
+                          <div>
+                            <label className="block text-xs font-semibold text-slate-300 mb-1">Store/Branch</label>
+                            <select
+                              value={signUpData.branch_id}
+                              onChange={(e) => setSignUpData({ ...signUpData, branch_id: e.target.value })}
+                              className={`w-full bg-[#121c29] border rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:ring-2 transition-all cursor-pointer ${signUpErrors.branch_id ? 'border-rose-500/80' : 'border-slate-800 focus:border-blue-500'}`}
+                            >
+                              <option value="">Select a branch</option>
+                              {registrationOptions.branches.map((branch) => <option key={branch.id} value={branch.id}>{branch.name}</option>)}
+                            </select>
+                            {signUpErrors.branch_id && <p className="text-[11px] text-rose-400 mt-1">{signUpErrors.branch_id}</p>}
+                          </div>
+                        )}
+
+                      </>
+                    )}
+
+
+
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       <div>
                         <label className="block text-xs font-semibold text-slate-300 mb-1">
@@ -816,26 +912,6 @@ export default function LoginPage() {
                       </div>
                     </div>
 
-                    <div>
-                      <label className="block text-xs font-semibold text-slate-300 mb-1">
-                        Role
-                      </label>
-                      <select
-                        value={signUpData.role}
-                        onChange={(e) =>
-                          setSignUpData({
-                            ...signUpData,
-                            role: e.target.value,
-                          })
-                        }
-                        className="w-full bg-[#121c29] border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:ring-2 focus:border-blue-500 focus:ring-blue-500/20 transition-all cursor-pointer"
-                      >
-                        <option value="Administrator">Admin</option>
-                        <option value="Store Administrator">Store Admin</option>
-                        <option value="Employee">Employee</option>
-                      </select>
-                    </div>
-
                     <div className="flex items-center pt-1">
                       <label className="flex items-center gap-2 cursor-pointer select-none">
                         <input
@@ -858,9 +934,19 @@ export default function LoginPage() {
 
                     <button
                       type="submit"
-                      className="w-full bg-gray-600 hover:bg-gray-500 text-white font-semibold py-3 rounded-xl transition-all duration-200 cursor-pointer flex items-center justify-center gap-2 shadow-lg shadow-blue-600/25 active:scale-[0.99] mt-2"
+                      disabled={loading || !signUpData.agree}
+                      className="w-full bg-blue-600 hover:bg-blue-500 text-white font-semibold py-3 rounded-xl transition-all duration-200 disabled:opacity-60 disabled:cursor-not-allowed cursor-pointer flex items-center justify-center gap-2 shadow-lg shadow-blue-600/25 active:scale-[0.99] mt-2"
                     >
-                      Create Account
+                      {loading ? (
+                        <>
+                          <Spinner className="w-4 h-4 text-white" />
+                          <span>
+                            Creating Account...
+                          </span>
+                        </>
+                      ) : (
+                        'Create Account'
+                      )}
                     </button>
                   </form>
                 )}
@@ -897,6 +983,65 @@ export default function LoginPage() {
                   </>
                 )}
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {roleModalOpen && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+          <div className="absolute inset-0" onClick={() => setRoleModalOpen(false)} />
+          <div className="relative z-10 w-full max-w-sm rounded-2xl border border-slate-700 bg-[#171923] p-5 shadow-2xl">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-bold text-white">SELECT ACCOUNT ROLE</h3>
+              <button
+                type="button"
+                onClick={() => setRoleModalOpen(false)}
+                className="rounded-full p-1.5 text-slate-400 hover:bg-white/10 hover:text-white"
+                aria-label="Close role selection"
+              >
+                <FiX className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-2">
+              {[
+                { value: 'Administrator', label: 'Administrator', icon: FiShield, description: 'Full system access and user management' },
+                { value: 'Store Admin', label: 'Store Admin', icon: FiHome, description: 'Store settings, reports and staff' },
+                { value: 'Employee', label: 'Employee', icon: FiBriefcase, description: 'Point of sale and inventory' },
+              ].map(({ value, label, icon: Icon, description }) => (
+                <button
+                  key={value}
+                  type="button"
+                  onClick={() => {
+                    setSignUpData((current) => ({ ...current, role: value, branch_id: '', department: '' }))
+                    setSignUpErrors({})
+                    setRoleModalOpen(false)
+                  }}
+                  className="w-full flex items-center gap-3 rounded-xl border border-slate-700 bg-[#121c29] p-3 text-left text-white hover:border-blue-500 hover:bg-blue-500/10 transition-colors"
+                >
+                  <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-500/10 text-blue-300">
+                    <Icon className="w-5 h-5" />
+                  </span>
+                  <span>
+                    <span className="block text-sm font-bold">{label}</span>
+                    <span className="block text-xs text-slate-400">{description}</span>
+                  </span>
+                </button>
+              ))}
+            </div>
+
+            <div className="mt-4">
+              <button
+                type="button"
+                onClick={() => {
+                  setRoleModalOpen(false)
+                  setActiveTab('login')
+                }}
+                className="w-full rounded-xl border border-slate-700 px-4 py-2.5 text-sm font-semibold text-slate-300 hover:bg-white/5 transition-colors"
+              >
+                CLOSE
+              </button>
             </div>
           </div>
         </div>

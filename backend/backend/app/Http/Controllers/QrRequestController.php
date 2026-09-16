@@ -70,7 +70,7 @@ class QrRequestController extends Controller
             'user_id' => $user->user_id,
             'employee_id' => $employee->employee_id,
             'role' => $user->role,
-            'branch' => $employee->branch ?: 'Main Branch',
+            'branch' => $employee->branch ? $employee->branch->name : null,
             'department' => $employee->department ?: 'Operations',
             'position' => $employee->position ?: $user->role,
             'status' => 'PENDING',
@@ -98,7 +98,7 @@ class QrRequestController extends Controller
             NotificationService::sendToAdmins([
                 'type' => 'new_qr_request',
                 'title' => '🔔 NEW STORE ADMIN QR REQUEST',
-                'message' => "Name: {$employee->first_name} {$employee->last_name}, Role: Store Administrator, Branch: " . ($employee->branch ?: 'Main Branch') . ", Status: PENDING VERIFICATION",
+                'message' => "Name: {$employee->first_name} {$employee->last_name}, Role: Store Administrator, Branch: " . ($employee->branch ? $employee->branch->name : 'Unassigned') . ", Status: PENDING VERIFICATION",
                 'action_url' => '/admin/qr-requests',
                 'priority' => 'high',
             ]);
@@ -106,7 +106,7 @@ class QrRequestController extends Controller
             NotificationService::sendToAdmins([
                 'type' => 'new_qr_request',
                 'title' => '🔔 NEW QR REQUEST',
-                'message' => "Employee: {$employee->first_name} {$employee->last_name} ({$employee->employee_code}), Branch: " . ($employee->branch ?: 'Main Branch') . ", Request Date: " . now()->format('F j, Y') . ", Status: PENDING VERIFICATION",
+                'message' => "Employee: {$employee->first_name} {$employee->last_name} ({$employee->employee_code}), Branch: " . ($employee->branch ? $employee->branch->name : 'Unassigned') . ", Request Date: " . now()->format('F j, Y') . ", Status: PENDING VERIFICATION",
                 'action_url' => '/admin/qr-requests',
                 'priority' => 'high',
             ]);
@@ -175,7 +175,7 @@ class QrRequestController extends Controller
                 'name' => "{$employee->first_name} {$employee->last_name}",
                 'position' => $employee->position,
                 'department' => $employee->department,
-                'branch' => $employee->branch,
+                'branch' => $employee->branch ? $employee->branch->name : null,
                 'email' => $employee->email,
                 'phone' => $employee->phone,
             ] : null,
@@ -217,7 +217,7 @@ class QrRequestController extends Controller
             $s = '%' . trim($request->search) . '%';
             $query->where(function ($q) use ($s) {
                 $q->where('request_code', 'like', $s)
-                  ->orWhere('branch', 'like', $s)
+                  ->orwhere('branch_id', 'like', $s)
                   ->orWhere('department', 'like', $s)
                   ->orWhere('position', 'like', $s)
                   ->orWhereHas('employee', function ($eq) use ($s) {
@@ -253,7 +253,7 @@ class QrRequestController extends Controller
                 'employee_id' => $emp ? $emp->employee_code : "EMP{$r->employee_id}",
                 'position' => $r->position ?: ($emp ? $emp->position : 'Staff'),
                 'department' => $r->department ?: ($emp ? $emp->department : 'Operations'),
-                'branch' => $r->branch ?: ($emp ? $emp->branch : 'Main Branch'),
+                'branch' => $r->branch ?: ($emp ? $emp->branch : null),
                 'phone' => $emp ? $emp->phone : '',
                 'email' => $emp ? $emp->email : ($r->user ? $r->user->username : ''),
                 'address' => $emp ? $emp->address : '',
@@ -313,7 +313,7 @@ class QrRequestController extends Controller
                 'role' => $qrRequest->role,
                 'position' => $qrRequest->position ?: ($emp ? $emp->position : 'Staff'),
                 'department' => $qrRequest->department ?: ($emp ? $emp->department : 'Operations'),
-                'branch' => $qrRequest->branch ?: ($emp ? $emp->branch : 'Main Branch'),
+                'branch' => $qrRequest->branch ?: ($emp ? $emp->branch : null),
                 'phone' => $emp ? ($emp->phone ?: '09XXXXXXXXX') : '09XXXXXXXXX',
                 'email' => $emp ? $emp->email : ($qrRequest->user ? $qrRequest->user->username : 'employee@email.com'),
                 'address' => $emp ? ($emp->address ?: 'No registered address') : 'No registered address',
@@ -558,3 +558,4 @@ class QrRequestController extends Controller
         ]);
     }
 }
+

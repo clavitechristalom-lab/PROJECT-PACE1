@@ -18,6 +18,7 @@ class User extends Authenticatable
 
     protected $fillable = [
         'employee_id',
+        'customer_id',
         'username',
         'password_hash',
         'role',
@@ -62,6 +63,18 @@ class User extends Authenticatable
             Employee::class,
             'employee_id',
             'employee_id'
+        );
+    }
+
+    /**
+     * Relationship with customer.
+     */
+    public function customer()
+    {
+        return $this->belongsTo(
+            Customer::class,
+            'customer_id',
+            'customer_id'
         );
     }
 

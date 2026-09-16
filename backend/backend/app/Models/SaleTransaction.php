@@ -10,7 +10,7 @@ class SaleTransaction extends Model
     protected $fillable = [
         'invoice_no', 'customer_id', 'processed_by', 'sale_date', 'payment_method',
         'subtotal', 'discount_amount', 'total_amount', 'amount_paid', 'balance_due',
-        'status', 'notes'
+        'status', 'notes', 'branch_id'
     ];
 
     public function customer()
@@ -31,5 +31,10 @@ class SaleTransaction extends Model
     public function installmentAccount()
     {
         return $this->hasOne(InstallmentAccount::class, 'sale_id', 'sale_id');
+    }
+
+    public function branch()
+    {
+        return $this->belongsTo(BranchProfile::class, 'branch_id', 'id');
     }
 }

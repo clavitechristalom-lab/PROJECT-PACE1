@@ -5,25 +5,26 @@ import {
   FiCalendar, FiUser, FiClock, FiFileText,
   FiBarChart2, FiSettings, FiShield, FiDatabase, FiActivity,
   FiSun, FiMoon, FiSearch, FiLogOut, FiMenu, FiChevronDown,
-  FiCheckCircle, FiX, FiBell, FiCamera, FiLayers
+  FiCheckCircle, FiX, FiBell, FiCamera, FiLayers, FiDollarSign
 } from 'react-icons/fi'
 import { useAuth } from '../../context/AuthContext'
 import { NotificationBell, showToast } from '../ui'
 import { api } from '../../lib/api'
 import { useTheme } from '../../context/ThemeContext'
 import ProfileModal from './ProfileModal'
+import EmployeePinVerificationModal from '../attendance/EmployeePinVerificationModal'
 import { TbCurrencyPeso } from 'react-icons/tb'
 
 const icons = {
   dashboard: <FiHome className="w-4 h-4 flex-shrink-0" />,
   products: <FiPackage className="w-4 h-4 flex-shrink-0" />,
-  customers: <FiUsers className="w-4 h-4 flex-shrink-0" />,
+  customers: <FiUser className="w-4 h-4 flex-shrink-0" />,
   sales: <FiShoppingCart className="w-4 h-4 flex-shrink-0" />,
   installment: <FiCreditCard className="w-4 h-4 flex-shrink-0" />,
   schedule: <FiCalendar className="w-4 h-4 flex-shrink-0" />,
-  payments: <TbCurrencyPeso className="w-4 h-4 flex-shrink-0" />,
-  employees: <FiUser className="w-4 h-4 flex-shrink-0" />,
-  payroll: <TbCurrencyPeso className="w-4 h-4 flex-shrink-0" />,
+  payments: <FiDollarSign className="w-4 h-4 flex-shrink-0" />,
+  employees: <FiUsers className="w-4 h-4 flex-shrink-0" />,
+  payroll: <FiDollarSign className="w-4 h-4 flex-shrink-0" />,
   attendance: <FiClock className="w-4 h-4 flex-shrink-0" />,
   qr: <FiCamera className="w-4 h-4 flex-shrink-0" />,
   reports: <FiBarChart2 className="w-4 h-4 flex-shrink-0" />,
@@ -43,6 +44,19 @@ function navByRole(role) {
       { label: 'My Attendance QR', path: '/employee/attendance', icon: icons.attendance },
       { label: 'My Payroll', path: '/employee/payroll', icon: icons.payroll },
       { label: 'My Payslips', path: '/employee/payslips', icon: icons.payslip },
+      {
+        label: 'My Details',
+        icon: icons.employees,
+        items: [
+          { label: 'Employees & QR', path: '/employees', icon: icons.employees }
+        ],
+      }
+    ]
+  }
+
+  if (role === 'Customer') {
+    return [
+      { label: 'My Dashboard', path: '/customer/dashboard', icon: icons.dashboard },
     ]
   }
 
@@ -81,6 +95,7 @@ function navByRole(role) {
     label: 'System Management',
     icon: icons.settings,
     items: [
+      { label: 'Admin Interface', path: '/admin-dashboard', icon: icons.shield },
       { label: 'Users', path: '/users', icon: icons.users },
       { label: 'System Logs', path: '/system-logs', icon: icons.logs },
       { label: 'Backup & Restore', path: '/backups', icon: icons.backup },
@@ -99,6 +114,15 @@ function navByRole(role) {
 
   if (isAdmin) {
     base.push(payroll)
+  } else if (isStoreAdmin) {
+    // Store Admins only see their branch employees
+    base.push({
+      label: 'Branch Staff',
+      icon: icons.employees,
+      items: [
+        { label: 'Employees & QR', path: '/employees', icon: icons.employees }
+      ],
+    })
   }
 
   base.push({ label: isAdmin ? 'Attendance Logs' : 'Branch Attendance', path: '/attendance', icon: icons.attendance })
@@ -164,7 +188,7 @@ function Sidebar({ collapsed }) {
   const { user } = useAuth()
   const navItems = user ? navByRole(user.role) : []
 
-  if (!user) return null
+  if (!user || user.role === 'Customer') return null
 
   return (
     <aside
@@ -367,13 +391,15 @@ function Header({
     <header className="h-14 border-b border-border bg-card px-4 flex items-center justify-between gap-4 flex-shrink-0 z-30">
       {/* Left: toggle + title */}
       <div className="flex items-center gap-3">
-        <button
-          onClick={onToggle}
-          className="w-8 h-8 rounded-xl hover:bg-muted flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
-          aria-label="Toggle sidebar"
-        >
-          <FiMenu className="w-4 h-4" />
-        </button>
+        {user?.role !== 'Customer' && (
+          <button
+            onClick={onToggle}
+            className="w-8 h-8 rounded-xl hover:bg-muted flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+            aria-label="Toggle sidebar"
+          >
+            <FiMenu className="w-4 h-4" />
+          </button>
+        )}
         <h1 className="text-sm font-bold text-foreground truncate">{title}</h1>
       </div>
 
@@ -543,12 +569,16 @@ function Header({
             onClick={() => setUserOpen(o => !o)}
             className="flex items-center gap-2 px-2.5 py-1.5 rounded-xl border border-border bg-muted/30 hover:bg-muted transition-colors cursor-pointer shadow-2xs"
           >
-            <div className="w-7 h-7 rounded-full bg-primary flex items-center justify-center text-primary-foreground text-xs font-bold">
-              {user.name ? user.name[0] : 'U'}
+            <div className="w-7 h-7 rounded-full bg-primary flex items-center justify-center text-primary-foreground text-xs font-bold overflow-hidden shadow-xs shrink-0">
+              {user?.profile_image ? (
+                <img src={user.profile_image} alt="Profile" className="w-full h-full object-cover" />
+              ) : (
+                user?.name ? user.name[0] : 'U'
+              )}
             </div>
             <div className="hidden sm:block text-left">
-              <div className="text-xs font-semibold text-foreground leading-tight">{user.name ? user.name.split(' ')[0] : 'User'}</div>
-              <div className="text-[10px] text-muted-foreground font-mono leading-tight">{user.role}</div>
+              <div className="text-xs font-semibold text-foreground leading-tight">{user?.name ? user.name.split(' ')[0] : 'User'}</div>
+              <div className="text-[10px] text-muted-foreground font-mono leading-tight">{user?.role}</div>
             </div>
           </button>
           {userOpen && (
@@ -624,6 +654,7 @@ const ROUTE_TITLES = {
   '/employee/attendance': 'My Attendance',
   '/employee/payroll': 'My Payroll',
   '/employee/payslips': 'My Payslips',
+  '/customer/dashboard': 'My Dashboard',
 }
 
 export default function AppShell() {
@@ -631,11 +662,12 @@ export default function AppShell() {
   const [profileOpen, setProfileOpen] = useState(false)
   const [notifs, setNotifs] = useState([])
   const [unreadCount, setUnreadCount] = useState(0)
+  const [pendingVerification, setPendingVerification] = useState(null) // New State for PIN verification
   const location = useLocation()
   const navigate = useNavigate()
   const { user } = useAuth()
 
-  const loadNotifications = async () => {
+  const loadData = async () => {
     if (!user) return
     try {
       const res = await api.notifications.getLatest({ limit: 15 })
@@ -644,11 +676,26 @@ export default function AppShell() {
     } catch (e) {
       // Background notifications failure should not break app
     }
+
+    // New: Poll for pending attendance verifications if Employee
+    if (user.role === 'Employee' || user.role === 'Store Administrator' || user.role === 'Store Admin') {
+      try {
+        const pRes = await api.attendance.pendingVerifications()
+        if (pRes.pending && pRes.pending.length > 0) {
+          // If there's a new pending request that we aren't currently showing, show it
+          if (!pendingVerification || pendingVerification.id !== pRes.pending[0].id) {
+            setPendingVerification(pRes.pending[0])
+          }
+        }
+      } catch (e) {
+        // Ignored
+      }
+    }
   }
 
   useEffect(() => {
-    loadNotifications()
-    const timer = setInterval(loadNotifications, 15000)
+    loadData()
+    const timer = setInterval(loadData, 10000) // Lowered to 10s for better responsiveness
     return () => clearInterval(timer)
   }, [user])
 
@@ -702,7 +749,7 @@ export default function AppShell() {
           unreadCount={unreadCount}
           onMarkAllRead={handleMarkAllRead}
           onNotificationClick={handleNotificationClick}
-          onRefreshNotifs={loadNotifications}
+          onRefreshNotifs={loadData}
         />
 
         <main className="flex-1 overflow-y-auto p-4 md:p-6 bg-background">
@@ -715,6 +762,12 @@ export default function AppShell() {
       <ProfileModal 
         isOpen={profileOpen} 
         onClose={() => setProfileOpen(false)} 
+      />
+
+      <EmployeePinVerificationModal
+        request={pendingVerification}
+        onClose={() => setPendingVerification(null)}
+        onSuccess={() => setPendingVerification(null)}
       />
     </div>
   )

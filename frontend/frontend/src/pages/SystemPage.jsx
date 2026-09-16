@@ -10,6 +10,7 @@ import {
   Btn, Badge, StatusBadge, Input, Select, Textarea, Modal, ConfirmDialog,
   Table, TR, TD, SearchBar, PageHeader, StatCard, Card, CardHeader, Pagination,
   TabBar, showToast, LoadingState, ErrorAlert, TableSkeleton, EmptyState,
+  showLoading, closeLoading
 } from '../components/ui'
 import { fmtDate, filterBySearch } from '../lib/utils'
 import { useAuth } from '../context/AuthContext'
@@ -117,12 +118,15 @@ export default function SystemPage({ defaultTab = 'users' }) {
   // User Actions
   const handleSaveUser = async (e) => {
     e.preventDefault()
+    showLoading('Saving user...')
     if (!userForm.username) {
       showToast('Username is required', 'error')
+      closeLoading()
       return
     }
     if (!editUser && !userForm.password) {
       showToast('Password is required for new user', 'error')
+      closeLoading()
       return
     }
 
@@ -150,11 +154,14 @@ export default function SystemPage({ defaultTab = 'users' }) {
       setUserForm({ username: '', password: '', role: 'Employee', is_active: true, employee_id: '' })
     } catch (err) {
       showToast(err.message || 'Failed to save user', 'error')
+    } finally {
+      closeLoading()
     }
   }
 
   const handleDeleteUser = async () => {
     if (!deleteUser) return
+    showLoading('Deleting user...')
     try {
       await api.system.deleteUser(deleteUser.user_id)
       setUsers(prev => prev.filter(u => u.user_id !== deleteUser.user_id))
@@ -162,6 +169,8 @@ export default function SystemPage({ defaultTab = 'users' }) {
       setDeleteUser(null)
     } catch (err) {
       showToast(err.message || 'Failed to delete user', 'error')
+    } finally {
+      closeLoading()
     }
   }
 
@@ -181,6 +190,7 @@ export default function SystemPage({ defaultTab = 'users' }) {
   const handleConfirmVerifyUser = async () => {
     if (!verifyConfirmUser) return
     setIsVerifying(true)
+    showLoading('Verifying account...')
     try {
       const res = await api.system.verifyUser(verifyConfirmUser.user_id)
       showToast(res.message || 'User account verified successfully', 'success')
@@ -203,12 +213,14 @@ export default function SystemPage({ defaultTab = 'users' }) {
       showToast(err.message || 'Failed to verify user account', 'error')
     } finally {
       setIsVerifying(false)
+      closeLoading()
     }
   }
 
   const handleConfirmRevokeUser = async () => {
     if (!revokeConfirmUser) return
     setIsVerifying(true)
+    showLoading('Revoking verification...')
     try {
       const res = await api.system.revokeUserVerification(revokeConfirmUser.user_id)
       showToast(res.message || 'Account verification revoked', 'success')
@@ -231,12 +243,14 @@ export default function SystemPage({ defaultTab = 'users' }) {
       showToast(err.message || 'Failed to revoke verification', 'error')
     } finally {
       setIsVerifying(false)
+      closeLoading()
     }
   }
 
   // Backup Actions
   const handleCreateBackup = async () => {
     setBackingUp(true)
+    showLoading('Creating database backup...')
     try {
       const res = await api.system.createBackup(user?.user_id || 1)
       showToast(res.message || 'Manual backup completed successfully', 'success')
@@ -245,11 +259,13 @@ export default function SystemPage({ defaultTab = 'users' }) {
       showToast(err.message || 'Failed to create database backup', 'error')
     } finally {
       setBackingUp(false)
+      closeLoading()
     }
   }
 
   const handleRestoreBackup = async () => {
     if (!restoringItem) return
+    showLoading('Restoring database...')
     try {
       const res = await api.system.restoreBackup(restoringItem.backup_id, user?.user_id || 1)
       showToast(res.message || 'Database restored successfully', 'success')
@@ -257,6 +273,8 @@ export default function SystemPage({ defaultTab = 'users' }) {
       loadTabData('backups')
     } catch (err) {
       showToast(err.message || 'Failed to restore backup', 'error')
+    } finally {
+      closeLoading()
     }
   }
 
@@ -264,6 +282,7 @@ export default function SystemPage({ defaultTab = 'users' }) {
   const handleSaveSettings = async (e) => {
     e.preventDefault()
     setSavingSettings(true)
+    showLoading('Saving settings...')
     try {
       await api.system.saveSettings({
         ...settings,
@@ -274,6 +293,7 @@ export default function SystemPage({ defaultTab = 'users' }) {
       showToast(err.message || 'Failed to save settings', 'error')
     } finally {
       setSavingSettings(false)
+      closeLoading()
     }
   }
 
@@ -357,6 +377,7 @@ export default function SystemPage({ defaultTab = 'users' }) {
                       <th className="py-3 px-4 text-left">User / Name</th>
                       <th className="py-3 px-4 text-left">Username</th>
                       <th className="py-3 px-4 text-left">Role</th>
+                      <th className="py-3 px-4 text-left">Branch</th>
                       <th className="py-3 px-4 text-left">Linked Employee</th>
                       <th className="py-3 px-4 text-center">Status</th>
                       <th className="py-3 px-4 text-center">Verification</th>
@@ -365,7 +386,7 @@ export default function SystemPage({ defaultTab = 'users' }) {
                   </thead>
                   <tbody className="divide-y divide-border">
                     {filteredUsers.map((u, i) => {
-                      const empName = u.employee ? trimName(u.employee) : 'System Account'
+                      const empName = u.employee ? trimName(u.employee) : (u.customer ? trimName(u.customer) : 'System Account')
                       const isVerified = Boolean(u.account_verified)
                       return (
                         <tr key={u.user_id || i} className={`hover:bg-muted/40 transition-colors ${i % 2 === 1 ? 'bg-muted/10' : ''}`}>
@@ -388,6 +409,11 @@ export default function SystemPage({ defaultTab = 'users' }) {
                             />
                           </td>
                           <td className="py-3 px-4">
+                            <span className="text-xs font-semibold text-foreground/80">
+                              {u.employee?.branch?.name || u.customer?.branch?.name || (u.role === 'Customer' ? 'Online' : '—')}
+                            </span>
+                          </td>
+                          <td className="py-3 px-4">
                             {u.employee ? (
                               <div className="text-xs">
                                 <span className="font-mono font-bold text-primary">{u.employee.employee_code}</span>
@@ -399,7 +425,9 @@ export default function SystemPage({ defaultTab = 'users' }) {
                           </td>
                           <td className="py-3 px-4 text-center"><StatusBadge status={u.is_active ? 'Active' : 'Inactive'} /></td>
                           <td className="py-3 px-4 text-center">
-                            {isVerified ? (
+                            {u.role === 'Customer' ? (
+                              <span className="text-xs text-muted-foreground italic">—</span>
+                            ) : isVerified ? (
                               <span className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-300 dark:border-emerald-800 px-2.5 py-0.5 rounded-full">
                                 <FiCheckCircle className="w-3 h-3 text-emerald-500" />
                                 <span>Verified</span>
@@ -761,7 +789,7 @@ export default function SystemPage({ defaultTab = 'users' }) {
                   </div>
                   <div>
                     <span className="text-[10px] uppercase font-bold text-muted-foreground block">Branch</span>
-                    <p className="font-semibold text-foreground">{selectedUserDetail.employee.branch || '—'}</p>
+                    <p className="font-semibold text-foreground">{selectedUserDetail.employee.branch?.name || '—'}</p>
                   </div>
                   <div>
                     <span className="text-[10px] uppercase font-bold text-muted-foreground block">Phone</span>
@@ -776,7 +804,8 @@ export default function SystemPage({ defaultTab = 'users' }) {
               )}
             </div>
 
-            {/* Account Verification Section */}
+            {/* Account Verification Section - Employee/Admin Only */}
+            {selectedUserDetail.role !== 'Customer' && (
             <div className="space-y-2">
               <span className="text-xs font-bold uppercase tracking-wider text-foreground block">
                 Verification State
@@ -839,6 +868,55 @@ export default function SystemPage({ defaultTab = 'users' }) {
                 </div>
               )}
             </div>
+            )}
+
+            {/* Customer Details - Customer Role Only */}
+            {selectedUserDetail.role === 'Customer' && (
+              <div className="space-y-2">
+                <span className="text-xs font-bold uppercase tracking-wider text-foreground block">
+                  Customer Details
+                </span>
+                <div className="p-3.5 bg-card rounded-xl border border-border space-y-2.5">
+                  {selectedUserDetail.customer ? (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2.5">
+                      <div>
+                        <span className="text-[10px] uppercase font-bold text-muted-foreground block">Customer Code</span>
+                        <p className="font-mono font-bold text-primary">{selectedUserDetail.customer.customer_code || '—'}</p>
+                      </div>
+                      <div>
+                        <span className="text-[10px] uppercase font-bold text-muted-foreground block">Full Name</span>
+                        <p className="font-semibold text-foreground">{selectedUserDetail.customer.first_name} {selectedUserDetail.customer.last_name}</p>
+                      </div>
+                      <div>
+                        <span className="text-[10px] uppercase font-bold text-muted-foreground block">Phone</span>
+                        <p className="font-mono font-semibold text-foreground">{selectedUserDetail.customer.phone || '—'}</p>
+                      </div>
+                      <div>
+                        <span className="text-[10px] uppercase font-bold text-muted-foreground block">Email</span>
+                        <p className="font-semibold text-foreground">{selectedUserDetail.customer.email || '—'}</p>
+                      </div>
+                      <div>
+                        <span className="text-[10px] uppercase font-bold text-muted-foreground block">Branch</span>
+                        <p className="font-semibold text-foreground">{selectedUserDetail.customer.branch?.name || 'Unassigned'}</p>
+                      </div>
+                      <div>
+                        <span className="text-[10px] uppercase font-bold text-muted-foreground block">Status</span>
+                        <StatusBadge status={selectedUserDetail.customer.status || 'Active'} />
+                      </div>
+                      <div className="col-span-full">
+                        <span className="text-[10px] uppercase font-bold text-muted-foreground block">Address</span>
+                        <p className="font-semibold text-foreground">{selectedUserDetail.customer.address || '—'}</p>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="p-3 bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800 text-amber-800 dark:text-amber-300 rounded-xl text-xs flex items-center gap-2">
+                      <FiAlertTriangle className="w-4 h-4 shrink-0 text-amber-500" />
+                      <span>This user account is not linked to a customer profile.</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
 
             <div className="flex justify-end pt-2 border-t border-border">
               <button

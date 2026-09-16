@@ -10,7 +10,7 @@ class Product extends Model
     protected $fillable = [
         'product_code', 'product_name', 'category', 'brand', 'description', 
         'unit_price', 'cost_price', 'stock_quantity', 'reorder_level', 
-        'unit', 'status'
+        'unit', 'status', 'image_url'
     ];
 
     // Relationships

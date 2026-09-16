@@ -4,19 +4,23 @@ import {
   FiUser, FiUsers, FiPlus, FiEdit, FiTrash2, FiEye,
   FiPhone, FiMapPin, FiMail, FiSearch,
   FiCreditCard, FiCheckCircle, FiAlertTriangle, FiX,
-  FiClock, FiFileText, FiFilter
+  FiClock, FiFileText, FiFilter, FiGitBranch
 } from 'react-icons/fi'
 import {
   Btn, Badge, StatusBadge, Input, Select, Textarea, Modal, ConfirmDialog,
   Table, TR, TD, SearchBar, PageHeader, StatCard, Card, Pagination, showToast,
-  TabBar, LoadingState, ErrorAlert, StatSkeleton, TableSkeleton, EmptyState,
+  TabBar, LoadingState, ErrorAlert, StatSkeleton, TableSkeleton, EmptyState, confirmAction,
 } from '../components/ui'
 import { fmt, filterBySearch } from '../lib/utils'
 import api, { downloadCsv } from '../lib/api'
 import { FiDownload } from 'react-icons/fi'
 import { TbCurrencyPeso } from 'react-icons/tb'
+import { useAuth } from '../context/AuthContext'
 
-export default function CustomersPage() {
+export default function CustomersPage({ branchFilter, embedded }) {
+  const { user } = useAuth()
+  const isAdmin = user?.role === 'Administrator'
+  const isStoreAdmin = user?.role === 'Store Administrator' || user?.role === 'Store Admin'
   const [searchParams] = useSearchParams()
   const [customers, setCustomers] = useState([])
   const [loading, setLoading] = useState(true)
@@ -29,12 +33,18 @@ export default function CustomersPage() {
   // Modals
   const [addModal, setAddModal] = useState(false)
   const [editItem, setEditItem] = useState(null)
-  const [deleteItem, setDeleteItem] = useState(null)
   const [detailCustomer, setDetailCustomer] = useState(null)
   const [detailTab, setDetailTab] = useState('profile')
   const [detailLoading, setDetailLoading] = useState(false)
   const [saving, setSaving] = useState(false)
   const [exporting, setExporting] = useState(false)
+
+  // Branch assignment (Admin only)
+  const [branches, setBranches] = useState([])
+  const [assignBranchModal, setAssignBranchModal] = useState(false)
+  const [assignBranchCustomer, setAssignBranchCustomer] = useState(null)
+  const [selectedBranchId, setSelectedBranchId] = useState('')
+  const [assigningSaving, setAssigningSaving] = useState(false)
 
   const handleExport = async () => {
     setExporting(true)
@@ -42,12 +52,47 @@ export default function CustomersPage() {
       await downloadCsv('/customers', {
         search: search || undefined,
         status: statusFilter !== 'All' ? statusFilter : undefined,
+        branch: branchFilter || undefined,
       })
       showToast('Customers exported successfully', 'success')
     } catch (err) {
       showToast(err.message || 'Export failed', 'error')
     } finally {
       setExporting(false)
+    }
+  }
+
+  // Load branches list for Admin assign-branch feature
+  useEffect(() => {
+    if (isAdmin) {
+      api.branches.getAll().then(res => setBranches(res.branches || [])).catch(() => {})
+    }
+  }, [isAdmin])
+
+  const openAssignBranch = (c) => {
+    setAssignBranchCustomer(c)
+    setSelectedBranchId(c.branch_id !== null && c.branch_id !== undefined ? String(c.branch_id) : '')
+    setAssignBranchModal(true)
+  }
+
+  const handleAssignBranch = async () => {
+    if (!assignBranchCustomer) return
+    setAssigningSaving(true)
+    try {
+      const branchId = selectedBranchId === '' ? null : parseInt(selectedBranchId)
+      const res = await api.customers.assignBranch(assignBranchCustomer.customer_id, branchId)
+      setCustomers(prev => prev.map(c =>
+        c.customer_id === assignBranchCustomer.customer_id
+          ? { ...c, branch_id: res.branch_id, branch_name: res.branch_name }
+          : c
+      ))
+      showToast(`Branch updated to: ${res.branch_name}`, 'success')
+      setAssignBranchModal(false)
+      setAssignBranchCustomer(null)
+    } catch (err) {
+      showToast(err.message || 'Failed to assign branch', 'error')
+    } finally {
+      setAssigningSaving(false)
     }
   }
 
@@ -65,6 +110,7 @@ export default function CustomersPage() {
       const data = await api.customers.getAll({
         search: search || undefined,
         status: statusFilter !== 'All' ? statusFilter : undefined,
+        branch: branchFilter || undefined,
       })
       setCustomers(data.customers || [])
     } catch (err) {
@@ -97,7 +143,6 @@ export default function CustomersPage() {
     try {
       if (editItem) {
         const res = await api.customers.update(editItem.customer_id, form)
-        // Automatic state update
         if (res.customer) {
           setCustomers(prev => prev.map(c => c.customer_id === editItem.customer_id ? res.customer : c))
         } else {
@@ -105,13 +150,14 @@ export default function CustomersPage() {
         }
         showToast('Customer updated successfully', 'success')
       } else {
+        // Create new customer
         const res = await api.customers.create(form)
         if (res.customer) {
-          setCustomers(prev => [res.customer, ...prev])
+          setCustomers(prev => [...prev, res.customer])
         } else {
           loadCustomers()
         }
-        showToast('Customer created successfully', 'success')
+        showToast('Customer added successfully', 'success')
       }
       setAddModal(false)
       setEditItem(null)
@@ -123,14 +169,18 @@ export default function CustomersPage() {
     }
   }
 
-  const handleDelete = async () => {
-    if (!deleteItem) return
+  const handleDelete = async (customer) => {
+    const confirmed = await confirmAction('Delete Customer?', `Are you sure you want to delete ${customer.first_name} ${customer.last_name}? This cannot be undone.`, 'Yes, Delete')
+    if (!confirmed) return
+
     setSaving(true)
     try {
-      await api.customers.delete(deleteItem.customer_id)
-      setCustomers(prev => prev.filter(c => c.customer_id !== deleteItem.customer_id))
+      await api.customers.delete(customer.customer_id)
+      setCustomers(prev => prev.filter(c => c.customer_id !== customer.customer_id))
       showToast('Customer deleted successfully', 'success')
-      setDeleteItem(null)
+      if (detailCustomer?.customer?.customer_id === customer.customer_id) {
+        setDetailCustomer(null)
+      }
     } catch (err) {
       showToast(err.message || 'Failed to delete customer', 'error')
     } finally {
@@ -182,30 +232,36 @@ export default function CustomersPage() {
   const customersWithBalance = customers.filter(c => (c.balance || 0) > 0).length
 
   return (
-    <div className="space-y-6">
-      <PageHeader
-        title="Customer Management"
-        subtitle="Manage customer records, credit histories, and installment accounts"
-        action={
-          <div className="flex gap-2">
-            <button
-              onClick={handleExport}
-              disabled={exporting}
-              className="flex items-center gap-2 px-4 py-2 bg-muted hover:bg-muted/80 text-foreground font-semibold text-xs rounded-xl shadow-xs transition-all cursor-pointer disabled:opacity-50"
-            >
-              {exporting ? <FiAlertTriangle className="w-4 h-4 animate-spin" /> : <FiDownload className="w-4 h-4" />}
-              <span>{exporting ? 'Exporting...' : 'Export CSV'}</span>
-            </button>
-            <button
-              onClick={() => { setEditItem(null); setForm(emptyForm); setAddModal(true) }}
-              className="flex items-center gap-2 px-4 py-2 bg-primary hover:bg-primary/90 text-primary-foreground font-semibold text-xs rounded-xl shadow-xs transition-all cursor-pointer"
-            >
-              <FiPlus className="w-4 h-4" />
-              <span>Add Customer</span>
-            </button>
-          </div>
-        }
-      />
+    <div className={embedded ? "" : "space-y-6"}>
+      {!embedded && (
+        <PageHeader
+          title="Customer Management"
+          subtitle="Manage customer records, credit histories, and installment accounts"
+          action={
+            <div className="flex gap-2">
+              <button
+                onClick={handleExport}
+                disabled={exporting}
+                className="flex items-center gap-2 px-4 py-2 bg-muted hover:bg-muted/80 text-foreground font-semibold text-xs rounded-xl shadow-xs transition-all cursor-pointer disabled:opacity-50"
+              >
+                {exporting ? <FiAlertTriangle className="w-4 h-4 animate-spin" /> : <FiDownload className="w-4 h-4" />}
+                <span>{exporting ? 'Exporting...' : 'Export CSV'}</span>
+              </button>
+
+              {isStoreAdmin && (
+                <button
+                  onClick={() => { setForm(emptyForm); setEditItem(null); setAddModal(true) }}
+                  className="flex items-center gap-2 px-4 py-2 bg-primary hover:bg-primary/90 text-primary-foreground font-semibold text-xs rounded-xl shadow-xs transition-all cursor-pointer"
+                >
+                  <FiPlus className="w-4 h-4" />
+                  <span>Add Customer</span>
+                </button>
+              )}
+
+            </div>
+          }
+        />
+      )}
 
       {/* Stats */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
@@ -262,15 +318,7 @@ export default function CustomersPage() {
             icon={<FiUsers className="w-12 h-12 text-muted-foreground/30 mx-auto" />}
             title="No customers found"
             description={search || statusFilter !== 'All' ? 'Try adjusting your search query or filters' : 'Add your first customer to get started'}
-            action={
-              <button
-                onClick={() => { setEditItem(null); setForm(emptyForm); setAddModal(true) }}
-                className="flex items-center gap-1.5 px-3.5 py-1.5 bg-primary text-primary-foreground font-bold text-xs rounded-xl cursor-pointer"
-              >
-                <FiPlus className="w-4 h-4" />
-                <span>Add Customer</span>
-              </button>
-            }
+            action={null}
           />
         ) : (
           <>
@@ -281,7 +329,7 @@ export default function CustomersPage() {
                     <th className="py-3 px-4 text-left">Customer Code</th>
                     <th className="py-3 px-4 text-left">Full Name</th>
                     <th className="py-3 px-4 text-left">Contact Info</th>
-                    <th className="py-3 px-4 text-left">Address</th>
+                    <th className="py-3 px-4 text-left">Branch</th>
                     <th className="py-3 px-4 text-center">Active Accounts</th>
                     <th className="py-3 px-4 text-right">Total Balance</th>
                     <th className="py-3 px-4 text-center">Status</th>
@@ -315,11 +363,17 @@ export default function CustomersPage() {
                           )}
                         </div>
                       </td>
-                      <td className="py-3 px-4 text-muted-foreground">
-                        <div className="flex items-center gap-1 truncate max-w-[200px]" title={c.address}>
-                          <FiMapPin className="w-3 h-3 shrink-0" />
-                          <span className="truncate">{c.address || '—'}</span>
-                        </div>
+                      <td className="py-3 px-4">
+                        {c.branch_name ? (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300">
+                            <FiGitBranch className="w-3 h-3" />
+                            {c.branch_name}
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300">
+                            Unassigned
+                          </span>
+                        )}
                       </td>
                       <td className="py-3 px-4 text-center">
                         <span className="font-mono text-xs px-2.5 py-0.5 rounded-full bg-primary/10 text-primary font-bold">
@@ -334,7 +388,7 @@ export default function CustomersPage() {
                       <td className="py-3 px-4 text-center">
                         <StatusBadge status={c.status} />
                       </td>
-                      <td className="py-3 px-4 text-center">
+                        <td className="py-3 px-4 text-center">
                         <div className="flex items-center justify-center gap-1">
                           <button
                             onClick={() => openDetail(c)}
@@ -343,20 +397,33 @@ export default function CustomersPage() {
                           >
                             <FiEye className="w-3.5 h-3.5" />
                           </button>
-                          <button
-                            onClick={() => openEdit(c)}
-                            title="Edit profile"
-                            className="p-1.5 rounded-lg border border-border hover:bg-muted text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
-                          >
-                            <FiEdit className="w-3.5 h-3.5" />
-                          </button>
-                          <button
-                            onClick={() => setDeleteItem(c)}
-                            title="Delete customer"
-                            className="p-1.5 rounded-lg border border-border hover:bg-rose-50 hover:text-rose-600 dark:hover:bg-rose-950/40 text-muted-foreground transition-colors cursor-pointer"
-                          >
-                            <FiTrash2 className="w-3.5 h-3.5" />
-                          </button>
+                          {isAdmin && (
+                            <button
+                              onClick={() => openAssignBranch(c)}
+                              title="Assign to branch"
+                              className="p-1.5 rounded-lg border border-border hover:bg-blue-50 hover:text-blue-600 dark:hover:bg-blue-900/30 text-muted-foreground transition-colors cursor-pointer"
+                            >
+                              <FiGitBranch className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                          {(isStoreAdmin || !isAdmin) && (
+                            <button
+                              onClick={() => openEdit(c)}
+                              title="Edit profile"
+                              className="p-1.5 rounded-lg border border-border hover:bg-muted text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+                            >
+                              <FiEdit className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                          {(isStoreAdmin || !isAdmin) && (
+                            <button
+                              onClick={() => handleDelete(c)}
+                              title="Delete customer"
+                              className="p-1.5 rounded-lg border border-border hover:bg-rose-50 hover:text-rose-600 dark:hover:bg-rose-950/40 text-muted-foreground transition-colors cursor-pointer"
+                            >
+                              <FiTrash2 className="w-3.5 h-3.5" />
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -373,8 +440,8 @@ export default function CustomersPage() {
       {addModal && (
         <Modal
           isOpen={true}
-          title={editItem ? `Edit Customer — ${editItem.customer_code}` : 'Register New Customer'}
-          onClose={() => { setAddModal(false); setEditItem(null) }}
+          title={editItem ? `Edit Customer — ${editItem?.customer_code || ''}` : 'Add New Customer'}
+          onClose={() => { setAddModal(false); setEditItem(null); setForm(emptyForm) }}
           size="md"
         >
           <form onSubmit={handleSave} className="space-y-3.5 text-xs">
@@ -512,46 +579,6 @@ export default function CustomersPage() {
               </button>
             </div>
           </form>
-        </Modal>
-      )}
-
-      {/* Delete Confirmation Modal */}
-      {deleteItem && (
-        <Modal
-          isOpen={true}
-          title="Delete Customer Record"
-          onClose={() => setDeleteItem(null)}
-          size="sm"
-        >
-          <div className="space-y-3 text-xs">
-            <div className="p-3 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900 rounded-xl text-rose-800 dark:text-rose-300 flex items-start gap-2.5">
-              <FiAlertTriangle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
-              <div>
-                <div className="font-bold text-sm">Delete this customer?</div>
-                <div className="mt-1 opacity-90">
-                  Customer <strong>{deleteItem.first_name} {deleteItem.last_name}</strong> ({deleteItem.customer_code}) will be removed.
-                </div>
-              </div>
-            </div>
-
-            <div className="flex justify-end gap-2 pt-2">
-              <button
-                type="button"
-                onClick={() => setDeleteItem(null)}
-                className="px-3.5 py-1.5 rounded-xl border border-border hover:bg-muted font-semibold cursor-pointer"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={handleDelete}
-                disabled={saving}
-                className="px-4 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold cursor-pointer"
-              >
-                {saving ? 'Deleting...' : 'Delete Customer'}
-              </button>
-            </div>
-          </div>
         </Modal>
       )}
 
@@ -720,6 +747,67 @@ export default function CustomersPage() {
               </div>
             </div>
           )}
+        </Modal>
+      )}
+
+      {/* Assign Branch Modal — Admin Only */}
+      {isAdmin && assignBranchModal && assignBranchCustomer && (
+        <Modal
+          isOpen={true}
+          title={`Assign Branch — ${assignBranchCustomer.first_name} ${assignBranchCustomer.last_name}`}
+          onClose={() => { setAssignBranchModal(false); setAssignBranchCustomer(null) }}
+          size="sm"
+        >
+          <div className="space-y-4 text-xs">
+            <div className="p-3 rounded-xl bg-muted/50 border border-border space-y-1">
+              <div className="text-muted-foreground">Customer Code</div>
+              <div className="font-mono font-bold text-foreground">{assignBranchCustomer.customer_code}</div>
+              <div className="text-muted-foreground mt-1">Current Branch</div>
+              <div className="font-semibold">
+                {assignBranchCustomer.branch_name ? (
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300">
+                    <FiGitBranch className="w-3 h-3" />
+                    {assignBranchCustomer.branch_name}
+                  </span>
+                ) : (
+                  <span className="text-amber-600">Unassigned</span>
+                )}
+              </div>
+            </div>
+
+            <div>
+              <label className="block font-bold text-muted-foreground mb-1.5">Assign to Branch</label>
+              <select
+                value={selectedBranchId}
+                onChange={e => setSelectedBranchId(e.target.value)}
+                className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground text-xs focus:outline-none focus:ring-2 focus:ring-primary/20"
+              >
+                <option value="">— Unassigned (no branch) —</option>
+                {branches.map(b => (
+                  <option key={b.id} value={String(b.id)}>{b.name}</option>
+                ))}
+              </select>
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => { setAssignBranchModal(false); setAssignBranchCustomer(null) }}
+                className="px-4 py-1.5 rounded-xl border border-border hover:bg-muted font-semibold cursor-pointer text-xs"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleAssignBranch}
+                disabled={assigningSaving}
+                className="px-4 py-1.5 rounded-xl bg-primary hover:bg-primary/90 text-primary-foreground font-semibold cursor-pointer text-xs disabled:opacity-50 flex items-center gap-1"
+              >
+                <FiGitBranch className="w-3.5 h-3.5" />
+                {assigningSaving ? 'Saving...' : 'Save Branch'}
+              </button>
+            </div>
+          </div>
         </Modal>
       )}
     </div>

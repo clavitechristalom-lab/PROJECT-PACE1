@@ -20,6 +20,18 @@ class SaleController extends Controller
     {
         $query = SaleTransaction::with(['customer', 'processedBy', 'items.product']);
 
+        $user = $request->user();
+
+        // Branch scoping for Store Administrator — use branch_id directly on sale_transactions
+        if ($user && in_array($user->role, ['Store Administrator', 'Store Admin'])) {
+            $userBranch = $user->employee ? $user->employee->branch_id : null;
+            if ($userBranch) {
+                $query->where('branch_id', $userBranch);
+            } else {
+                $query->where('sale_id', -1); // No branch — return empty
+            }
+        }
+
         if ($request->filled('search')) {
             $s = $request->query('search');
             $query->where(function ($q) use ($s) {
@@ -46,12 +58,17 @@ class SaleController extends Controller
             $query->whereDate('sale_date', '<=', $request->query('date_to'));
         }
 
+        if ($request->filled('branch') && $request->query('branch') !== 'All') {
+            $branch = $request->query('branch');
+            $query->where('branch_id', $branch);
+        }
+
         if ($request->boolean('export_csv')) {
             $user = $request->user();
             if ($user && in_array($user->role, ['Store Administrator', 'Store Admin'])) {
-                $branch = $user->employee ? $user->employee->branch : 'Main Branch';
+                $branch = $user->employee ? $user->employee->branch_id : null;
                 $query->whereHas('processedBy.employee', function($eq) use ($branch) {
-                    $eq->where('branch', $branch);
+                    $eq->where('branch_id', $branch);
                 });
             }
 
@@ -155,6 +172,10 @@ class SaleController extends Controller
 
     public function store(Request $request)
     {
+        if ($request->user() && $request->user()->role === 'Administrator') {
+            return response()->json(['success' => false, 'message' => 'Admin is not authorized to create sales.'], 403);
+        }
+
         $validated = $request->validate([
             'customer_id' => 'required|exists:customers,customer_id',
             'payment_method' => 'required|in:Cash,Installment',
@@ -199,18 +220,19 @@ class SaleController extends Controller
             $invoiceNo = 'INV-' . date('Y') . '-' . str_pad($invoiceCount, 3, '0', STR_PAD_LEFT);
 
             $sale = SaleTransaction::create([
-                'invoice_no' => $invoiceNo,
-                'customer_id' => $validated['customer_id'],
-                'processed_by' => $request->input('user_id', 1),
-                'sale_date' => now(),
-                'payment_method' => $payMethod,
-                'subtotal' => $subtotal,
+                'invoice_no'      => $invoiceNo,
+                'customer_id'     => $validated['customer_id'],
+                'processed_by'    => $request->user() ? $request->user()->user_id : $request->input('user_id', 1),
+                'branch_id'       => $request->user() && $request->user()->employee ? $request->user()->employee->branch_id : null,
+                'sale_date'       => now(),
+                'payment_method'  => $payMethod,
+                'subtotal'        => $subtotal,
                 'discount_amount' => $totalDiscount,
-                'total_amount' => $totalAmount,
-                'amount_paid' => $amountPaid,
-                'balance_due' => $balanceDue,
-                'status' => $status,
-                'notes' => $validated['notes'] ?? '',
+                'total_amount'    => $totalAmount,
+                'amount_paid'     => $amountPaid,
+                'balance_due'     => $balanceDue,
+                'status'          => $status,
+                'notes'           => $validated['notes'] ?? '',
             ]);
 
             // Create items and reduce stock
@@ -316,3 +338,4 @@ class SaleController extends Controller
         });
     }
 }
+

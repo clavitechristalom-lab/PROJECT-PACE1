@@ -6,6 +6,7 @@ use App\Http\Controllers\AuthController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\ProductController;
 use App\Http\Controllers\CustomerController;
+use App\Http\Controllers\CustomerDashboardController;
 use App\Http\Controllers\SaleController;
 use App\Http\Controllers\InstallmentController;
 use App\Http\Controllers\PaymentController;
@@ -18,15 +19,25 @@ use App\Http\Controllers\TransactionController;
 use App\Http\Controllers\SearchController;
 use App\Http\Controllers\NotificationController;
 use App\Http\Controllers\QrRequestController;
+use App\Http\Controllers\BranchController;
 
 // ─── Authentication (Public) ──────────────────────────────────────────────────
 Route::post('/login', [AuthController::class, 'login']);
 Route::post('/register', [AuthController::class, 'register']);
+Route::get('/registration-options', [AuthController::class, 'registrationOptions']);
 
 // ─── Protected Routes (Sanctum Authenticated) ─────────────────────────────────
 Route::middleware('auth:sanctum')->group(function () {
     Route::get('/me', [AuthController::class, 'me']);
     Route::post('/logout', [AuthController::class, 'logout']);
+    Route::post('/user/profile-image', [AuthController::class, 'uploadProfileImage']);
+
+    // Branches
+    Route::get('/branches', [BranchController::class, 'index']);
+    Route::post('/branches', [BranchController::class, 'store']);
+    Route::put('/branches/{id}', [BranchController::class, 'update']);
+    Route::delete('/branches/{id}', [BranchController::class, 'destroy']);
+    Route::post('/branches/{id}/image', [BranchController::class, 'uploadImage']);
 
     Route::get('/search', [SearchController::class, 'search']);
 
@@ -54,6 +65,8 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/customers', [CustomerController::class, 'store']);
     Route::put('/customers/{id}', [CustomerController::class, 'update']);
     Route::delete('/customers/{id}', [CustomerController::class, 'destroy']);
+    // Admin-only: assign customer to a branch
+    Route::put('/customers/{id}/branch', [CustomerController::class, 'assignBranch']);
 
     // ─── Sales ──────────────────────────────────────────────────────────────────
     Route::get('/sales', [SaleController::class, 'index']);
@@ -80,9 +93,11 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::put('/employee/me', [EmployeeController::class, 'updateMe']);
     Route::get('/employee/me/attendance', [AttendanceController::class, 'meAttendance']);
     Route::get('/employee/me/payroll', [PayrollController::class, 'mePayroll']);
-    Route::get('/employee/me/payslip/{id}', [PayrollController::class, 'show']);
+    Route::get('/employee/me/payslip/{id}', [PayrollController::class, 'mePayslip']);
     Route::post('/employee/verify-account', [EmployeeController::class, 'verifyAccount']);
     Route::post('/employee/me/verify', [EmployeeController::class, 'verifyMe']);
+    Route::post('/employee/me/verify-attendance-pin', [AttendanceController::class, 'approveVerification']);
+    Route::get('/employee/me/pending-verifications', [AttendanceController::class, 'pendingVerifications']);
     Route::get('/employees/{id}/qr', [EmployeeController::class, 'getQr']);
 
     // ─── Attendance QR Requests (Employee & Store Admin User Requests) ───────────
@@ -93,7 +108,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::middleware('role:Store Administrator,Store Admin')->group(function () {
         Route::post('/attendance/scan', [AttendanceController::class, 'scan']);
         Route::post('/attendance/verify-qr', [AttendanceController::class, 'verifyQr']);
-        Route::post('/attendance/verify-pin', [AttendanceController::class, 'verifyPinAndRecord']);
+        Route::get('/attendance/check-verification/{id}', [AttendanceController::class, 'checkVerification']);
     });
 
     // ─── Attendance Records & Summary (Scoped by Role) ───────────────────────────
@@ -109,6 +124,10 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/admin/qr-requests/{id}/approve', [QrRequestController::class, 'approve']);
         Route::post('/admin/qr-requests/{id}/reject', [QrRequestController::class, 'reject']);
 
+    });
+
+    // ─── Employee Management (Role-based access is handled in the controller) ────────
+    Route::middleware('role:Administrator,Store Administrator,Store Admin,Employee')->group(function () {
         Route::get('/employees', [EmployeeController::class, 'index']);
         Route::get('/employees/{id}', [EmployeeController::class, 'show']);
         Route::post('/employees', [EmployeeController::class, 'store']);
@@ -124,19 +143,34 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/employees/{id}/pin', [EmployeeController::class, 'setPin']);
         Route::post('/employees/{id}/verify', [EmployeeController::class, 'verifyEmployee']);
         Route::post('/employees/{id}/unverify', [EmployeeController::class, 'unverifyEmployee']);
+    });
+
+    Route::middleware('role:Administrator')->group(function () {
         Route::get('/admin/qr-monitoring', [EmployeeController::class, 'getQrMonitoringStats']);
+
+        // ─── Employee Financial Settings (Allowances, Deductions, Loans) ─────────
+        Route::get('/employees/{id}/financials', [\App\Http\Controllers\EmployeeFinancialController::class, 'getFinancials']);
+        Route::post('/employees/{id}/allowances', [\App\Http\Controllers\EmployeeFinancialController::class, 'addAllowance']);
+        Route::delete('/employees/allowances/{id}', [\App\Http\Controllers\EmployeeFinancialController::class, 'deleteAllowance']);
+        Route::post('/employees/{id}/deductions', [\App\Http\Controllers\EmployeeFinancialController::class, 'addDeduction']);
+        Route::delete('/employees/deductions/{id}', [\App\Http\Controllers\EmployeeFinancialController::class, 'deleteDeduction']);
+        Route::post('/employees/{id}/loans', [\App\Http\Controllers\EmployeeFinancialController::class, 'addLoan']);
+        Route::delete('/employees/loans/{id}', [\App\Http\Controllers\EmployeeFinancialController::class, 'deleteLoan']);
     });
 
     // ─── Payroll (Admin & Store Admin Scoped) ────────────────────────────────────
     Route::get('/payroll', [PayrollController::class, 'index']);
     Route::get('/payroll/{id}/payslip', [PayrollController::class, 'show']);
-    Route::post('/payroll/generate', [PayrollController::class, 'generate']);
-    Route::post('/payroll/generate-13th-month', [PayrollController::class, 'generate13thMonth']);
-    Route::put('/payroll/{id}/approve', [PayrollController::class, 'approve']);
-    Route::put('/payroll/{id}/mark-paid', [PayrollController::class, 'markPaid']);
     Route::get('/payroll-periods', [PayrollController::class, 'periods']);
-    Route::post('/payroll-periods', [PayrollController::class, 'storePeriod']);
-    Route::put('/payroll-periods/{id}/close', [PayrollController::class, 'closePeriod']);
+
+    Route::middleware('role:Store Administrator,Store Admin')->group(function () {
+        Route::post('/payroll/generate', [PayrollController::class, 'generate']);
+        Route::post('/payroll/generate-13th-month', [PayrollController::class, 'generate13thMonth']);
+        Route::put('/payroll/{id}/approve', [PayrollController::class, 'approve']);
+        Route::put('/payroll/{id}/mark-paid', [PayrollController::class, 'markPaid']);
+        Route::post('/payroll-periods', [PayrollController::class, 'storePeriod']);
+        Route::put('/payroll-periods/{id}/close', [PayrollController::class, 'closePeriod']);
+    });
 
     // ─── Reports ────────────────────────────────────────────────────────────────
     Route::get('/reports/employees', [ReportController::class, 'employees']);
@@ -177,4 +211,8 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/notifications/{id}/unread', [NotificationController::class, 'markAsUnread']);
     Route::delete('/notifications/clear-all', [NotificationController::class, 'clearAllRead']);
     Route::delete('/notifications/{id}', [NotificationController::class, 'destroy']);
+
+    // 🌟 Customer App 🌟
+    Route::get('/customer/dashboard', [CustomerDashboardController::class, 'getDashboard']);
+    Route::get('/customer/installments', [CustomerDashboardController::class, 'getInstallments']);
 });

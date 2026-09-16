@@ -7,7 +7,7 @@ import {
 } from 'react-icons/fi'
 import {
   Btn, Badge, StatusBadge, Input, Select, Modal,
-  Table, TR, TD, PageHeader, StatCard, Card, Pagination, showToast,
+  Table, TR, TD, PageHeader, StatCard, Card, Pagination, showToast, confirmAction, showLoading, closeLoading,
   TabBar, LoadingState, ErrorAlert, TableSkeleton, EmptyState,
 } from '../components/ui'
 import { fmt } from '../lib/utils'
@@ -15,6 +15,7 @@ import { useAuth } from '../context/AuthContext'
 import { api } from '../lib/api'
 import { ComposedChart, Bar, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend } from 'recharts'
 import { TbCurrencyPeso } from 'react-icons/tb'
+import EmployeePayslipModal from '../components/payslip/EmployeePayslipModal'
 
 export default function PayrollPage() {
   const [searchParams] = useSearchParams()
@@ -40,17 +41,37 @@ export default function PayrollPage() {
   const [endDate, setEndDate] = useState('')
   const [payDate, setPayDate] = useState('')
 
-  const loadData = async (targetPeriodId) => {
+  const loadData = async (targetPeriodId, customParams = {}) => {
     setLoading(true)
     setError('')
     try {
-      const data = await api.payroll.getAll({
-        period_id: targetPeriodId !== undefined ? (targetPeriodId || undefined) : (selectedPeriodId || undefined),
-      })
-      setPayroll(data.payroll || [])
-      setPeriods(data.periods || [])
-      if (!selectedPeriodId && data.periods?.length > 0 && targetPeriodId === undefined) {
-        setSelectedPeriodId(data.periods[0].period_id.toString())
+      if (user?.role === 'Employee') {
+        const data = await api.payroll.getMePayroll({
+          period_id: targetPeriodId !== undefined ? (targetPeriodId || undefined) : (selectedPeriodId || undefined),
+          from_date: customParams.fromDate || undefined,
+          to_date: customParams.toDate || undefined,
+          status: customParams.status || undefined,
+        })
+        setPayroll(data.payroll || [])
+        // if period_id wasn't in filters but it exists in the data, it's fine. We don't have periods list returned natively in mePayroll unless we add it, but wait! The admin endpoint returned periods. Let's fetch periods separately if needed, or rely on admin periods endpoint.
+        // Wait, for employee, we might not even need the period dropdown if we use from/to date, but the requirements said "Payroll Period dropdown".
+        // Let's fetch periods using api.payroll.getPeriods() if not already loaded.
+        if (periods.length === 0) {
+          const periodsData = await api.payroll.getPeriods().catch(() => ({ periods: [] }))
+          setPeriods(periodsData.periods || [])
+        }
+      } else {
+        const data = await api.payroll.getAll({
+          period_id: targetPeriodId !== undefined ? (targetPeriodId || undefined) : (selectedPeriodId || undefined),
+          from_date: customParams.fromDate || undefined,
+          to_date: customParams.toDate || undefined,
+          status: customParams.status || undefined,
+        })
+        setPayroll(data.payroll || [])
+        setPeriods(data.periods || [])
+        if (!selectedPeriodId && data.periods?.length > 0 && targetPeriodId === undefined) {
+          setSelectedPeriodId(data.periods[0].period_id.toString())
+        }
       }
     } catch (err) {
       console.error('Failed to load payroll:', err)
@@ -77,7 +98,11 @@ export default function PayrollPage() {
   }
 
   const handleGenerate = async () => {
+    const confirmed = await confirmAction('Generate Payroll', 'Are you sure you want to generate payroll for the selected period? This will process all attendance and deductions.', 'Yes, Generate')
+    if (!confirmed) return
+
     setGenerating(true)
+    showLoading('Generating payroll...')
     try {
       const res = await api.payroll.generate(user?.user_id || 1, selectedPeriodId ? parseInt(selectedPeriodId) : undefined)
       showToast(res.message || 'Payroll generated successfully', 'success')
@@ -86,11 +111,16 @@ export default function PayrollPage() {
       showToast(err.message || 'Failed to generate payroll', 'error')
     } finally {
       setGenerating(false)
+      closeLoading()
     }
   }
 
   const handleGenerate13thMonth = async () => {
+    const confirmed = await confirmAction('Generate 13th Month Pay', 'Are you sure you want to generate 13th Month Pay? This is typically done at the end of the year.', 'Yes, Generate')
+    if (!confirmed) return
+
     setGenerating(true)
+    showLoading('Processing 13th Month Pay...')
     try {
       const res = await api.payroll.generate13thMonth(user?.user_id || 1)
       showToast(res.message || '13th Month Pay generated successfully', 'success')
@@ -99,26 +129,39 @@ export default function PayrollPage() {
       showToast(err.message || 'Failed to generate 13th month pay', 'error')
     } finally {
       setGenerating(false)
+      closeLoading()
     }
   }
 
   const handleApprove = async (payrollId) => {
+    const confirmed = await confirmAction('Approve Payroll', 'Are you sure you want to approve this payroll record?', 'Yes, Approve')
+    if (!confirmed) return
+
+    showLoading('Approving payroll...')
     try {
       await api.payroll.approve(payrollId, user?.user_id || 1)
       setPayroll(prev => prev.map(p => p.payroll_id === payrollId ? { ...p, status: 'Approved' } : p))
       showToast('Payroll record approved', 'success')
     } catch (err) {
       showToast(err.message || 'Failed to approve payroll', 'error')
+    } finally {
+      closeLoading()
     }
   }
 
   const handleMarkPaid = async (payrollId) => {
+    const confirmed = await confirmAction('Mark as Paid', 'Are you sure you want to mark this payroll as Paid? This indicates the employee has received their money.', 'Yes, Mark Paid')
+    if (!confirmed) return
+
+    showLoading('Marking as paid...')
     try {
       await api.payroll.markPaid(payrollId)
       setPayroll(prev => prev.map(p => p.payroll_id === payrollId ? { ...p, status: 'Paid' } : p))
       showToast('Payroll marked as Paid', 'success')
     } catch (err) {
       showToast(err.message || 'Failed to update payroll status', 'error')
+    } finally {
+      closeLoading()
     }
   }
 
@@ -130,6 +173,7 @@ export default function PayrollPage() {
     }
 
     setSaving(true)
+    showLoading('Creating payroll period...')
     try {
       const res = await api.payroll.createPeriod({
         period_name: periodName,
@@ -150,16 +194,36 @@ export default function PayrollPage() {
       showToast(err.message || 'Failed to create period', 'error')
     } finally {
       setSaving(false)
+      closeLoading()
     }
   }
 
   const openPayslip = async (p) => {
     try {
-      const data = await api.payroll.getPayslip(p.payroll_id)
-      setPayslip(data.record)
+      if (user?.role === 'Employee') {
+        const data = await api.payroll.getMePayslip(p.payroll_id)
+        setPayslip(data.record)
+      } else if (['Administrator', 'Admin'].includes(user?.role)) {
+        // Admin gets the same professional payslip view
+        const data = await api.payroll.getPayslip(p.payroll_id)
+        setPayslip(data.record)
+      } else {
+        const data = await api.payroll.getPayslip(p.payroll_id)
+        setPayslip(data.record)
+      }
     } catch (err) {
       showToast(err.message || 'Failed to fetch payslip details', 'error')
     }
+  }
+
+  // Common Filters
+  const [fromDate, setFromDate] = useState('')
+  const [toDate, setToDate] = useState('')
+  const [filterStatus, setFilterStatus] = useState('')
+
+  const handleSearchFilters = () => {
+    setPage(1)
+    loadData(selectedPeriodId, { fromDate, toDate, status: filterStatus })
   }
 
   const displayed = useMemo(() => {
@@ -201,37 +265,38 @@ export default function PayrollPage() {
 
   return (
     <div className="space-y-6">
-      <PageHeader
-        title="Payroll & Compensation"
-        subtitle="Manage salary generation, statutory deductions (SSS, PhilHealth, Pag-IBIG), approval, and payslips"
-        action={
-          <div className="flex gap-2">
-            <button
-              onClick={() => setNewPeriodModal(true)}
-              className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-border bg-card hover:bg-muted font-semibold text-xs text-foreground cursor-pointer shadow-2xs transition-colors"
-            >
-              <FiPlus className="w-4 h-4" />
-              <span>New Period</span>
-            </button>
-            <button
-              onClick={handleGenerate13thMonth}
-              disabled={generating}
-              className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-border bg-card hover:bg-muted font-semibold text-xs text-foreground cursor-pointer shadow-2xs transition-colors disabled:opacity-50"
-            >
-              <FiGift className="w-4 h-4 text-purple-500" />
-              <span>{generating ? 'Processing...' : '13th Month'}</span>
-            </button>
-            <button
-              onClick={handleGenerate}
-              disabled={generating}
-              className="flex items-center gap-2 px-4 py-2 bg-primary hover:bg-primary/90 text-primary-foreground font-semibold text-xs rounded-xl shadow-xs transition-all cursor-pointer disabled:opacity-50"
-            >
-              <FiZap className="w-4 h-4" />
-              <span>{generating ? 'Generating...' : 'Generate Payroll'}</span>
-            </button>
-          </div>
-        }
-      />
+      {user?.role !== 'Employee' ? (
+        <PageHeader
+          title="Payroll & Compensation"
+          subtitle="Manage salary generation, statutory deductions, approval, and payslips"
+          action={
+            ['Store Administrator', 'Store Admin'].includes(user?.role) ? (
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setNewPeriodModal(true)}
+                  className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-border bg-card hover:bg-muted font-semibold text-xs text-foreground cursor-pointer shadow-2xs transition-colors"
+                >
+                  <FiPlus className="w-4 h-4" />
+                  <span>New Period</span>
+                </button>
+                <button
+                  onClick={handleGenerate13thMonth}
+                  disabled={generating}
+                  className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-white font-semibold text-xs cursor-pointer shadow-2xs transition-colors disabled:opacity-50"
+                >
+                  <FiGift className="w-4 h-4" />
+                  <span>{generating ? 'Processing...' : '13th Month Pay'}</span>
+                </button>
+              </div>
+            ) : null
+          }
+        />
+      ) : (
+        <PageHeader
+          title="My Payslips"
+          subtitle="View and download your official company pay stubs and salary history"
+        />
+      )}
 
       {/* Stats */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
@@ -241,8 +306,8 @@ export default function PayrollPage() {
         <StatCard title="Employees Processed" value={displayed.length.toString()} sub="in selected period" icon={<FiUsers className="w-5 h-5 text-indigo-500" />} color="indigo" />
       </div>
 
-      {/* Payroll Summary Chart */}
-      {displayed.length > 0 && (
+      {/* Payroll Summary Chart (Admin Only) */}
+      {user?.role !== 'Employee' && displayed.length > 0 && (
         <Card noPad className="p-4 border border-border">
           <h3 className="text-xs font-bold text-foreground mb-4 uppercase tracking-wide">Payroll Distribution by Department</h3>
           <div className="h-[220px] w-full">
@@ -267,42 +332,59 @@ export default function PayrollPage() {
 
       {error && <ErrorAlert message={error} onRetry={loadData} />}
 
-      {/* Period Selector & Search Card */}
+      {/* Filters */}
       <Card noPad className="p-3.5 border border-border">
-        <div className="flex flex-col md:flex-row justify-between items-center gap-3">
-          <div className="flex items-center gap-2 w-full md:w-auto">
-            <label className="text-xs font-bold text-muted-foreground uppercase whitespace-nowrap">Payroll Period:</label>
-            <select
-              value={selectedPeriodId}
-              onChange={e => { handlePeriodChange(e.target.value); setPage(1); }}
-              className="border border-border rounded-xl px-3 py-2 text-xs font-semibold text-primary bg-card cursor-pointer w-full sm:w-72"
-            >
-              {periods.map(prd => (
-                <option key={prd.period_id} value={prd.period_id}>
-                  {prd.period_name} ({prd.status})
-                </option>
-              ))}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-3 items-end">
+          {user?.role !== 'Employee' && (
+            <div className="lg:col-span-2">
+              <label className="text-[11px] font-bold text-muted-foreground uppercase mb-1 block">Employee Search</label>
+              <div className="relative">
+                <FiSearch className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
+                <input
+                  type="text"
+                  placeholder="Search name, code, dept..."
+                  value={search}
+                  onChange={e => { setSearch(e.target.value); setPage(1); }}
+                  className="w-full pl-9 pr-8 py-1.5 text-xs border border-border rounded-lg bg-card text-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all placeholder:text-muted-foreground/70"
+                />
+                {search && (
+                  <button type="button" onClick={() => setSearch('')} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground cursor-pointer">
+                    <FiX className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+          <div>
+            <label className="text-[11px] font-bold text-muted-foreground uppercase mb-1 block">From Date</label>
+            <input type="date" value={fromDate} onChange={e => setFromDate(e.target.value)} className="w-full px-3 py-1.5 text-xs border border-border rounded-lg bg-card text-foreground" />
+          </div>
+          <div>
+            <label className="text-[11px] font-bold text-muted-foreground uppercase mb-1 block">To Date</label>
+            <input type="date" value={toDate} onChange={e => setToDate(e.target.value)} className="w-full px-3 py-1.5 text-xs border border-border rounded-lg bg-card text-foreground" />
+          </div>
+          <div>
+            <label className="text-[11px] font-bold text-muted-foreground uppercase mb-1 block">Payroll Period</label>
+            <select value={selectedPeriodId} onChange={e => setSelectedPeriodId(e.target.value)} className="w-full px-3 py-1.5 text-xs border border-border rounded-lg bg-card text-foreground">
+              <option value="">All Periods</option>
+              {periods.map(prd => <option key={prd.period_id} value={prd.period_id}>{prd.period_name}</option>)}
             </select>
           </div>
-
-          <div className="w-full md:w-80 relative">
-            <FiSearch className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
-            <input
-              type="text"
-              placeholder="Search employee name, code, dept..."
-              value={search}
-              onChange={e => { setSearch(e.target.value); setPage(1); }}
-              className="w-full pl-9 pr-8 py-2 text-xs border border-border rounded-xl bg-card text-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all placeholder:text-muted-foreground/70"
-            />
-            {search && (
-              <button
-                type="button"
-                onClick={() => setSearch('')}
-                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground cursor-pointer"
-              >
-                <FiX className="w-3.5 h-3.5" />
-              </button>
-            )}
+          <div>
+            <label className="text-[11px] font-bold text-muted-foreground uppercase mb-1 block">Status</label>
+            <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)} className="w-full px-3 py-1.5 text-xs border border-border rounded-lg bg-card text-foreground">
+              <option value="">All</option>
+              <option value="Paid">Paid</option>
+              <option value="Approved">Approved</option>
+              <option value="Processing">Processing</option>
+              <option value="Pending">Pending</option>
+            </select>
+          </div>
+          <div>
+            <button onClick={handleSearchFilters} className="w-full flex items-center justify-center gap-1.5 px-3 py-1.5 bg-primary text-primary-foreground font-semibold text-xs rounded-lg hover:bg-primary/90 transition-all cursor-pointer shadow-sm">
+              <FiSearch className="w-3.5 h-3.5" />
+              <span>Search</span>
+            </button>
           </div>
         </div>
       </Card>
@@ -317,14 +399,16 @@ export default function PayrollPage() {
             title="No payroll entries found for this period"
             description="Click 'Generate Payroll' to automatically compute salaries and deductions for active employees."
             action={
-              <button
-                onClick={handleGenerate}
-                disabled={generating}
-                className="flex items-center gap-1.5 px-3.5 py-1.5 bg-primary text-primary-foreground font-bold text-xs rounded-xl cursor-pointer disabled:opacity-50"
-              >
-                <FiZap className="w-4 h-4" />
-                <span>{generating ? 'Generating...' : 'Generate Payroll Now'}</span>
-              </button>
+              ['Store Administrator', 'Store Admin'].includes(user?.role) ? (
+                <button
+                  onClick={handleGenerate}
+                  disabled={generating}
+                  className="flex items-center gap-1.5 px-3.5 py-1.5 bg-primary text-primary-foreground font-bold text-xs rounded-xl cursor-pointer disabled:opacity-50"
+                >
+                  <FiZap className="w-4 h-4" />
+                  <span>{generating ? 'Generating...' : 'Generate Payroll Now'}</span>
+                </button>
+              ) : null
             }
           />
         ) : (
@@ -367,7 +451,7 @@ export default function PayrollPage() {
                             <FiFileText className="w-3.5 h-3.5" />
                             <span>Slip</span>
                           </button>
-                          {p.status === 'Draft' && (
+                          {['Store Administrator', 'Store Admin'].includes(user?.role) && p.status === 'Draft' && (
                             <button
                               onClick={() => handleApprove(p.payroll_id)}
                               title="Approve payroll"
@@ -377,7 +461,7 @@ export default function PayrollPage() {
                               <span>Approve</span>
                             </button>
                           )}
-                          {p.status === 'Approved' && (
+                          {['Store Administrator', 'Store Admin'].includes(user?.role) && p.status === 'Approved' && (
                             <button
                               onClick={() => handleMarkPaid(p.payroll_id)}
                               title="Mark as Paid"
@@ -400,7 +484,11 @@ export default function PayrollPage() {
       </Card>
 
       {/* Payslip Modal */}
-      {payslip && (
+      {payslip && (user?.role === 'Employee' || ['Administrator', 'Admin'].includes(user?.role)) && (
+        <EmployeePayslipModal payslip={payslip} onClose={() => setPayslip(null)} />
+      )}
+
+      {payslip && ['Store Administrator', 'Store Admin'].includes(user?.role) && (
         <Modal
           isOpen={true}
           title={`Payslip: ${payslip.employee_name} (${payslip.period_name})`}

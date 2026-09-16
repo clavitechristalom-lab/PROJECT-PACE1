@@ -24,14 +24,14 @@ class AttendanceController extends Controller
         if ($user && $user->role === 'Employee') {
             $query->where('employee_id', $user->employee_id);
         } elseif ($user && in_array($user->role, ['Store Administrator', 'Store Admin'])) {
-            $branch = $user->employee ? $user->employee->branch : 'Main Branch';
+            $branch = $user->employee ? $user->employee->branch_id : null;
             $query->whereHas('employee', function ($eq) use ($branch) {
-                $eq->where('branch', $branch);
+                $eq->where('branch_id', $branch);
             });
         } elseif ($request->filled('branch') && $request->query('branch') !== 'All') {
             $branch = $request->query('branch');
             $query->whereHas('employee', function ($eq) use ($branch) {
-                $eq->where('branch', $branch);
+                $eq->where('branch_id', $branch);
             });
         }
 
@@ -95,7 +95,7 @@ class AttendanceController extends Controller
                         $a->employee_id,
                         $emp ? "{$emp->first_name} {$emp->last_name}" : 'Employee',
                         $emp ? $emp->department : '',
-                        $emp ? $emp->branch : '',
+                        $emp && $emp->branch ? $emp->branch->name : '',
                         $a->attendance_date,
                         $a->time_in,
                         $a->break_out,
@@ -127,7 +127,7 @@ class AttendanceController extends Controller
                 'employee_code' => $emp ? $emp->employee_code : '',
                 'department' => $emp ? $emp->department : '',
                 'position' => $emp ? $emp->position : '',
-                'branch' => $emp ? $emp->branch : '',
+                'branch' => $emp && $emp->branch ? $emp->branch->name : '',
                 'attendance_date' => $a->attendance_date,
                 'time_in' => $a->time_in ? date('h:i A', strtotime($a->time_in)) : '',
                 'time_out' => $a->time_out ? date('h:i A', strtotime($a->time_out)) : '',
@@ -224,14 +224,14 @@ class AttendanceController extends Controller
         
         $query = Attendance::query();
         if ($user && in_array($user->role, ['Store Administrator', 'Store Admin'])) {
-            $branch = $user->employee ? $user->employee->branch : 'Main Branch';
+            $branch = $user->employee ? $user->employee->branch_id : null;
             $query->whereHas('employee', function ($eq) use ($branch) {
-                $eq->where('branch', $branch);
+                $eq->where('branch_id', $branch);
             });
         } elseif ($request->filled('branch') && $request->query('branch') !== 'All') {
             $branch = $request->query('branch');
             $query->whereHas('employee', function ($eq) use ($branch) {
-                $eq->where('branch', $branch);
+                $eq->where('branch_id', $branch);
             });
         }
 
@@ -288,7 +288,7 @@ class AttendanceController extends Controller
 
         $token = trim($validated['qr_token']);
         $deviceInfo = $request->input('device_info', $request->userAgent());
-        $storeAdminBranch = $user->employee && !empty($user->employee->branch) ? trim($user->employee->branch) : 'Main Branch';
+        $storeAdminBranch = $user->employee && !empty($user->employee->branch_id) ? trim($user->employee->branch_id) : null;
 
         $employee = Employee::where('qr_token', $token)->first();
 
@@ -358,8 +358,8 @@ class AttendanceController extends Controller
         }
 
         // 4. Branch Security: Verify employee belongs to Store Admin's authorized branch
-        $employeeBranch = !empty($employee->branch) ? trim($employee->branch) : 'Main Branch';
-        if (strcasecmp($employeeBranch, $storeAdminBranch) !== 0) {
+        $employeeBranch = !empty($employee->branch_id) ? trim((string)$employee->branch_id) : null;
+        if (strcasecmp((string)$employeeBranch, (string)$storeAdminBranch) !== 0) {
             AttendanceScanLog::create([
                 'employee_id' => $employee->employee_id,
                 'scanned_by' => $user->user_id,
@@ -369,7 +369,7 @@ class AttendanceController extends Controller
                 'pin_verified' => false,
                 'action_type' => 'UNAUTHORIZED_BRANCH_SCAN',
                 'status' => 'FAILED',
-                'failure_reason' => "This employee belongs to {$employee->branch}, but your authorized branch is {$storeAdminBranch}",
+                'failure_reason' => "This employee belongs to '" . ($employee->branch ? $employee->branch->name : 'Unassigned') . "', but your authorized branch is {$storeAdminBranch}",
                 'device_info' => $deviceInfo,
                 'ip_address' => $request->ip(),
             ]);
@@ -377,7 +377,7 @@ class AttendanceController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'This employee does not belong to your authorized branch.',
-                'employee_branch' => $employee->branch,
+                'employee_branch' => $employee->branch ? $employee->branch->name : null,
                 'authorized_branch' => $storeAdminBranch,
             ], 403);
         }
@@ -392,366 +392,52 @@ class AttendanceController extends Controller
             ], 423);
         }
 
-        // Log successful initial QR token scan
-        AttendanceScanLog::create([
+        // Log successful initial QR token scan and set as PENDING_VERIFICATION
+        $log = AttendanceScanLog::create([
             'employee_id' => $employee->employee_id,
             'scanned_by' => $user->user_id,
             'branch' => $storeAdminBranch,
             'qr_token_scanned' => substr($token, 0, 50),
             'qr_verified' => true,
             'pin_verified' => false,
-            'action_type' => 'QR_SCAN_SUCCESS',
-            'status' => 'PENDING_PIN',
+            'action_type' => 'PENDING_VERIFICATION',
+            'status' => 'PENDING',
             'failure_reason' => null,
             'device_info' => $deviceInfo,
             'ip_address' => $request->ip(),
         ]);
 
-        // Determine available actions
-        $todayRecord = \App\Models\Attendance::where('employee_id', $employee->employee_id)
-            ->where('attendance_date', date('Y-m-d'))
-            ->first();
-
-        $availableActions = [];
-        if (!$todayRecord) {
-            $availableActions = ['TIME_IN'];
-        } else if (empty($todayRecord->time_out)) {
-            if (!empty($todayRecord->break_out) && empty($todayRecord->break_in)) {
-                $availableActions = ['BREAK_IN'];
-            } else if (!empty($todayRecord->lunch_out) && empty($todayRecord->lunch_in)) {
-                $availableActions = ['LUNCH_IN'];
-            } else {
-                $availableActions = ['BREAK_OUT', 'LUNCH_OUT', 'TIME_OUT'];
-            }
-        } else {
-            $availableActions = ['COMPLETED'];
+        // Trigger Notification to Employee
+        if ($employee->user) {
+            $storeAdminName = $user->employee ? trim("{$user->employee->first_name} {$user->employee->last_name}") : $user->username;
+            \App\Services\NotificationService::sendToUser($employee->user->user_id, [
+                'type' => 'attendance_verification',
+                'title' => 'Attendance Verification Request',
+                'message' => "Store Admin {$storeAdminName} is requesting your PIN to authorize their attendance.",
+                'module' => 'Attendance',
+                'related_id' => $log->scan_id ?? $log->id, // Use whatever primary key it generates
+                'related_type' => 'App\Models\AttendanceScanLog',
+                'action_url' => '/dashboard',
+                'priority' => 'high',
+            ]);
         }
 
         return response()->json([
             'success' => true,
-            'employee' => [
-                'employee_id' => $employee->employee_id,
-                'employee_code' => $employee->employee_code,
-                'name' => "{$employee->first_name} {$employee->last_name}",
-                'first_name' => $employee->first_name,
-                'last_name' => $employee->last_name,
-                'position' => $employee->position,
-                'department' => $employee->department,
-                'branch' => $employee->branch ?: $storeAdminBranch,
-                'gender' => $employee->gender,
-                'working_hours' => $employee->working_hours,
-                'qr_status' => 'ACTIVE',
-            ],
-            'available_actions' => $availableActions,
-            'requires_pin' => true,
-            'has_pin' => !empty($employee->attendance_pin),
-        ]);
-    }
-
-    /**
-     * Step 2: Verify Personal Attendance PIN & Record Time In / Time Out
-     * STRICT: ONLY Store Administrator can record attendance.
-     */
-    public function verifyPinAndRecord(Request $request)
-    {
-        $user = $request->user('sanctum') ?? $request->user();
-        if (!$user || !in_array($user->role, ['Store Administrator', 'Store Admin'])) {
-            return response()->json([
-                'success' => false,
-                'message' => '403 Forbidden: Only authorized Store Administrators can record attendance.',
-            ], 403);
-        }
-
-        $validated = $request->validate([
-            'qr_token' => 'required|string',
-            'pin' => 'required|string',
-            'device_info' => 'nullable|string',
-        ]);
-
-        $token = trim($validated['qr_token']);
-        $pin = trim($validated['pin']);
-        $deviceInfo = $request->input('device_info', $request->userAgent());
-        $storeAdminBranch = $user->employee && !empty($user->employee->branch) ? trim($user->employee->branch) : 'Main Branch';
-
-        $employee = Employee::where('qr_token', $token)->first();
-
-        if (!$employee || !$employee->qr_active || $employee->status !== 'Active') {
-            return response()->json([
-                'success' => false,
-                'message' => 'Invalid, inactive, or unauthorized employee record.',
-            ], 403);
-        }
-
-        // Branch Security check
-        $employeeBranch = !empty($employee->branch) ? trim($employee->branch) : 'Main Branch';
-        if (strcasecmp($employeeBranch, $storeAdminBranch) !== 0) {
-            AttendanceScanLog::create([
-                'employee_id' => $employee->employee_id,
-                'scanned_by' => $user->user_id,
-                'branch' => $storeAdminBranch,
-                'qr_token_scanned' => substr($token, 0, 50),
-                'qr_verified' => true,
-                'pin_verified' => false,
-                'action_type' => 'UNAUTHORIZED_BRANCH_SCAN',
-                'status' => 'FAILED',
-                'failure_reason' => "This employee belongs to {$employee->branch}, but your authorized branch is {$storeAdminBranch}",
-                'device_info' => $deviceInfo,
-                'ip_address' => $request->ip(),
-            ]);
-
-            return response()->json([
-                'success' => false,
-                'message' => 'This employee does not belong to your authorized branch.',
-            ], 403);
-        }
-
-        // Check Lockout
-        if ($employee->pin_locked_until && $employee->pin_locked_until > now()) {
-            $minutes = max(1, now()->diffInMinutes($employee->pin_locked_until));
-            return response()->json([
-                'success' => false,
-                'is_locked' => true,
-                'message' => "Too many failed PIN attempts. Account is locked for {$minutes} more minute(s).",
-            ], 423);
-        }
-
-        // If no PIN is configured, default to '1234'
-        if (empty($employee->attendance_pin)) {
-            $employee->attendance_pin = Hash::make('1234');
-            $employee->save();
-        }
-
-        // Verify PIN securely using Hash::check
-        if (!Hash::check($pin, $employee->attendance_pin)) {
-            $employee->pin_failed_attempts = ($employee->pin_failed_attempts ?? 0) + 1;
-            $attemptsLeft = max(0, 5 - $employee->pin_failed_attempts);
-
-            if ($employee->pin_failed_attempts >= 5) {
-                $employee->pin_locked_until = now()->addMinutes(15);
-                $employee->save();
-
-                AttendanceScanLog::create([
-                    'employee_id' => $employee->employee_id,
-                    'scanned_by' => $user->user_id,
-                    'branch' => $storeAdminBranch,
-                    'qr_token_scanned' => substr($token, 0, 50),
-                    'qr_verified' => true,
-                    'pin_verified' => false,
-                    'action_type' => 'PIN_VERIFICATION_FAILED',
-                    'status' => 'FAILED',
-                    'failure_reason' => 'PIN verification failed 5 times - Account locked for 15 minutes',
-                    'device_info' => $deviceInfo,
-                    'ip_address' => $request->ip(),
-                ]);
-
-                // Security Alert Notification to Admins
-                NotificationService::sendToAdmins([
-                    'type' => 'attendance_failed_verification',
-                    'title' => 'Security Alert: PIN Lockout',
-                    'message' => "Employee {$employee->first_name} {$employee->last_name} ({$employee->employee_code}) account locked after 5 failed PIN attempts at {$storeAdminBranch}.",
-                    'module' => 'Security',
-                    'related_id' => $employee->employee_id,
-                    'related_type' => 'App\Models\Employee',
-                    'action_url' => '/attendance',
-                    'priority' => 'critical',
-                ]);
-
-                return response()->json([
-                    'success' => false,
-                    'is_locked' => true,
-                    'message' => 'Too many failed attempts. Account has been locked for 15 minutes for security.',
-                ], 423);
-            }
-
-            $employee->save();
-
-            AttendanceScanLog::create([
-                'employee_id' => $employee->employee_id,
-                'scanned_by' => $user->user_id,
-                'branch' => $storeAdminBranch,
-                'qr_token_scanned' => substr($token, 0, 50),
-                'qr_verified' => true,
-                'pin_verified' => false,
-                'action_type' => 'PIN_VERIFICATION_FAILED',
-                'status' => 'FAILED',
-                'failure_reason' => "Incorrect PIN attempt ({$employee->pin_failed_attempts}/5)",
-                'device_info' => $deviceInfo,
-                'ip_address' => $request->ip(),
-            ]);
-
-            return response()->json([
-                'success' => false,
-                'message' => "PIN verification failed. Attendance was not recorded. ({$attemptsLeft} attempt(s) remaining)",
-                'attempts_left' => $attemptsLeft,
-            ], 422);
-        }
-
-        // PIN is valid! Reset failed attempts and lockout
-        $employee->pin_failed_attempts = 0;
-        $employee->pin_locked_until = null;
-        $employee->save();
-
-        // ─── Attendance Business Rules ──────────────────────────────────────────────
-        $action = strtoupper($request->input('action'));
-        if (!in_array($action, ['TIME_IN', 'BREAK_OUT', 'BREAK_IN', 'LUNCH_OUT', 'LUNCH_IN', 'TIME_OUT'])) {
-            return response()->json(['success' => false, 'message' => 'Invalid action requested.'], 400);
-        }
-
-        $today = date('Y-m-d');
-        $now = date('H:i:s');
-        $timeStr = date('h:i A');
-        $verifiedByName = "Store Administrator ({$user->username})";
-
-        $record = Attendance::where('employee_id', $employee->employee_id)
-            ->where('attendance_date', $today)
-            ->first();
-
-        // Prevent invalid flows
-        if ($action !== 'TIME_IN' && !$record) {
-            return response()->json(['success' => false, 'message' => 'Cannot perform this action without Time In.'], 400);
-        }
-        if ($record && $record->time_out) {
-            return response()->json(['success' => false, 'message' => 'Attendance already completed for today.'], 400);
-        }
-
-        if ($action === 'TIME_IN') {
-            if ($record) return response()->json(['success' => false, 'message' => 'Already timed in.'], 400);
-            
-            $record = new Attendance();
-            $record->employee_id = $employee->employee_id;
-            $record->scanned_by = $user->user_id;
-            $record->attendance_date = $today;
-            $record->time_in = $now;
-            $record->qr_scan_in = 'QR_PIN_VERIFIED';
-            $record->verification_method = 'QR + PIN';
-            $record->verified_by_name = $verifiedByName;
-            $record->device_info = $deviceInfo;
-            $record->ip_address = $request->ip();
-            $record->total_hours = 0;
-            $record->overtime_hours = 0;
-
-            $hour = (int)date('H');
-            $min = (int)date('i');
-            if ($hour > 8 || ($hour === 8 && $min > 15)) {
-                $record->status = 'Late';
-            } else {
-                $record->status = 'Present';
-            }
-            $record->save();
-        } else if ($action === 'BREAK_OUT') {
-            if ($record->break_out) return response()->json(['success' => false, 'message' => 'Already took a break.'], 400);
-            $record->break_out = $now;
-            $record->save();
-        } else if ($action === 'BREAK_IN') {
-            if (!$record->break_out || $record->break_in) return response()->json(['success' => false, 'message' => 'Invalid action.'], 400);
-            $record->break_in = $now;
-            $record->save();
-        } else if ($action === 'LUNCH_OUT') {
-            if ($record->lunch_out) return response()->json(['success' => false, 'message' => 'Already took lunch.'], 400);
-            $record->lunch_out = $now;
-            $record->save();
-        } else if ($action === 'LUNCH_IN') {
-            if (!$record->lunch_out || $record->lunch_in) return response()->json(['success' => false, 'message' => 'Invalid action.'], 400);
-            $record->lunch_in = $now;
-            $record->save();
-        } else if ($action === 'TIME_OUT') {
-            if (($record->break_out && !$record->break_in) || ($record->lunch_out && !$record->lunch_in)) {
-                return response()->json(['success' => false, 'message' => 'Cannot time out while on break or lunch.'], 400);
-            }
-            $record->time_out = $now;
-            $record->qr_scan_out = 'QR_PIN_VERIFIED';
-            $record->verified_by_name = $verifiedByName;
-
-            // Calculate actual worked hours
-            $inDateTime = strtotime($record->attendance_date . ' ' . $record->time_in);
-            $outDateTime = strtotime($today . ' ' . $now);
-            if ($outDateTime < $inDateTime) {
-                $outDateTime += 86400; // overnight
-            }
-            $totalShiftSeconds = max(0, $outDateTime - $inDateTime);
-
-            $breakSeconds = 0;
-            if ($record->break_out && $record->break_in) {
-                $breakOut = strtotime($record->attendance_date . ' ' . $record->break_out);
-                $breakIn = strtotime($record->attendance_date . ' ' . $record->break_in);
-                if ($breakIn < $breakOut) $breakIn += 86400;
-                $breakSeconds = max(0, $breakIn - $breakOut);
-            }
-
-            $lunchSeconds = 0;
-            if ($record->lunch_out && $record->lunch_in) {
-                $lunchOut = strtotime($record->attendance_date . ' ' . $record->lunch_out);
-                $lunchIn = strtotime($record->attendance_date . ' ' . $record->lunch_in);
-                if ($lunchIn < $lunchOut) $lunchIn += 86400;
-                $lunchSeconds = max(0, $lunchIn - $lunchOut);
-            }
-
-            $workedSeconds = $totalShiftSeconds - $breakSeconds - $lunchSeconds;
-            $diffHours = round(max(0, $workedSeconds / 3600), 2);
-
-            $record->total_hours = $diffHours;
-            $record->overtime_hours = max(0, round($diffHours - 8, 2));
-            $record->status = 'COMPLETE';
-            $record->save();
-        }
-
-        // Shared Logs and Notifications for all actions
-        AttendanceScanLog::create([
-            'employee_id' => $employee->employee_id,
-            'scanned_by' => $user->user_id,
-            'branch' => $storeAdminBranch,
-            'qr_token_scanned' => substr($token, 0, 50),
-            'qr_verified' => true,
-            'pin_verified' => true,
-            'action_type' => 'ATTENDANCE_' . $action,
-            'status' => 'SUCCESS',
-            'failure_reason' => null,
-            'device_info' => $deviceInfo,
-            'ip_address' => $request->ip(),
-        ]);
-
-        SystemLog::create([
-            'user_id' => $user->user_id,
-            'action' => 'UPDATE',
-            'module' => 'Attendance',
-            'description' => "{$action} recorded via QR + PIN for {$employee->first_name} {$employee->last_name} at {$timeStr} by {$user->username}",
-            'ip_address' => $request->ip(),
-            'user_agent' => $deviceInfo,
-        ]);
-
-        $friendlyAction = str_replace('_', ' ', $action);
-
-        NotificationService::sendToAdmins([
-            'type' => 'attendance_recorded',
-            'title' => 'Attendance Action',
-            'message' => "Employee: {$employee->first_name} {$employee->last_name}, Branch: {$employee->branch}, Action: {$friendlyAction} ({$timeStr})",
-            'module' => 'Attendance',
-            'related_id' => $record->attendance_id,
-            'related_type' => 'App\Models\Attendance',
-            'action_url' => '/attendance',
-            'priority' => 'normal',
-        ]);
-
-        return response()->json([
-            'success' => true,
-            'action' => $action,
-            'message' => "{$friendlyAction} SUCCESSFUL — Time: {$timeStr}" . ($action === 'TIME_OUT' ? " (Total: {$record->total_hours} hrs)" : ""),
-            'time' => $timeStr,
-            'date' => $today,
-            'status' => $record->status,
-            'record' => $record,
-            'verified_by' => $verifiedByName,
-            'branch' => $employee->branch ?: $storeAdminBranch,
+            'status' => 'PENDING',
+            'scan_log_id' => $log->scan_id ?? $log->id, // AttendanceScanLog primary key
             'employee' => [
                 'employee_id' => $employee->employee_id,
                 'employee_code' => $employee->employee_code,
                 'name' => "{$employee->first_name} {$employee->last_name}",
                 'department' => $employee->department,
-                'position' => $employee->position,
-                'branch' => $employee->branch ?: $storeAdminBranch,
+                'branch' => $employee->branch ? $employee->branch->name : $storeAdminBranch,
             ],
+            'message' => 'Waiting for Employee verification...',
         ]);
     }
+
+
 
     /**
      * Get Security Scan & PIN Verification Logs
@@ -762,8 +448,8 @@ class AttendanceController extends Controller
         $query = AttendanceScanLog::with(['employee', 'scannedBy.employee']);
 
         if ($user && in_array($user->role, ['Store Administrator', 'Store Admin'])) {
-            $branch = $user->employee ? $user->employee->branch : 'Main Branch';
-            $query->where('branch', $branch);
+            $branch = $user->employee ? $user->employee->branch_id : null;
+            $query->where('branch_id', $branch);
         }
 
         if ($request->filled('date')) {
@@ -787,7 +473,7 @@ class AttendanceController extends Controller
                        ->orWhere('employee_code', 'like', "%{$s}%");
                 })->orWhere('qr_token_scanned', 'like', "%{$s}%")
                   ->orWhere('failure_reason', 'like', "%{$s}%")
-                  ->orWhere('branch', 'like', "%{$s}%");
+                  ->orwhere('branch_id', 'like', "%{$s}%");
             });
         }
 
@@ -804,7 +490,7 @@ class AttendanceController extends Controller
                 'employee_name' => $emp ? "{$emp->first_name} {$emp->last_name}" : 'Unidentified',
                 'employee_code' => $emp ? $emp->employee_code : 'N/A',
                 'department' => $emp ? $emp->department : '—',
-                'branch' => $l->branch ?: ($emp ? $emp->branch : 'Main Branch'),
+                'branch' => $l->branch ?: ($emp && $emp->branch ? $emp->branch->name : null),
                 'qr_token_scanned' => $l->qr_token_scanned ? substr($l->qr_token_scanned, 0, 8) . '...' : '—',
                 'scan_time' => $l->scan_time ? $l->scan_time->format('Y-m-d H:i:s') : '',
                 'qr_verified' => (bool)$l->qr_verified,
@@ -825,4 +511,180 @@ class AttendanceController extends Controller
             'last_page' => $logs->lastPage(),
         ]);
     }
+
+    // ─── NEW FLOW: Employee Approves Verification ───────────────────────────────
+    public function checkVerification(Request $request, $id)
+    {
+        $log = AttendanceScanLog::with('employee')->findOrFail($id);
+        return response()->json([
+            'status' => $log->status,
+            'action' => $log->action_type,
+            'log' => $log
+        ]);
+    }
+
+    public function pendingVerifications(Request $request)
+    {
+        $user = $request->user();
+        if (!$user || !$user->employee) {
+            return response()->json(['pending' => []]);
+        }
+
+        $pending = AttendanceScanLog::with('scannedBy.employee')
+            ->where('employee_id', $user->employee_id)
+            ->where('status', 'PENDING')
+            ->where('created_at', '>=', now()->subMinutes(5)) // Only look at recent ones
+            ->orderBy('created_at', 'desc')
+            ->get();
+
+        return response()->json(['pending' => $pending]);
+    }
+
+    public function approveVerification(Request $request)
+    {
+        $user = $request->user();
+        if (!$user || !$user->employee) {
+            return response()->json(['success' => false, 'message' => 'Unauthorized'], 403);
+        }
+
+        $validated = $request->validate([
+            'scan_log_id' => 'required|integer',
+            'pin' => 'required|string',
+        ]);
+
+        $log = AttendanceScanLog::where('id', $validated['scan_log_id'])
+            ->where('employee_id', $user->employee_id)
+            ->where('status', 'PENDING')
+            ->first();
+
+        if (!$log) {
+            return response()->json(['success' => false, 'message' => 'Pending request not found or expired.'], 404);
+        }
+
+        $employee = $user->employee;
+
+        // Check Lockout
+        if ($employee->pin_locked_until && $employee->pin_locked_until > now()) {
+            return response()->json([
+                'success' => false,
+                'is_locked' => true,
+                'message' => 'Account is currently locked due to too many failed attempts.',
+            ], 423);
+        }
+
+        if (empty($employee->attendance_pin)) {
+            $employee->attendance_pin = \Illuminate\Support\Facades\Hash::make('1234');
+            $employee->save();
+        }
+
+        // Verify PIN
+        if (!\Illuminate\Support\Facades\Hash::check($validated['pin'], $employee->attendance_pin)) {
+            $employee->pin_failed_attempts = ($employee->pin_failed_attempts ?? 0) + 1;
+            if ($employee->pin_failed_attempts >= 5) {
+                $employee->pin_locked_until = now()->addMinutes(15);
+                $employee->save();
+                
+                $log->update(['status' => 'FAILED', 'failure_reason' => 'PIN lockout']);
+                return response()->json(['success' => false, 'is_locked' => true, 'message' => 'Too many failed attempts. Account locked.'], 423);
+            }
+            $employee->save();
+            return response()->json(['success' => false, 'message' => 'Incorrect PIN.'], 422);
+        }
+
+        // PIN is valid!
+        $employee->pin_failed_attempts = 0;
+        $employee->pin_locked_until = null;
+        $employee->save();
+
+        // ─── ATTENDANCE BELONGS TO THE SCANNED EMPLOYEE ───
+        $storeAdminUser = \App\Models\User::with('employee')->find($log->scanned_by);
+        
+        $today = date('Y-m-d');
+        $now = date('H:i:s');
+        $timeStr = date('h:i A');
+
+        $record = \App\Models\Attendance::where('employee_id', $employee->employee_id)
+            ->where('attendance_date', $today)
+            ->first();
+
+        // Auto-determine next action for Employee
+        if (!$record) {
+            $action = 'TIME_IN';
+        } elseif ($record->time_out) {
+            $log->update(['status' => 'FAILED', 'failure_reason' => 'Attendance already completed today.']);
+            return response()->json(['success' => false, 'message' => 'Attendance already completed for today.'], 400);
+        } elseif ($record->lunch_out && !$record->lunch_in) {
+            $action = 'LUNCH_IN';
+        } else {
+            // Default to TIME_OUT or next logical break
+            if (!$record->lunch_out) $action = 'LUNCH_OUT';
+            else $action = 'TIME_OUT';
+        }
+
+        // Apply Action
+        if ($action === 'TIME_IN') {
+            $record = new \App\Models\Attendance();
+            $record->employee_id = $employee->employee_id;
+            $record->scanned_by = $log->scanned_by;
+            $record->attendance_date = $today;
+            $record->time_in = $now;
+            $record->qr_scan_in = 'QR_PIN_VERIFIED';
+            $record->verification_method = 'QR + PIN (Authorized by Employee)';
+            $record->verified_by_name = "{$employee->first_name} {$employee->last_name}";
+            $record->device_info = $log->device_info;
+            $record->ip_address = $log->ip_address;
+            $record->total_hours = 0;
+            $record->overtime_hours = 0;
+            
+            $hour = (int)date('H');
+            $min = (int)date('i');
+            if ($hour > 8 || ($hour === 8 && $min > 15)) {
+                $record->status = 'Late';
+            } else {
+                $record->status = 'Present';
+            }
+            
+            $record->save();
+        } else if ($action === 'LUNCH_OUT') {
+            $record->lunch_out = $now;
+            $record->save();
+        } else if ($action === 'LUNCH_IN') {
+            $record->lunch_in = $now;
+            $record->save();
+        } else if ($action === 'TIME_OUT') {
+            $record->time_out = $now;
+            $record->qr_scan_out = 'QR_PIN_VERIFIED';
+            $record->verified_by_name = "{$employee->first_name} {$employee->last_name}";
+            
+            // Calc hours
+            $inDateTime = strtotime($record->attendance_date . ' ' . $record->time_in);
+            $outDateTime = strtotime($today . ' ' . $now);
+            $totalSeconds = max(0, $outDateTime - $inDateTime);
+            
+            $lunchSeconds = 0;
+            if ($record->lunch_out && $record->lunch_in) {
+                $lunchSeconds = max(0, strtotime($record->attendance_date.' '.$record->lunch_in) - strtotime($record->attendance_date.' '.$record->lunch_out));
+            }
+            
+            $workedSeconds = $totalSeconds - $lunchSeconds;
+            $diffHours = round(max(0, $workedSeconds / 3600), 2);
+            $record->total_hours = $diffHours;
+            $record->overtime_hours = max(0, round($diffHours - 8, 2));
+            $record->status = 'COMPLETE';
+            $record->save();
+        }
+
+        // Update Log
+        $log->update([
+            'status' => 'SUCCESS',
+            'action_type' => 'ATTENDANCE_' . $action,
+            'pin_verified' => true
+        ]);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Attendance authorized successfully.'
+        ]);
+    }
 }
+

@@ -63,6 +63,7 @@ export default function QrScannerPage() {
   // Identified employee data from Step 1
   const [identifiedEmp, setIdentifiedEmp] = useState(null)
   const [scannedToken, setScannedToken] = useState('')
+  const [availableActions, setAvailableActions] = useState([])
 
   // PIN pad state
   const [pin, setPin] = useState('')
@@ -191,6 +192,7 @@ export default function QrScannerPage() {
 
       if (res.success && res.employee) {
         setIdentifiedEmp(res.employee)
+        setAvailableActions(res.available_actions || [])
         setStep('pin')
         setPin('')
         setPinError('')
@@ -461,6 +463,14 @@ export default function QrScannerPage() {
             {pinError && (
               <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-400 text-xs font-semibold text-center animate-shake">
                 {pinError}
+              </div>
+            )}
+
+            {availableActions.length > 0 && (
+              <div className="flex justify-center my-2">
+                <span className="px-5 py-2 bg-primary-500/90 text-white text-sm font-black rounded-xl uppercase tracking-wider shadow-md">
+                  {availableActions[0].replace('_', ' ')}
+                </span>
               </div>
             )}
 

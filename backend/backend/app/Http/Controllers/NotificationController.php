@@ -324,8 +324,8 @@ class NotificationController extends Controller
         if ($user->role === 'Administrator' || $isStoreAdmin) {
             $instQuery = \App\Models\InstallmentAccount::where('status', 'Overdue');
             if ($isStoreAdmin) {
-                $branch = $user->employee ? $user->employee->branch : 'Main Branch';
-                $instQuery->whereHas('sale.processedBy.employee', fn($eq) => $eq->where('branch', $branch));
+                $branch = $user->employee ? $user->employee->branch_id : null;
+                $instQuery->whereHas('sale.processedBy.employee', fn($eq) => $eq->where('branch_id', $branch));
             }
             $overdueCount = $instQuery->count();
             if ($overdueCount > 0) {
@@ -374,3 +374,4 @@ class NotificationController extends Controller
         }
     }
 }
+
