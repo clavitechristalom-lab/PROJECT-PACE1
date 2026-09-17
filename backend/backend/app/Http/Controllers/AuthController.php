@@ -55,8 +55,10 @@ class AuthController extends Controller
         if ($role === 'Customer') {
             // Customer signs up with branch_id = NULL.
             // Admin will assign them to a branch later via the Customer Management interface.
+            $maxId = \App\Models\Customer::max('customer_id');
+            $nextId = $maxId ? $maxId + 1 : 1;
             $customer = \App\Models\Customer::create([
-                'customer_code' => 'CUS-' . str_pad(\App\Models\Customer::count() + 1, 3, '0', STR_PAD_LEFT),
+                'customer_code' => 'CUS-' . str_pad($nextId, 3, '0', STR_PAD_LEFT),
                 'first_name' => $firstName,
                 'last_name' => $lastName,
                 'email' => $validated['email'],
@@ -74,7 +76,9 @@ class AuthController extends Controller
             ]);
         } else {
             // For all staff roles (Administrator, Store Administrator, Employee), create a new employee record.
-            $employeeCode = 'EMP-' . str_pad(\App\Models\Employee::count() + 1, 3, '0', STR_PAD_LEFT);
+            $maxId = \App\Models\Employee::max('employee_id');
+            $nextId = $maxId ? $maxId + 1 : 1;
+            $employeeCode = 'EMP-' . str_pad($nextId, 3, '0', STR_PAD_LEFT);
             $employee = \App\Models\Employee::create([
                 'employee_code' => $employeeCode,
                 'first_name' => $firstName,
