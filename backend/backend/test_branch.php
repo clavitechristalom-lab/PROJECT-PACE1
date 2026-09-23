@@ -1,0 +1,1 @@
+<?php require 'vendor/autoload.php'; \ = require_once 'bootstrap/app.php'; \->make(Illuminate\Contracts\Console\Kernel::class)->bootstrap(); try { \ = App\Models\BranchProfile::create(['name' => 'C-LICZ CDO Test', 'location' => 'cdo', 'status' => 'open', 'color' => '#fff']); echo json_encode(\); } catch(\Exception \) { echo \->getMessage(); }

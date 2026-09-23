@@ -18,13 +18,25 @@ export default function CreateBranchModal({ isOpen, onClose, onCreate }) {
 
   const handleSubmit = async (e) => {
     if (e) e.preventDefault()
-    if (!formData.name || !formData.name.trim()) {
+    
+    // Read from the actual DOM elements in case browser autofill bypassed React's onChange
+    const nameVal = e.target.elements.name?.value || formData.name
+    const locationVal = e.target.elements.location?.value || formData.location
+    const contactVal = e.target.elements.contact_number?.value || formData.contact_number
+
+    if (!nameVal || !nameVal.trim()) {
       alert("Please enter a Branch Name before creating.");
       return;
     }
     setLoading(true)
     try {
-      await onCreate(formData, imageFile)
+      const finalData = {
+        ...formData,
+        name: nameVal,
+        location: locationVal,
+        contact_number: contactVal
+      }
+      await onCreate(finalData, imageFile)
     } finally {
       setLoading(false)
     }
@@ -105,8 +117,7 @@ export default function CreateBranchModal({ isOpen, onClose, onCreate }) {
             Cancel
           </button>
           <button 
-            type="button"
-            onClick={handleSubmit}
+            type="submit"
             className="px-4 py-2 text-sm font-bold text-white bg-primary hover:bg-primary/90 rounded-xl flex items-center gap-2"
             disabled={loading}
           >

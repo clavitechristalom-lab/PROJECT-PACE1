@@ -96,6 +96,7 @@ function navByRole(role) {
     icon: icons.settings,
     items: [
       { label: 'Admin Interface', path: '/admin-dashboard', icon: icons.shield },
+      { label: 'Branches', path: '/branches', icon: icons.products },
       { label: 'Users', path: '/users', icon: icons.users },
       { label: 'System Logs', path: '/system-logs', icon: icons.logs },
       { label: 'Backup & Restore', path: '/backups', icon: icons.backup },

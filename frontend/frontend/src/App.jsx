@@ -22,6 +22,7 @@ import QrMonitoringPage from './pages/QrMonitoringPage'
 import QrRequestsPage from './pages/QrRequestsPage'
 import { UsersPage, SystemLogsPage, BackupsPage, SettingsPage } from './pages/SystemPage'
 import SystemAdminDashboard from './pages/SystemAdminDashboard'
+import BranchesPage from './pages/BranchesPage'
 
 function FullPageLoader() {
   return (
@@ -117,6 +118,7 @@ function AppRoutes() {
         <Route path="/store-admin/attendance/scanner" element={<RequireAuth roles={['Store Administrator', 'Store Admin']}><QrScannerPage /></RequireAuth>} />
 
         {/* Administrator only routes */}
+        <Route path="/branches" element={<RequireAuth roles={['Administrator']}><BranchesPage /></RequireAuth>} />
         <Route path="/admin-dashboard" element={<RequireAuth roles={['Administrator']}><SystemAdminDashboard /></RequireAuth>} />
         <Route path="/qr-monitoring" element={<RequireAuth roles={['Administrator']}><QrMonitoringPage /></RequireAuth>} />
         <Route path="/admin/qr-monitoring" element={<RequireAuth roles={['Administrator']}><QrMonitoringPage /></RequireAuth>} />
