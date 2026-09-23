@@ -278,6 +278,23 @@ class SystemController extends Controller
             'employee_id' => 'nullable|exists:employees,employee_id',
         ]);
 
+        if (in_array($validated['role'], ['Store Administrator', 'Store Admin']) && !empty($validated['employee_id']) && ($validated['is_active'] ?? true)) {
+            $employee = \App\Models\Employee::find($validated['employee_id']);
+            if ($employee && $employee->branch_id) {
+                $existing = User::whereIn('role', ['Store Administrator', 'Store Admin'])
+                    ->where('is_active', true)
+                    ->whereHas('employee', function ($q) use ($employee) {
+                        $q->where('branch_id', $employee->branch_id);
+                    })
+                    ->first();
+                if ($existing) {
+                    return response()->json([
+                        'message' => 'This branch already has an active Store Admin.'
+                    ], 422);
+                }
+            }
+        }
+
         $user = User::create([
             'username' => $validated['username'],
             'password_hash' => Hash::make($validated['password']),
@@ -320,6 +337,24 @@ class SystemController extends Controller
             'is_active' => 'nullable|boolean',
             'employee_id' => 'nullable|exists:employees,employee_id',
         ]);
+
+        if (in_array($validated['role'], ['Store Administrator', 'Store Admin']) && !empty($validated['employee_id']) && ($validated['is_active'] ?? $user->is_active)) {
+            $employee = \App\Models\Employee::find($validated['employee_id']);
+            if ($employee && $employee->branch_id) {
+                $existing = User::whereIn('role', ['Store Administrator', 'Store Admin'])
+                    ->where('is_active', true)
+                    ->where('user_id', '!=', $id)
+                    ->whereHas('employee', function ($q) use ($employee) {
+                        $q->where('branch_id', $employee->branch_id);
+                    })
+                    ->first();
+                if ($existing) {
+                    return response()->json([
+                        'message' => 'This branch already has an active Store Admin.'
+                    ], 422);
+                }
+            }
+        }
 
         $data = [
             'username' => $validated['username'],

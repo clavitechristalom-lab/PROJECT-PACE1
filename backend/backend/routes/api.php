@@ -108,6 +108,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::middleware('role:Store Administrator,Store Admin')->group(function () {
         Route::post('/attendance/scan', [AttendanceController::class, 'scan']);
         Route::post('/attendance/verify-qr', [AttendanceController::class, 'verifyQr']);
+        Route::post('/attendance/verify-pin', [AttendanceController::class, 'verifyPin']);
         Route::get('/attendance/check-verification/{id}', [AttendanceController::class, 'checkVerification']);
     });
 

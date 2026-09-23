@@ -10,7 +10,9 @@ use App\Models\PayrollPeriod;
 use App\Models\SaleTransaction;
 use App\Models\Product;
 use App\Models\InstallmentAccount;
+use App\Models\Report;
 use Illuminate\Support\Facades\DB;
+use App\Services\NotificationService;
 
 class ReportController extends Controller
 {
@@ -397,6 +399,278 @@ class ReportController extends Controller
             'completed_accounts' => $completed,
             'total_balance' => $totalBalance,
             'accounts' => $list,
+        ]);
+    }
+
+    /**
+     * Reports CRUD
+     */
+    public function index(Request $request)
+    {
+        $user = $request->user();
+        $query = Report::with(['branch', 'createdBy.employee', 'reviewedBy.employee']);
+
+        if ($user && in_array($user->role, ['Store Administrator', 'Store Admin'])) {
+            $branchId = $user->employee ? $user->employee->branch_id : -1;
+            $query->where('branch_id', $branchId);
+        } elseif ($request->filled('branch_id') && $request->query('branch_id') !== 'All') {
+            $query->where('branch_id', $request->query('branch_id'));
+        }
+
+        if ($request->filled('status') && $request->query('status') !== 'All') {
+            $query->where('status', $request->query('status'));
+        }
+
+        if ($request->filled('report_type') && $request->query('report_type') !== 'All') {
+            $query->where('report_type', $request->query('report_type'));
+        }
+
+        $reports = $query->orderByDesc('report_id')->get()->map(function ($r) {
+            return [
+                'report_id' => $r->report_id,
+                'report_title' => $r->report_title,
+                'report_type' => $r->report_type,
+                'branch_id' => $r->branch_id,
+                'branch_name' => $r->branch ? $r->branch->name : null,
+                'week_start' => $r->week_start ? $r->week_start->format('Y-m-d') : null,
+                'week_end' => $r->week_end ? $r->week_end->format('Y-m-d') : null,
+                'status' => $r->status,
+                'created_by_name' => $r->createdBy ? ($r->createdBy->employee ? "{$r->createdBy->employee->first_name} {$r->createdBy->employee->last_name}" : $r->createdBy->username) : null,
+                'created_at' => $r->created_at->format('Y-m-d H:i:s'),
+                'submitted_at' => $r->submitted_at ? $r->submitted_at->format('Y-m-d H:i:s') : null,
+                'reviewed_by_name' => $r->reviewedBy ? ($r->reviewedBy->employee ? "{$r->reviewedBy->employee->first_name} {$r->reviewedBy->employee->last_name}" : $r->reviewedBy->username) : null,
+                'reviewed_at' => $r->reviewed_at ? $r->reviewed_at->format('Y-m-d H:i:s') : null,
+            ];
+        });
+
+        return response()->json([
+            'success' => true,
+            'reports' => $reports,
+        ]);
+    }
+
+    public function show(Request $request, $id)
+    {
+        $user = $request->user();
+        $report = Report::with(['branch', 'createdBy.employee', 'reviewedBy.employee'])->findOrFail($id);
+
+        if ($user && in_array($user->role, ['Store Administrator', 'Store Admin'])) {
+            $branchId = $user->employee ? $user->employee->branch_id : -1;
+            if ($report->branch_id != $branchId) {
+                return response()->json(['message' => 'Unauthorized branch access.'], 403);
+            }
+        }
+
+        return response()->json([
+            'success' => true,
+            'report' => [
+                'report_id' => $report->report_id,
+                'report_title' => $report->report_title,
+                'report_type' => $report->report_type,
+                'branch_id' => $report->branch_id,
+                'branch_name' => $report->branch ? $report->branch->name : null,
+                'week_start' => $report->week_start ? $report->week_start->format('Y-m-d') : null,
+                'week_end' => $report->week_end ? $report->week_end->format('Y-m-d') : null,
+                'status' => $report->status,
+                'content' => $report->content,
+                'notes' => $report->notes,
+                'created_by_name' => $report->createdBy ? ($report->createdBy->employee ? "{$report->createdBy->employee->first_name} {$report->createdBy->employee->last_name}" : $report->createdBy->username) : null,
+                'created_at' => $report->created_at->format('Y-m-d H:i:s'),
+                'submitted_at' => $report->submitted_at ? $report->submitted_at->format('Y-m-d H:i:s') : null,
+                'reviewed_by_name' => $report->reviewedBy ? ($report->reviewedBy->employee ? "{$report->reviewedBy->employee->first_name} {$report->reviewedBy->employee->last_name}" : $report->reviewedBy->username) : null,
+                'reviewed_at' => $report->reviewed_at ? $report->reviewed_at->format('Y-m-d H:i:s') : null,
+            ],
+        ]);
+    }
+
+    public function store(Request $request)
+    {
+        $user = $request->user();
+        if (!$user || !in_array($user->role, ['Store Administrator', 'Store Admin'])) {
+            return response()->json(['message' => 'Only Store Admins can create reports.'], 403);
+        }
+
+        $branchId = $user->employee ? $user->employee->branch_id : null;
+        if (!$branchId) {
+            return response()->json(['message' => 'You are not assigned to a branch.'], 422);
+        }
+
+        $validated = $request->validate([
+            'report_title' => 'required|string|max:255',
+            'report_type' => 'required|string|in:Weekly Store Report,Product / Inventory Report',
+            'week_start' => 'nullable|date',
+            'week_end' => 'nullable|date|after_or_equal:week_start',
+            'notes' => 'nullable|string',
+        ]);
+
+        // Generate content payload server-side
+        $content = [];
+        if ($validated['report_type'] === 'Weekly Store Report') {
+            $dateFrom = $validated['week_start'] ?? date('Y-m-d', strtotime('-7 days'));
+            $dateTo = $validated['week_end'] ?? date('Y-m-d');
+            
+            // Generate real attendance summary for the branch in this period
+            $attendances = Attendance::whereHas('employee', function($q) use ($branchId) {
+                $q->where('branch_id', $branchId);
+            })->whereBetween('attendance_date', [$dateFrom, $dateTo])->get();
+            
+            $content['attendance_summary'] = [
+                'total_records' => $attendances->count(),
+                'present' => $attendances->where('status', 'Present')->count(),
+                'absent' => $attendances->where('status', 'Absent')->count(),
+                'late' => $attendances->where('status', 'Late')->count(),
+                'total_hours' => round($attendances->sum('total_hours'), 2),
+                'overtime_hours' => round($attendances->sum('overtime_hours'), 2),
+            ];
+            
+            $content['employee_summary'] = [
+                'total_employees' => Employee::where('branch_id', $branchId)->count(),
+                'active_employees' => Employee::where('branch_id', $branchId)->where('status', 'Active')->count(),
+            ];
+        } else if ($validated['report_type'] === 'Product / Inventory Report') {
+            $products = Product::all();
+            $content['inventory_summary'] = [
+                'total_products' => $products->count(),
+                'in_stock' => $products->where('stock_quantity', '>', 0)->count(),
+                'low_stock' => $products->filter(fn($p) => $p->stock_quantity > 0 && $p->stock_quantity <= $p->reorder_level)->count(),
+                'out_of_stock' => $products->where('stock_quantity', '<=', 0)->count(),
+            ];
+        }
+
+        $report = Report::create([
+            'report_title' => $validated['report_title'],
+            'report_type' => $validated['report_type'],
+            'branch_id' => $branchId,
+            'week_start' => $validated['week_start'] ?? null,
+            'week_end' => $validated['week_end'] ?? null,
+            'created_by' => $user->user_id,
+            'status' => 'DRAFT',
+            'content' => $content,
+            'notes' => $validated['notes'] ?? null,
+        ]);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Report draft created successfully.',
+            'report_id' => $report->report_id,
+        ]);
+    }
+
+    public function update(Request $request, $id)
+    {
+        $user = $request->user();
+        $report = Report::findOrFail($id);
+
+        if ($user && in_array($user->role, ['Store Administrator', 'Store Admin'])) {
+            $branchId = $user->employee ? $user->employee->branch_id : -1;
+            if ($report->branch_id != $branchId) {
+                return response()->json(['message' => 'Unauthorized.'], 403);
+            }
+        }
+
+        if ($report->status !== 'DRAFT') {
+            return response()->json(['message' => 'Only DRAFT reports can be edited.'], 422);
+        }
+
+        $validated = $request->validate([
+            'report_title' => 'required|string|max:255',
+            'week_start' => 'nullable|date',
+            'week_end' => 'nullable|date|after_or_equal:week_start',
+            'notes' => 'nullable|string',
+        ]);
+
+        $report->update([
+            'report_title' => $validated['report_title'],
+            'week_start' => $validated['week_start'] ?? null,
+            'week_end' => $validated['week_end'] ?? null,
+            'notes' => $validated['notes'] ?? null,
+        ]);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Report draft updated successfully.',
+        ]);
+    }
+
+    public function submit(Request $request, $id)
+    {
+        $user = $request->user();
+        $report = Report::with('branch')->findOrFail($id);
+
+        if ($user && in_array($user->role, ['Store Administrator', 'Store Admin'])) {
+            $branchId = $user->employee ? $user->employee->branch_id : -1;
+            if ($report->branch_id != $branchId) {
+                return response()->json(['message' => 'Unauthorized.'], 403);
+            }
+        }
+
+        if ($report->status !== 'DRAFT') {
+            return response()->json(['message' => 'Report is already submitted or reviewed.'], 422);
+        }
+
+        $report->update([
+            'status' => 'SUBMITTED',
+            'submitted_at' => now(),
+        ]);
+
+        // Send notification to admin
+        $storeAdminName = $user->employee ? trim("{$user->employee->first_name} {$user->employee->last_name}") : $user->username;
+        $branchName = $report->branch ? $report->branch->name : 'Unknown Branch';
+        
+        $admins = \App\Models\User::where('role', 'Administrator')->where('is_active', true)->get();
+        foreach ($admins as $admin) {
+            NotificationService::sendToUser($admin->user_id, [
+                'type' => 'report_submission',
+                'title' => 'New Report Submitted',
+                'message' => "Weekly report '{$report->report_title}' submitted by {$storeAdminName} for {$branchName}.",
+                'module' => 'Reports',
+                'related_id' => $report->report_id,
+                'related_type' => 'App\Models\Report',
+                'action_url' => '/dashboard',
+                'priority' => 'normal',
+            ]);
+        }
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Report submitted successfully.',
+        ]);
+    }
+
+    public function review(Request $request, $id)
+    {
+        $user = $request->user();
+        if (!$user || $user->role !== 'Administrator') {
+            return response()->json(['message' => 'Only Administrators can review reports.'], 403);
+        }
+
+        $report = Report::findOrFail($id);
+
+        if ($report->status !== 'SUBMITTED') {
+            return response()->json(['message' => 'Report must be SUBMITTED before it can be reviewed.'], 422);
+        }
+
+        $report->update([
+            'status' => 'REVIEWED',
+            'reviewed_by' => $user->user_id,
+            'reviewed_at' => now(),
+        ]);
+
+        // Notify store admin
+        NotificationService::sendToUser($report->created_by, [
+            'type' => 'report_review',
+            'title' => 'Report Reviewed',
+            'message' => "Your report '{$report->report_title}' has been reviewed by Administrator.",
+            'module' => 'Reports',
+            'related_id' => $report->report_id,
+            'related_type' => 'App\Models\Report',
+            'action_url' => '/reports',
+            'priority' => 'normal',
+        ]);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Report marked as reviewed successfully.',
         ]);
     }
 }

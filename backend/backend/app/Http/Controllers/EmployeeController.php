@@ -267,6 +267,28 @@ class EmployeeController extends Controller
             'attendance_pin' => 'nullable|string|min:4|max:6',
         ]);
 
+        if (!empty($validated['branch_id']) && $validated['branch_id'] != $employee->branch_id) {
+            $isStoreAdmin = \App\Models\User::where('employee_id', $employee->employee_id)
+                ->whereIn('role', ['Store Administrator', 'Store Admin'])
+                ->where('is_active', true)
+                ->exists();
+                
+            if ($isStoreAdmin) {
+                $existingStoreAdmin = \App\Models\User::whereIn('role', ['Store Administrator', 'Store Admin'])
+                    ->where('is_active', true)
+                    ->where('employee_id', '!=', $employee->employee_id)
+                    ->whereHas('employee', function ($q) use ($validated) {
+                        $q->where('branch_id', $validated['branch_id']);
+                    })
+                    ->first();
+                if ($existingStoreAdmin) {
+                    return response()->json([
+                        'message' => 'The target branch already has an active Store Admin.'
+                    ], 422);
+                }
+            }
+        }
+
         if (isset($validated['documents'])) {
             $validated['documents'] = json_encode($validated['documents']);
         }

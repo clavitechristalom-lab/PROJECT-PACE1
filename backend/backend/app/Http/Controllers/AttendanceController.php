@@ -422,6 +422,23 @@ class AttendanceController extends Controller
             ]);
         }
 
+        $today = date('Y-m-d');
+        $record = \App\Models\Attendance::where('employee_id', $employee->employee_id)
+            ->where('attendance_date', $today)
+            ->first();
+
+        // Auto-determine next action for Employee
+        if (!$record) {
+            $action = 'TIME_IN';
+        } elseif ($record->time_out) {
+            $action = 'COMPLETED';
+        } elseif ($record->lunch_out && !$record->lunch_in) {
+            $action = 'LUNCH_IN';
+        } else {
+            if (!$record->lunch_out) $action = 'LUNCH_OUT';
+            else $action = 'TIME_OUT';
+        }
+
         return response()->json([
             'success' => true,
             'status' => 'PENDING',
@@ -433,8 +450,206 @@ class AttendanceController extends Controller
                 'department' => $employee->department,
                 'branch' => $employee->branch ? $employee->branch->name : $storeAdminBranch,
             ],
+            'available_actions' => [$action],
             'message' => 'Waiting for Employee verification...',
         ]);
+    }
+
+    public function verifyPin(Request $request)
+    {
+        $user = $request->user('sanctum') ?? $request->user();
+        if (!$user || !in_array($user->role, ['Store Administrator', 'Store Admin'])) {
+            return response()->json([
+                'success' => false,
+                'message' => '403 Forbidden: Only authorized Store Administrators can access this endpoint.',
+            ], 403);
+        }
+
+        $validated = $request->validate([
+            'qr_token' => 'required|string',
+            'pin' => 'required|string',
+            'device_info' => 'nullable|string',
+        ]);
+
+        $token = trim($validated['qr_token']);
+        $pin = $validated['pin'];
+        $deviceInfo = $request->input('device_info', $request->userAgent());
+        $storeAdminBranch = $user->employee && !empty($user->employee->branch_id) ? trim($user->employee->branch_id) : null;
+
+        $employee = Employee::where('qr_token', $token)->first();
+
+        if (!$employee) {
+            return response()->json(['success' => false, 'message' => 'Invalid or unrecognized QR code.'], 404);
+        }
+
+        // Branch Validation
+        $employeeBranch = !empty($employee->branch_id) ? trim((string)$employee->branch_id) : null;
+        if (strcasecmp((string)$employeeBranch, (string)$storeAdminBranch) !== 0) {
+            return response()->json([
+                'success' => false,
+                'message' => 'This employee does not belong to your authorized branch.'
+            ], 403);
+        }
+
+        // Lockout Check
+        if ($employee->pin_locked_until && $employee->pin_locked_until > now()) {
+            return response()->json([
+                'success' => false,
+                'is_locked' => true,
+                'message' => 'Account is currently locked due to too many failed attempts.',
+            ], 423);
+        }
+
+        if (empty($employee->attendance_pin)) {
+            $employee->attendance_pin = \Illuminate\Support\Facades\Hash::make('1234');
+            $employee->save();
+        }
+
+        // Find the pending scan log
+        $log = AttendanceScanLog::where('employee_id', $employee->employee_id)
+            ->where('qr_token_scanned', substr($token, 0, 50))
+            ->where('status', 'PENDING')
+            ->orderBy('id', 'desc')
+            ->first();
+
+        if (!$log) {
+            $log = AttendanceScanLog::create([
+                'employee_id' => $employee->employee_id,
+                'scanned_by' => $user->user_id,
+                'branch' => $storeAdminBranch,
+                'qr_token_scanned' => substr($token, 0, 50),
+                'qr_verified' => true,
+                'pin_verified' => false,
+                'action_type' => 'PIN_VERIFICATION',
+                'status' => 'PENDING',
+                'device_info' => $deviceInfo,
+                'ip_address' => $request->ip(),
+            ]);
+        }
+
+        // Verify PIN
+        if (!\Illuminate\Support\Facades\Hash::check($pin, $employee->attendance_pin)) {
+            $employee->pin_failed_attempts = ($employee->pin_failed_attempts ?? 0) + 1;
+            if ($employee->pin_failed_attempts >= 5) {
+                $employee->pin_locked_until = now()->addMinutes(15);
+                $employee->save();
+                
+                $log->update(['status' => 'FAILED', 'failure_reason' => 'PIN lockout']);
+                return response()->json(['success' => false, 'is_locked' => true, 'message' => 'Too many failed attempts. Account locked.'], 423);
+            }
+            $employee->save();
+            $log->update(['status' => 'FAILED', 'failure_reason' => 'Incorrect PIN']);
+            return response()->json(['success' => false, 'message' => 'Incorrect PIN. Please enter your correct Personal PIN.'], 422);
+        }
+
+        // PIN is valid!
+        $employee->pin_failed_attempts = 0;
+        $employee->pin_locked_until = null;
+        $employee->save();
+
+        $today = date('Y-m-d');
+        $now = date('H:i:s');
+        $timeStr = date('h:i A');
+
+        $record = \App\Models\Attendance::where('employee_id', $employee->employee_id)
+            ->where('attendance_date', $today)
+            ->first();
+
+        // Auto-determine next action for Employee
+        if (!$record) {
+            $action = 'TIME_IN';
+        } elseif ($record->time_out) {
+            $log->update(['status' => 'FAILED', 'failure_reason' => 'Attendance already completed today.']);
+            return response()->json(['success' => false, 'message' => 'TIME IN ALREADY RECORDED. Attendance already completed for today.'], 400);
+        } elseif ($record->lunch_out && !$record->lunch_in) {
+            $action = 'LUNCH_IN';
+        } else {
+            if (!$record->lunch_out) $action = 'LUNCH_OUT';
+            else $action = 'TIME_OUT';
+        }
+        
+        \Illuminate\Support\Facades\DB::beginTransaction();
+        try {
+            // Apply Action
+            if ($action === 'TIME_IN') {
+                $record = new \App\Models\Attendance();
+                $record->employee_id = $employee->employee_id;
+                $record->scanned_by = $user->user_id;
+                $record->attendance_date = $today;
+                $record->time_in = $now;
+                $record->qr_scan_in = 'QR_PIN_VERIFIED';
+                $record->verification_method = 'QR + PIN';
+                $record->verified_by_name = "Store Administrator";
+                $record->device_info = $deviceInfo;
+                $record->ip_address = $request->ip();
+                $record->total_hours = 0;
+                $record->overtime_hours = 0;
+                
+                $hour = (int)date('H');
+                $min = (int)date('i');
+                if ($hour > 8 || ($hour === 8 && $min > 15)) {
+                    $record->status = 'Late';
+                } else {
+                    $record->status = 'Present';
+                }
+                
+                $record->save();
+            } else if ($action === 'LUNCH_OUT') {
+                $record->lunch_out = $now;
+                $record->save();
+            } else if ($action === 'LUNCH_IN') {
+                $record->lunch_in = $now;
+                $record->save();
+            } else if ($action === 'TIME_OUT') {
+                $record->time_out = $now;
+                $record->qr_scan_out = 'QR_PIN_VERIFIED';
+                $record->verified_by_name = "Store Administrator";
+                
+                // Calc hours
+                $inDateTime = strtotime($record->attendance_date . ' ' . $record->time_in);
+                $outDateTime = strtotime($today . ' ' . $now);
+                $totalSeconds = max(0, $outDateTime - $inDateTime);
+                
+                $lunchSeconds = 0;
+                if ($record->lunch_out && $record->lunch_in) {
+                    $lunchSeconds = max(0, strtotime($record->attendance_date.' '.$record->lunch_in) - strtotime($record->attendance_date.' '.$record->lunch_out));
+                }
+                
+                $workedSeconds = $totalSeconds - $lunchSeconds;
+                $diffHours = round(max(0, $workedSeconds / 3600), 2);
+                $record->total_hours = $diffHours;
+                $record->overtime_hours = max(0, round($diffHours - 8, 2));
+                $record->status = 'COMPLETE';
+                $record->save();
+            }
+
+            // Update Log
+            $log->update([
+                'status' => 'SUCCESS',
+                'action_type' => 'ATTENDANCE_' . $action,
+                'pin_verified' => true
+            ]);
+            
+            \Illuminate\Support\Facades\DB::commit();
+
+            return response()->json([
+                'success' => true,
+                'action' => $action,
+                'time' => $timeStr,
+                'employee' => [
+                    'name' => "{$employee->first_name} {$employee->last_name}",
+                    'employee_code' => $employee->employee_code
+                ],
+                'branch' => $storeAdminBranch,
+                'total_hours' => $record->total_hours ?? 0,
+                'overtime_hours' => $record->overtime_hours ?? 0,
+                'message' => "Attendance recorded. Action: " . str_replace('_', ' ', $action),
+            ]);
+        } catch (\Exception $e) {
+            \Illuminate\Support\Facades\DB::rollBack();
+            $log->update(['status' => 'FAILED', 'failure_reason' => 'Database error']);
+            return response()->json(['success' => false, 'message' => 'Failed to save attendance.'], 500);
+        }
     }
 
 
