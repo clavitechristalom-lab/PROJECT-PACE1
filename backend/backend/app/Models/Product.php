@@ -8,7 +8,7 @@ class Product extends Model
     protected $table = 'products';
 
     protected $fillable = [
-        'product_code', 'product_name', 'category', 'brand', 'description', 
+        'branch_id', 'product_code', 'product_name', 'category', 'brand', 'description', 
         'unit_price', 'cost_price', 'stock_quantity', 'reorder_level', 
         'unit', 'status', 'image_url'
     ];
@@ -17,5 +17,10 @@ class Product extends Model
     public function saleItems()
     {
         return $this->hasMany(SaleItem::class, 'product_id', 'product_id');
+    }
+
+    public function branch()
+    {
+        return $this->belongsTo(BranchProfile::class, 'branch_id', 'id');
     }
 }

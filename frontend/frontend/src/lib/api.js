@@ -174,6 +174,11 @@ export const api = {
       }),
   },
 
+  // ─── Branches ───
+  branches: {
+    getAll: () => request('/branches'),
+  },
+
   // ─── Transactions (Unified History) ───
   transactions: {
     getAll: (params = {}) => {

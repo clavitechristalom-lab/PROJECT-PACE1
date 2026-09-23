@@ -539,7 +539,7 @@ class AttendanceController extends Controller
             }
             $employee->save();
             $log->update(['status' => 'FAILED', 'failure_reason' => 'Incorrect PIN']);
-            return response()->json(['success' => false, 'message' => 'Incorrect PIN. Please enter your correct Personal PIN.'], 422);
+            return response()->json(['success' => false, 'message' => 'INCORRECT PIN. Please enter your correct Personal PIN. EMPLOYEE VERIFICATION FAILED. Attendance was not recorded.'], 422);
         }
 
         // PIN is valid!

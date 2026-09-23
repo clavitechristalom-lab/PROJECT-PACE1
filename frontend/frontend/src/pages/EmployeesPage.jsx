@@ -1017,10 +1017,11 @@ export default function EmployeesPage({ branchFilter, embedded }) {
                     <select
                       value={form.branch_id}
                       onChange={e => setForm(f => ({ ...f, branch_id: e.target.value }))}
-                      className="w-full bg-muted/50 border border-border rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-primary transition-colors appearance-none"
+                      disabled={isStoreAdmin}
+                      className={`w-full bg-muted/50 border border-border rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-primary transition-colors appearance-none ${isStoreAdmin ? 'opacity-50 cursor-not-allowed' : ''}`}
                     >
-                      <option value="">Unassigned</option>
-                      {branchesList.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+                      <option value="">{isStoreAdmin ? 'Auto-assigned to your branch' : 'Unassigned'}</option>
+                      {!isStoreAdmin && branchesList.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
                     </select>
                   </div>
                   <div>

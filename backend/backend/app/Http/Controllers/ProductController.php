@@ -10,7 +10,25 @@ class ProductController extends Controller
 {
     public function index(Request $request)
     {
-        $query = Product::query();
+        $query = Product::with('branch');
+        $user = $request->user();
+
+        if ($user) {
+            if ($user->role === 'Customer') {
+                $branchId = $user->customer ? $user->customer->branch_id : null;
+                if (!$branchId) {
+                    return response()->json(['products' => [], 'total' => 0]);
+                }
+                $query->where('branch_id', $branchId);
+            } elseif (in_array($user->role, ['Store Administrator', 'Store Admin'])) {
+                $branchId = $user->employee ? $user->employee->branch_id : null;
+                if (!$branchId) {
+                    return response()->json(['products' => [], 'total' => 0]);
+                }
+                $query->where('branch_id', $branchId);
+            }
+            // Administrators see all products
+        }
 
         if ($request->filled('search')) {
             $s = $request->query('search');
@@ -92,11 +110,10 @@ class ProductController extends Controller
 
     public function store(Request $request)
     {
-        if ($request->user() && $request->user()->role === 'Administrator') {
-            return response()->json(['success' => false, 'message' => 'Admin is not authorized to create products. Monitor/View only.'], 403);
-        }
+        $user = $request->user();
 
         $validated = $request->validate([
+            'branch_id' => 'nullable|exists:branch_profiles,id',
             'product_code' => 'nullable|string|unique:products,product_code',
             'product_name' => 'required|string|max:255',
             'category' => 'required|string|max:255',
@@ -119,7 +136,19 @@ class ProductController extends Controller
         $validated['reorder_level'] = $validated['reorder_level'] ?? 0;
         $validated['unit'] = $validated['unit'] ?? 'unit';
 
+        if ($user && in_array($user->role, ['Store Administrator', 'Store Admin'])) {
+            if (!$user->employee || !$user->employee->branch_id) {
+                return response()->json(['message' => 'Store Administrator is not assigned to any branch.'], 403);
+            }
+            $validated['branch_id'] = $user->employee->branch_id;
+        } elseif ($user && $user->role === 'Administrator') {
+            if (empty($validated['branch_id'])) {
+                return response()->json(['message' => 'Branch ID is required for Administrator.'], 422);
+            }
+        }
+
         $product = Product::create($validated);
+        $product->load('branch');
 
         SystemLog::create([
             'user_id' => $request->input('user_id', 1),
@@ -139,8 +168,16 @@ class ProductController extends Controller
     public function update(Request $request, $id)
     {
         $product = Product::findOrFail($id);
+        $user = $request->user();
+
+        if ($user && in_array($user->role, ['Store Administrator', 'Store Admin'])) {
+            if (!$user->employee || $user->employee->branch_id !== $product->branch_id) {
+                return response()->json(['message' => 'Unauthorized to update product from another branch.'], 403);
+            }
+        }
 
         $validated = $request->validate([
+            'branch_id' => 'nullable|exists:branch_profiles,id',
             'product_code' => "required|string|unique:products,product_code,{$id},product_id",
             'product_name' => 'required|string|max:255',
             'category' => 'required|string|max:255',
@@ -154,7 +191,16 @@ class ProductController extends Controller
             'status' => 'required|string|in:Active,Inactive',
         ]);
 
+        if ($user && in_array($user->role, ['Store Administrator', 'Store Admin'])) {
+            unset($validated['branch_id']); // Store admin cannot change branch
+        } elseif ($user && $user->role === 'Administrator') {
+             if (empty($validated['branch_id'])) {
+                return response()->json(['message' => 'Branch ID is required for Administrator.'], 422);
+            }
+        }
+
         $product->update($validated);
+        $product->load('branch');
 
         SystemLog::create([
             'user_id' => $request->input('user_id', 1),
@@ -174,6 +220,14 @@ class ProductController extends Controller
     public function destroy(Request $request, $id)
     {
         $product = Product::findOrFail($id);
+        $user = $request->user();
+
+        if ($user && in_array($user->role, ['Store Administrator', 'Store Admin'])) {
+            if (!$user->employee || $user->employee->branch_id !== $product->branch_id) {
+                return response()->json(['message' => 'Unauthorized to delete product from another branch.'], 403);
+            }
+        }
+
         $name = $product->product_name;
         $code = $product->product_code;
 

@@ -26,6 +26,7 @@ export default function ProductsPage({ branchFilter, embedded }) {
   const isAdmin = user?.role === 'Administrator'
   const [searchParams] = useSearchParams()
   const [products, setProducts] = useState([])
+  const [branches, setBranches] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [search, setSearch] = useState('')
@@ -61,7 +62,7 @@ export default function ProductsPage({ branchFilter, embedded }) {
 
   // Form
   const emptyForm = {
-    product_code: '', product_name: '', category: 'Appliances',
+    branch_id: '', product_code: '', product_name: '', category: 'Appliances',
     brand: '', unit_price: '', cost_price: '',
     stock_quantity: '', reorder_level: '5', unit: 'unit',
     status: 'Active', description: ''
@@ -72,13 +73,17 @@ export default function ProductsPage({ branchFilter, embedded }) {
     setLoading(true)
     setError('')
     try {
-      const data = await api.products.getAll({
-        search: search || undefined,
-        category: category !== 'All' ? category : undefined,
-        stock_status: stockStatus !== 'All' ? stockStatus : undefined,
-        branch: branchFilter || undefined,
-      })
+      const [data, branchesData] = await Promise.all([
+        api.products.getAll({
+          search: search || undefined,
+          category: category !== 'All' ? category : undefined,
+          stock_status: stockStatus !== 'All' ? stockStatus : undefined,
+          branch: branchFilter || undefined,
+        }),
+        isAdmin ? api.branches.getAll() : Promise.resolve({ branches: [] })
+      ])
       setProducts(data.products || [])
+      if (isAdmin) setBranches(branchesData.branches || [])
     } catch (err) {
       console.error('Failed to load products:', err)
       setError(err.message || 'Failed to fetch products')
@@ -178,6 +183,7 @@ export default function ProductsPage({ branchFilter, embedded }) {
       unit: p.unit || 'unit',
       status: p.status || 'Active',
       description: p.description || '',
+      branch_id: p.branch_id?.toString() || '',
     })
     setAddModal(true)
   }
@@ -308,6 +314,7 @@ export default function ProductsPage({ branchFilter, embedded }) {
                   <tr className="border-b border-border bg-muted/50 text-muted-foreground uppercase font-semibold text-[11px]">
                     <th className="py-3 px-4 text-left">SKU Code</th>
                     <th className="py-3 px-4 text-left">Product Name</th>
+                    {isAdmin && <th className="py-3 px-4 text-left">Branch</th>}
                     <th className="py-3 px-4 text-left">Category</th>
                     <th className="py-3 px-4 text-right">Selling Price</th>
                     <th className="py-3 px-4 text-right">Cost Price</th>
@@ -339,6 +346,13 @@ export default function ProductsPage({ branchFilter, embedded }) {
                             </div>
                           </div>
                         </td>
+                        {isAdmin && (
+                          <td className="py-3 px-4">
+                            <span className="text-[11px] font-semibold text-foreground bg-muted/50 px-2 py-1 rounded-md">
+                              {p.branch?.branch_name || 'Unassigned'}
+                            </span>
+                          </td>
+                        )}
                         <td className="py-3 px-4">
                           <Badge text={p.category} variant="neutral" />
                         </td>
@@ -429,16 +443,40 @@ export default function ProductsPage({ branchFilter, embedded }) {
               </div>
             </div>
 
-            <div>
-              <label className="block font-bold text-muted-foreground mb-1">Product Name *</label>
-              <input
-                type="text"
-                value={form.product_name}
-                onChange={e => setForm(f => ({ ...f, product_name: e.target.value }))}
-                placeholder="e.g. Samsung Inverter Refrigerator 8.4 cu.ft"
-                required
-                className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground font-semibold"
-              />
+            <div className="grid grid-cols-2 gap-2.5">
+              <div className={isAdmin ? "col-span-1" : "col-span-2"}>
+                <label className="block font-bold text-muted-foreground mb-1">Product Name *</label>
+                <input
+                  type="text"
+                  value={form.product_name}
+                  onChange={e => setForm(f => ({ ...f, product_name: e.target.value }))}
+                  placeholder="e.g. Samsung Inverter Refrigerator"
+                  required
+                  className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground font-semibold"
+                />
+              </div>
+              
+              {isAdmin ? (
+                <div>
+                  <label className="block font-bold text-muted-foreground mb-1">Assigned Branch *</label>
+                  <select
+                    value={form.branch_id}
+                    onChange={e => setForm(f => ({ ...f, branch_id: e.target.value }))}
+                    className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground font-semibold"
+                    required
+                  >
+                    <option value="">Select Branch</option>
+                    {branches.map(b => (
+                      <option key={b.id} value={b.id}>{b.branch_name}</option>
+                    ))}
+                  </select>
+                </div>
+              ) : (
+                <div className="col-span-2 text-[10px] text-muted-foreground flex items-center gap-1.5 mt-1 bg-muted/30 p-2 rounded-lg border border-border">
+                  <FiInfo className="w-3 h-3" />
+                  <span>This product will automatically be assigned to your active branch.</span>
+                </div>
+              )}
             </div>
 
             <div className="grid grid-cols-2 gap-2.5">
@@ -577,6 +615,7 @@ export default function ProductsPage({ branchFilter, embedded }) {
                 <div><span className="text-[10px] text-muted-foreground uppercase font-bold block mb-0.5">Category:</span> <p className="font-semibold text-foreground">{viewItem.category}</p></div>
                 <div><span className="text-[10px] text-muted-foreground uppercase font-bold block mb-0.5">Brand:</span> <p className="font-medium text-foreground">{viewItem.brand || '—'}</p></div>
                 <div><span className="text-[10px] text-muted-foreground uppercase font-bold block mb-0.5">Status:</span> <div><StatusBadge status={viewItem.status} /></div></div>
+                {isAdmin && <div className="col-span-2"><span className="text-[10px] text-muted-foreground uppercase font-bold block mb-0.5">Branch:</span> <p className="font-medium text-primary">{viewItem.branch?.branch_name || 'Unassigned'}</p></div>}
               </div>
             </div>
 

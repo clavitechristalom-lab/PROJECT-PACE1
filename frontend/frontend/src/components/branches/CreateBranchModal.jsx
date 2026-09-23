@@ -7,7 +7,6 @@ export default function CreateBranchModal({ isOpen, onClose, onCreate }) {
   const [formData, setFormData] = useState({
     name: '',
     location: '',
-    manager_id: '',
     contact_number: '',
     status: 'open',
     color: '#2b5ce6',
@@ -16,21 +15,13 @@ export default function CreateBranchModal({ isOpen, onClose, onCreate }) {
   const [imageFile, setImageFile] = useState(null)
 
   const [loading, setLoading] = useState(false)
-  const [admins, setAdmins] = useState([])
-
-  useEffect(() => {
-    if (isOpen) {
-      api.system.getUsers()
-        .then(res => {
-          const users = res.users || res || [];
-          setAdmins(users.filter(u => u.role === 'Store Administrator'))
-        })
-        .catch(err => console.error(err))
-    }
-  }, [isOpen])
 
   const handleSubmit = async (e) => {
-    e.preventDefault()
+    if (e) e.preventDefault()
+    if (!formData.name || !formData.name.trim()) {
+      alert("Please enter a Branch Name before creating.");
+      return;
+    }
     setLoading(true)
     try {
       await onCreate(formData, imageFile)
@@ -53,7 +44,6 @@ export default function CreateBranchModal({ isOpen, onClose, onCreate }) {
         <div className="space-y-1">
           <label className="text-xs font-bold text-muted-foreground uppercase">Branch Name *</label>
           <input 
-            required
             name="name"
             value={formData.name}
             onChange={handleChange}
@@ -90,29 +80,6 @@ export default function CreateBranchModal({ isOpen, onClose, onCreate }) {
           </div>
         </div>
 
-        {/* Manager */}
-        <div className="space-y-1">
-          <label className="text-xs font-bold text-muted-foreground uppercase flex items-center gap-1">
-            <FiUser className="w-3 h-3" /> Store Manager
-          </label>
-          <select 
-            name="manager_id"
-            value={formData.manager_id}
-            onChange={handleChange}
-            className="w-full px-3 py-2 bg-muted/40 border border-border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
-          >
-            <option value="">Select a Manager...</option>
-            {admins.map(admin => {
-               const empName = admin.employee ? `${admin.employee.first_name} ${admin.employee.last_name}`.trim() : admin.username;
-               return (
-                 <option key={admin.user_id} value={admin.user_id}>
-                   {empName}
-                 </option>
-               )
-            })}
-          </select>
-        </div>
-
         {/* Image Upload */}
         <div className="space-y-1">
           <label className="text-xs font-bold text-muted-foreground uppercase flex items-center gap-1">
@@ -138,7 +105,8 @@ export default function CreateBranchModal({ isOpen, onClose, onCreate }) {
             Cancel
           </button>
           <button 
-            type="submit"
+            type="button"
+            onClick={handleSubmit}
             className="px-4 py-2 text-sm font-bold text-white bg-primary hover:bg-primary/90 rounded-xl flex items-center gap-2"
             disabled={loading}
           >

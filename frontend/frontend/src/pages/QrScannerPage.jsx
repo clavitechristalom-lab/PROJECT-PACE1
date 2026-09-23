@@ -78,6 +78,16 @@ export default function QrScannerPage() {
   const scannerContainerId = 'qr-terminal-camera-box'
   const resetTimerRef = useRef(null)
 
+  // Real-time Clock
+  const [currentTime, setCurrentTime] = useState(new Date())
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setCurrentTime(new Date())
+    }, 1000)
+    return () => clearInterval(timer)
+  }, [])
+
   // STRICT ACCESS RESTRICTION: Non-store-admin gets 403 Forbidden screen
   if (!isStoreAdmin) {
     return (
@@ -244,12 +254,12 @@ export default function QrScannerPage() {
         startAutoResetTimer()
       } else {
         playSound('error')
-        setPinError(res.message || 'PIN verification failed.')
+        setPinError(res.message || 'EMPLOYEE VERIFICATION FAILED. Attendance was not recorded.')
         setPin('')
       }
     } catch (err) {
       playSound('error')
-      setPinError(err.message || 'PIN verification failed.')
+      setPinError(err.message || 'EMPLOYEE VERIFICATION FAILED. Attendance was not recorded.')
       setPin('')
     } finally {
       setLoading(false)
@@ -314,10 +324,22 @@ export default function QrScannerPage() {
           </p>
         </div>
 
-        {step !== 'scan' && (
+        {step !== 'scan' ? (
           <Btn variant="outline" size="sm" onClick={handleReset} icon={<FiRefreshCw />}>
             Reset / Scan New
           </Btn>
+        ) : (
+          <div className="flex flex-col items-end">
+            <div className="flex items-center gap-1.5 text-slate-400 text-[10px] font-bold uppercase tracking-widest mb-1">
+              <FiClock className="text-emerald-500" /> REAL-TIME CLOCK
+            </div>
+            <div className="text-3xl font-mono font-bold text-emerald-400 bg-slate-900/80 px-4 py-1.5 rounded-xl border border-slate-800 shadow-inner">
+              {currentTime.toLocaleTimeString('en-US', { hour12: true, hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+            </div>
+            <div className="text-xs text-slate-500 font-semibold mt-1">
+              {currentTime.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
+            </div>
+          </div>
         )}
       </div>
 

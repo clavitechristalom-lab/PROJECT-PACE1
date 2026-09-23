@@ -110,7 +110,7 @@ export function ProductListModal({ isOpen, onClose, category }) {
               <EmptyState 
                 icon={<FiPackage className="w-12 h-12 text-muted-foreground/30 mx-auto" />} 
                 title={searchQuery ? "No matching products" : "No products found"} 
-                description={searchQuery ? `No products matching "${searchQuery}" in ${activeCategory}.` : `No products available in ${activeCategory} at the moment.`} 
+                description={searchQuery ? `No products matching "${searchQuery}" in ${activeCategory}.` : `No products available in your branch at the moment.`} 
               />
             </div>
           ) : (
