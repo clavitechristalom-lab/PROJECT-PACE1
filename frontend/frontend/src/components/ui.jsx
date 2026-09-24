@@ -146,7 +146,7 @@ export function Badge({ label, text, color = 'gray', variant, icon }) {
 }
 
 const STATUS_COLORS = {
-  Active: 'green', Completed: 'green', Paid: 'green', Present: 'green', Approved: 'blue',
+  Active: 'green', Completed: 'green', Paid: 'green', Present: 'green', Approved: 'blue', Responded: 'green',
   Overdue: 'red', Inactive: 'red', Absent: 'red', Cancelled: 'red',
   Pending: 'yellow', Draft: 'yellow', Late: 'yellow', Open: 'yellow', 'Half Day': 'yellow',
   'Partially Paid': 'purple', Processing: 'blue', 'On Leave': 'indigo', 'Rest Day': 'gray',

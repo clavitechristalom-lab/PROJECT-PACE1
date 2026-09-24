@@ -14,6 +14,7 @@ import {
 import { fmt, fmtDate } from '../lib/utils'
 import { useAuth } from '../context/AuthContext'
 import api, { downloadCsv } from '../lib/api'
+import { useRealtimeSync, triggerDataSync } from '../lib/realtimeSync'
 import { TbCurrencyPeso } from 'react-icons/tb'
 import { FiDownload } from 'react-icons/fi'
 
@@ -27,6 +28,7 @@ export default function InstallmentsPage({ branchFilter: propBranchFilter, embed
   const [installments, setInstallments] = useState([])
   const [customers, setCustomers] = useState([])
   const [products, setProducts] = useState([])
+  const [branches, setBranches] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
 
@@ -93,17 +95,19 @@ export default function InstallmentsPage({ branchFilter: propBranchFilter, embed
     if (!silent) setLoading(true)
     if (!silent) setError('')
     try {
-      const [instRes, custRes, prodRes] = await Promise.all([
+      const [instRes, custRes, prodRes, branchRes] = await Promise.all([
         api.installments.getAll({
           branch: branchFilter !== 'All' ? branchFilter : undefined,
         }),
         api.customers.getAll().catch(() => ({ customers: [] })),
         api.products.getAll().catch(() => ({ products: [] })),
+        api.branches.getAll().catch(() => []),
       ])
 
       setInstallments(instRes.installments || [])
       setCustomers(custRes.customers || [])
       setProducts(prodRes.products || [])
+      setBranches(Array.isArray(branchRes) ? branchRes : (branchRes.branches || []))
     } catch (err) {
       console.error('Failed to load installment data:', err)
       if (!silent) setError(err.message || 'Failed to fetch customer installment records')
@@ -114,9 +118,9 @@ export default function InstallmentsPage({ branchFilter: propBranchFilter, embed
 
   useEffect(() => {
     loadInitialData()
-    const interval = setInterval(() => loadInitialData(true), 10000)
-    return () => clearInterval(interval)
   }, [branchFilter, search, statusFilter, activeTab])
+
+  useRealtimeSync(() => loadInitialData(true), [branchFilter, search, statusFilter, activeTab])
 
   useEffect(() => {
     const id = searchParams.get('id')
@@ -290,6 +294,7 @@ export default function InstallmentsPage({ branchFilter: propBranchFilter, embed
       }
 
       showToast(res.message || 'Customer installment created successfully', 'success')
+      triggerDataSync('installments')
       setAddModalOpen(false)
       setAddForm(initialAddForm)
     } catch (err) {
@@ -328,6 +333,7 @@ export default function InstallmentsPage({ branchFilter: propBranchFilter, embed
       }
 
       showToast(res.message || 'Installment updated successfully', 'success')
+      triggerDataSync('installments')
       setEditModalItem(null)
     } catch (err) {
       showToast(err.message || 'Failed to update installment', 'error')
@@ -347,7 +353,7 @@ export default function InstallmentsPage({ branchFilter: propBranchFilter, embed
 
       // AUTOMATIC STATE UPDATE: Remove item from React state immediately
       setInstallments(prev => prev.filter(item => item.installment_id !== account.installment_id))
-
+      triggerDataSync('installments')
       showToast(res.message || 'Installment deleted successfully', 'success')
     } catch (err) {
       showToast(err.message || 'Failed to delete installment', 'error')
@@ -428,6 +434,7 @@ export default function InstallmentsPage({ branchFilter: propBranchFilter, embed
       }
 
       showToast(res.message || 'Payment recorded successfully', 'success')
+      triggerDataSync('installments')
       setPayModalItem(null)
 
       // Refresh detail modal if open
@@ -610,9 +617,9 @@ export default function InstallmentsPage({ branchFilter: propBranchFilter, embed
               className="w-full px-3 py-2 text-xs rounded-xl border border-border bg-card text-foreground cursor-pointer disabled:opacity-70 disabled:bg-muted font-medium focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all"
             >
               <option value="All">All Branches</option>
-              <option value="Main Branch">Main Branch</option>
-              <option value="North Branch">North Branch</option>
-              <option value="South Branch">South Branch</option>
+              {branches.map(b => (
+                <option key={b.branch_id} value={b.name}>{b.name}</option>
+              ))}
             </select>
           </div>
         </div>

@@ -13,6 +13,7 @@ import {
 import { fmt, fmtDate } from '../lib/utils'
 import { useAuth } from '../context/AuthContext'
 import api, { downloadCsv } from '../lib/api'
+import { useRealtimeSync, triggerDataSync } from '../lib/realtimeSync'
 import { TbCurrencyPeso } from 'react-icons/tb'
 import { FiDownload } from 'react-icons/fi'
 
@@ -66,6 +67,7 @@ export default function PaymentsPage() {
   const [payments, setPayments] = useState([])
   const [installments, setInstallments] = useState([])
   const [monitoring, setMonitoring] = useState(null)
+  const [branches, setBranches] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
 
@@ -95,7 +97,7 @@ export default function PaymentsPage() {
     if (!silent) setLoading(true)
     if (!silent) setError('')
     try {
-      const [paymentsRes, instRes, monRes] = await Promise.all([
+      const [paymentsRes, instRes, monRes, branchRes] = await Promise.all([
         api.payments.getAll({
           search: search || undefined,
           payment_method: methodFilter !== 'All' ? methodFilter : undefined,
@@ -105,11 +107,13 @@ export default function PaymentsPage() {
         }),
         api.installments.getAll({ status: 'Active', branch: branchFilter !== 'All' ? branchFilter : undefined }),
         api.payments.getMonitoring({ branch: branchFilter !== 'All' ? branchFilter : undefined }).catch(() => null),
+        api.branches.getAll().catch(() => []),
       ])
 
       setPayments(paymentsRes.payments || [])
       setInstallments(instRes.installments || [])
       setMonitoring(monRes)
+      setBranches(Array.isArray(branchRes) ? branchRes : (branchRes.branches || []))
     } catch (err) {
       console.error('Failed to load payments:', err)
       if (!silent) setError(err.message || 'Failed to fetch payment collections')
@@ -120,8 +124,10 @@ export default function PaymentsPage() {
 
   useEffect(() => {
     loadData()
-    const interval = setInterval(() => loadData(true), 10000)
-    return () => clearInterval(interval)
+  }, [methodFilter, branchFilter, search, dateFrom, dateTo])
+
+  useRealtimeSync(() => {
+    loadData(true)
   }, [methodFilter, branchFilter, search, dateFrom, dateTo])
 
   useEffect(() => {
@@ -184,8 +190,11 @@ export default function PaymentsPage() {
       if (res.payment) {
         setPayments(prev => [res.payment, ...prev])
       } else {
-        loadData()
+        loadData(true)
       }
+      triggerDataSync('payments')
+      triggerDataSync('installments')
+      triggerDataSync('dashboard')
     } catch (err) {
       showToast(err.message || 'Failed to record payment', 'error')
     } finally {
@@ -321,9 +330,9 @@ export default function PaymentsPage() {
               className="w-full border border-border rounded-xl px-3 py-2 text-xs font-semibold bg-card text-foreground cursor-pointer disabled:opacity-70"
             >
               <option value="All">All Branches</option>
-              <option value="Main Branch">Main Branch</option>
-              <option value="North Branch">North Branch</option>
-              <option value="South Branch">South Branch</option>
+              {branches.map(b => (
+                <option key={b.branch_id} value={b.name}>{b.name}</option>
+              ))}
             </select>
           </div>
 

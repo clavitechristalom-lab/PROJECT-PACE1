@@ -22,7 +22,7 @@ export default function DashboardCard({ title, value, icon, subtitle, colorClass
             </p>
           )}
         </div>
-        <div className={`p-3 rounded-lg ${colorClass} bg-opacity-10 text-opacity-80 group-hover:scale-110 transition-transform`}>
+        <div className={`p-3 rounded-xl ${colorClass} text-white flex items-center justify-center group-hover:scale-110 transition-transform shadow-sm`}>
           {icon}
         </div>
       </div>

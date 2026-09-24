@@ -8,6 +8,7 @@ import {
 } from 'react-icons/fi'
 import { useAuth } from '../context/AuthContext'
 import { api } from '../lib/api'
+import { triggerDataSync } from '../lib/realtimeSync'
 import { Btn, Card, Badge, StatusBadge, showToast } from '../components/ui'
 
 // Web Audio API feedback
@@ -252,6 +253,8 @@ export default function QrScannerPage() {
         setStep('result')
         showToast(res.message || 'Attendance recorded successfully!', 'success')
         startAutoResetTimer()
+        triggerDataSync('attendance')
+        triggerDataSync('dashboard')
       } else {
         playSound('error')
         setPinError(res.message || 'EMPLOYEE VERIFICATION FAILED. Attendance was not recorded.')

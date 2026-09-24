@@ -646,7 +646,12 @@ class InstallmentController extends Controller
 
         // Security check for Customer
         if ($user && $user->role === 'Customer') {
-            if ($account->customer_id !== $user->customer_id) {
+            $customerId = $user->customer_id ?? ($user->customer ? $user->customer->customer_id : null);
+            if (!$customerId) {
+                $cust = Customer::where('email', $user->username)->first();
+                $customerId = $cust ? $cust->customer_id : null;
+            }
+            if ($account->customer_id != $customerId) {
                 return response()->json(['message' => 'Unauthorized access to installment.'], 403);
             }
         }
@@ -678,7 +683,7 @@ class InstallmentController extends Controller
                 : $adminUser->username;
                 
             if ($adminUser->employee && $adminUser->employee->branch) {
-                $branch = $adminUser->employee->branch->branch_name;
+                $branch = $adminUser->employee->branch->name ?? $adminUser->employee->branch->branch_name ?? 'Main Branch';
             } elseif ($adminUser->employee && $adminUser->employee->branch_id) {
                 $branch = $adminUser->employee->branch_id;
             }
@@ -692,6 +697,7 @@ class InstallmentController extends Controller
                     'product_id' => $item->product_id,
                     'product_code' => $item->product ? $item->product->product_code : 'SKU',
                     'product_name' => $item->product ? $item->product->product_name : 'Product',
+                    'description' => $item->product ? $item->product->description : '',
                     'image_url' => $item->product && $item->product->image_url ? $item->product->image_url : null,
                     'category' => $item->product ? $item->product->category : '',
                     'quantity' => (float)$item->quantity,

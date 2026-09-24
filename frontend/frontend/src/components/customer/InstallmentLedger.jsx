@@ -44,7 +44,7 @@ export default function InstallmentLedger({ installments, onView }) {
                 <td className="px-6 py-4 flex items-center gap-3 min-w-[200px]">
                   {inst.image_url ? (
                     <img 
-                      src={`http://localhost:8000${inst.image_url}`} 
+                      src={inst.image_url.startsWith('http') ? inst.image_url : `http://127.0.0.1:8000${inst.image_url}`} 
                       alt={inst.product}
                       className="w-10 h-10 rounded object-cover border border-slate-200 dark:border-slate-700 bg-white"
                       onError={(e) => { e.target.src = 'https://via.placeholder.com/40?text=No+Image'; }}

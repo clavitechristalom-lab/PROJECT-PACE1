@@ -20,6 +20,7 @@ use App\Http\Controllers\SearchController;
 use App\Http\Controllers\NotificationController;
 use App\Http\Controllers\QrRequestController;
 use App\Http\Controllers\BranchController;
+use App\Http\Controllers\SyncController;
 
 // ─── Authentication (Public) ──────────────────────────────────────────────────
 Route::post('/login', [AuthController::class, 'login']);
@@ -29,6 +30,7 @@ Route::get('/registration-options', [AuthController::class, 'registrationOptions
 // ─── Protected Routes (Sanctum Authenticated) ─────────────────────────────────
 Route::middleware('auth:sanctum')->group(function () {
     Route::get('/me', [AuthController::class, 'me']);
+    Route::get('/sync/status', [SyncController::class, 'status']);
     Route::post('/logout', [AuthController::class, 'logout']);
     Route::post('/user/profile-image', [AuthController::class, 'uploadProfileImage']);
 
@@ -216,4 +218,9 @@ Route::middleware('auth:sanctum')->group(function () {
     // 🌟 Customer App 🌟
     Route::get('/customer/dashboard', [CustomerDashboardController::class, 'getDashboard']);
     Route::get('/customer/installments', [CustomerDashboardController::class, 'getInstallments']);
+    
+    // Support Messages
+    Route::get('/support-messages', [\App\Http\Controllers\SupportMessageController::class, 'index']);
+    Route::post('/support-messages', [\App\Http\Controllers\SupportMessageController::class, 'store']);
+    Route::put('/support-messages/{id}', [\App\Http\Controllers\SupportMessageController::class, 'update']);
 });

@@ -12,8 +12,8 @@ import {
   SearchBar, Pagination, TabBar, showToast, LoadingState, ErrorAlert, TableSkeleton, EmptyState, Modal,
 } from '../components/ui'
 import { fmtDate, filterBySearch } from '../lib/utils'
-import { api } from '../lib/api'
-import { downloadCsv } from '../lib/api'
+import { api, downloadCsv } from '../lib/api'
+import { useRealtimeSync, triggerDataSync } from '../lib/realtimeSync'
 import { Html5Qrcode } from 'html5-qrcode'
 import { QRCodeSVG } from 'qrcode.react'
 import QrMonitoringModal from '../components/attendance/QrMonitoringModal'
@@ -133,9 +133,9 @@ export default function AttendancePage() {
   const isScannerRunningRef = useRef(false)
   const fileInputRef = useRef(null)
 
-  const loadData = async () => {
-    setLoading(true)
-    setError('')
+  const loadData = async (silent = false) => {
+    if (!silent) setLoading(true)
+    if (!silent) setError('')
     try {
       const data = await api.attendance.getDaily({
         date: selectedDate || undefined,
@@ -146,14 +146,14 @@ export default function AttendancePage() {
       setSummary(data.summary || data.stats || null)
     } catch (err) {
       console.error('Failed to load attendance:', err)
-      setError(err.message || 'Failed to fetch attendance records')
+      if (!silent) setError(err.message || 'Failed to fetch attendance records')
     } finally {
-      setLoading(false)
+      if (!silent) setLoading(false)
     }
   }
 
-  const loadScanLogs = async () => {
-    setScanLogsLoading(true)
+  const loadScanLogs = async (silent = false) => {
+    if (!silent) setScanLogsLoading(true)
     try {
       const res = await api.attendance.getScanLogs({
         page: scanLogsPage,
@@ -165,13 +165,13 @@ export default function AttendancePage() {
     } catch (err) {
       console.error('Failed to load scan logs:', err)
     } finally {
-      setScanLogsLoading(false)
+      if (!silent) setScanLogsLoading(false)
     }
   }
 
-  const loadMyProfile = async () => {
+  const loadMyProfile = async (silent = false) => {
     if (!isEmployee && !isStoreAdmin) return
-    setMyProfileLoading(true)
+    if (!silent) setMyProfileLoading(true)
     try {
       const res = await api.employees.getMe()
       if (res?.employee) {
@@ -180,7 +180,7 @@ export default function AttendancePage() {
     } catch (err) {
       console.error('Failed to load employee profile:', err)
     } finally {
-      setMyProfileLoading(false)
+      if (!silent) setMyProfileLoading(false)
     }
   }
 
@@ -191,7 +191,8 @@ export default function AttendancePage() {
       if (res.success) {
         showToast(res.message || 'Your QR code request has been submitted to the Administrator.', 'success')
         setQrRequestModalOpen(false)
-        loadMyProfile()
+        loadMyProfile(true)
+        triggerDataSync('qr_requests')
       } else {
         showToast(res.message || 'Failed to submit request', 'error')
       }
@@ -215,6 +216,17 @@ export default function AttendancePage() {
       loadScanLogs()
     }
   }, [activeTab, selectedDate, deptFilter, statusFilter, scanLogsPage, scanLogsStatusFilter, scanLogsActionFilter])
+
+  useRealtimeSync(() => {
+    if (activeTab === 'log' || activeTab === 'timesheet') {
+      loadData(true)
+    } else if (activeTab === 'audit') {
+      loadScanLogs(true)
+    }
+    if (isEmployee || isStoreAdmin) {
+      loadMyProfile(true)
+    }
+  }, [activeTab, selectedDate, deptFilter, statusFilter, scanLogsPage, scanLogsStatusFilter, scanLogsActionFilter, isEmployee, isStoreAdmin])
 
   useEffect(() => {
     const searchParam = searchParams.get('search')
@@ -391,6 +403,8 @@ export default function AttendancePage() {
               message: `ATTENDANCE SUCCESS`,
             })
             setStationStep('result')
+            triggerDataSync('attendance')
+            triggerDataSync('dashboard')
           } else if (res.status === 'FAILED') {
             clearInterval(interval)
             playTone('error')
@@ -473,7 +487,9 @@ export default function AttendancePage() {
         setPunchResult(res)
         setStationStep('result')
         startAutoResetCountdown()
-        loadData()
+        loadData(true)
+        triggerDataSync('attendance')
+        triggerDataSync('dashboard')
         showToast(res.message || 'Attendance verified and recorded!', 'success')
       } else {
         playTone('error')

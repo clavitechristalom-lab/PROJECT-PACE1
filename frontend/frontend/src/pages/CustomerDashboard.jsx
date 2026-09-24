@@ -6,6 +6,7 @@ import { FiPackage, FiMonitor, FiCreditCard, FiAlertCircle, FiTrendingUp, FiUser
 import { BiWallet } from 'react-icons/bi';
 import { Spinner } from '../components/ui';
 import { useAuth } from '../context/AuthContext';
+import { useRealtimeSync, triggerDataSync } from '../lib/realtimeSync';
 
 import DashboardCard from '../components/customer/DashboardCard';
 import InstallmentLedger from '../components/customer/InstallmentLedger';
@@ -37,8 +38,29 @@ export default function CustomerDashboard() {
     setModalArgs(null);
   };
 
+  const fetchDashboardData = async (source) => {
+    const isBg = source === 'timer' || source === 'database' || source === 'event' || source === 'focus' || source === 'mutation' || source === 'sync';
+    try {
+      if (!isBg) setLoading(true);
+      const [dashResult, instResult] = await Promise.allSettled([
+        api.customerApp.getDashboard(),
+        api.customerApp.getInstallments()
+      ]);
+      if (dashResult.status === 'fulfilled' && dashResult.value?.metrics) {
+        setStats(dashResult.value.metrics);
+      }
+      if (instResult.status === 'fulfilled' && instResult.value?.installments) {
+        setInstallments(instResult.value.installments);
+      }
+    } catch (error) {
+      if (!isBg) console.error('Failed to load dashboard', error);
+    } finally {
+      if (!isBg) setLoading(false);
+    }
+  };
+
   useEffect(() => {
-    fetchDashboardData();
+    fetchDashboardData('initial');
   }, []);
 
   useEffect(() => {
@@ -48,21 +70,7 @@ export default function CustomerDashboard() {
     }
   }, [searchParams]);
 
-  const fetchDashboardData = async () => {
-    try {
-      setLoading(true);
-      const [dashRes, instRes] = await Promise.all([
-        api.customerApp.getDashboard(),
-        api.customerApp.getInstallments()
-      ]);
-      setStats(dashRes.metrics);
-      setInstallments(instRes.installments);
-    } catch (error) {
-      console.error('Failed to load dashboard', error);
-    } finally {
-      setLoading(false);
-    }
-  };
+  useRealtimeSync(fetchDashboardData, []);
 
   const handleViewLedger = (installment) => {
     openModal('installmentAccount', installment.installment_id);

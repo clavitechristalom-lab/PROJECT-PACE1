@@ -13,6 +13,7 @@ import {
 import { fmt, fmtDate, filterBySearch } from '../lib/utils'
 import { useAuth } from '../context/AuthContext'
 import { api } from '../lib/api'
+import { useRealtimeSync } from '../lib/realtimeSync'
 import { TbCurrencyPeso } from 'react-icons/tb'
 import MySalesChart from '../components/MySalesChart'
 
@@ -85,9 +86,9 @@ export default function TransactionsPage() {
   // Modal State
   const [selectedTx, setSelectedTx] = useState(null)
 
-  const loadData = async () => {
-    setLoading(true)
-    setError('')
+  const loadData = async (silent = false) => {
+    if (!silent) setLoading(true)
+    if (!silent) setError('')
     try {
       let from = dateFrom || undefined
       let to = dateTo || undefined
@@ -113,9 +114,9 @@ export default function TransactionsPage() {
       setSummary(res.summary || null)
     } catch (err) {
       console.error('Failed to load transaction history:', err)
-      setError(err.message || 'Failed to fetch transaction history')
+      if (!silent) setError(err.message || 'Failed to fetch transaction history')
     } finally {
-      setLoading(false)
+      if (!silent) setLoading(false)
     }
   }
 
@@ -124,6 +125,10 @@ export default function TransactionsPage() {
   useEffect(() => {
     loadData()
   }, [activeChannelTab, typeFilter, providerFilter, dateRange, dateFrom, dateTo])
+
+  useRealtimeSync(() => {
+    loadData(true)
+  }, [activeChannelTab, typeFilter, providerFilter, dateRange, dateFrom, dateTo, search])
 
   useEffect(() => {
     const id = searchParams.get('id')

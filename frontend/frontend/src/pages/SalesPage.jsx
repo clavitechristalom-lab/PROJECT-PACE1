@@ -13,6 +13,7 @@ import {
 import { fmt, fmtDate, filterBySearch } from '../lib/utils'
 import { useAuth } from '../context/AuthContext'
 import api, { downloadCsv } from '../lib/api'
+import { useRealtimeSync, triggerDataSync } from '../lib/realtimeSync'
 import { TbCurrencyPeso } from 'react-icons/tb'
 import MySalesChart from '../components/MySalesChart'
 
@@ -72,9 +73,10 @@ export default function SalesPage({ branchFilter, embedded }) {
 
   useEffect(() => {
     loadData()
-    const interval = setInterval(() => loadData(true), 10000)
-    return () => clearInterval(interval)
   }, [methodFilter, statusFilter, branchFilter, search])
+
+  // Real-time synchronization across multi-user accounts
+  useRealtimeSync(() => loadData(true), [methodFilter, statusFilter, branchFilter, search])
 
   const openViewSale = async (s) => {
     try {
@@ -157,6 +159,7 @@ export default function SalesPage({ branchFilter, embedded }) {
       }
 
       showToast('Sale transaction completed successfully', 'success')
+      triggerDataSync('sales')
       setNewSaleModal(false)
       // Reset form
       setCustomerId('')

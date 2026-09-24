@@ -15,11 +15,24 @@ class ProductController extends Controller
 
         if ($user) {
             if ($user->role === 'Customer') {
-                $branchId = $user->customer ? $user->customer->branch_id : null;
-                if (!$branchId) {
-                    return response()->json(['products' => [], 'total' => 0]);
+                $customerId = $user->customer_id ?? ($user->customer ? $user->customer->customer_id : null);
+                if (!$customerId) {
+                    $cust = \App\Models\Customer::where('email', $user->username)->first();
+                    if ($cust) {
+                        $customerId = $cust->customer_id;
+                    }
                 }
-                $query->where('branch_id', $branchId);
+                $branchId = null;
+                if ($customerId) {
+                    $cust = \App\Models\Customer::find($customerId);
+                    $branchId = $cust ? $cust->branch_id : null;
+                }
+                if ($branchId) {
+                    $branchCount = Product::where('branch_id', $branchId)->count();
+                    if ($branchCount > 0) {
+                        $query->where('branch_id', $branchId);
+                    }
+                }
             } elseif (in_array($user->role, ['Store Administrator', 'Store Admin'])) {
                 $branchId = $user->employee ? $user->employee->branch_id : null;
                 if (!$branchId) {
@@ -146,10 +159,11 @@ class ProductController extends Controller
         $validated['unit'] = $validated['unit'] ?? 'unit';
 
         if ($user && in_array($user->role, ['Store Administrator', 'Store Admin'])) {
-            if (!$user->employee || !$user->employee->branch_id) {
-                return response()->json(['message' => 'Store Administrator is not assigned to any branch.'], 403);
+            $employee = \App\Models\Employee::where('employee_id', $user->employee_id)->first();
+            if (!$employee || !$employee->branch_id) {
+                return response()->json(['message' => 'Store Administrator is not assigned to any branch. (DEBUG: user_id=' . $user->user_id . ', employee_id=' . $user->employee_id . ', has_employee=' . ($employee ? 'yes' : 'no') . ')'], 403);
             }
-            $validated['branch_id'] = $user->employee->branch_id;
+            $validated['branch_id'] = $employee->branch_id;
         } elseif ($user && $user->role === 'Administrator') {
             if (empty($validated['branch_id'])) {
                 return response()->json(['message' => 'Branch ID is required for Administrator.'], 422);
@@ -219,7 +233,8 @@ class ProductController extends Controller
         $user = $request->user();
 
         if ($user && in_array($user->role, ['Store Administrator', 'Store Admin'])) {
-            if (!$user->employee || $user->employee->branch_id !== $product->branch_id) {
+            $employee = \App\Models\Employee::where('employee_id', $user->employee_id)->first();
+            if (!$employee || $employee->branch_id !== $product->branch_id) {
                 return response()->json(['message' => 'Unauthorized to update product from another branch.'], 403);
             }
         }

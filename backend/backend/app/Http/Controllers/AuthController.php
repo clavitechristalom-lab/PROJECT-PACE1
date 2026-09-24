@@ -119,7 +119,7 @@ class AuthController extends Controller
                     'user_id' => $adminUser->user_id,
                     'type' => 'System',
                     'title' => 'NEW CUSTOMER ACCOUNT',
-                    'message' => "Customer: {$validated['name']}\nEmail: {$validated['email']}\nBranch: Unassigned\nCreated: " . now()->format('Y-m-d H:i:s'),
+                    'message' => "Customer: {$validated['first_name']} {$validated['last_name']}\nEmail: {$validated['email']}\nBranch: Unassigned\nCreated: " . now()->format('Y-m-d H:i:s'),
                     'module' => 'Customers',
                     'related_id' => $user->user_id,
                     'related_type' => 'User',
@@ -136,7 +136,7 @@ class AuthController extends Controller
                 'user_id' => $user->user_id,
                 'username' => $user->username,
                 'role' => $user->role,
-                'name' => $validated['name'],
+                'name' => trim("{$validated['first_name']} {$validated['last_name']}"),
             ]
         ], 201);
     }
@@ -148,13 +148,7 @@ class AuthController extends Controller
                 ->where('status', '!=', 'closed')
                 ->orderBy('name')
                 ->get(['id', 'name']),
-            'departments' => \App\Models\Employee::query()
-                ->whereNotNull('department')
-                ->where('department', '!=', '')
-                ->distinct()
-                ->orderBy('department')
-                ->pluck('department')
-                ->values(),
+            'departments' => ['Store Admin', 'Employee'],
         ]);
     }
 
@@ -186,17 +180,34 @@ class AuthController extends Controller
             'profile_image' => $user->profile_image ? url(Storage::url($user->profile_image)) : null,
         ];
 
+        if ($user->employee) {
+            $data['employee'] = [
+                'employee_id'   => $user->employee->employee_id,
+                'employee_code' => $user->employee->employee_code,
+                'first_name'    => $user->employee->first_name,
+                'last_name'     => $user->employee->last_name,
+                'position'      => $user->employee->position,
+                'department'    => $user->employee->department,
+                'branch_id'     => $user->employee->branch_id,
+                'branch'        => $user->employee->branch ? $user->employee->branch->name : null,
+            ];
+            $data['branch_id']   = $user->employee->branch_id;
+            $data['branch_name'] = $user->employee->branch ? $user->employee->branch->name : null;
+        }
+
         // Include branch info for Customer role
-        if ($user->role === 'Customer' && $user->customer) {
+        if ($user->customer) {
+            $data['customer'] = [
+                'customer_id'   => $user->customer->customer_id,
+                'customer_code' => $user->customer->customer_code,
+                'first_name'    => $user->customer->first_name,
+                'last_name'     => $user->customer->last_name,
+                'branch_id'     => $user->customer->branch_id,
+                'branch'        => $user->customer->branch ? $user->customer->branch->name : null,
+            ];
             $data['customer_code'] = $user->customer->customer_code;
             $data['branch_id']     = $user->customer->branch_id;
             $data['branch_name']   = $user->customer->branch ? $user->customer->branch->name : null;
-        }
-
-        // Include branch info for Store Admin role (via employee)
-        if (in_array($user->role, ['Store Administrator', 'Store Admin']) && $user->employee) {
-            $data['branch_id']   = $user->employee->branch_id;
-            $data['branch_name'] = $user->employee->branch ? $user->employee->branch->name : null;
         }
 
         return $data;

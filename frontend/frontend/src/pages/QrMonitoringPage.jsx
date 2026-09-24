@@ -5,6 +5,7 @@ import {
   FiFilter, FiLayers, FiCalendar, FiMapPin, FiKey
 } from 'react-icons/fi'
 import { api } from '../lib/api'
+import { useRealtimeSync } from '../lib/realtimeSync'
 import {
   Card, StatCard, Badge, StatusBadge, SearchBar,
   Table, TR, TD, TableSkeleton, EmptyState, Btn, showToast
@@ -31,8 +32,8 @@ export default function QrMonitoringPage() {
   const [statusFilter, setStatusFilter] = useState('All')
   const [actionFilter, setActionFilter] = useState('All')
 
-  const loadData = async () => {
-    setLoading(true)
+  const loadData = async (silent = false) => {
+    if (!silent) setLoading(true)
     try {
       const res = await api.admin.getQrMonitoring()
       if (res.success) {
@@ -41,17 +42,18 @@ export default function QrMonitoringPage() {
       }
     } catch (err) {
       console.error('Failed to load QR monitoring stats:', err)
-      showToast(err.message || 'Failed to load QR monitoring data', 'error')
+      if (!silent) showToast(err.message || 'Failed to load QR monitoring data', 'error')
     } finally {
-      setLoading(false)
+      if (!silent) setLoading(false)
     }
   }
 
   useEffect(() => {
     loadData()
-    // Live monitoring auto-refresh every 20 seconds
-    const interval = setInterval(loadData, 20000)
-    return () => clearInterval(interval)
+  }, [])
+
+  useRealtimeSync(() => {
+    loadData(true)
   }, [])
 
   if (!isAdmin) {

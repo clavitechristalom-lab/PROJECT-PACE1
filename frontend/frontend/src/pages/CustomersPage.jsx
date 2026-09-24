@@ -13,6 +13,7 @@ import {
 } from '../components/ui'
 import { fmt, filterBySearch } from '../lib/utils'
 import api, { downloadCsv } from '../lib/api'
+import { useRealtimeSync, triggerDataSync } from '../lib/realtimeSync'
 import { FiDownload } from 'react-icons/fi'
 import { TbCurrencyPeso } from 'react-icons/tb'
 import { useAuth } from '../context/AuthContext'
@@ -87,6 +88,7 @@ export default function CustomersPage({ branchFilter, embedded }) {
           : c
       ))
       showToast(`Branch updated to: ${res.branch_name}`, 'success')
+      triggerDataSync('customers')
       setAssignBranchModal(false)
       setAssignBranchCustomer(null)
     } catch (err) {
@@ -103,8 +105,11 @@ export default function CustomersPage({ branchFilter, embedded }) {
   }
   const [form, setForm] = useState(emptyForm)
 
-  const loadCustomers = async () => {
-    setLoading(true)
+  const loadCustomers = async (source) => {
+    const isBackground = source === 'timer' || source === 'database' || source === 'event' || source === 'focus' || source === 'mutation'
+    if (!isBackground) {
+      setLoading(true)
+    }
     setError('')
     try {
       const data = await api.customers.getAll({
@@ -114,16 +119,23 @@ export default function CustomersPage({ branchFilter, embedded }) {
       })
       setCustomers(data.customers || [])
     } catch (err) {
-      console.error('Failed to load customers:', err)
-      setError(err.message || 'Failed to fetch customers')
+      if (!isBackground) {
+        console.error('Failed to load customers:', err)
+        setError(err.message || 'Failed to fetch customers')
+      }
     } finally {
-      setLoading(false)
+      if (!isBackground) {
+        setLoading(false)
+      }
     }
   }
 
   useEffect(() => {
-    loadCustomers()
+    loadCustomers('filter_change')
   }, [statusFilter])
+
+  // Real-time synchronization
+  useRealtimeSync(loadCustomers, [statusFilter, search, branchFilter])
 
   useEffect(() => {
     const id = searchParams.get('id')
@@ -159,6 +171,7 @@ export default function CustomersPage({ branchFilter, embedded }) {
         }
         showToast('Customer added successfully', 'success')
       }
+      triggerDataSync('customers')
       setAddModal(false)
       setEditItem(null)
       setForm(emptyForm)
@@ -177,6 +190,7 @@ export default function CustomersPage({ branchFilter, embedded }) {
     try {
       await api.customers.delete(customer.customer_id)
       setCustomers(prev => prev.filter(c => c.customer_id !== customer.customer_id))
+      triggerDataSync('customers')
       showToast('Customer deleted successfully', 'success')
       if (detailCustomer?.customer?.customer_id === customer.customer_id) {
         setDetailCustomer(null)

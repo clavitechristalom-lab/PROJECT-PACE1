@@ -97,7 +97,7 @@ class EmployeeController extends Controller
 
         if ($user && in_array($user->role, ['Store Administrator', 'Store Admin'])) {
             $userBranch = $user->employee ? $user->employee->branch_id : null;
-            if ($employee->branch !== $userBranch) {
+            if ($employee->branch_id != $userBranch) {
                 return response()->json(['message' => 'Unauthorized access to employee in another branch.'], 403);
             }
         }

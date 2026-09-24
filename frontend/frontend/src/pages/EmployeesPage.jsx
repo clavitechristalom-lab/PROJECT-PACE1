@@ -14,6 +14,7 @@ import {
 } from '../components/ui'
 import { fmt, fmtDate, filterBySearch } from '../lib/utils'
 import { api } from '../lib/api'
+import { useRealtimeSync, triggerDataSync } from '../lib/realtimeSync'
 import { QRCodeSVG } from 'qrcode.react'
 import EmployeeFinancialsTab from '../components/employees/EmployeeFinancialsTab'
 import { TbCurrencyPeso } from 'react-icons/tb'
@@ -37,6 +38,7 @@ export default function EmployeesPage({ branchFilter, embedded }) {
   const [error, setError] = useState('')
   const [search, setSearch] = useState('')
   const [deptFilter, setDeptFilter] = useState('All')
+  const [branchSelectFilter, setBranchSelectFilter] = useState('All')
   const [statusFilter, setStatusFilter] = useState('All')
   const [page, setPage] = useState(1)
   const pageSize = 10
@@ -68,7 +70,7 @@ export default function EmployeesPage({ branchFilter, embedded }) {
     employee_code: '', first_name: '', middle_name: '', last_name: '',
     gender: 'Male', birth_date: '', date_of_birth: '', marital_status: 'Single',
     tin_number: '', sss_number: '', philhealth_number: '', pagibig_number: '',
-    position: '', branch_id: '',
+    position: '', department: 'Unassigned', branch_id: '',
     pay_type: 'Cash', ewallet_provider: 'Gcash', ewallet_account_no: '', bank_name: 'BDO', bank_account_no: '',
     basic_salary: '', phone: '', email: '',
     address: '', hire_date: '', working_hours: '8 AM to 5 PM',
@@ -77,28 +79,39 @@ export default function EmployeesPage({ branchFilter, embedded }) {
   }
   const [form, setForm] = useState(emptyForm)
 
-  const loadEmployees = async () => {
-    setLoading(true)
+  const loadEmployees = async (source) => {
+    // Only show full loading spinner on initial manual change, not background auto-syncs
+    const isBackground = source === 'timer' || source === 'database' || source === 'event' || source === 'focus' || source === 'mutation'
+    if (!isBackground) {
+      setLoading(true)
+    }
     setError('')
     try {
       const data = await api.employees.getAll({
         search: search || undefined,
-        
         status: statusFilter !== 'All' ? statusFilter : undefined,
-        branch_id: branchFilter || undefined,
+        branch_id: branchFilter || (branchSelectFilter !== 'All' ? branchSelectFilter : undefined),
+        department: deptFilter !== 'All' ? deptFilter : undefined,
       })
       setEmployees(data.employees || [])
     } catch (err) {
-      console.error('Failed to load employees:', err)
-      setError(err.message || 'Failed to fetch employees')
+      if (!isBackground) {
+        console.error('Failed to load employees:', err)
+        setError(err.message || 'Failed to fetch employees')
+      }
     } finally {
-      setLoading(false)
+      if (!isBackground) {
+        setLoading(false)
+      }
     }
   }
 
   useEffect(() => {
-    loadEmployees()
-  }, [deptFilter, statusFilter])
+    loadEmployees('filter_change')
+  }, [search, deptFilter, branchSelectFilter, statusFilter, branchFilter])
+
+  // Real-time synchronization across all tabs and multi-user activities
+  useRealtimeSync(loadEmployees, [search, deptFilter, branchSelectFilter, statusFilter, branchFilter])
 
   useEffect(() => {
     const id = searchParams.get('id')
@@ -143,6 +156,7 @@ export default function EmployeesPage({ branchFilter, embedded }) {
         }
         showToast('Employee registered successfully', 'success')
       }
+      triggerDataSync('employees')
       setAddModal(false)
       setEditItem(null)
       setForm(emptyForm)
@@ -163,6 +177,7 @@ export default function EmployeesPage({ branchFilter, embedded }) {
     try {
       await api.employees.delete(deleteItem.employee_id)
       setEmployees(prev => prev.filter(emp => emp.employee_id !== deleteItem.employee_id))
+      triggerDataSync('employees')
       showToast('Employee record deleted successfully', 'success')
       setDeleteItem(null)
     } catch (err) {
@@ -242,6 +257,7 @@ export default function EmployeesPage({ branchFilter, embedded }) {
       showToast(res.message || 'Permanent QR code generated successfully.', 'success')
       setGenerateModalEmp(null)
       loadEmployees()
+      triggerDataSync('employees')
     } catch (err) {
       showToast(err.message || 'Failed to generate QR code', 'error')
     } finally {
@@ -257,6 +273,7 @@ export default function EmployeesPage({ branchFilter, embedded }) {
       const res = await api.employees.revokeQr(emp.employee_id)
       showToast(res.message || 'QR code successfully revoked.', 'success')
       loadEmployees()
+      triggerDataSync('employees')
     } catch (err) {
       showToast(err.message || 'Failed to revoke QR code', 'error')
     } finally {
@@ -272,6 +289,7 @@ export default function EmployeesPage({ branchFilter, embedded }) {
       const res = await api.employees.reissueQr(emp.employee_id)
       showToast(res.message || 'New permanent QR code issued successfully.', 'success')
       loadEmployees()
+      triggerDataSync('employees')
     } catch (err) {
       showToast(err.message || 'Failed to reissue QR code', 'error')
     } finally {
@@ -347,6 +365,7 @@ export default function EmployeesPage({ branchFilter, embedded }) {
         }
       }))
       loadEmployees()
+      triggerDataSync('employees')
     } catch (err) {
       showToast(err.message || 'Failed to toggle QR status', 'error')
     } finally {
@@ -377,6 +396,7 @@ export default function EmployeesPage({ branchFilter, embedded }) {
         }))
       }
       loadEmployees()
+      triggerDataSync('employees')
     } catch (err) {
       showToast(err.message || 'Failed to update verification status', 'error')
     } finally {
@@ -427,6 +447,7 @@ export default function EmployeesPage({ branchFilter, embedded }) {
       await api.employees.setPin(pinEmployee.employee_id, newPin)
       showToast(`Attendance PIN successfully set for ${pinEmployee.first_name}`, 'success')
       setPinModalOpen(false)
+      triggerDataSync('employees')
       if (detailItem && detailItem.employee.employee_id === pinEmployee.employee_id) {
         setDetailItem(prev => ({
           ...prev,
@@ -525,13 +546,24 @@ export default function EmployeesPage({ branchFilter, embedded }) {
           </div>
 
           <div className="flex gap-2">
+            {!branchFilter && !isStoreAdmin && (
+              <select
+                value={branchSelectFilter}
+                onChange={e => { setBranchSelectFilter(e.target.value); setPage(1) }}
+                className="border border-border rounded-xl px-3 py-2 text-xs font-semibold text-foreground bg-card cursor-pointer"
+              >
+                <option value="All">All Branches</option>
+                {branchesList.map(b => <option key={b.id || b.branch_id} value={b.id || b.branch_id}>{b.name}</option>)}
+              </select>
+            )}
             <select
               value={deptFilter}
               onChange={e => { setDeptFilter(e.target.value); setPage(1) }}
               className="border border-border rounded-xl px-3 py-2 text-xs font-semibold text-foreground bg-card cursor-pointer"
             >
-              <option value="All">All Branches</option>
-              {branchesList.map(b => <option key={b.branch_id} value={b.branch_id}>{b.name}</option>)}
+              <option value="All">All Departments</option>
+              <option value="Store Admin">Store Admin</option>
+              <option value="Employee">Employee</option>
             </select>
             <select
               value={statusFilter}
@@ -1007,7 +1039,16 @@ export default function EmployeesPage({ branchFilter, embedded }) {
                     />
                   </div>
                   <div>
-                    
+                    <label className="block font-bold text-muted-foreground mb-1">Department</label>
+                    <select
+                      value={form.department || 'Unassigned'}
+                      onChange={e => setForm(f => ({ ...f, department: e.target.value }))}
+                      className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground font-semibold"
+                    >
+                      <option value="Unassigned">Unassigned</option>
+                      <option value="Store Admin">Store Admin</option>
+                      <option value="Employee">Employee</option>
+                    </select>
                   </div>
                 </div>
 

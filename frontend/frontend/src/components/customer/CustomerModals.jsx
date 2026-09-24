@@ -82,17 +82,16 @@ export function ProductListModal({ isOpen, onClose, category, availableCategorie
         <div className="flex flex-col relative h-[500px]">
           {/* Filter & Search Bar */}
           <div className="flex flex-col sm:flex-row justify-between items-center gap-4 mb-4 pb-4 border-b border-border shrink-0">
-            <div className="flex gap-2">
-              {(category ? [category] : ['All', ...availableCategories]).map(cat => (
+            <div className="flex gap-2 overflow-x-auto pb-1 max-w-full">
+              {Array.from(new Set(['All', ...availableCategories, 'Sale Items'])).map(cat => (
                 <button
                   key={cat}
                   onClick={() => { setActiveCategory(cat); setCurrentIndex(0); }}
-                  className={`px-4 py-1.5 rounded-full text-sm font-semibold transition-colors ${
+                  className={`px-4 py-1.5 rounded-full text-sm font-semibold whitespace-nowrap transition-colors ${
                     activeCategory === cat 
-                      ? 'bg-[#176B87] text-white cursor-default' 
-                      : 'bg-muted text-muted-foreground hover:bg-slate-200 dark:hover:bg-slate-800'
+                      ? 'bg-[#176B87] text-white cursor-default shadow-sm' 
+                      : 'bg-muted text-muted-foreground hover:bg-slate-200 dark:hover:bg-slate-800 cursor-pointer'
                   }`}
-                  disabled={category ? true : false}
                 >
                   {cat}
                 </button>
@@ -394,7 +393,7 @@ export function PaymentDetailsModal({ isOpen, onClose, installments }) {
             <div key={s.schedule_id} className="p-3 border border-border rounded-xl bg-card">
               <div className="flex justify-between items-center mb-1">
                 <span className="font-bold text-sm">{s.product}</span>
-                <span className="font-mono font-bold text-blue-600">{fmt(s.amount)}</span>
+                <span className="font-mono font-bold text-blue-600">{fmt(s.amount_due ?? s.balance_due ?? s.amount)}</span>
               </div>
               <div className="flex justify-between items-center text-xs text-muted-foreground">
                 <span className="font-mono">Acct: {s.account_no}</span>
@@ -486,7 +485,7 @@ export function OverduePaymentsModal({ isOpen, onClose, installments }) {
                 <div className="absolute left-0 top-0 bottom-0 w-1 bg-rose-500"></div>
                 <div className="flex justify-between items-center mb-1 pl-2">
                   <span className="font-bold text-sm text-foreground">{s.product}</span>
-                  <span className="font-mono font-bold text-rose-600">{fmt(s.amount)}</span>
+                  <span className="font-mono font-bold text-rose-600">{fmt(s.balance_due ?? s.amount_due ?? s.amount)}</span>
                 </div>
                 <div className="flex justify-between items-center text-xs text-muted-foreground pl-2">
                   <span className="font-mono">Acct: {s.account_no}</span>
@@ -502,14 +501,17 @@ export function OverduePaymentsModal({ isOpen, onClose, installments }) {
 }
 
 export function InstallmentAccountDetailsModal({ isOpen, onClose, installmentId }) {
-  const [account, setAccount] = useState(null);
+  const [accountData, setAccountData] = useState(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     if (isOpen && installmentId) {
       setLoading(true);
       api.installments.getById(installmentId)
-        .then(data => setAccount(data.installment || data))
+        .then(data => {
+          // data has { account, next_payment, sale_items, schedules, payments }
+          setAccountData(data.installment || data);
+        })
         .catch(err => console.error(err))
         .finally(() => setLoading(false));
     }
@@ -517,97 +519,102 @@ export function InstallmentAccountDetailsModal({ isOpen, onClose, installmentId 
 
   if (!isOpen) return null;
 
+  const acc = accountData?.account || {};
+  const saleItems = accountData?.sale_items || [];
+  const schedules = accountData?.schedules || [];
+  const payments = accountData?.payments || [];
+  const item = saleItems.length > 0 ? saleItems[0] : null;
+
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title="Installment Details" size="lg">
-      {loading || !account ? (
+    <Modal isOpen={isOpen} onClose={onClose} title="Installment & Product Details" size="lg">
+      {loading || !accountData ? (
         <LoadingState message="Loading account details..." />
       ) : (
-        <div className="space-y-4">
-          <div className="flex flex-col sm:flex-row gap-4 p-4 bg-muted/20 border border-border rounded-xl">
-            {account.sale_items && account.sale_items.length > 0 && account.sale_items[0].image_url ? (
+        <div className="space-y-6">
+          {/* Product Info Section */}
+          <div className="flex flex-col sm:flex-row gap-6 p-5 bg-slate-50 dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800">
+            {item && (item.image_url || item.image) ? (
               <img 
-                src={`http://localhost:8000${account.sale_items[0].image_url}`} 
-                alt={account.sale_items[0].product_name} 
-                className="w-24 h-24 object-cover rounded-lg border border-border shrink-0 bg-white"
+                src={(item.image_url || item.image)?.startsWith('http') ? (item.image_url || item.image) : `http://127.0.0.1:8000${item.image_url || item.image}`} 
+                alt={item.product_name} 
+                className="w-32 h-32 object-cover rounded-xl border border-slate-200 dark:border-slate-700 bg-white shrink-0 shadow-sm"
                 onError={(e) => { e.target.src = 'https://via.placeholder.com/150?text=No+Image'; }}
               />
             ) : (
-              <div className="w-24 h-24 bg-muted border border-border rounded-lg flex items-center justify-center shrink-0">
-                <FiPackage className="w-8 h-8 text-muted-foreground/50" />
+              <div className="w-32 h-32 bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl flex items-center justify-center shrink-0 shadow-sm">
+                <FiPackage className="w-10 h-10 text-slate-400" />
               </div>
             )}
-            <div className="flex-1 flex justify-between items-start">
-              <div>
-                <div className="text-sm font-bold text-foreground">
-                  {account.sale_items && account.sale_items.length > 0 
-                    ? account.sale_items[0].product_name 
-                    : 'Multiple Items'}
-                </div>
-                <div className="text-xs uppercase font-bold text-muted-foreground mt-2 mb-1">Account Number</div>
-                <div className="font-mono text-xl font-bold text-primary">{account.account_no}</div>
-                <div className="text-xs text-muted-foreground mt-2 flex flex-col gap-1">
-                  <div><span className="font-semibold">Branch:</span> {account.branch || 'Main Branch'}</div>
-                  <div><span className="font-semibold">Store Admin:</span> {account.store_admin || 'System/Admin'}</div>
-                </div>
+            <div className="flex-1 flex flex-col justify-center">
+              <div className="flex justify-between items-start mb-2">
+                <h3 className="text-xl font-bold text-slate-800 dark:text-slate-100 leading-tight">
+                  {item ? item.product_name : 'Multiple Items / Custom Product'}
+                </h3>
+                <StatusBadge status={acc.status} />
               </div>
-              <StatusBadge status={account.status} />
-            </div>
-          </div>
+              
+              {item && item.description && (
+                <p className="text-sm text-slate-500 dark:text-slate-400 mb-3 line-clamp-2">
+                  {item.description}
+                </p>
+              )}
 
-          <div className="grid grid-cols-2 sm:grid-cols-6 gap-3">
-             <div className="p-3 border border-border rounded-xl text-center">
-              <div className="text-[10px] text-muted-foreground uppercase font-bold mb-1">Total Payable</div>
-              <div className="font-mono font-bold text-foreground">{fmt(account.total_payable)}</div>
-            </div>
-            <div className="p-3 border border-border rounded-xl text-center">
-              <div className="text-[10px] text-muted-foreground uppercase font-bold mb-1">Down Payment</div>
-              <div className="font-mono font-bold text-foreground">{fmt(account.down_payment)}</div>
-            </div>
-            <div className="p-3 border border-border rounded-xl text-center bg-primary/10 border-primary/20">
-              <div className="text-[10px] text-primary uppercase font-bold mb-1">Remaining Bal</div>
-              <div className="font-mono font-bold text-primary">{fmt(account.balance)}</div>
-            </div>
-            <div className="p-3 border border-border rounded-xl text-center">
-              <div className="text-[10px] text-muted-foreground uppercase font-bold mb-1">Monthly</div>
-              <div className="font-mono font-bold text-foreground">{fmt(account.installment_amount)}</div>
-            </div>
-             <div className="p-3 border border-border rounded-xl text-center">
-              <div className="text-[10px] text-muted-foreground uppercase font-bold mb-1">Term</div>
-              <div className="font-mono font-bold text-foreground">{account.months} mos</div>
-            </div>
-            <div className="p-3 border border-border rounded-xl text-center bg-rose-500/10 border-rose-500/20">
-              <div className="text-[10px] text-rose-600 uppercase font-bold mb-1">Left</div>
-              <div className="font-mono font-bold text-rose-600">
-                {account.payment_schedules ? account.payment_schedules.filter(s => s.status !== 'Paid').length : 0} mos
+              <div className="grid grid-cols-2 gap-y-2 text-sm mt-auto">
+                <div className="text-slate-500">Account No: <span className="font-mono font-bold text-slate-700 dark:text-slate-300">{acc.account_no}</span></div>
+                <div className="text-slate-500">Purchase Date: <span className="font-medium text-slate-700 dark:text-slate-300">{acc.start_date || acc.sale_date}</span></div>
+                <div className="text-slate-500">Branch: <span className="font-medium text-slate-700 dark:text-slate-300">{acc.branch || 'Main Branch'}</span></div>
+                <div className="text-slate-500">Processed By: <span className="font-medium text-slate-700 dark:text-slate-300">{acc.store_admin || 'System/Admin'}</span></div>
               </div>
             </div>
           </div>
 
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mt-4">
+          {/* Financials Section */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+             <div className="p-4 bg-[var(--card)] border border-slate-200 dark:border-slate-800 rounded-xl">
+              <div className="text-xs text-slate-500 uppercase font-semibold mb-1">Total Price</div>
+              <div className="text-lg font-mono font-bold text-slate-800 dark:text-slate-100">{fmt(acc.total_payable)}</div>
+            </div>
+            <div className="p-4 bg-[var(--card)] border border-slate-200 dark:border-slate-800 rounded-xl">
+              <div className="text-xs text-slate-500 uppercase font-semibold mb-1">Down Payment</div>
+              <div className="text-lg font-mono font-bold text-slate-800 dark:text-slate-100">{fmt(acc.down_payment)}</div>
+            </div>
+            <div className="p-4 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-xl">
+              <div className="text-xs text-emerald-600 dark:text-emerald-400 uppercase font-semibold mb-1">Remaining Bal</div>
+              <div className="text-lg font-mono font-bold text-emerald-700 dark:text-emerald-300">{fmt(acc.balance)}</div>
+            </div>
+            <div className="p-4 bg-[#176B87]/5 border border-[#176B87]/20 rounded-xl">
+              <div className="text-xs text-[#176B87] dark:text-[#64ccc5] uppercase font-semibold mb-1">Monthly Pay</div>
+              <div className="text-lg font-mono font-bold text-[#176B87] dark:text-[#64ccc5]">{fmt(acc.installment_amount)}</div>
+            </div>
+          </div>
+
+          {/* Tables Section */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-4">
+            {/* Payment History */}
             <div>
-              <h4 className="text-sm font-bold text-foreground mb-2">Payment History</h4>
-              <div className="overflow-y-auto border border-border rounded-xl max-h-[30vh]">
+              <h4 className="text-sm font-bold text-slate-800 dark:text-slate-200 mb-3">Payments Made (History)</h4>
+              <div className="overflow-y-auto border border-slate-200 dark:border-slate-800 rounded-xl max-h-[250px] shadow-sm">
                 <table className="w-full text-xs">
-                  <thead className="bg-muted/50 text-muted-foreground sticky top-0">
+                  <thead className="bg-slate-50 dark:bg-slate-800/80 text-slate-500 sticky top-0">
                     <tr>
-                      <th className="py-2 px-3 text-left">Date</th>
-                      <th className="py-2 px-3 text-left">Receipt</th>
-                      <th className="py-2 px-3 text-left">Method</th>
-                      <th className="py-2 px-3 text-right">Amount</th>
+                      <th className="py-2.5 px-3 text-left font-semibold">Date</th>
+                      <th className="py-2.5 px-3 text-left font-semibold">Receipt</th>
+                      <th className="py-2.5 px-3 text-left font-semibold">Method</th>
+                      <th className="py-2.5 px-3 text-right font-semibold">Amount</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-border">
-                    {(!account.payments || account.payments.length === 0) ? (
+                  <tbody className="divide-y divide-slate-100 dark:divide-slate-800/50 bg-[var(--card)]">
+                    {payments.length === 0 ? (
                       <tr>
-                        <td colSpan="4" className="py-4 text-center text-muted-foreground">No payments made yet.</td>
+                        <td colSpan="4" className="py-6 text-center text-slate-400">No payments made yet.</td>
                       </tr>
                     ) : (
-                      account.payments.map(p => (
-                        <tr key={p.payment_id}>
-                          <td className="py-2 px-3 font-mono">{p.payment_date}</td>
-                          <td className="py-2 px-3 font-mono">{p.receipt_no}</td>
-                          <td className="py-2 px-3">{p.payment_method}</td>
-                          <td className="py-2 px-3 text-right font-mono font-bold text-emerald-600">{fmt(p.amount)}</td>
+                      payments.map(p => (
+                        <tr key={p.payment_id} className="hover:bg-slate-50 dark:hover:bg-slate-800/30">
+                          <td className="py-2.5 px-3 text-slate-600 dark:text-slate-300">{p.payment_date}</td>
+                          <td className="py-2.5 px-3 font-mono text-slate-500">{p.receipt_no}</td>
+                          <td className="py-2.5 px-3 text-slate-600 dark:text-slate-300">{p.payment_method}</td>
+                          <td className="py-2.5 px-3 text-right font-mono font-bold text-emerald-600 dark:text-emerald-400">{fmt(p.amount)}</td>
                         </tr>
                       ))
                     )}
@@ -616,30 +623,31 @@ export function InstallmentAccountDetailsModal({ isOpen, onClose, installmentId 
               </div>
             </div>
 
+            {/* Payment Schedule */}
             <div>
-              <h4 className="text-sm font-bold text-foreground mb-2">Payment Schedule</h4>
-              <div className="overflow-y-auto border border-border rounded-xl max-h-[30vh]">
+              <h4 className="text-sm font-bold text-slate-800 dark:text-slate-200 mb-3">Payment Schedule & Due Dates</h4>
+              <div className="overflow-y-auto border border-slate-200 dark:border-slate-800 rounded-xl max-h-[250px] shadow-sm">
                 <table className="w-full text-xs">
-                  <thead className="bg-muted/50 text-muted-foreground sticky top-0">
+                  <thead className="bg-slate-50 dark:bg-slate-800/80 text-slate-500 sticky top-0">
                     <tr>
-                      <th className="py-2 px-3 text-left">No.</th>
-                      <th className="py-2 px-3 text-left">Due Date</th>
-                      <th className="py-2 px-3 text-left">Status</th>
-                      <th className="py-2 px-3 text-right">Amount Due</th>
+                      <th className="py-2.5 px-3 text-left font-semibold">No.</th>
+                      <th className="py-2.5 px-3 text-left font-semibold">Due Date</th>
+                      <th className="py-2.5 px-3 text-left font-semibold">Status</th>
+                      <th className="py-2.5 px-3 text-right font-semibold">Amount Due</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-border">
-                    {(!account.payment_schedules || account.payment_schedules.length === 0) ? (
+                  <tbody className="divide-y divide-slate-100 dark:divide-slate-800/50 bg-[var(--card)]">
+                    {schedules.length === 0 ? (
                       <tr>
-                        <td colSpan="4" className="py-4 text-center text-muted-foreground">No schedules found.</td>
+                        <td colSpan="4" className="py-6 text-center text-slate-400">No schedules found.</td>
                       </tr>
                     ) : (
-                      account.payment_schedules.map(s => (
-                        <tr key={s.schedule_id}>
-                          <td className="py-2 px-3 font-mono">{s.installment_no}</td>
-                          <td className="py-2 px-3 font-mono">{s.due_date}</td>
-                          <td className="py-2 px-3"><StatusBadge status={s.status} /></td>
-                          <td className="py-2 px-3 text-right font-mono font-bold text-foreground">{fmt(s.amount_due)}</td>
+                      schedules.map(s => (
+                        <tr key={s.schedule_id} className="hover:bg-slate-50 dark:hover:bg-slate-800/30">
+                          <td className="py-2.5 px-3 font-mono text-slate-500">{s.installment_no}</td>
+                          <td className="py-2.5 px-3 text-slate-600 dark:text-slate-300">{s.due_date}</td>
+                          <td className="py-2.5 px-3"><StatusBadge status={s.status} /></td>
+                          <td className="py-2.5 px-3 text-right font-mono font-bold text-slate-700 dark:text-slate-200">{fmt(s.amount_due)}</td>
                         </tr>
                       ))
                     )}
@@ -843,13 +851,41 @@ export function SupportModal({ isOpen, onClose }) {
   const [submitting, setSubmitting] = useState(false);
   const [topic, setTopic] = useState('');
   const [message, setMessage] = useState('');
+  const [activeTab, setActiveTab] = useState('submit');
+  const [myMessages, setMyMessages] = useState([]);
+  const [loadingHistory, setLoadingHistory] = useState(false);
 
-  const handleSubmit = (e) => {
+  useEffect(() => {
+    if (isOpen && activeTab === 'history') {
+      loadMyMessages();
+    }
+  }, [isOpen, activeTab]);
+
+  // Auto-refresh history every 5 seconds when viewing it
+  useEffect(() => {
+    if (!isOpen || activeTab !== 'history') return;
+    const interval = setInterval(() => loadMyMessages(true), 5000);
+    return () => clearInterval(interval);
+  }, [isOpen, activeTab]);
+
+  const loadMyMessages = async (silent = false) => {
+    if (!silent) setLoadingHistory(true);
+    try {
+      const data = await api.supportMessages.getAll();
+      setMyMessages(data.messages || []);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      if (!silent) setLoadingHistory(false);
+    }
+  };
+
+  const handleSubmit = async (e) => {
     e.preventDefault();
     setSubmitting(true);
     
-    setTimeout(() => {
-      setSubmitting(false);
+    try {
+      await api.supportMessages.create({ topic, message });
       Swal.fire({
         icon: 'success',
         title: 'Message Sent',
@@ -858,56 +894,218 @@ export function SupportModal({ isOpen, onClose }) {
         color: document.documentElement.classList.contains('dark') ? '#f8fafc' : '#0f172a',
         confirmButtonColor: '#176B87'
       });
-      onClose();
-    }, 1000);
+      setTopic('');
+      setMessage('');
+      setActiveTab('history');
+      loadMyMessages();
+    } catch (err) {
+      console.error(err);
+      Swal.fire({
+        icon: 'error',
+        title: 'Error',
+        text: err.message || 'Failed to send message',
+        background: document.documentElement.classList.contains('dark') ? '#1e293b' : '#fff',
+        color: document.documentElement.classList.contains('dark') ? '#f8fafc' : '#0f172a',
+      });
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   if (!isOpen) return null;
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title="Customer Support" size="md">
-      <form onSubmit={handleSubmit} className="space-y-4">
-        <div className="text-sm text-muted-foreground mb-4">
-          Need help with your account or an appliance? Send us a message and our support team will assist you.
-        </div>
-        
-        <div>
-          <label className="block text-xs font-bold text-muted-foreground mb-1">Topic</label>
-          <select
-            value={topic}
-            onChange={e => setTopic(e.target.value)}
-            required
-            className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground text-sm"
-          >
-            <option value="">-- Select a Topic --</option>
-            <option value="Billing">Billing & Installments</option>
-            <option value="Technical">Appliance Technical Support</option>
-            <option value="Delivery">Delivery Status</option>
-            <option value="Other">Other Inquiry</option>
-          </select>
-        </div>
-        
-        <div>
-          <label className="block text-xs font-bold text-muted-foreground mb-1">Message</label>
-          <textarea
-            value={message}
-            onChange={e => setMessage(e.target.value)}
-            required
-            rows={4}
-            placeholder="How can we help you?"
-            className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground text-sm resize-none"
-          ></textarea>
-        </div>
-        
+    <Modal isOpen={isOpen} onClose={onClose} title="Customer Support" size="lg">
+      {/* Tabs */}
+      <div className="flex border-b border-border mb-4 -mt-1">
         <button
-          type="submit"
-          disabled={submitting}
-          className="w-full py-2.5 bg-primary hover:bg-primary/90 text-primary-foreground font-bold rounded-xl flex items-center justify-center gap-2 transition-colors disabled:opacity-50"
+          type="button"
+          onClick={() => setActiveTab('submit')}
+          className={`flex-1 py-2.5 text-sm font-bold text-center border-b-2 transition-colors cursor-pointer ${
+            activeTab === 'submit'
+              ? 'border-primary text-primary'
+              : 'border-transparent text-muted-foreground hover:text-foreground'
+          }`}
         >
-          {submitting ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div> : <FiMessageCircle className="w-4 h-4" />}
-          <span>{submitting ? 'Sending...' : 'Send Message'}</span>
+          <span className="flex items-center justify-center gap-2">
+            <FiMessageCircle className="w-4 h-4" />
+            Send Feedback
+          </span>
         </button>
-      </form>
+        <button
+          type="button"
+          onClick={() => setActiveTab('history')}
+          className={`flex-1 py-2.5 text-sm font-bold text-center border-b-2 transition-colors cursor-pointer ${
+            activeTab === 'history'
+              ? 'border-primary text-primary'
+              : 'border-transparent text-muted-foreground hover:text-foreground'
+          }`}
+        >
+          <span className="flex items-center justify-center gap-2">
+            <FiClock className="w-4 h-4" />
+            My Feedback History
+            {myMessages.filter(m => m.status === 'Responded' && m.response).length > 0 && (
+              <span className="w-5 h-5 rounded-full bg-emerald-500 text-white text-[10px] font-bold flex items-center justify-center">
+                {myMessages.filter(m => m.status === 'Responded' && m.response).length}
+              </span>
+            )}
+          </span>
+        </button>
+      </div>
+
+      {activeTab === 'submit' ? (
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div className="text-sm text-muted-foreground mb-4">
+            Need help with your account or an appliance? Send us a message and our support team will assist you.
+          </div>
+          
+          <div>
+            <label className="block text-xs font-bold text-muted-foreground mb-1">Topic</label>
+            <select
+              value={topic}
+              onChange={e => setTopic(e.target.value)}
+              required
+              className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground text-sm"
+            >
+              <option value="">-- Select a Topic --</option>
+              <option value="Billing">Billing & Installments</option>
+              <option value="Technical">Appliance Technical Support</option>
+              <option value="Delivery">Delivery Status</option>
+              <option value="Other">Other Inquiry</option>
+            </select>
+          </div>
+          
+          <div>
+            <label className="block text-xs font-bold text-muted-foreground mb-1">Message</label>
+            <textarea
+              value={message}
+              onChange={e => setMessage(e.target.value)}
+              required
+              rows={4}
+              placeholder="How can we help you?"
+              className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground text-sm resize-none"
+            ></textarea>
+          </div>
+          
+          <button
+            type="submit"
+            disabled={submitting}
+            className="w-full py-2.5 bg-primary hover:bg-primary/90 text-primary-foreground font-bold rounded-xl flex items-center justify-center gap-2 transition-colors disabled:opacity-50"
+          >
+            {submitting ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div> : <FiMessageCircle className="w-4 h-4" />}
+            <span>{submitting ? 'Sending...' : 'Send Message'}</span>
+          </button>
+        </form>
+      ) : (
+        <div className="space-y-3 max-h-[60vh] overflow-y-auto pr-1">
+          {loadingHistory ? (
+            <div className="flex items-center justify-center py-12">
+              <div className="w-8 h-8 border-3 border-primary/20 border-t-primary rounded-full animate-spin"></div>
+            </div>
+          ) : myMessages.length === 0 ? (
+            <div className="text-center py-12 text-muted-foreground">
+              <FiMessageCircle className="w-10 h-10 mx-auto mb-3 opacity-30" />
+              <p className="font-medium">No feedback submitted yet</p>
+              <p className="text-sm mt-1">Send your first feedback using the "Send Feedback" tab.</p>
+            </div>
+          ) : (
+            myMessages.map(m => (
+              <div key={m.id} className="rounded-xl border border-border p-4 space-y-3">
+                {/* Customer's original message */}
+                <div>
+                  <div className="flex items-center gap-2 mb-1.5 flex-wrap">
+                    <span className="text-xs font-bold text-primary uppercase tracking-wider">{m.topic}</span>
+                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${
+                      m.status === 'Responded'
+                        ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400'
+                        : 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400'
+                    }`}>
+                      {m.status}
+                    </span>
+                    <span className="text-[10px] text-muted-foreground font-mono ml-auto">
+                      {new Date(m.created_at).toLocaleString()}
+                    </span>
+                  </div>
+                  <p className="text-sm text-foreground/80 whitespace-pre-wrap leading-relaxed">{m.message}</p>
+                </div>
+
+                {/* Admin Response */}
+                {m.response ? (
+                  <div className="border-l-2 border-emerald-500 pl-3 py-2 bg-emerald-50/50 dark:bg-emerald-900/10 rounded-r-xl">
+                    <div className="flex items-center gap-2 mb-1">
+                      <FiCheckCircle className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+                      <span className="text-xs font-bold text-emerald-700 dark:text-emerald-400">Store Admin Response</span>
+                      {m.responded_at && (
+                        <span className="text-[10px] text-muted-foreground font-mono">
+                          {new Date(m.responded_at).toLocaleString()}
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-sm text-foreground/80 leading-relaxed mb-3">{m.response}</p>
+                    
+                    {/* Customer Reply Section */}
+                    {m.customer_reply ? (
+                      <div className="mt-3 border-t border-emerald-200/50 dark:border-emerald-800/50 pt-3">
+                        <div className="flex items-center gap-2 mb-1">
+                          <FiMessageCircle className="w-3.5 h-3.5 text-primary" />
+                          <span className="text-xs font-bold text-primary">Your Reply</span>
+                          {m.customer_reply_at && (
+                            <span className="text-[10px] text-muted-foreground font-mono">
+                              {new Date(m.customer_reply_at).toLocaleString()}
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-sm text-foreground/80 leading-relaxed">{m.customer_reply}</p>
+                      </div>
+                    ) : (
+                      <form onSubmit={async (e) => {
+                        e.preventDefault();
+                        const formData = new FormData(e.target);
+                        const reply = formData.get('reply');
+                        if (!reply.trim()) return;
+                        const btn = e.target.querySelector('button[type="submit"]');
+                        btn.disabled = true;
+                        btn.innerHTML = '<span class="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin block"></span>';
+                        try {
+                          await api.supportMessages.update(m.id, { customer_reply: reply });
+                          loadMyMessages(true);
+                        } catch (err) {
+                          console.error(err);
+                          alert('Failed to send reply');
+                          btn.disabled = false;
+                          btn.innerText = 'Reply';
+                        }
+                      }} className="mt-3 flex gap-2">
+                        <input
+                          type="text"
+                          name="reply"
+                          placeholder="Type your reply to the admin..."
+                          className="flex-1 px-3 py-1.5 rounded-lg border border-emerald-200 dark:border-emerald-800 bg-white dark:bg-card text-xs focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                          required
+                        />
+                        <button
+                          type="submit"
+                          className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg transition-colors flex items-center justify-center min-w-[60px]"
+                        >
+                          Reply
+                        </button>
+                      </form>
+                    )}
+                  </div>
+                ) : (
+                  <div className="border-l-2 border-amber-400 pl-3 py-2 bg-amber-50/50 dark:bg-amber-900/10 rounded-r-xl">
+                    <div className="flex items-center gap-2">
+                      <FiClock className="w-3.5 h-3.5 text-amber-500 animate-pulse" />
+                      <span className="text-xs font-medium text-amber-600 dark:text-amber-400">Awaiting response from our team...</span>
+                    </div>
+                  </div>
+                )}
+              </div>
+            ))
+          )}
+        </div>
+      )}
     </Modal>
   );
 }
+

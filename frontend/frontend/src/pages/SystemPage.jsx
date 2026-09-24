@@ -15,6 +15,7 @@ import {
 import { fmtDate, filterBySearch } from '../lib/utils'
 import { useAuth } from '../context/AuthContext'
 import { api } from '../lib/api'
+import { useRealtimeSync, triggerDataSync } from '../lib/realtimeSync'
 
 const MODULES = ['All', 'Auth', 'Customers', 'Products', 'Sales', 'Installments', 'Payroll', 'Attendance', 'System', 'Users', 'Employees']
 const ROLES = ['Administrator', 'Store Administrator', 'Employee']
@@ -66,9 +67,9 @@ export default function SystemPage({ defaultTab = 'users' }) {
   })
   const [savingSettings, setSavingSettings] = useState(false)
 
-  const loadTabData = async (tab) => {
-    setLoading(true)
-    setError('')
+  const loadTabData = async (tab, silent = false) => {
+    if (!silent) setLoading(true)
+    if (!silent) setError('')
     try {
       if (tab === 'users') {
         const [userData, empData] = await Promise.all([
@@ -91,14 +92,18 @@ export default function SystemPage({ defaultTab = 'users' }) {
       }
     } catch (err) {
       console.error(`Failed to load ${tab} data:`, err)
-      setError(err.message || `Failed to fetch ${tab}`)
+      if (!silent) setError(err.message || `Failed to fetch ${tab}`)
     } finally {
-      setLoading(false)
+      if (!silent) setLoading(false)
     }
   }
 
   useEffect(() => {
     loadTabData(activeTab)
+  }, [activeTab, logModule])
+
+  useRealtimeSync(() => {
+    loadTabData(activeTab, true)
   }, [activeTab, logModule])
 
   useEffect(() => {
@@ -140,15 +145,18 @@ export default function SystemPage({ defaultTab = 'users' }) {
         const res = await api.system.updateUser(editUser.user_id, payload)
         setUsers(prev => prev.map(u => u.user_id === editUser.user_id ? (res.user || { ...u, ...payload }) : u))
         showToast('User account updated successfully', 'success')
+        triggerDataSync('users')
       } else {
         const res = await api.system.createUser(payload)
         if (res.user) {
           setUsers(prev => [res.user, ...prev])
         } else {
-          loadTabData('users')
+          loadTabData('users', true)
         }
         showToast('User account created successfully', 'success')
+        triggerDataSync('users')
       }
+      triggerDataSync('dashboard')
       setUserModal(false)
       setEditUser(null)
       setUserForm({ username: '', password: '', role: 'Employee', is_active: true, employee_id: '' })
@@ -167,6 +175,8 @@ export default function SystemPage({ defaultTab = 'users' }) {
       setUsers(prev => prev.filter(u => u.user_id !== deleteUser.user_id))
       showToast('User account deleted successfully', 'success')
       setDeleteUser(null)
+      triggerDataSync('users')
+      triggerDataSync('dashboard')
     } catch (err) {
       showToast(err.message || 'Failed to delete user', 'error')
     } finally {
@@ -208,6 +218,7 @@ export default function SystemPage({ defaultTab = 'users' }) {
       }
 
       setVerifyConfirmUser(null)
+      triggerDataSync('users')
     } catch (err) {
       console.error('Verify user failed:', err)
       showToast(err.message || 'Failed to verify user account', 'error')
@@ -238,6 +249,7 @@ export default function SystemPage({ defaultTab = 'users' }) {
       }
 
       setRevokeConfirmUser(null)
+      triggerDataSync('users')
     } catch (err) {
       console.error('Revoke user failed:', err)
       showToast(err.message || 'Failed to revoke verification', 'error')
@@ -254,7 +266,8 @@ export default function SystemPage({ defaultTab = 'users' }) {
     try {
       const res = await api.system.createBackup(user?.user_id || 1)
       showToast(res.message || 'Manual backup completed successfully', 'success')
-      loadTabData('backups')
+      loadTabData('backups', true)
+      triggerDataSync('system')
     } catch (err) {
       showToast(err.message || 'Failed to create database backup', 'error')
     } finally {
@@ -270,7 +283,8 @@ export default function SystemPage({ defaultTab = 'users' }) {
       const res = await api.system.restoreBackup(restoringItem.backup_id, user?.user_id || 1)
       showToast(res.message || 'Database restored successfully', 'success')
       setRestoringItem(null)
-      loadTabData('backups')
+      loadTabData('backups', true)
+      triggerDataSync('system')
     } catch (err) {
       showToast(err.message || 'Failed to restore backup', 'error')
     } finally {
@@ -289,6 +303,7 @@ export default function SystemPage({ defaultTab = 'users' }) {
         user_id: user?.user_id || 1,
       })
       showToast('System configuration saved successfully', 'success')
+      triggerDataSync('system')
     } catch (err) {
       showToast(err.message || 'Failed to save settings', 'error')
     } finally {

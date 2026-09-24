@@ -6,6 +6,7 @@ import {
   FiMapPin, FiMail, FiPhone, FiLock, FiAlertCircle
 } from 'react-icons/fi'
 import { api } from '../lib/api'
+import { useRealtimeSync, triggerDataSync } from '../lib/realtimeSync'
 import {
   Card, StatCard, Badge, StatusBadge, SearchBar,
   Table, TR, TD, TableSkeleton, EmptyState, Btn, Modal, showToast, PageHeader, Pagination, showLoading, closeLoading
@@ -58,8 +59,8 @@ export default function QrRequestsPage() {
   const [approveModalOpen, setApproveModalOpen] = useState(false)
   const [approving, setApproving] = useState(false)
 
-  const loadData = async () => {
-    setLoading(true)
+  const loadData = async (silent = false) => {
+    if (!silent) setLoading(true)
     try {
       const params = { page }
       if (search) params.search = search
@@ -77,15 +78,19 @@ export default function QrRequestsPage() {
       }
     } catch (err) {
       console.error('Failed to load QR requests:', err)
-      showToast(err.message || 'Failed to load QR requests', 'error')
+      if (!silent) showToast(err.message || 'Failed to load QR requests', 'error')
     } finally {
-      setLoading(false)
+      if (!silent) setLoading(false)
     }
   }
 
   useEffect(() => {
     loadData()
   }, [page, statusFilter, roleFilter])
+
+  useRealtimeSync(() => {
+    loadData(true)
+  }, [page, statusFilter, roleFilter, search])
 
   const handleSearchSubmit = (e) => {
     e?.preventDefault()
@@ -110,7 +115,7 @@ export default function QrRequestsPage() {
     if (reqItem.status === 'PENDING') {
       try {
         await api.qrRequests.review(reqItem.request_id)
-        loadData()
+        loadData(true)
       } catch (e) {
         console.error('Auto review failed:', e)
       }
@@ -157,7 +162,10 @@ export default function QrRequestsPage() {
         showToast(`QR Request ${selectedRequest.request_code} approved! Permanent QR is now ACTIVE.`, 'success')
         setApproveModalOpen(false)
         setReviewModalOpen(false)
-        loadData()
+        loadData(true)
+        triggerDataSync('qr_requests')
+        triggerDataSync('employees')
+        triggerDataSync('attendance')
       } else {
         showToast(res.message || 'Approval failed', 'error')
       }
@@ -189,7 +197,9 @@ export default function QrRequestsPage() {
         showToast(`QR Request ${selectedRequest.request_code} rejected.`, 'info')
         setRejectModalOpen(false)
         setReviewModalOpen(false)
-        loadData()
+        loadData(true)
+        triggerDataSync('qr_requests')
+        triggerDataSync('employees')
       } else {
         showToast(res.message || 'Rejection failed', 'error')
       }

@@ -13,6 +13,7 @@ import {
 import { fmt } from '../lib/utils'
 import { useAuth } from '../context/AuthContext'
 import { api } from '../lib/api'
+import { useRealtimeSync, triggerDataSync } from '../lib/realtimeSync'
 import { ComposedChart, Bar, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend } from 'recharts'
 import { TbCurrencyPeso } from 'react-icons/tb'
 import EmployeePayslipModal from '../components/payslip/EmployeePayslipModal'
@@ -41,9 +42,9 @@ export default function PayrollPage() {
   const [endDate, setEndDate] = useState('')
   const [payDate, setPayDate] = useState('')
 
-  const loadData = async (targetPeriodId, customParams = {}) => {
-    setLoading(true)
-    setError('')
+  const loadData = async (targetPeriodId, customParams = {}, silent = false) => {
+    if (!silent) setLoading(true)
+    if (!silent) setError('')
     try {
       if (user?.role === 'Employee') {
         const data = await api.payroll.getMePayroll({
@@ -53,9 +54,6 @@ export default function PayrollPage() {
           status: customParams.status || undefined,
         })
         setPayroll(data.payroll || [])
-        // if period_id wasn't in filters but it exists in the data, it's fine. We don't have periods list returned natively in mePayroll unless we add it, but wait! The admin endpoint returned periods. Let's fetch periods separately if needed, or rely on admin periods endpoint.
-        // Wait, for employee, we might not even need the period dropdown if we use from/to date, but the requirements said "Payroll Period dropdown".
-        // Let's fetch periods using api.payroll.getPeriods() if not already loaded.
         if (periods.length === 0) {
           const periodsData = await api.payroll.getPeriods().catch(() => ({ periods: [] }))
           setPeriods(periodsData.periods || [])
@@ -75,15 +73,19 @@ export default function PayrollPage() {
       }
     } catch (err) {
       console.error('Failed to load payroll:', err)
-      setError(err.message || 'Failed to fetch payroll records')
+      if (!silent) setError(err.message || 'Failed to fetch payroll records')
     } finally {
-      setLoading(false)
+      if (!silent) setLoading(false)
     }
   }
 
   useEffect(() => {
     loadData()
   }, [])
+
+  useRealtimeSync(() => {
+    loadData(selectedPeriodId, {}, true)
+  }, [selectedPeriodId, user?.role])
 
   useEffect(() => {
     const id = searchParams.get('id')
@@ -106,7 +108,8 @@ export default function PayrollPage() {
     try {
       const res = await api.payroll.generate(user?.user_id || 1, selectedPeriodId ? parseInt(selectedPeriodId) : undefined)
       showToast(res.message || 'Payroll generated successfully', 'success')
-      loadData(selectedPeriodId)
+      loadData(selectedPeriodId, {}, true)
+      triggerDataSync('payroll')
     } catch (err) {
       showToast(err.message || 'Failed to generate payroll', 'error')
     } finally {
@@ -124,7 +127,8 @@ export default function PayrollPage() {
     try {
       const res = await api.payroll.generate13thMonth(user?.user_id || 1)
       showToast(res.message || '13th Month Pay generated successfully', 'success')
-      loadData()
+      loadData(undefined, {}, true)
+      triggerDataSync('payroll')
     } catch (err) {
       showToast(err.message || 'Failed to generate 13th month pay', 'error')
     } finally {
@@ -142,6 +146,7 @@ export default function PayrollPage() {
       await api.payroll.approve(payrollId, user?.user_id || 1)
       setPayroll(prev => prev.map(p => p.payroll_id === payrollId ? { ...p, status: 'Approved' } : p))
       showToast('Payroll record approved', 'success')
+      triggerDataSync('payroll')
     } catch (err) {
       showToast(err.message || 'Failed to approve payroll', 'error')
     } finally {
@@ -158,6 +163,7 @@ export default function PayrollPage() {
       await api.payroll.markPaid(payrollId)
       setPayroll(prev => prev.map(p => p.payroll_id === payrollId ? { ...p, status: 'Paid' } : p))
       showToast('Payroll marked as Paid', 'success')
+      triggerDataSync('payroll')
     } catch (err) {
       showToast(err.message || 'Failed to update payroll status', 'error')
     } finally {
@@ -189,7 +195,8 @@ export default function PayrollPage() {
       setStartDate('')
       setEndDate('')
       setPayDate('')
-      loadData(res.period?.period_id ? res.period.period_id.toString() : undefined)
+      loadData(res.period?.period_id ? res.period.period_id.toString() : undefined, {}, true)
+      triggerDataSync('payroll')
     } catch (err) {
       showToast(err.message || 'Failed to create period', 'error')
     } finally {

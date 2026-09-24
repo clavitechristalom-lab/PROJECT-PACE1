@@ -17,47 +17,82 @@ class CustomerDashboardController extends Controller
     public function getDashboard(Request $request)
     {
         $user = $request->user();
-        if (!$user || $user->role !== 'Customer' || !$user->customer_id) {
+        if (!$user || $user->role !== 'Customer') {
             return response()->json(['message' => 'Unauthorized or missing customer profile'], 403);
         }
 
         $customerId = $user->customer_id;
+        if (!$customerId && $user->customer) {
+            $customerId = $user->customer->customer_id;
+        }
+        if (!$customerId) {
+            $cust = \App\Models\Customer::where('email', $user->username)->first();
+            if ($cust) {
+                $customerId = $cust->customer_id;
+            }
+        }
 
-        // Products metrics scoped by branch
-        $branchId = $user->customer ? $user->customer->branch_id : null;
-        
+        // Products metrics scoped by branch (with fallback to all active products)
+        $branchId = null;
+        if ($customerId) {
+            $customer = \App\Models\Customer::find($customerId);
+            if ($customer) {
+                $branchId = $customer->branch_id;
+            }
+        }
+
         if ($branchId) {
-            $totalProducts = Product::where('branch_id', $branchId)->count();
-            $outOfStockCount = Product::where('branch_id', $branchId)->where('stock_quantity', '<=', 0)->count();
-            $saleItemCount = Product::where('branch_id', $branchId)->where('status', 'Active')->whereNotNull('discount_price')->count(); 
+            $branchProductsCount = Product::where('branch_id', $branchId)->count();
+            if ($branchProductsCount > 0) {
+                $totalProducts = $branchProductsCount;
+                $outOfStockCount = Product::where('branch_id', $branchId)->where('stock_quantity', '<=', 0)->count();
+                $saleItemCount = Product::where('branch_id', $branchId)->where('status', 'Active')->whereNotNull('discount_price')->count();
 
-            $categories = Product::where('branch_id', $branchId)
-                ->select('category', \Illuminate\Support\Facades\DB::raw('count(*) as count'))
+                $categories = Product::where('branch_id', $branchId)
+                    ->select('category', \Illuminate\Support\Facades\DB::raw('count(*) as count'))
+                    ->groupBy('category')
+                    ->get();
+            } else {
+                $totalProducts = Product::count();
+                $outOfStockCount = Product::where('stock_quantity', '<=', 0)->count();
+                $saleItemCount = Product::where('status', 'Active')->whereNotNull('discount_price')->count();
+                $categories = Product::select('category', \Illuminate\Support\Facades\DB::raw('count(*) as count'))
+                    ->groupBy('category')
+                    ->get();
+            }
+        } else {
+            $totalProducts = Product::count();
+            $outOfStockCount = Product::where('stock_quantity', '<=', 0)->count();
+            $saleItemCount = Product::where('status', 'Active')->whereNotNull('discount_price')->count();
+            $categories = Product::select('category', \Illuminate\Support\Facades\DB::raw('count(*) as count'))
                 ->groupBy('category')
                 ->get();
-        } else {
-            $totalProducts = $outOfStockCount = $saleItemCount = 0;
-            $categories = [];
         }
 
         // Financial metrics for this customer
-        $activeInstallments = InstallmentAccount::where('customer_id', $customerId)
-            ->whereIn('status', ['Active', 'Pending'])
-            ->get();
+        if ($customerId) {
+            $activeInstallments = InstallmentAccount::where('customer_id', $customerId)
+                ->whereIn('status', ['Active', 'Pending'])
+                ->get();
+                
+            $monthlyPayment = $activeInstallments->sum('installment_amount');
             
-        $monthlyPayment = $activeInstallments->sum('installment_amount');
-        
-        // Calculate remaining credit balance
-        $totalPayable = $activeInstallments->sum('total_payable');
-        $totalPaid = Payment::whereIn('installment_id', $activeInstallments->pluck('installment_id'))
-            ->sum('amount');
-        $totalCreditBalance = max(0, $totalPayable - $totalPaid);
+            // Calculate remaining credit balance
+            $totalPayable = $activeInstallments->sum('total_payable');
+            $totalPaid = Payment::whereIn('installment_id', $activeInstallments->pluck('installment_id'))
+                ->sum('amount');
+            $totalCreditBalance = max(0, $totalPayable - $totalPaid);
 
-        // Overdue count
-        $overdueCount = PaymentSchedule::whereIn('installment_id', $activeInstallments->pluck('installment_id'))
-            ->where('due_date', '<', now()->format('Y-m-d'))
-            ->where('status', 'Pending')
-            ->count();
+            // Overdue count
+            $overdueCount = PaymentSchedule::whereIn('installment_id', $activeInstallments->pluck('installment_id'))
+                ->where('due_date', '<', now()->format('Y-m-d'))
+                ->where('status', 'Pending')
+                ->count();
+        } else {
+            $monthlyPayment = 0;
+            $totalCreditBalance = 0;
+            $overdueCount = 0;
+        }
 
         return response()->json([
             'metrics' => [
@@ -78,14 +113,27 @@ class CustomerDashboardController extends Controller
     public function getInstallments(Request $request)
     {
         $user = $request->user();
-        if (!$user || $user->role !== 'Customer' || !$user->customer_id) {
+        if (!$user || $user->role !== 'Customer') {
             return response()->json(['message' => 'Unauthorized'], 403);
         }
 
-        $installments = InstallmentAccount::with(['sale.items.product', 'payments' => function($q) {
-            $q->where('status', 'Completed');
-        }, 'paymentSchedules'])
-            ->where('customer_id', $user->customer_id)
+        $customerId = $user->customer_id;
+        if (!$customerId && $user->customer) {
+            $customerId = $user->customer->customer_id;
+        }
+        if (!$customerId) {
+            $cust = \App\Models\Customer::where('email', $user->username)->first();
+            if ($cust) {
+                $customerId = $cust->customer_id;
+            }
+        }
+
+        if (!$customerId) {
+            return response()->json(['installments' => []]);
+        }
+
+        $installments = InstallmentAccount::with(['sale.items.product', 'payments', 'paymentSchedules'])
+            ->where('customer_id', $customerId)
             ->orderBy('created_at', 'desc')
             ->get();
 
@@ -93,11 +141,11 @@ class CustomerDashboardController extends Controller
             $productName = 'Multiple Items';
             $imageUrl = null;
             if ($inst->sale && $inst->sale->items->count() === 1) {
-                $productName = $inst->sale->items->first()->product->product_name ?? 'Unknown';
-                $imageUrl = $inst->sale->items->first()->product->image_url ?? null;
+                $productName = $inst->sale->items->first()->product?->product_name ?? 'Unknown';
+                $imageUrl = $inst->sale->items->first()->product?->image_url ?? null;
             } elseif ($inst->sale && $inst->sale->items->count() > 1) {
-                $productName = $inst->sale->items->first()->product->product_name . ' + others';
-                $imageUrl = $inst->sale->items->first()->product->image_url ?? null;
+                $productName = $inst->sale->items->first()->product?->product_name . ' + others';
+                $imageUrl = $inst->sale->items->first()->product?->image_url ?? null;
             }
 
             $paidAmount = $inst->payments->sum('amount');

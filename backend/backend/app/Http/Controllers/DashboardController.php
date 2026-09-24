@@ -368,20 +368,21 @@ class DashboardController extends Controller
 
         $comparison = [];
         foreach ($branchProfiles as $bp) {
+            $branchId = $bp->id;
             $branch = $bp->name;
             // Sales
-            $sales = (float)SaleTransaction::whereHas('processedBy.employee', function ($eq) use ($branch) {
-                $eq->where('branch_id', $branch);
+            $sales = (float)SaleTransaction::whereHas('processedBy.employee', function ($eq) use ($branchId) {
+                $eq->where('branch_id', $branchId);
             })->sum('total_amount');
 
             // Collections
-            $collections = (float)Payment::whereHas('installmentAccount.sale.processedBy.employee', function ($eq) use ($branch) {
-                $eq->where('branch_id', $branch);
+            $collections = (float)Payment::whereHas('installmentAccount.sale.processedBy.employee', function ($eq) use ($branchId) {
+                $eq->where('branch_id', $branchId);
             })->sum('amount');
 
             // Installment
-            $insts = InstallmentAccount::with('payments')->whereHas('sale.processedBy.employee', function ($eq) use ($branch) {
-                $eq->where('branch_id', $branch);
+            $insts = InstallmentAccount::with('payments')->whereHas('sale.processedBy.employee', function ($eq) use ($branchId) {
+                $eq->where('branch_id', $branchId);
             })->get();
 
             $instSales = (float)$insts->sum('total_payable');

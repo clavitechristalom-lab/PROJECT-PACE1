@@ -5,11 +5,12 @@ import {
   FiCalendar, FiUser, FiClock, FiFileText,
   FiBarChart2, FiSettings, FiShield, FiDatabase, FiActivity,
   FiSun, FiMoon, FiSearch, FiLogOut, FiMenu, FiChevronDown,
-  FiCheckCircle, FiX, FiBell, FiCamera, FiLayers, FiDollarSign
+  FiCheckCircle, FiX, FiBell, FiCamera, FiLayers, FiDollarSign, FiMessageSquare
 } from 'react-icons/fi'
 import { useAuth } from '../../context/AuthContext'
 import { NotificationBell, showToast } from '../ui'
 import { api } from '../../lib/api'
+import { useRealtimeSync, triggerDataSync } from '../../lib/realtimeSync'
 import { useTheme } from '../../context/ThemeContext'
 import ProfileModal from './ProfileModal'
 import EmployeePinVerificationModal from '../attendance/EmployeePinVerificationModal'
@@ -35,6 +36,7 @@ const icons = {
   history: <FiActivity className="w-4 h-4 flex-shrink-0" />,
   payslip: <FiFileText className="w-4 h-4 flex-shrink-0" />,
   notifications: <FiBell className="w-4 h-4 flex-shrink-0" />,
+  support: <FiMessageSquare className="w-4 h-4 flex-shrink-0" />,
 }
 
 function navByRole(role) {
@@ -129,6 +131,8 @@ function navByRole(role) {
   base.push({ label: isAdmin ? 'Attendance Logs' : 'Branch Attendance', path: '/attendance', icon: icons.attendance })
 
   base.push({ label: 'Reports', path: '/reports', icon: icons.reports })
+  
+  base.push({ label: 'Customer Support', path: '/support', icon: icons.support })
 
   if (isAdmin) {
     base.push(system)
@@ -712,8 +716,12 @@ export default function AppShell() {
 
   useEffect(() => {
     loadData()
-    const timer = setInterval(loadData, 10000) // Lowered to 10s for better responsiveness
+    const timer = setInterval(loadData, 10000)
     return () => clearInterval(timer)
+  }, [user])
+
+  useRealtimeSync(() => {
+    loadData()
   }, [user])
 
   const handleMarkAllRead = async () => {

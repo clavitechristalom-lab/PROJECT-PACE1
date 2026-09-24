@@ -13,6 +13,7 @@ import {
 import { fmtDate } from '../lib/utils'
 import { api } from '../lib/api'
 import { useAuth } from '../context/AuthContext'
+import { useRealtimeSync, triggerDataSync } from '../lib/realtimeSync'
 import { TbCurrencyPeso } from 'react-icons/tb'
 
 const MODULE_CATEGORIES = [
@@ -57,9 +58,9 @@ export default function NotificationsPage() {
     return localStorage.getItem('notif_sound') !== 'disabled'
   })
 
-  const loadNotifications = async (targetPage = page) => {
-    setLoading(true)
-    setError('')
+  const loadNotifications = async (targetPage = page, silent = false) => {
+    if (!silent) setLoading(true)
+    if (!silent) setError('')
     try {
       const res = await api.notifications.getAll({
         page: targetPage,
@@ -80,9 +81,9 @@ export default function NotificationsPage() {
       }
     } catch (err) {
       console.error('Failed to load notifications:', err)
-      setError(err.message || 'Failed to load notifications')
+      if (!silent) setError(err.message || 'Failed to load notifications')
     } finally {
-      setLoading(false)
+      if (!silent) setLoading(false)
     }
   }
 
@@ -93,6 +94,10 @@ export default function NotificationsPage() {
     }, search ? 280 : 0)
     return () => clearTimeout(timer)
   }, [statusFilter, moduleFilter, priorityFilter, search])
+
+  useRealtimeSync(() => {
+    loadNotifications(page, true)
+  }, [page, statusFilter, moduleFilter, priorityFilter, search])
 
   // Mark single read/unread
   const handleToggleRead = async (n) => {
@@ -108,6 +113,7 @@ export default function NotificationsPage() {
         setUnreadCount(prev => Math.max(0, prev - 1))
         showToast('Marked as read', 'success')
       }
+      triggerDataSync('notifications')
     } catch (err) {
       showToast(err.message || 'Failed to update notification', 'error')
     }
@@ -120,6 +126,7 @@ export default function NotificationsPage() {
       setNotifications(prev => prev.map(item => ({ ...item, is_read: true })))
       setUnreadCount(0)
       showToast(res.message || 'All notifications marked as read', 'success')
+      triggerDataSync('notifications')
     } catch (err) {
       showToast(err.message || 'Failed to mark all as read', 'error')
     }
@@ -131,6 +138,7 @@ export default function NotificationsPage() {
       const res = await api.notifications.clearAllRead()
       setNotifications(prev => prev.filter(item => !item.is_read))
       showToast(res.message || 'Cleared read notifications', 'info')
+      triggerDataSync('notifications')
     } catch (err) {
       showToast(err.message || 'Failed to clear notifications', 'error')
     }
@@ -142,6 +150,7 @@ export default function NotificationsPage() {
       await api.notifications.delete(id)
       setNotifications(prev => prev.filter(item => item.id !== id))
       showToast('Notification deleted', 'info')
+      triggerDataSync('notifications')
     } catch (err) {
       showToast(err.message || 'Failed to delete notification', 'error')
     }

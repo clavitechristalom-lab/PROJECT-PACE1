@@ -44,7 +44,10 @@ export function AuthProvider({ children }) {
         // Update cached user payload
         const updated = JSON.stringify({
           ...session,
-          cached_user: data.user,
+          cached_user: {
+            ...data.user,
+            role: data.user.role ? data.user.role.trim() : ''
+          },
         })
         sessionStorage.setItem('pace_session', updated)
         localStorage.setItem('pace_session', updated)
@@ -55,9 +58,14 @@ export function AuthProvider({ children }) {
       }
     } catch (err) {
       console.warn('Session verification failed:', err)
-      sessionStorage.removeItem('pace_session')
-      localStorage.removeItem('pace_session')
-      setUser(null)
+      if (err.status === 401 || err.status === 403) {
+        sessionStorage.removeItem('pace_session')
+        localStorage.removeItem('pace_session')
+        setUser(null)
+      } else if (session?.cached_user) {
+        // Retain cached user during network hiccups so user is not redirected
+        setUser(session.cached_user)
+      }
     } finally {
       setCheckingAuth(false)
     }

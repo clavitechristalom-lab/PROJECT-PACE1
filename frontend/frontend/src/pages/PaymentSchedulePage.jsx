@@ -9,7 +9,9 @@ import {
 } from '../components/ui'
 import { fmt, filterBySearch } from '../lib/utils'
 import { api } from '../lib/api'
+import { useRealtimeSync } from '../lib/realtimeSync'
 import { TbCurrencyPeso } from 'react-icons/tb'
+import { InstallmentAccountDetailsModal } from '../components/customer/CustomerModals'
 
 export default function PaymentSchedulePage({ branchFilter: propBranchFilter, embedded }) {
   const [schedules, setSchedules] = useState([])
@@ -19,32 +21,53 @@ export default function PaymentSchedulePage({ branchFilter: propBranchFilter, em
   const [statusFilter, setStatusFilter] = useState('All')
   const [viewMode, setViewMode] = useState('list')
   const [page, setPage] = useState(1)
+  const [currentMonth, setCurrentMonth] = useState(new Date())
+  const [initialMonthSet, setInitialMonthSet] = useState(false)
+  const [selectedInstallmentId, setSelectedInstallmentId] = useState(null)
   const pageSize = 12
+
+  const tDate = new Date();
+  const localTodayStr = `${tDate.getFullYear()}-${String(tDate.getMonth() + 1).padStart(2, '0')}-${String(tDate.getDate()).padStart(2, '0')}`
+
 
   const [localBranchFilter, setLocalBranchFilter] = useState('All')
   const branchFilter = propBranchFilter || localBranchFilter
 
-  const loadSchedules = async () => {
-    setLoading(true)
-    setError('')
+  const loadSchedules = async (silent = false) => {
+    if (!silent) setLoading(true)
+    if (!silent) setError('')
     try {
       const data = await api.payments.getSchedules({
         search: search || undefined,
         status: statusFilter !== 'All' ? statusFilter : undefined,
         branch: branchFilter || undefined,
       })
-      setSchedules(data.schedules || [])
+      const fetched = data.schedules || []
+      setSchedules(fetched)
+
+      if (!initialMonthSet && fetched.length > 0) {
+        const upcoming = fetched.filter(s => s.status !== 'Paid').sort((a,b) => new Date(a.due_date) - new Date(b.due_date))
+        if (upcoming.length > 0) {
+          const d = new Date(upcoming[0].due_date)
+          setCurrentMonth(new Date(d.getFullYear(), d.getMonth(), 1))
+        }
+        setInitialMonthSet(true)
+      }
     } catch (err) {
       console.error('Failed to load schedules:', err)
-      setError(err.message || 'Failed to fetch amortization schedules')
+      if (!silent) setError(err.message || 'Failed to fetch amortization schedules')
     } finally {
-      setLoading(false)
+      if (!silent) setLoading(false)
     }
   }
 
   useEffect(() => {
     loadSchedules()
   }, [statusFilter, branchFilter])
+
+  useRealtimeSync(() => {
+    loadSchedules(true)
+  }, [statusFilter, branchFilter, search])
 
   const filtered = useMemo(() => {
     return filterBySearch(schedules, search, ['account_no', 'customer_name', 'due_date'])
@@ -185,56 +208,120 @@ export default function PaymentSchedulePage({ branchFilter: propBranchFilter, em
             <Pagination total={total} page={page} pageSize={pageSize} onChange={setPage} />
           </>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-            {Object.entries(
-              filtered.reduce((acc, s) => {
-                if (!acc[s.due_date]) acc[s.due_date] = [];
-                acc[s.due_date].push(s);
-                return acc;
-              }, {})
-            )
-            .sort((a, b) => new Date(a[0]) - new Date(b[0]))
-            .map(([date, items]) => {
-              const dateObj = new Date(date);
-              const isToday = new Date().toDateString() === dateObj.toDateString();
-              const isPast = dateObj < new Date(new Date().setHours(0,0,0,0));
-              
-              return (
-                <div key={date} className={`border rounded-2xl p-4 shadow-2xs ${isToday ? 'bg-blue-50/50 dark:bg-blue-950/20 border-blue-200 dark:border-blue-800' : isPast ? 'bg-rose-50/30 dark:bg-rose-950/20 border-rose-200 dark:border-rose-900' : 'bg-card border-border'}`}>
-                  <div className="flex justify-between items-center mb-3 border-b border-border/60 pb-2.5">
-                    <div className="flex items-center gap-2">
-                      <div className={`p-2 rounded-xl border ${isToday ? 'bg-blue-100 text-blue-700 border-blue-200' : isPast ? 'bg-rose-100 text-rose-700 border-rose-200' : 'bg-muted text-muted-foreground border-border'}`}>
-                        <FiCalendar className="w-4 h-4" />
+          <div className="flex flex-col h-full bg-card">
+            {/* Calendar Header */}
+            <div className="flex justify-between items-center p-4 border-b border-border">
+              <h2 className="text-lg font-bold text-foreground flex items-center gap-2">
+                <FiCalendar className="text-primary" />
+                {currentMonth.toLocaleDateString('default', { month: 'long', year: 'numeric' })}
+              </h2>
+              <div className="flex gap-2">
+                <button 
+                  onClick={() => setCurrentMonth(new Date(currentMonth.getFullYear(), currentMonth.getMonth() - 1, 1))}
+                  className="px-3 py-1.5 border border-border rounded-lg text-xs font-bold hover:bg-muted cursor-pointer text-foreground"
+                >
+                  Prev
+                </button>
+                <button 
+                  onClick={() => setCurrentMonth(new Date())}
+                  className="px-3 py-1.5 border border-border rounded-lg text-xs font-bold hover:bg-muted cursor-pointer text-foreground"
+                >
+                  Today
+                </button>
+                <button 
+                  onClick={() => setCurrentMonth(new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 1))}
+                  className="px-3 py-1.5 border border-border rounded-lg text-xs font-bold hover:bg-muted cursor-pointer text-foreground"
+                >
+                  Next
+                </button>
+              </div>
+            </div>
+
+            {/* Calendar Grid */}
+            <div className="grid grid-cols-7 border-b border-border bg-muted/30">
+              {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(day => (
+                <div key={day} className="py-2 text-center text-xs font-bold text-muted-foreground uppercase tracking-wider border-r border-border last:border-0">
+                  {day}
+                </div>
+              ))}
+            </div>
+
+            <div className="grid grid-cols-7 flex-1 auto-rows-fr">
+              {(() => {
+                const year = currentMonth.getFullYear()
+                const month = currentMonth.getMonth()
+                const firstDay = new Date(year, month, 1).getDay()
+                const daysInMonth = new Date(year, month + 1, 0).getDate()
+                
+                const days = []
+                for (let i = 0; i < firstDay; i++) days.push(null)
+                for (let i = 1; i <= daysInMonth; i++) days.push(new Date(year, month, i))
+                while (days.length % 7 !== 0) days.push(null)
+
+                const schedulesByDate = filtered.reduce((acc, s) => {
+                  if (!acc[s.due_date]) acc[s.due_date] = [];
+                  acc[s.due_date].push(s);
+                  return acc;
+                }, {})
+
+                return days.map((dateObj, i) => {
+                  if (!dateObj) {
+                    return <div key={`empty-${i}`} className="min-h-[120px] p-2 border-r border-b border-border bg-muted/10 last:border-r-0"></div>
+                  }
+                  
+                  const dy = String(dateObj.getDate()).padStart(2, '0');
+                  const dm = String(dateObj.getMonth() + 1).padStart(2, '0');
+                  const dyY = dateObj.getFullYear();
+                  const dateStr = `${dyY}-${dm}-${dy}`;
+                  const isToday = dateStr === localTodayStr
+                  const daySchedules = schedulesByDate[dateStr] || []
+                  
+                  return (
+                    <div key={dateStr} className={`min-h-[120px] p-2 border-r border-b border-border last:border-r-0 ${isToday ? 'bg-primary/5' : 'bg-card'}`}>
+                      <div className="flex justify-between items-start mb-2">
+                        <span className={`text-xs font-bold w-6 h-6 flex items-center justify-center rounded-full ${isToday ? 'bg-primary text-primary-foreground' : 'text-muted-foreground'}`}>
+                          {dateObj.getDate()}
+                        </span>
+                        {daySchedules.length > 0 && (
+                          <span className="text-[10px] bg-muted px-1.5 py-0.5 rounded-full text-foreground font-semibold">
+                            {daySchedules.length}
+                          </span>
+                        )}
                       </div>
-                      <div>
-                        <h3 className="font-bold text-foreground text-xs">{dateObj.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}</h3>
-                        {isToday && <span className="text-[10px] font-bold bg-blue-100 text-blue-700 px-1.5 py-0.2 rounded-full">TODAY</span>}
-                        {isPast && !isToday && <span className="text-[10px] font-bold bg-rose-100 text-rose-700 px-1.5 py-0.2 rounded-full">PAST DUE</span>}
+                      
+                      <div className="space-y-1.5 overflow-y-auto max-h-[100px] no-scrollbar">
+                        {daySchedules.map(s => {
+                          let bgColor = 'bg-slate-100 dark:bg-slate-800 border-slate-200'
+                          if (s.status === 'Paid') bgColor = 'bg-emerald-50 border-emerald-200 dark:bg-emerald-900/20 text-emerald-800 dark:text-emerald-300 dark:border-emerald-800/50'
+                          else if (s.status === 'Overdue') bgColor = 'bg-rose-50 border-rose-200 dark:bg-rose-900/20 text-rose-800 dark:text-rose-300 dark:border-rose-800/50'
+                          else bgColor = 'bg-blue-50 border-blue-200 dark:bg-blue-900/20 text-blue-800 dark:text-blue-300 dark:border-blue-800/50'
+
+                          return (
+                            <div key={s.schedule_id} onClick={() => setSelectedInstallmentId(s.installment_id)} className={`p-2 rounded-lg border text-[10px] leading-tight cursor-pointer hover:shadow-md transition-all ${bgColor}`} title={`${s.customer_name} - ${fmt(s.balance_due)}`}>
+                              <div className="opacity-70 mb-0.5 text-[9px] uppercase tracking-wide">Acc: {s.account_no}</div>
+                              <div className="font-bold truncate text-[11px] mb-1">{s.customer_name}</div>
+                              <div className="flex justify-between items-center mt-1 pt-1 border-t border-black/5 dark:border-white/10">
+                                <span className="opacity-80">Inst #{s.installment_no}</span>
+                                <span className="font-mono font-bold">{fmt(s.balance_due)}</span>
+                              </div>
+                            </div>
+                          )
+                        })}
                       </div>
                     </div>
-                    <span className="text-[11px] font-bold font-mono bg-muted text-muted-foreground px-2.5 py-0.5 rounded-full">{items.length} due</span>
-                  </div>
-                  
-                  <div className="space-y-2 max-h-[300px] overflow-y-auto pr-1">
-                    {items.map(s => (
-                      <div key={s.schedule_id} className="bg-card border border-border rounded-xl p-3 shadow-2xs text-xs hover:border-primary/40 transition-colors">
-                        <div className="flex justify-between items-start mb-1">
-                          <span className="font-bold text-foreground truncate mr-2" title={s.customer_name}>{s.customer_name}</span>
-                          <StatusBadge status={s.status} />
-                        </div>
-                        <div className="flex justify-between text-[11px] text-muted-foreground mt-1.5">
-                          <span className="font-mono">{s.account_no} (Inst #{s.installment_no})</span>
-                          <span className="font-mono font-bold text-primary">{fmt(s.balance_due)}</span>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )
-            })}
+                  )
+                })
+              })()}
+            </div>
           </div>
         )}
       </Card>
+
+      <InstallmentAccountDetailsModal
+        isOpen={!!selectedInstallmentId}
+        onClose={() => setSelectedInstallmentId(null)}
+        installmentId={selectedInstallmentId}
+      />
     </div>
   )
 }

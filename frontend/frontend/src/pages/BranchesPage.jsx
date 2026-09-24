@@ -11,6 +11,7 @@ import {
 import { fmt, filterBySearch } from '../lib/utils'
 import api from '../lib/api'
 import { useAuth } from '../context/AuthContext'
+import { useRealtimeSync, triggerDataSync } from '../lib/realtimeSync'
 import CreateBranchModal from '../components/branches/CreateBranchModal'
 
 export default function BranchesPage() {
@@ -30,22 +31,26 @@ export default function BranchesPage() {
   const [editItem, setEditItem] = useState(null)
   const [saving, setSaving] = useState(false)
 
-  const loadData = async () => {
-    setLoading(true)
-    setError('')
+  const loadData = async (silent = false) => {
+    if (!silent) setLoading(true)
+    if (!silent) setError('')
     try {
       const res = await api.branches.getAll()
       setBranches(res.branches || [])
     } catch (err) {
       console.error('Failed to load branches:', err)
-      setError(err.message || 'Failed to fetch branches')
+      if (!silent) setError(err.message || 'Failed to fetch branches')
     } finally {
-      setLoading(false)
+      if (!silent) setLoading(false)
     }
   }
 
   useEffect(() => {
     loadData()
+  }, [])
+
+  useRealtimeSync(() => {
+    loadData(true)
   }, [])
 
   // Form
@@ -56,7 +61,8 @@ export default function BranchesPage() {
   const handleCreateSuccess = () => {
     setShowCreateModal(false)
     showToast('Branch successfully created!', 'success')
-    loadData()
+    loadData(true)
+    triggerDataSync('branches')
   }
 
   const openEdit = (b) => {
@@ -81,7 +87,8 @@ export default function BranchesPage() {
         try {
           await api.branches.delete(id)
           showToast('Branch deleted successfully', 'success')
-          loadData()
+          loadData(true)
+          triggerDataSync('branches')
         } catch (err) {
           showToast(err.message || 'Failed to delete branch', 'error')
         }
@@ -102,7 +109,8 @@ export default function BranchesPage() {
       await api.branches.update(editItem.id, form)
       showToast('Branch updated successfully', 'success')
       setEditItem(null)
-      loadData()
+      loadData(true)
+      triggerDataSync('branches')
     } catch (err) {
       showToast(err.message || 'Failed to update branch', 'error')
     } finally {

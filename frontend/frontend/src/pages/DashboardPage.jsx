@@ -16,9 +16,9 @@ import {
   Table, TR, TD, PageHeader, StatCard, Card, CardHeader, Pagination, showToast, showLoading, closeLoading, confirmAction, LoadingState, ErrorAlert, TableSkeleton, EmptyState,
   StatSkeleton, ProgressBar, TabBar
 } from '../components/ui'
-import EmployeePayslipModal from '../components/payslip/EmployeePayslipModal'
 import { fmt, fmtDate } from '../lib/utils'
 import { api } from '../lib/api'
+import { useRealtimeSync, triggerDataSync } from '../lib/realtimeSync'
 import { TbCurrencyPeso } from 'react-icons/tb'
 
 import BranchCarousel from '../components/branches/BranchCarousel'
@@ -96,8 +96,11 @@ function AdminBusinessDashboard() {
   const [showCreateBranchModal, setShowCreateBranchModal] = useState(false)
   const [showQrWidgetModal, setShowQrWidgetModal] = useState(false)
 
-  const loadData = async () => {
-    setLoading(true)
+  const loadData = async (source) => {
+    const isBg = source === 'timer' || source === 'database' || source === 'event' || source === 'focus' || source === 'mutation' || source === 'sync'
+    if (!isBg) {
+      setLoading(true)
+    }
     setError('')
     try {
       const [statsData, chartsData, recentData, alertsData, branchData] = await Promise.all([
@@ -121,10 +124,14 @@ function AdminBusinessDashboard() {
         }).catch(() => { })
       }
     } catch (err) {
-      console.error('Failed to load admin business dashboard:', err)
-      setError(err.message || 'Failed to load business dashboard metrics')
+      if (!isBg) {
+        console.error('Failed to load admin business dashboard:', err)
+        setError(err.message || 'Failed to load business dashboard metrics')
+      }
     } finally {
-      setLoading(false)
+      if (!isBg) {
+        setLoading(false)
+      }
     }
   }
 
@@ -145,18 +152,16 @@ function AdminBusinessDashboard() {
     }
   }
 
-  // Auto-refresh Dashboard data every 30 seconds
   useEffect(() => {
-    loadData()
+    loadData('initial')
     loadPerformance()
-
-    const interval = setInterval(() => {
-      loadData()
-      loadPerformance()
-    }, 30000)
-
-    return () => clearInterval(interval)
   }, [])
+
+  // High-frequency real-time synchronization
+  useRealtimeSync(() => {
+    loadData('sync')
+    loadPerformance()
+  }, [timeframe])
 
 
 
@@ -638,8 +643,11 @@ function StoreAdminBusinessDashboard() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
 
-  const loadData = async () => {
-    setLoading(true)
+  const loadData = async (source) => {
+    const isBg = source === 'timer' || source === 'database' || source === 'event' || source === 'focus' || source === 'mutation' || source === 'sync'
+    if (!isBg) {
+      setLoading(true)
+    }
     setError('')
     try {
       const [statsData, perfDataRes, recentData] = await Promise.all([
@@ -651,16 +659,22 @@ function StoreAdminBusinessDashboard() {
       setPerfData(perfDataRes)
       setRecent(recentData)
     } catch (err) {
-      console.error('Failed to load store admin dashboard:', err)
-      setError(err.message || 'Failed to fetch branch metrics')
+      if (!isBg) {
+        console.error('Failed to load store admin dashboard:', err)
+        setError(err.message || 'Failed to fetch branch metrics')
+      }
     } finally {
-      setLoading(false)
+      if (!isBg) {
+        setLoading(false)
+      }
     }
   }
 
   useEffect(() => {
-    loadData()
+    loadData('initial')
   }, [timeframe])
+
+  useRealtimeSync(() => loadData('sync'), [timeframe])
 
   if (loading) {
     return (
@@ -819,8 +833,11 @@ export function EmployeeDashboard() {
     }
   }
 
-  const loadData = async () => {
-    setLoading(true)
+  const loadData = async (source) => {
+    const isBg = source === 'timer' || source === 'database' || source === 'event' || source === 'focus' || source === 'mutation' || source === 'sync'
+    if (!isBg) {
+      setLoading(true)
+    }
     setError('')
     try {
       const data = await api.dashboard.getStats({
@@ -829,16 +846,22 @@ export function EmployeeDashboard() {
       })
       setStats(data)
     } catch (err) {
-      console.error('Failed to load employee stats:', err)
-      setError(err.message || 'Failed to load employee metrics')
+      if (!isBg) {
+        console.error('Failed to load employee stats:', err)
+        setError(err.message || 'Failed to load employee metrics')
+      }
     } finally {
-      setLoading(false)
+      if (!isBg) {
+        setLoading(false)
+      }
     }
   }
 
   useEffect(() => {
-    loadData()
+    loadData('initial')
   }, [user])
+
+  useRealtimeSync(() => loadData('sync'), [user])
 
   const today = stats?.my_attendance_today
   const myPayroll = stats?.my_latest_payroll

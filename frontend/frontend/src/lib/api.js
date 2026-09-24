@@ -44,7 +44,7 @@ async function request(endpoint, options = {}) {
         window.dispatchEvent(new CustomEvent('auth:expired'));
       }
       let errorMsg = data?.message || `Request failed with status ${response.status}`;
-      if (response.status === 401) {
+      if (response.status === 401 && !endpoint.startsWith('/login') && !endpoint.startsWith('/register')) {
         errorMsg = 'Your session has expired. Please log in again.';
       }
       if (data?.errors) {
@@ -111,6 +111,11 @@ export const api = {
         method: 'POST',
         body: formData,
       }),
+  },
+
+  // ─── Realtime Sync ───
+  sync: {
+    getStatus: () => request('/sync/status'),
   },
 
   dashboard: {
@@ -579,6 +584,13 @@ export const api = {
   customerApp: {
     getDashboard: () => request('/customer/dashboard'),
     getInstallments: () => request('/customer/installments'),
+  },
+
+  // ─── Support Messages ───
+  supportMessages: {
+    getAll: () => request('/support-messages'),
+    create: (data) => request('/support-messages', { method: 'POST', body: JSON.stringify(data) }),
+    update: (id, data) => request(`/support-messages/${id}`, { method: 'PUT', body: JSON.stringify(typeof data === 'string' ? { status: data } : data) }),
   },
 
   search: (query) => request(`/search?q=${encodeURIComponent(query)}`),

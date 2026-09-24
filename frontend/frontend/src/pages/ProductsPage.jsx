@@ -12,6 +12,7 @@ import {
 } from '../components/ui'
 import { fmt, filterBySearch } from '../lib/utils'
 import api, { downloadCsv } from '../lib/api'
+import { useRealtimeSync, triggerDataSync } from '../lib/realtimeSync'
 import { FiDownload } from 'react-icons/fi'
 import { TbCurrencyPeso } from 'react-icons/tb'
 import MySalesChart from '../components/MySalesChart'
@@ -84,8 +85,11 @@ export default function ProductsPage({ branchFilter, embedded }) {
   const [existingImages, setExistingImages] = useState([null, null, null, null])
   const [removeImages, setRemoveImages] = useState([false, false, false, false])
 
-  const loadProducts = async () => {
-    setLoading(true)
+  const loadProducts = async (source) => {
+    const isBackground = source === 'timer' || source === 'database' || source === 'event' || source === 'focus' || source === 'mutation'
+    if (!isBackground) {
+      setLoading(true)
+    }
     setError('')
     try {
       const [data, branchesData] = await Promise.all([
@@ -100,16 +104,23 @@ export default function ProductsPage({ branchFilter, embedded }) {
       setProducts(data.products || [])
       if (isAdmin) setBranches(branchesData.branches || [])
     } catch (err) {
-      console.error('Failed to load products:', err)
-      setError(err.message || 'Failed to fetch products')
+      if (!isBackground) {
+        console.error('Failed to load products:', err)
+        setError(err.message || 'Failed to fetch products')
+      }
     } finally {
-      setLoading(false)
+      if (!isBackground) {
+        setLoading(false)
+      }
     }
   }
 
   useEffect(() => {
-    loadProducts()
+    loadProducts('filter_change')
   }, [category, stockStatus])
+
+  // Real-time synchronization
+  useRealtimeSync(loadProducts, [category, stockStatus, search])
 
   useEffect(() => {
     const id = searchParams.get('id')
@@ -175,6 +186,7 @@ export default function ProductsPage({ branchFilter, embedded }) {
         }
         showToast('Product created successfully', 'success')
       }
+      triggerDataSync('products')
       setAddModal(false)
       setEditItem(null)
       setForm(emptyForm)
@@ -197,6 +209,7 @@ export default function ProductsPage({ branchFilter, embedded }) {
     try {
       await api.products.delete(deleteItem.product_id)
       setProducts(prev => prev.filter(p => p.product_id !== deleteItem.product_id))
+      triggerDataSync('products')
       showToast('Product deleted successfully', 'success')
       setDeleteItem(null)
     } catch (err) {
@@ -270,6 +283,7 @@ export default function ProductsPage({ branchFilter, embedded }) {
         loadProducts()
       }
       showToast('Discount updated successfully', 'success')
+      triggerDataSync('products')
       setDiscountModal(null)
     } catch (err) {
       showToast(err.message || 'Failed to update discount', 'error')

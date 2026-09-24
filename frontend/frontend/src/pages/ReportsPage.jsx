@@ -16,6 +16,7 @@ import {
 import { fmt, fmtDate } from '../lib/utils'
 import { api } from '../lib/api'
 import { useAuth } from '../context/AuthContext'
+import { useRealtimeSync } from '../lib/realtimeSync'
 import { TbCurrencyPeso } from 'react-icons/tb'
 
 const COLORS = ['#2563eb', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#06b6d4', '#f97316']
@@ -40,6 +41,15 @@ export default function ReportsPage() {
 
   // Available options
   const [periods, setPeriods] = useState([])
+  const [branchesList, setBranchesList] = useState([])
+
+  useEffect(() => {
+    api.branches.getAll()
+      .then(res => {
+        if (res?.branches) setBranchesList(res.branches)
+      })
+      .catch(() => {})
+  }, [])
 
   useEffect(() => {
     api.payroll.getPeriods()
@@ -49,10 +59,12 @@ export default function ReportsPage() {
       .catch(() => {})
   }, [])
 
-  const loadReport = async (tab = activeTab) => {
-    setLoading(true)
-    setError('')
-    setReportData(null)
+  const loadReport = async (tab = activeTab, silent = false) => {
+    if (!silent) {
+      setLoading(true)
+      setError('')
+      setReportData(null)
+    }
     try {
       let data = null
       const params = {
@@ -81,15 +93,19 @@ export default function ReportsPage() {
       setReportData(data)
     } catch (err) {
       console.error(`Failed to load ${tab} report:`, err)
-      setError(err.message || `Failed to fetch ${tab} report from server`)
+      if (!silent) setError(err.message || `Failed to fetch ${tab} report from server`)
     } finally {
-      setLoading(false)
+      if (!silent) setLoading(false)
     }
   }
 
   useEffect(() => {
     loadReport(activeTab)
   }, [activeTab])
+
+  useRealtimeSync(() => {
+    loadReport(activeTab, true)
+  }, [activeTab, branch, department, status, startDate, endDate, periodId])
 
   const handleApplyFilters = () => {
     loadReport(activeTab)
@@ -305,9 +321,9 @@ export default function ReportsPage() {
               className="w-full border border-border rounded-xl px-2.5 py-1.5 text-xs font-semibold bg-card text-foreground cursor-pointer disabled:opacity-70"
             >
               <option value="All">All Branches</option>
-              <option value="Main Branch">Main Branch</option>
-              <option value="North Branch">North Branch</option>
-              <option value="South Branch">South Branch</option>
+              {branchesList.map(b => (
+                <option key={b.id || b.name} value={b.name}>{b.name}</option>
+              ))}
             </select>
           </div>
 
@@ -320,12 +336,8 @@ export default function ReportsPage() {
               className="w-full border border-border rounded-xl px-2.5 py-1.5 text-xs font-semibold bg-card text-foreground cursor-pointer"
             >
               <option value="All">All Departments</option>
-              <option value="Sales">Sales</option>
-              <option value="Inventory">Inventory</option>
-              <option value="Finance">Finance</option>
-              <option value="HR">HR</option>
-              <option value="IT">IT</option>
-              <option value="Operations">Operations</option>
+              <option value="Store Admin">Store Admin</option>
+              <option value="Employee">Employee</option>
             </select>
           </div>
 
