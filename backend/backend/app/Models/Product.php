@@ -9,8 +9,8 @@ class Product extends Model
 
     protected $fillable = [
         'branch_id', 'product_code', 'product_name', 'category', 'brand', 'description', 
-        'unit_price', 'cost_price', 'stock_quantity', 'reorder_level', 
-        'unit', 'status', 'image_url'
+        'unit_price', 'discount_price', 'cost_price', 'stock_quantity', 'reorder_level', 
+        'unit', 'status', 'image_url', 'image_url_2', 'image_url_3', 'image_url_4'
     ];
 
     // Relationships

@@ -64,7 +64,7 @@ export default function PaymentSchedulePage({ branchFilter: propBranchFilter, em
       {!embedded && (
         <PageHeader
           title="Payment Schedules & Amortization"
-          subtitle="Global schedule tracker across all customer installment accounts"
+          subtitle="Global schedule tracker across all customer installment"
         />
       )}
 

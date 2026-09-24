@@ -81,7 +81,7 @@ class PaymentController extends Controller
 
             return $this->exportCsv(
                 'payments_export_' . date('Y-m-d') . '.csv',
-                ['Payment ID', 'Receipt No', 'Installment Account No', 'Customer Name', 'Payment Date', 'Amount', 'Payment Method', 'Reference No', 'Received By', 'Branch', 'Created Date'],
+                ['Payment ID', 'Receipt No', 'Installment No', 'Customer Name', 'Payment Date', 'Amount', 'Payment Method', 'Reference No', 'Received By', 'Branch', 'Created Date'],
                 $query->orderByDesc('payment_date')->orderByDesc('payment_id'),
                 function ($p) {
                     $inst = $p->installmentAccount;
@@ -300,7 +300,7 @@ class PaymentController extends Controller
             $outstanding = max(0, round((float)$inst->total_payable - $currentPaid, 2));
 
             if ($outstanding <= 0) {
-                return response()->json(['message' => 'This installment account is already fully paid.'], 422);
+                return response()->json(['message' => 'This installment is already fully paid.'], 422);
             }
 
             $payAmount = (float)$validated['amount'];
@@ -364,7 +364,7 @@ class PaymentController extends Controller
                 $payment->update(['schedule_id' => $primaryScheduleId]);
             }
 
-            // 3. Update Installment Account Status
+            // 3. Update Installment Status
             $newTotalPaid = round($currentPaid + $payAmount, 2);
             $newBalance = max(0, round((float)$inst->total_payable - $newTotalPaid, 2));
 
@@ -408,9 +408,14 @@ class PaymentController extends Controller
                 'user_agent' => $request->userAgent(),
             ]);
 
-            // 6. Real System Notifications
+            // 6. Dispatch Real System Notifications
+            $accBranch = 'Main Branch';
+            if ($inst->sale && $inst->sale->processedBy && $inst->sale->processedBy->employee) {
+                $accBranch = $inst->sale->processedBy->employee->branch_id ?: null;
+            }
+
             if ($newBalance <= 0) {
-                NotificationService::sendToAdmins([
+                $notificationData = [
                     'type' => 'installment_completed',
                     'title' => 'Installment Fully Paid',
                     'message' => "Account {$inst->account_no} ({$custName}) has been fully paid with final payment {$receiptNo}.",
@@ -419,9 +424,9 @@ class PaymentController extends Controller
                     'related_type' => 'App\Models\InstallmentAccount',
                     'action_url' => "/installments?id={$inst->installment_id}",
                     'priority' => 'high',
-                ]);
+                ];
             } else {
-                NotificationService::sendToAdmins([
+                $notificationData = [
                     'type' => 'payment_received',
                     'title' => 'Installment Payment Received',
                     'message' => "Payment of ₱" . number_format($payAmount, 2) . " ({$receiptNo}) received for account {$inst->account_no} ({$custName}). Remaining balance: ₱" . number_format($newBalance, 2),
@@ -430,7 +435,13 @@ class PaymentController extends Controller
                     'related_type' => 'App\Models\Payment',
                     'action_url' => "/payments?id={$payment->payment_id}",
                     'priority' => 'normal',
-                ]);
+                ];
+            }
+
+            \App\Services\NotificationService::sendToAdmins($notificationData);
+            \App\Services\NotificationService::sendToStoreAdmins($notificationData, $accBranch);
+            if ($inst->customer_id) {
+                \App\Services\NotificationService::sendToCustomer($inst->customer_id, $notificationData);
             }
 
             return response()->json([

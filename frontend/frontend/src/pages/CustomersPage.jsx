@@ -236,7 +236,7 @@ export default function CustomersPage({ branchFilter, embedded }) {
       {!embedded && (
         <PageHeader
           title="Customer Management"
-          subtitle="Manage customer records, credit histories, and installment accounts"
+          subtitle="Manage customer records, credit histories, and installment"
           action={
             <div className="flex gap-2">
               <button
@@ -630,22 +630,30 @@ export default function CustomersPage({ branchFilter, embedded }) {
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
-                    <div className="p-3 border border-border rounded-xl bg-blue-50/50 dark:bg-blue-950/20">
-                      <span className="text-[10px] text-muted-foreground uppercase font-bold block mb-1">Active Accounts</span>
+                  <div className="grid grid-cols-2 sm:grid-cols-6 gap-2.5">
+                    <div className="p-3 border border-border rounded-xl bg-blue-50/50 dark:bg-blue-950/20 text-center">
+                      <span className="text-[10px] text-muted-foreground uppercase font-bold block mb-1">Accounts</span>
                       <span className="text-xl font-bold font-mono text-primary">{detailCustomer.customer.active_installments}</span>
                     </div>
-                    <div className="p-3 border border-border rounded-xl bg-amber-50/50 dark:bg-amber-950/20">
-                      <span className="text-[10px] text-muted-foreground uppercase font-bold block mb-1">Due Balance</span>
+                    <div className="p-3 border border-border rounded-xl bg-amber-50/50 dark:bg-amber-950/20 text-center">
+                      <span className="text-[10px] text-amber-600/70 uppercase font-bold block mb-1">Credit Bal</span>
                       <span className="text-lg font-bold font-mono text-amber-600">{fmt(detailCustomer.customer.balance)}</span>
                     </div>
-                    <div className="p-3 border border-border rounded-xl bg-emerald-50/50 dark:bg-emerald-950/20">
-                      <span className="text-[10px] text-muted-foreground uppercase font-bold block mb-1">Lifetime Spend</span>
+                    <div className="p-3 border border-border rounded-xl bg-indigo-50/50 dark:bg-indigo-950/20 text-center">
+                      <span className="text-[10px] text-indigo-600/70 uppercase font-bold block mb-1">Monthly</span>
+                      <span className="text-lg font-bold font-mono text-indigo-600">{fmt(detailCustomer.customer.monthly_payment)}</span>
+                    </div>
+                    <div className="p-3 border border-border rounded-xl bg-rose-50/50 dark:bg-rose-950/20 text-center">
+                      <span className="text-[10px] text-rose-600/70 uppercase font-bold block mb-1">Overdue</span>
+                      <span className="text-lg font-bold font-mono text-rose-600">{detailCustomer.customer.overdue_count}</span>
+                    </div>
+                    <div className="p-3 border border-border rounded-xl bg-emerald-50/50 dark:bg-emerald-950/20 text-center">
+                      <span className="text-[10px] text-emerald-600/70 uppercase font-bold block mb-1">Lifetime</span>
                       <span className="text-lg font-bold font-mono text-emerald-600">{fmt(detailCustomer.customer.lifetime_spend)}</span>
                     </div>
-                    <div className="p-3 border border-border rounded-xl bg-muted/30">
-                      <span className="text-[10px] text-muted-foreground uppercase font-bold block mb-1">Last Purchase</span>
-                      <span className="text-xs font-bold font-mono text-foreground">{detailCustomer.customer.last_purchase || 'No purchases'}</span>
+                    <div className="p-3 border border-border rounded-xl bg-muted/30 text-center">
+                      <span className="text-[10px] text-muted-foreground uppercase font-bold block mb-1">Last Order</span>
+                      <span className="text-xs font-bold font-mono text-foreground mt-1.5 block">{detailCustomer.customer.last_purchase || 'None'}</span>
                     </div>
                   </div>
                 </div>
@@ -654,7 +662,7 @@ export default function CustomersPage({ branchFilter, embedded }) {
               {detailTab === 'installments' && (
                 <div className="space-y-2">
                   {detailCustomer.installments?.length === 0 ? (
-                    <div className="py-8 text-center text-muted-foreground">No installment accounts on file</div>
+                    <div className="py-8 text-center text-muted-foreground">No installment on file</div>
                   ) : (
                     detailCustomer.installments.map(inst => (
                       <div key={inst.installment_id} className="p-3 border border-border rounded-xl bg-card space-y-2">
@@ -662,10 +670,11 @@ export default function CustomersPage({ branchFilter, embedded }) {
                           <span className="font-mono font-bold text-primary">{inst.account_no} (Invoice: {inst.invoice_no})</span>
                           <StatusBadge status={inst.status} />
                         </div>
-                        <div className="grid grid-cols-3 gap-2 text-xs">
-                          <div><span className="text-muted-foreground">Total:</span> <p className="font-mono font-semibold">{fmt(inst.total_payable)}</p></div>
-                          <div><span className="text-muted-foreground">Paid:</span> <p className="font-mono font-semibold text-emerald-600">{fmt(inst.paid)}</p></div>
-                          <div><span className="text-muted-foreground">Balance:</span> <p className="font-mono font-bold text-rose-600">{fmt(inst.balance)}</p></div>
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+                          <div><span className="text-muted-foreground block text-[10px] uppercase font-bold">Total Credit</span> <p className="font-mono font-semibold">{fmt(inst.total_payable)}</p></div>
+                          <div><span className="text-muted-foreground block text-[10px] uppercase font-bold text-indigo-600/70">Monthly Payment</span> <p className="font-mono font-semibold text-indigo-600">{fmt(inst.installment_amount)}</p></div>
+                          <div><span className="text-muted-foreground block text-[10px] uppercase font-bold text-emerald-600/70">Paid</span> <p className="font-mono font-semibold text-emerald-600">{fmt(inst.paid)}</p></div>
+                          <div><span className="text-muted-foreground block text-[10px] uppercase font-bold text-rose-600/70">Remaining Bal</span> <p className="font-mono font-bold text-rose-600">{fmt(inst.balance)}</p></div>
                         </div>
                       </div>
                     ))

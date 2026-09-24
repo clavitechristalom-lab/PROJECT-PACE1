@@ -45,9 +45,9 @@ export default function SalesPage({ branchFilter, embedded }) {
   const [frequency, setFrequency] = useState('Monthly')
   const [notes, setNotes] = useState('')
 
-  const loadData = async () => {
-    setLoading(true)
-    setError('')
+  const loadData = async (silent = false) => {
+    if (!silent) setLoading(true)
+    if (!silent) setError('')
     try {
       const [salesRes, productsRes, customersRes] = await Promise.all([
         api.sales.getAll({
@@ -64,15 +64,17 @@ export default function SalesPage({ branchFilter, embedded }) {
       setCustomers(customersRes.customers || [])
     } catch (err) {
       console.error('Failed to load sales data:', err)
-      setError(err.message || 'Failed to fetch sales transactions')
+      if (!silent) setError(err.message || 'Failed to fetch sales transactions')
     } finally {
-      setLoading(false)
+      if (!silent) setLoading(false)
     }
   }
 
   useEffect(() => {
     loadData()
-  }, [methodFilter, statusFilter, branchFilter])
+    const interval = setInterval(() => loadData(true), 10000)
+    return () => clearInterval(interval)
+  }, [methodFilter, statusFilter, branchFilter, search])
 
   const openViewSale = async (s) => {
     try {
@@ -98,7 +100,10 @@ export default function SalesPage({ branchFilter, embedded }) {
   // Calculate live totals for the new sale
   const calculatedSubtotal = items.reduce((sum, item) => {
     const prod = products.find(p => p.product_id === parseInt(item.product_id))
-    const price = prod ? prod.unit_price : 0
+    let price = 0
+    if (prod) {
+      price = prod.discount_price ? parseFloat(prod.discount_price) : parseFloat(prod.unit_price)
+    }
     return sum + (price * (parseInt(item.quantity) || 0))
   }, 0)
 

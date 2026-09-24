@@ -8,6 +8,7 @@ use App\Models\BranchProfile;
 use App\Models\SystemLog;
 use App\Models\Notification;
 use App\Models\User;
+use App\Models\PaymentSchedule;
 
 class CustomerController extends Controller
 {
@@ -217,8 +218,14 @@ class CustomerController extends Controller
 
         $activeInsts    = $installments->whereIn('status', ['Active', 'Overdue'])->count();
         $totalBalance   = $installments->whereIn('status', ['Active', 'Overdue'])->sum('balance');
+        $monthlyPayment = $installments->whereIn('status', ['Active', 'Overdue'])->sum('installment_amount');
         $lifetimeSpend  = $customer->saleTransactions->sum('total_amount');
         $lastPurchase   = $customer->saleTransactions->max('sale_date');
+
+        $overdueCount = PaymentSchedule::whereIn('installment_id', $installments->pluck('installment_id'))
+            ->where('due_date', '<', date('Y-m-d'))
+            ->where('status', 'Pending')
+            ->count();
 
         return response()->json([
             'customer' => [
@@ -236,6 +243,8 @@ class CustomerController extends Controller
                 'branch_name'         => $customer->branch ? $customer->branch->name : null,
                 'active_installments' => $activeInsts,
                 'balance'             => $totalBalance,
+                'monthly_payment'     => $monthlyPayment,
+                'overdue_count'       => $overdueCount,
                 'lifetime_spend'      => (float)$lifetimeSpend,
                 'last_purchase'       => $lastPurchase ? date('M d, Y', strtotime($lastPurchase)) : null,
             ],

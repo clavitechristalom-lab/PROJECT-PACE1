@@ -75,7 +75,7 @@ function navByRole(role) {
     label: 'Installment Monitoring',
     icon: icons.installment,
     items: [
-      { label: 'Installment Accounts', path: '/installments', icon: icons.installment },
+      { label: 'Installment', path: '/installments', icon: icons.installment },
       { label: 'Payment Schedule', path: '/payment-schedule', icon: icons.schedule },
       { label: 'Payments', path: '/payments', icon: icons.payments },
     ],
@@ -632,7 +632,7 @@ const ROUTE_TITLES = {
   '/customers': 'Customers',
   '/sales': 'Sales Transactions',
   '/sales/create': 'Create Sale',
-  '/installments': 'Installment Accounts',
+  '/installments': 'Installment',
   '/payment-schedule': 'Payment Schedule',
   '/payments': 'Payments',
   '/employees': 'Employee Management',
@@ -663,7 +663,8 @@ export default function AppShell() {
   const [profileOpen, setProfileOpen] = useState(false)
   const [notifs, setNotifs] = useState([])
   const [unreadCount, setUnreadCount] = useState(0)
-  const [pendingVerification, setPendingVerification] = useState(null) // New State for PIN verification
+  const [pendingVerification, setPendingVerification] = useState(null)
+  const latestNotifIdRef = useRef(null)
   const location = useLocation()
   const navigate = useNavigate()
   const { user } = useAuth()
@@ -672,7 +673,22 @@ export default function AppShell() {
     if (!user) return
     try {
       const res = await api.notifications.getLatest({ limit: 15 })
-      setNotifs(res.notifications || [])
+      const fetchedNotifs = res.notifications || []
+      
+      if (fetchedNotifs.length > 0) {
+        const currentHighest = Math.max(...fetchedNotifs.map(n => n.id || n.notification_id || 0))
+        
+        if (latestNotifIdRef.current !== null && currentHighest > latestNotifIdRef.current) {
+          const newNotifs = fetchedNotifs.filter(n => (n.id || n.notification_id || 0) > latestNotifIdRef.current)
+          newNotifs.forEach(n => {
+            showToast(`${n.title}: ${n.message}`, 'info')
+          })
+        }
+        
+        latestNotifIdRef.current = Math.max(latestNotifIdRef.current || 0, currentHighest)
+      }
+
+      setNotifs(fetchedNotifs)
       setUnreadCount(res.unread_count || 0)
     } catch (e) {
       // Background notifications failure should not break app
@@ -727,7 +743,11 @@ export default function AppShell() {
     }
 
     if (notif.action_url) {
-      navigate(notif.action_url)
+      let finalUrl = notif.action_url;
+      if (user?.role === 'Customer' && finalUrl.startsWith('/products?id=')) {
+        finalUrl = finalUrl.replace('/products?id=', '/customer/dashboard?product_id=');
+      }
+      navigate(finalUrl)
     } else {
       navigate('/notifications')
     }

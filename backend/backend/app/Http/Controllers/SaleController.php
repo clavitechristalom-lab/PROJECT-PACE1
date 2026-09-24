@@ -194,16 +194,30 @@ class SaleController extends Controller
             $subtotal = 0;
             $totalDiscount = 0;
 
+            $user = $request->user();
+            $userBranch = $user && $user->employee ? $user->employee->branch_id : null;
+
             // Calculate totals and check stock
             foreach ($validated['items'] as $itemData) {
                 $product = Product::lockForUpdate()->findOrFail($itemData['product_id']);
+                
+                // Enforce Branch Security
+                if ($user && in_array($user->role, ['Store Administrator', 'Store Admin'])) {
+                    if ($product->branch_id != $userBranch) {
+                        return response()->json([
+                            'message' => "Unauthorized: Product {$product->product_name} does not belong to your branch."
+                        ], 403);
+                    }
+                }
+
                 if ($product->stock_quantity < $itemData['quantity']) {
                     return response()->json([
                         'message' => "Insufficient stock for product {$product->product_name}. Available: {$product->stock_quantity}"
                     ], 422);
                 }
 
-                $itemSubtotal = $product->unit_price * $itemData['quantity'];
+                $effectivePrice = !empty($product->discount_price) ? $product->discount_price : $product->unit_price;
+                $itemSubtotal = $effectivePrice * $itemData['quantity'];
                 $itemDiscount = $itemData['discount'] ?? 0;
                 $subtotal += $itemSubtotal;
                 $totalDiscount += $itemDiscount;
@@ -239,13 +253,14 @@ class SaleController extends Controller
             foreach ($validated['items'] as $itemData) {
                 $product = Product::findOrFail($itemData['product_id']);
                 $itemDisc = $itemData['discount'] ?? 0;
-                $lineTotal = ($product->unit_price * $itemData['quantity']) - $itemDisc;
+                $effectivePrice = !empty($product->discount_price) ? $product->discount_price : $product->unit_price;
+                $lineTotal = ($effectivePrice * $itemData['quantity']) - $itemDisc;
 
                 SaleItem::create([
                     'sale_id' => $sale->sale_id,
                     'product_id' => $product->product_id,
                     'quantity' => $itemData['quantity'],
-                    'unit_price' => $product->unit_price,
+                    'unit_price' => $effectivePrice,
                     'discount_amount' => $itemDisc,
                     'line_total' => $lineTotal,
                 ]);
@@ -253,7 +268,7 @@ class SaleController extends Controller
                 $product->decrement('stock_quantity', $itemData['quantity']);
             }
 
-            // If Installment, create account and schedule
+            // If Installment, create or update account and schedule
             if ($payMethod === 'Installment') {
                 $downPayment = (float)($validated['down_payment'] ?? 0);
                 $interestRate = (float)($validated['interest_rate'] ?? 0);
@@ -265,44 +280,73 @@ class SaleController extends Controller
                 $totalPayable = $principal + $interestAmount;
                 $installmentAmount = $numInstallments > 0 ? $totalPayable / $numInstallments : $totalPayable;
 
-                $accCount = InstallmentAccount::count() + 1;
-                $accountNo = 'ACC-' . str_pad($accCount, 4, '0', STR_PAD_LEFT);
+                $instAccount = InstallmentAccount::where('customer_id', $validated['customer_id'])
+                    ->whereIn('status', ['Active', 'Pending'])
+                    ->first();
 
-                $instAccount = InstallmentAccount::create([
-                    'account_no' => $accountNo,
-                    'customer_id' => $validated['customer_id'],
-                    'sale_id' => $sale->sale_id,
-                    'start_date' => now()->toDateString(),
-                    'principal_amount' => $principal,
-                    'down_payment' => $downPayment,
-                    'interest_rate' => $interestRate,
-                    'interest_amount' => $interestAmount,
-                    'total_payable' => $totalPayable,
-                    'installment_amount' => $installmentAmount,
-                    'number_of_installments' => $numInstallments,
-                    'frequency' => $frequency,
-                    'status' => 'Active',
-                    'notes' => '',
-                ]);
+                if ($instAccount) {
+                    // Update existing account
+                    $instAccount->principal_amount += $principal;
+                    $instAccount->down_payment += $downPayment;
+                    $instAccount->interest_amount += $interestAmount;
+                    $instAccount->total_payable += $totalPayable;
+                    $instAccount->number_of_installments += $numInstallments;
+                    $instAccount->installment_amount += $installmentAmount; // Aggregate representation
+                    $instAccount->save();
 
-                // Generate payment schedule
+                    // Get the last schedule to know where to append
+                    $lastSchedule = PaymentSchedule::where('installment_id', $instAccount->installment_id)
+                        ->orderBy('installment_no', 'desc')
+                        ->first();
+                    
+                    $startNo = $lastSchedule ? $lastSchedule->installment_no : 0;
+                    $lastDate = $lastSchedule ? $lastSchedule->due_date : now()->toDateString();
+                } else {
+                    // Create new account
+                    $accCount = InstallmentAccount::count() + 1;
+                    $accountNo = 'ACC-' . str_pad($accCount, 4, '0', STR_PAD_LEFT);
+
+                    $instAccount = InstallmentAccount::create([
+                        'account_no' => $accountNo,
+                        'customer_id' => $validated['customer_id'],
+                        'sale_id' => $sale->sale_id,
+                        'start_date' => now()->toDateString(),
+                        'principal_amount' => $principal,
+                        'down_payment' => $downPayment,
+                        'interest_rate' => $interestRate,
+                        'interest_amount' => $interestAmount,
+                        'total_payable' => $totalPayable,
+                        'installment_amount' => $installmentAmount,
+                        'number_of_installments' => $numInstallments,
+                        'frequency' => $frequency,
+                        'status' => 'Active',
+                        'notes' => '',
+                    ]);
+                    
+                    $startNo = 0;
+                    $lastDate = now()->toDateString();
+                }
+
+                // Generate new payment schedules appended
                 for ($i = 1; $i <= $numInstallments; $i++) {
-                    $dueDate = match ($frequency) {
-                        'Weekly' => now()->addWeeks($i)->toDateString(),
-                        'Biweekly' => now()->addWeeks($i * 2)->toDateString(),
-                        default => now()->addMonths($i)->toDateString(),
+                    $nextNo = $startNo + $i;
+                    
+                    $dueDate = match ($instAccount->frequency) {
+                        'Weekly' => date('Y-m-d', strtotime($lastDate . ' + ' . $i . ' weeks')),
+                        'Biweekly' => date('Y-m-d', strtotime($lastDate . ' + ' . ($i * 2) . ' weeks')),
+                        default => date('Y-m-d', strtotime($lastDate . ' + ' . $i . ' months')),
                     };
 
                     PaymentSchedule::create([
                         'installment_id' => $instAccount->installment_id,
-                        'installment_no' => $i,
+                        'installment_no' => $nextNo,
                         'due_date' => $dueDate,
                         'amount_due' => $installmentAmount,
                         'amount_paid' => 0,
                         'balance_due' => $installmentAmount,
                         'status' => 'Pending',
                         'paid_date' => null,
-                        'notes' => '',
+                        'notes' => "Added from Sale {$sale->invoice_no}",
                     ]);
                 }
             }

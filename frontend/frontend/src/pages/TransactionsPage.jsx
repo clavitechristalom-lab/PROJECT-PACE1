@@ -296,7 +296,7 @@ export default function TransactionsPage() {
           { id: 'ewallet', label: 'E-Wallet History', icon: <FiSmartphone className="w-3.5 h-3.5" />, count: summary?.ewallet_count },
           { id: 'online_bank', label: 'Online Banking History', icon: <FiCreditCard className="w-3.5 h-3.5" />, count: summary?.online_bank_count },
           { id: 'cash', label: 'Cash Payments', icon: <TbCurrencyPeso className="w-3.5 h-3.5" />, count: summary?.cash_count },
-          { id: 'installment', label: 'Installment Accounts', icon: <FiFileText className="w-3.5 h-3.5" />, count: summary?.installment_count },
+          { id: 'installment', label: 'Installment', icon: <FiFileText className="w-3.5 h-3.5" />, count: summary?.installment_count },
         ].map(tab => {
           const isActive = activeChannelTab === tab.id
           return (

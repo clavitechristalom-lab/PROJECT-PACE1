@@ -25,7 +25,11 @@ class AuthController extends Controller
         }
 
         $rules = [
-            'name' => 'required|string|max:255',
+            'first_name' => 'required|string|max:255',
+            'middle_name' => 'nullable|string|max:255',
+            'last_name' => 'required|string|max:255',
+            'phone' => 'required|string|max:50',
+            'address' => 'required|string',
             'email' => 'required|string|email|max:255',
             'username' => 'required|string|max:255|unique:users,username',
             'password' => 'required|string|min:6|same:confirmPassword',
@@ -48,9 +52,11 @@ class AuthController extends Controller
             throw ValidationException::withMessages(['email' => 'This email is already registered.']);
         }
 
-        $nameParts = explode(' ', $validated['name'], 2);
-        $firstName = $nameParts[0];
-        $lastName = $nameParts[1] ?? '';
+        $firstName = $validated['first_name'];
+        $middleName = $validated['middle_name'] ?? null;
+        $lastName = $validated['last_name'];
+        $phone = $validated['phone'];
+        $address = $validated['address'];
 
         if ($role === 'Customer') {
             // Customer signs up with branch_id = NULL.
@@ -60,9 +66,11 @@ class AuthController extends Controller
             $customer = \App\Models\Customer::create([
                 'customer_code' => 'CUS-' . str_pad($nextId, 3, '0', STR_PAD_LEFT),
                 'first_name' => $firstName,
+                'middle_name' => $middleName,
                 'last_name' => $lastName,
                 'email' => $validated['email'],
-                'phone' => 'N/A', // Customer updates this in their profile
+                'phone' => $phone,
+                'address' => $address,
                 'status' => 'Active',
                 'branch_id' => null,
             ]);
@@ -82,8 +90,11 @@ class AuthController extends Controller
             $employee = \App\Models\Employee::create([
                 'employee_code' => $employeeCode,
                 'first_name' => $firstName,
+                'middle_name' => $middleName,
                 'last_name' => $lastName,
                 'email' => $validated['email'],
+                'phone' => $phone,
+                'address' => $address,
                 'position' => $role,
                 'status' => 'Active',
                 'pay_type' => 'Monthly',

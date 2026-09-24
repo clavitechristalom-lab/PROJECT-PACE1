@@ -7,7 +7,7 @@ import { TbCurrencyPeso } from 'react-icons/tb';
 import { useAuth } from '../../context/AuthContext';
 import Swal from 'sweetalert2';
 
-export function ProductListModal({ isOpen, onClose, category }) {
+export function ProductListModal({ isOpen, onClose, category, availableCategories = [], initialProductId = null }) {
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
   
@@ -21,6 +21,13 @@ export function ProductListModal({ isOpen, onClose, category }) {
 
   // Detail Modal state
   const [selectedProduct, setSelectedProduct] = useState(null);
+
+  useEffect(() => {
+    if (initialProductId && products.length > 0 && !selectedProduct) {
+      const prod = products.find(p => p.product_id == initialProductId);
+      if (prod) setSelectedProduct(prod);
+    }
+  }, [initialProductId, products]);
 
   useEffect(() => {
     if (isOpen) {
@@ -76,15 +83,16 @@ export function ProductListModal({ isOpen, onClose, category }) {
           {/* Filter & Search Bar */}
           <div className="flex flex-col sm:flex-row justify-between items-center gap-4 mb-4 pb-4 border-b border-border shrink-0">
             <div className="flex gap-2">
-              {['All', 'Furniture', 'Appliances'].map(cat => (
+              {(category ? [category] : ['All', ...availableCategories]).map(cat => (
                 <button
                   key={cat}
                   onClick={() => { setActiveCategory(cat); setCurrentIndex(0); }}
                   className={`px-4 py-1.5 rounded-full text-sm font-semibold transition-colors ${
                     activeCategory === cat 
-                      ? 'bg-[#176B87] text-white' 
+                      ? 'bg-[#176B87] text-white cursor-default' 
                       : 'bg-muted text-muted-foreground hover:bg-slate-200 dark:hover:bg-slate-800'
                   }`}
+                  disabled={category ? true : false}
                 >
                   {cat}
                 </button>
@@ -126,7 +134,7 @@ export function ProductListModal({ isOpen, onClose, category }) {
                 
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4 flex-1 items-start">
                   {visibleProducts.map(p => {
-                    const salePrice = p.unit_price < p.cost_price ? p.unit_price : null; // Logic for sale if needed
+                    const salePrice = p.discount_price || null;
                     const image = p.image_url || 'https://via.placeholder.com/300x200?text=No+Image';
 
                     return (
@@ -139,8 +147,8 @@ export function ProductListModal({ isOpen, onClose, category }) {
                         <div className="h-32 w-full bg-slate-200 dark:bg-slate-800 relative shrink-0">
                           <img src={image} alt={p.product_name} className="w-full h-full object-cover" />
                           {salePrice && (
-                            <div className="absolute top-2 left-2 bg-rose-500 text-white text-[10px] font-bold px-2 py-1 rounded">
-                              SALE
+                            <div className="absolute top-2 left-2 bg-emerald-600 text-white text-[10px] font-bold px-2 py-1 rounded shadow-sm">
+                              ON SALE
                             </div>
                           )}
                           <div className="absolute top-2 right-2">
@@ -157,8 +165,8 @@ export function ProductListModal({ isOpen, onClose, category }) {
                           <div className="mt-3 pt-2 border-t border-border flex flex-col shrink-0">
                             {salePrice ? (
                               <>
-                                <div className="text-[10px] text-muted-foreground line-through">{fmt(p.cost_price || p.unit_price)}</div>
-                                <div className="font-mono font-bold text-rose-500">{fmt(salePrice)}</div>
+                                <div className="text-[10px] text-muted-foreground line-through">{fmt(p.unit_price)}</div>
+                                <div className="font-mono font-bold text-emerald-600">{fmt(salePrice)}</div>
                               </>
                             ) : (
                               <div className="font-mono font-bold text-primary">{fmt(p.unit_price)}</div>
@@ -208,8 +216,9 @@ export function ProductListModal({ isOpen, onClose, category }) {
 }
 
 function ProductDetailModal({ product, onClose }) {
-  // Image gallery state (we only use image_url based on existing DB schema)
-  const images = product.image_url ? [product.image_url] : ['https://via.placeholder.com/600x400?text=No+Image'];
+  // Image gallery state
+  const availableImages = [product.image_url, product.image_url_2, product.image_url_3, product.image_url_4].filter(Boolean);
+  const images = availableImages.length > 0 ? availableImages : ['https://via.placeholder.com/600x400?text=No+Image'];
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
 
   // Keyboard navigation
@@ -299,9 +308,16 @@ function ProductDetailModal({ product, onClose }) {
           
           <h2 className="text-2xl font-bold text-foreground leading-tight mt-1 mb-6">{product.product_name}</h2>
 
-          <div className="font-mono text-3xl font-bold text-primary mb-6">
-            {fmt(product.unit_price)}
-          </div>
+          {product.discount_price ? (
+            <div className="mb-6">
+              <div className="text-sm font-semibold text-muted-foreground line-through">{fmt(product.unit_price)}</div>
+              <div className="font-mono text-3xl font-bold text-emerald-600">{fmt(product.discount_price)}</div>
+            </div>
+          ) : (
+            <div className="font-mono text-3xl font-bold text-primary mb-6">
+              {fmt(product.unit_price)}
+            </div>
+          )}
 
           <div className="flex-1 flex flex-col space-y-6">
             {/* Specifications Block */}
@@ -502,20 +518,43 @@ export function InstallmentAccountDetailsModal({ isOpen, onClose, installmentId 
   if (!isOpen) return null;
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title="Installment Account Details" size="lg">
+    <Modal isOpen={isOpen} onClose={onClose} title="Installment Details" size="lg">
       {loading || !account ? (
         <LoadingState message="Loading account details..." />
       ) : (
         <div className="space-y-4">
-          <div className="flex justify-between items-start p-4 bg-muted/20 border border-border rounded-xl">
-            <div>
-              <div className="text-xs uppercase font-bold text-muted-foreground mb-1">Account Number</div>
-              <div className="font-mono text-xl font-bold text-primary">{account.account_no}</div>
+          <div className="flex flex-col sm:flex-row gap-4 p-4 bg-muted/20 border border-border rounded-xl">
+            {account.sale_items && account.sale_items.length > 0 && account.sale_items[0].image_url ? (
+              <img 
+                src={`http://localhost:8000${account.sale_items[0].image_url}`} 
+                alt={account.sale_items[0].product_name} 
+                className="w-24 h-24 object-cover rounded-lg border border-border shrink-0 bg-white"
+                onError={(e) => { e.target.src = 'https://via.placeholder.com/150?text=No+Image'; }}
+              />
+            ) : (
+              <div className="w-24 h-24 bg-muted border border-border rounded-lg flex items-center justify-center shrink-0">
+                <FiPackage className="w-8 h-8 text-muted-foreground/50" />
+              </div>
+            )}
+            <div className="flex-1 flex justify-between items-start">
+              <div>
+                <div className="text-sm font-bold text-foreground">
+                  {account.sale_items && account.sale_items.length > 0 
+                    ? account.sale_items[0].product_name 
+                    : 'Multiple Items'}
+                </div>
+                <div className="text-xs uppercase font-bold text-muted-foreground mt-2 mb-1">Account Number</div>
+                <div className="font-mono text-xl font-bold text-primary">{account.account_no}</div>
+                <div className="text-xs text-muted-foreground mt-2 flex flex-col gap-1">
+                  <div><span className="font-semibold">Branch:</span> {account.branch || 'Main Branch'}</div>
+                  <div><span className="font-semibold">Store Admin:</span> {account.store_admin || 'System/Admin'}</div>
+                </div>
+              </div>
+              <StatusBadge status={account.status} />
             </div>
-            <StatusBadge status={account.status} />
           </div>
 
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          <div className="grid grid-cols-2 sm:grid-cols-6 gap-3">
              <div className="p-3 border border-border rounded-xl text-center">
               <div className="text-[10px] text-muted-foreground uppercase font-bold mb-1">Total Payable</div>
               <div className="font-mono font-bold text-foreground">{fmt(account.total_payable)}</div>
@@ -523,6 +562,10 @@ export function InstallmentAccountDetailsModal({ isOpen, onClose, installmentId 
             <div className="p-3 border border-border rounded-xl text-center">
               <div className="text-[10px] text-muted-foreground uppercase font-bold mb-1">Down Payment</div>
               <div className="font-mono font-bold text-foreground">{fmt(account.down_payment)}</div>
+            </div>
+            <div className="p-3 border border-border rounded-xl text-center bg-primary/10 border-primary/20">
+              <div className="text-[10px] text-primary uppercase font-bold mb-1">Remaining Bal</div>
+              <div className="font-mono font-bold text-primary">{fmt(account.balance)}</div>
             </div>
             <div className="p-3 border border-border rounded-xl text-center">
               <div className="text-[10px] text-muted-foreground uppercase font-bold mb-1">Monthly</div>
@@ -532,36 +575,78 @@ export function InstallmentAccountDetailsModal({ isOpen, onClose, installmentId 
               <div className="text-[10px] text-muted-foreground uppercase font-bold mb-1">Term</div>
               <div className="font-mono font-bold text-foreground">{account.months} mos</div>
             </div>
+            <div className="p-3 border border-border rounded-xl text-center bg-rose-500/10 border-rose-500/20">
+              <div className="text-[10px] text-rose-600 uppercase font-bold mb-1">Left</div>
+              <div className="font-mono font-bold text-rose-600">
+                {account.payment_schedules ? account.payment_schedules.filter(s => s.status !== 'Paid').length : 0} mos
+              </div>
+            </div>
           </div>
 
-          <h4 className="text-sm font-bold text-foreground mt-4 mb-2">Payment History</h4>
-          <div className="overflow-x-auto border border-border rounded-xl max-h-[30vh]">
-            <table className="w-full text-xs">
-              <thead className="bg-muted/50 text-muted-foreground sticky top-0">
-                <tr>
-                  <th className="py-2 px-3 text-left">Date</th>
-                  <th className="py-2 px-3 text-left">Receipt</th>
-                  <th className="py-2 px-3 text-left">Method</th>
-                  <th className="py-2 px-3 text-right">Amount</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border">
-                {(!account.payments || account.payments.length === 0) ? (
-                  <tr>
-                    <td colSpan="4" className="py-4 text-center text-muted-foreground">No payments made yet.</td>
-                  </tr>
-                ) : (
-                  account.payments.map(p => (
-                    <tr key={p.payment_id}>
-                      <td className="py-2 px-3 font-mono">{p.payment_date}</td>
-                      <td className="py-2 px-3 font-mono">{p.receipt_no}</td>
-                      <td className="py-2 px-3">{p.payment_method}</td>
-                      <td className="py-2 px-3 text-right font-mono font-bold text-emerald-600">{fmt(p.amount)}</td>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mt-4">
+            <div>
+              <h4 className="text-sm font-bold text-foreground mb-2">Payment History</h4>
+              <div className="overflow-y-auto border border-border rounded-xl max-h-[30vh]">
+                <table className="w-full text-xs">
+                  <thead className="bg-muted/50 text-muted-foreground sticky top-0">
+                    <tr>
+                      <th className="py-2 px-3 text-left">Date</th>
+                      <th className="py-2 px-3 text-left">Receipt</th>
+                      <th className="py-2 px-3 text-left">Method</th>
+                      <th className="py-2 px-3 text-right">Amount</th>
                     </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
+                  </thead>
+                  <tbody className="divide-y divide-border">
+                    {(!account.payments || account.payments.length === 0) ? (
+                      <tr>
+                        <td colSpan="4" className="py-4 text-center text-muted-foreground">No payments made yet.</td>
+                      </tr>
+                    ) : (
+                      account.payments.map(p => (
+                        <tr key={p.payment_id}>
+                          <td className="py-2 px-3 font-mono">{p.payment_date}</td>
+                          <td className="py-2 px-3 font-mono">{p.receipt_no}</td>
+                          <td className="py-2 px-3">{p.payment_method}</td>
+                          <td className="py-2 px-3 text-right font-mono font-bold text-emerald-600">{fmt(p.amount)}</td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div>
+              <h4 className="text-sm font-bold text-foreground mb-2">Payment Schedule</h4>
+              <div className="overflow-y-auto border border-border rounded-xl max-h-[30vh]">
+                <table className="w-full text-xs">
+                  <thead className="bg-muted/50 text-muted-foreground sticky top-0">
+                    <tr>
+                      <th className="py-2 px-3 text-left">No.</th>
+                      <th className="py-2 px-3 text-left">Due Date</th>
+                      <th className="py-2 px-3 text-left">Status</th>
+                      <th className="py-2 px-3 text-right">Amount Due</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border">
+                    {(!account.payment_schedules || account.payment_schedules.length === 0) ? (
+                      <tr>
+                        <td colSpan="4" className="py-4 text-center text-muted-foreground">No schedules found.</td>
+                      </tr>
+                    ) : (
+                      account.payment_schedules.map(s => (
+                        <tr key={s.schedule_id}>
+                          <td className="py-2 px-3 font-mono">{s.installment_no}</td>
+                          <td className="py-2 px-3 font-mono">{s.due_date}</td>
+                          <td className="py-2 px-3"><StatusBadge status={s.status} /></td>
+                          <td className="py-2 px-3 text-right font-mono font-bold text-foreground">{fmt(s.amount_due)}</td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
           </div>
         </div>
       )}

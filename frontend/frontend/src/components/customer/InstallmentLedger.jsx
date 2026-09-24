@@ -8,8 +8,8 @@ export default function InstallmentLedger({ installments, onView }) {
     return (
       <div className="bg-[var(--card)] rounded-xl p-8 text-center border border-slate-200 dark:border-slate-800">
         <AlertCircle size={48} className="mx-auto text-slate-400 mb-4" />
-        <h3 className="text-lg font-semibold mb-2">No Installment Accounts</h3>
-        <p className="text-slate-500">You do not have any active installment accounts at the moment.</p>
+        <h3 className="text-lg font-semibold mb-2">No Installment</h3>
+        <p className="text-slate-500">You do not have any active installment at the moment.</p>
       </div>
     );
   }
@@ -41,7 +41,21 @@ export default function InstallmentLedger({ installments, onView }) {
             {installments.map((inst, idx) => (
               <tr key={inst.installment_id || idx} className="hover:bg-slate-50 dark:hover:bg-slate-800/30 transition-colors">
                 <td className="px-6 py-4 font-semibold text-[#176B87] dark:text-[#64ccc5]">{inst.account_no}</td>
-                <td className="px-6 py-4">{inst.product}</td>
+                <td className="px-6 py-4 flex items-center gap-3 min-w-[200px]">
+                  {inst.image_url ? (
+                    <img 
+                      src={`http://localhost:8000${inst.image_url}`} 
+                      alt={inst.product}
+                      className="w-10 h-10 rounded object-cover border border-slate-200 dark:border-slate-700 bg-white"
+                      onError={(e) => { e.target.src = 'https://via.placeholder.com/40?text=No+Image'; }}
+                    />
+                  ) : (
+                    <div className="w-10 h-10 rounded bg-slate-100 dark:bg-slate-800 flex items-center justify-center border border-slate-200 dark:border-slate-700 text-slate-400">
+                      <FileText size={16} />
+                    </div>
+                  )}
+                  <span className="font-medium text-slate-700 dark:text-slate-300">{inst.product}</span>
+                </td>
                 <td className="px-6 py-4">{inst.purchase_date}</td>
                 <td className="px-6 py-4 text-right font-medium">{fmt(inst.total_amount)}</td>
                 <td className="px-6 py-4 text-right">{fmt(inst.monthly_payment)}</td>

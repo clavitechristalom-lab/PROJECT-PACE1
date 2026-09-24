@@ -135,16 +135,21 @@ export const api = {
       return request(`/products${qs ? `?${qs}` : ''}`);
     },
     getById: (id) => request(`/products/${id}`),
-    create: (data) =>
-      request('/products', {
+    create: (data) => {
+      const isForm = data instanceof FormData;
+      return request('/products', {
         method: 'POST',
-        body: JSON.stringify(data),
-      }),
-    update: (id, data) =>
-      request(`/products/${id}`, {
-        method: 'PUT',
-        body: JSON.stringify(data),
-      }),
+        body: isForm ? data : JSON.stringify(data),
+      });
+    },
+    update: (id, data) => {
+      const isForm = data instanceof FormData;
+      if (isForm) data.append('_method', 'PUT');
+      return request(`/products/${id}`, {
+        method: isForm ? 'POST' : 'PUT',
+        body: isForm ? data : JSON.stringify(data),
+      });
+    },
     delete: (id) => request(`/products/${id}`, { method: 'DELETE' }),
   },
 

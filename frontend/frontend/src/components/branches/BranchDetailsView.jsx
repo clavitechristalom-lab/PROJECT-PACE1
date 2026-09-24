@@ -106,7 +106,7 @@ export default function BranchDetailsView({ branchData, onBack }) {
     { id: 'customers', label: 'Customers', icon: <FiUsers className="w-4 h-4" /> },
     { id: 'employees', label: 'Employees', icon: <FiUsers className="w-4 h-4 text-emerald-500" /> },
     { id: 'sales', label: 'Sales', icon: <FiShoppingCart className="w-4 h-4" /> },
-    { id: 'installments', label: 'Installment Accounts', icon: <FiCalendar className="w-4 h-4" /> },
+    { id: 'installments', label: 'Installment', icon: <FiCalendar className="w-4 h-4" /> },
     { id: 'schedule', label: 'Payment Schedule', icon: <FiClock className="w-4 h-4" /> },
     { id: 'payments', label: 'Payments', icon: <FiCreditCard className="w-4 h-4" /> },
   ]

@@ -113,7 +113,7 @@ class InstallmentController extends Controller
     }
 
     /**
-     * List all installment accounts with role/branch scoping and real-time balance calculations.
+     * List all installment with role/branch scoping and real-time balance calculations.
      */
     public function index(Request $request)
     {
@@ -195,7 +195,7 @@ class InstallmentController extends Controller
                 'user_id' => $user ? $user->user_id : null,
                 'action' => 'EXPORT',
                 'module' => 'Installments',
-                'description' => 'Exported Installment Accounts to CSV',
+                'description' => 'Exported Installment to CSV',
                 'ip_address' => $request->ip(),
                 'user_agent' => $request->userAgent(),
             ]);
@@ -259,13 +259,13 @@ class InstallmentController extends Controller
     }
 
     /**
-     * Create a new Customer Installment Account.
+     * Create a new Customer Installment.
      */
     public function store(Request $request)
     {
         $user = $request->user();
         if ($user && $user->role === 'Administrator') {
-            return response()->json(['success' => false, 'message' => 'Admin is not authorized to create installment accounts.'], 403);
+            return response()->json(['success' => false, 'message' => 'Admin is not authorized to create installment.'], 403);
         }
         $today = date('Y-m-d');
 
@@ -358,6 +358,17 @@ class InstallmentController extends Controller
             $productId = $validated['product_id'] ?? null;
             if ($productId) {
                 $product = Product::find($productId);
+                
+                // Branch Validation
+                $userBranch = $user && $user->employee ? $user->employee->branch_id : null;
+                if ($user && in_array($user->role, ['Store Administrator', 'Store Admin'])) {
+                    if ($product && $product->branch_id != $userBranch) {
+                        return response()->json([
+                            'message' => "Unauthorized: Product does not belong to your branch."
+                        ], 403);
+                    }
+                }
+
                 if ($product) {
                     SaleItem::create([
                         'sale_id' => $sale->sale_id,
@@ -387,33 +398,58 @@ class InstallmentController extends Controller
                 }
             }
 
-            // 4. Create Installment Account
-            $accountCount = InstallmentAccount::count() + 1;
-            $accountNo = 'ACC-' . date('Y') . '-' . str_pad($accountCount, 5, '0', STR_PAD_LEFT);
+            // 4. Create or Update Installment
+            $account = InstallmentAccount::where('customer_id', $customerId)
+                ->whereIn('status', ['Active', 'Pending'])
+                ->first();
 
-            $account = InstallmentAccount::create([
-                'account_no' => $accountNo,
-                'customer_id' => $customerId,
-                'sale_id' => $sale->sale_id,
-                'start_date' => $startDate,
-                'principal_amount' => $principal,
-                'down_payment' => $downPayment,
-                'interest_rate' => $interestRate,
-                'interest_amount' => $interestAmount,
-                'total_payable' => $totalPayable,
-                'installment_amount' => $installmentAmount,
-                'number_of_installments' => $numInstallments,
-                'frequency' => $frequency,
-                'status' => $status,
-                'notes' => $notes,
-            ]);
+            if ($account) {
+                $account->principal_amount += $principal;
+                $account->down_payment += $downPayment;
+                $account->interest_amount += $interestAmount;
+                $account->total_payable += $totalPayable;
+                $account->number_of_installments += $numInstallments;
+                $account->installment_amount += $installmentAmount;
+                $account->save();
+                
+                $lastSchedule = PaymentSchedule::where('installment_id', $account->installment_id)
+                    ->orderBy('installment_no', 'desc')
+                    ->first();
+                
+                $startNo = $lastSchedule ? $lastSchedule->installment_no : 0;
+                $lastDate = $lastSchedule ? $lastSchedule->due_date : $startDate;
+            } else {
+                $accountCount = InstallmentAccount::count() + 1;
+                $accountNo = 'ACC-' . date('Y') . '-' . str_pad($accountCount, 5, '0', STR_PAD_LEFT);
+
+                $account = InstallmentAccount::create([
+                    'account_no' => $accountNo,
+                    'customer_id' => $customerId,
+                    'sale_id' => $sale->sale_id,
+                    'start_date' => $startDate,
+                    'principal_amount' => $principal,
+                    'down_payment' => $downPayment,
+                    'interest_rate' => $interestRate,
+                    'interest_amount' => $interestAmount,
+                    'total_payable' => $totalPayable,
+                    'installment_amount' => $installmentAmount,
+                    'number_of_installments' => $numInstallments,
+                    'frequency' => $frequency,
+                    'status' => $status,
+                    'notes' => $notes,
+                ]);
+                
+                $startNo = 0;
+                $lastDate = $startDate;
+            }
 
             // 5. Generate Payment Schedule entries
-            $firstDueDate = $validated['due_date'] ?? date('Y-m-d', strtotime($startDate . ' +1 month'));
-            $daysStep = ($frequency === 'Weekly') ? 7 : (($frequency === 'Bi-weekly') ? 14 : 30);
+            $firstDueDate = $validated['due_date'] ?? date('Y-m-d', strtotime($lastDate . ' +1 month'));
+            $daysStep = ($frequency === 'Weekly') ? 7 : (($frequency === 'Bi-weekly' || $frequency === 'Biweekly') ? 14 : 30);
 
             for ($i = 1; $i <= $numInstallments; $i++) {
-                if ($i === 1) {
+                $nextNo = $startNo + $i;
+                if ($i === 1 && $startNo === 0) {
                     $schedDueDate = $firstDueDate;
                 } else {
                     $schedDueDate = date('Y-m-d', strtotime($firstDueDate . ' +' . (($i - 1) * $daysStep) . ' days'));
@@ -421,7 +457,7 @@ class InstallmentController extends Controller
 
                 PaymentSchedule::create([
                     'installment_id' => $account->installment_id,
-                    'installment_no' => $i,
+                    'installment_no' => $nextNo,
                     'due_date' => $schedDueDate,
                     'amount_due' => $installmentAmount,
                     'amount_paid' => 0.00,
@@ -455,7 +491,7 @@ class InstallmentController extends Controller
                 'user_id' => $user ? $user->user_id : 1,
                 'action' => 'CREATE',
                 'module' => 'Installments',
-                'description' => "Created new customer installment account {$accountNo} for {$custFullName} (Total: ₱" . number_format($totalPayable, 2) . ", Down: ₱" . number_format($downPayment, 2) . ", {$numInstallments} Mos)",
+                'description' => "Created new customer installment {$accountNo} for {$custFullName} (Total: ₱" . number_format($totalPayable, 2) . ", Down: ₱" . number_format($downPayment, 2) . ", {$numInstallments} Mos)",
                 'ip_address' => $request->ip(),
                 'user_agent' => $request->userAgent(),
             ]);
@@ -463,7 +499,7 @@ class InstallmentController extends Controller
             // 8. Notification
             NotificationService::sendToAdmins([
                 'type' => 'installment_created',
-                'title' => 'New Installment Account Created',
+                'title' => 'New Installment Created',
                 'message' => "Account {$accountNo} created for {$custFullName} — ₱" . number_format($totalPayable, 2) . " ({$numInstallments} {$frequency} terms).",
                 'module' => 'Installments',
                 'related_id' => $account->installment_id,
@@ -484,7 +520,7 @@ class InstallmentController extends Controller
             $formatted = $this->formatAccount($account, $today);
 
             return response()->json([
-                'message' => "Customer Installment Account {$accountNo} created successfully",
+                'message' => "Customer Installment {$accountNo} created successfully",
                 'account' => $formatted,
             ], 201);
         });
@@ -591,7 +627,7 @@ class InstallmentController extends Controller
     }
 
     /**
-     * Show single installment account with purchase details, items, schedules, and payment history.
+     * Show single installment with purchase details, items, schedules, and payment history.
      */
     public function show(Request $request, $id)
     {
@@ -608,6 +644,13 @@ class InstallmentController extends Controller
             'payments.receivedBy.employee'
         ])->findOrFail($id);
 
+        // Security check for Customer
+        if ($user && $user->role === 'Customer') {
+            if ($account->customer_id !== $user->customer_id) {
+                return response()->json(['message' => 'Unauthorized access to installment.'], 403);
+            }
+        }
+
         // Security check for Store Administrator
         if ($user && in_array($user->role, ['Store Administrator', 'Store Admin'])) {
             $userBranch = $user->employee ? $user->employee->branch_id : null;
@@ -616,7 +659,7 @@ class InstallmentController extends Controller
                 $accBranch = $account->sale->processedBy->employee->branch_id ?: null;
             }
             if ($userBranch !== $accBranch) {
-                return response()->json(['message' => 'Unauthorized access to installment account in another branch.'], 403);
+                return response()->json(['message' => 'Unauthorized access to installment in another branch.'], 403);
             }
         }
 
@@ -624,10 +667,21 @@ class InstallmentController extends Controller
         $totalPayable = (float)$account->total_payable;
         $balance = max(0, round($totalPayable - $paid, 2));
 
-        // Branch
+        // Branch and Store Admin
         $branch = 'Main Branch';
-        if ($account->sale && $account->sale->processedBy && $account->sale->processedBy->employee) {
-            $branch = $account->sale->processedBy->employee->branch_id ?: null;
+        $storeAdmin = 'System/Admin';
+        
+        if ($account->sale && $account->sale->processedBy) {
+            $adminUser = $account->sale->processedBy;
+            $storeAdmin = $adminUser->employee 
+                ? "{$adminUser->employee->first_name} {$adminUser->employee->last_name}" 
+                : $adminUser->username;
+                
+            if ($adminUser->employee && $adminUser->employee->branch) {
+                $branch = $adminUser->employee->branch->branch_name;
+            } elseif ($adminUser->employee && $adminUser->employee->branch_id) {
+                $branch = $adminUser->employee->branch_id;
+            }
         }
 
         // Sale Items
@@ -638,6 +692,7 @@ class InstallmentController extends Controller
                     'product_id' => $item->product_id,
                     'product_code' => $item->product ? $item->product->product_code : 'SKU',
                     'product_name' => $item->product ? $item->product->product_name : 'Product',
+                    'image_url' => $item->product && $item->product->image_url ? $item->product->image_url : null,
                     'category' => $item->product ? $item->product->category : '',
                     'quantity' => (float)$item->quantity,
                     'unit_price' => (float)$item->unit_price,
@@ -711,6 +766,7 @@ class InstallmentController extends Controller
                 'customer_email' => $account->customer ? $account->customer->email : '—',
                 'customer_address' => $account->customer ? $account->customer->address : '—',
                 'branch' => $branch,
+                'store_admin' => $storeAdmin,
                 'sale_id' => $account->sale_id,
                 'invoice_no' => $account->sale ? $account->sale->invoice_no : 'N/A',
                 'sale_date' => $account->sale ? $account->sale->sale_date : $account->start_date,
@@ -743,7 +799,7 @@ class InstallmentController extends Controller
     }
 
     /**
-     * Update installment account details or status.
+     * Update installment details or status.
      */
     public function update(Request $request, $id)
     {
@@ -780,7 +836,7 @@ class InstallmentController extends Controller
             'user_id' => $user ? $user->user_id : 1,
             'action' => 'UPDATE',
             'module' => 'Installments',
-            'description' => "Updated installment account {$account->account_no} (Status: {$account->status})",
+            'description' => "Updated installment {$account->account_no} (Status: {$account->status})",
             'ip_address' => $request->ip(),
             'user_agent' => $request->userAgent(),
         ]);
@@ -794,13 +850,13 @@ class InstallmentController extends Controller
         ]);
 
         return response()->json([
-            'message' => "Installment account {$account->account_no} updated successfully",
+            'message' => "Installment {$account->account_no} updated successfully",
             'account' => $this->formatAccount($account, date('Y-m-d')),
         ]);
     }
 
     /**
-     * Delete an installment account and its associated schedules/payments safely.
+     * Delete an installment and its associated schedules/payments safely.
      */
     public function destroy(Request $request, $id)
     {
@@ -829,13 +885,13 @@ class InstallmentController extends Controller
                 'user_id' => $user ? $user->user_id : 1,
                 'action' => 'DELETE',
                 'module' => 'Installments',
-                'description' => "Deleted installment account {$accountNo}",
+                'description' => "Deleted installment {$accountNo}",
                 'ip_address' => $request->ip(),
                 'user_agent' => $request->userAgent(),
             ]);
 
             return response()->json([
-                'message' => "Installment account {$accountNo} deleted successfully",
+                'message' => "Installment {$accountNo} deleted successfully",
                 'installment_id' => (int)$account->installment_id,
             ]);
         });

@@ -319,7 +319,7 @@ class NotificationController extends Controller
             }
         }
 
-        // 2. Overdue Installment Accounts (Administrators and Store Administrators)
+        // 2. Overdue Installment (Administrators and Store Administrators)
         $isStoreAdmin = in_array($user->role, ['Store Administrator', 'Store Admin']);
         if ($user->role === 'Administrator' || $isStoreAdmin) {
             $instQuery = \App\Models\InstallmentAccount::where('status', 'Overdue');
@@ -337,8 +337,8 @@ class NotificationController extends Controller
                     Notification::create([
                         'user_id' => $user->user_id,
                         'type' => 'overdue_installments_alert',
-                        'title' => 'Overdue Installment Accounts',
-                        'message' => "{$overdueCount} installment account(s) have past-due schedules.",
+                        'title' => 'Overdue Installment',
+                        'message' => "{$overdueCount} installment(s) have past-due schedules.",
                         'module' => 'Installments',
                         'action_url' => '/installments?tab=overdue',
                         'priority' => 'critical',

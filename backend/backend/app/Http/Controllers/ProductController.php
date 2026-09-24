@@ -41,7 +41,11 @@ class ProductController extends Controller
         }
 
         if ($request->filled('category') && $request->query('category') !== 'All') {
-            $query->where('category', $request->query('category'));
+            if ($request->query('category') === 'Sale Items') {
+                $query->whereNotNull('discount_price');
+            } else {
+                $query->where('category', $request->query('category'));
+            }
         }
 
         if ($request->filled('status') && $request->query('status') !== 'All') {
@@ -120,11 +124,16 @@ class ProductController extends Controller
             'brand' => 'nullable|string|max:255',
             'description' => 'nullable|string',
             'unit_price' => 'required|numeric|min:0',
+            'discount_price' => 'nullable|numeric|min:0',
             'cost_price' => 'nullable|numeric|min:0',
             'stock_quantity' => 'required|integer|min:0',
             'reorder_level' => 'nullable|integer|min:0',
             'unit' => 'nullable|string|max:50',
             'status' => 'required|string|in:Active,Inactive',
+            'image_1' => 'nullable|image|mimes:jpeg,png,jpg,webp|max:5120',
+            'image_2' => 'nullable|image|mimes:jpeg,png,jpg,webp|max:5120',
+            'image_3' => 'nullable|image|mimes:jpeg,png,jpg,webp|max:5120',
+            'image_4' => 'nullable|image|mimes:jpeg,png,jpg,webp|max:5120',
         ]);
 
         if (empty($validated['product_code'])) {
@@ -148,6 +157,30 @@ class ProductController extends Controller
         }
 
         $product = Product::create($validated);
+
+        // Handle image uploads
+        $urlBase = $request->getSchemeAndHttpHost() . '/storage/';
+        $updates = [];
+        if ($request->hasFile('image_1')) {
+            $path = $request->file('image_1')->store('products', 'public');
+            $updates['image_url'] = $urlBase . $path;
+        }
+        if ($request->hasFile('image_2')) {
+            $path = $request->file('image_2')->store('products', 'public');
+            $updates['image_url_2'] = $urlBase . $path;
+        }
+        if ($request->hasFile('image_3')) {
+            $path = $request->file('image_3')->store('products', 'public');
+            $updates['image_url_3'] = $urlBase . $path;
+        }
+        if ($request->hasFile('image_4')) {
+            $path = $request->file('image_4')->store('products', 'public');
+            $updates['image_url_4'] = $urlBase . $path;
+        }
+        if (!empty($updates)) {
+            $product->update($updates);
+        }
+
         $product->load('branch');
 
         SystemLog::create([
@@ -158,6 +191,21 @@ class ProductController extends Controller
             'ip_address' => $request->ip(),
             'user_agent' => $request->userAgent(),
         ]);
+
+        $notificationData = [
+            'type' => 'new_product_alert',
+            'title' => 'New Product Added',
+            'message' => "{$product->product_name} is now available in your branch.",
+            'module' => 'Products',
+            'related_id' => $product->product_id,
+            'related_type' => 'App\Models\Product',
+            'action_url' => '/products?id=' . $product->product_id,
+            'priority' => 'normal',
+        ];
+        
+        \App\Services\NotificationService::sendToAdmins($notificationData);
+        \App\Services\NotificationService::sendToStoreAdmins($notificationData, $product->branch_id);
+        \App\Services\NotificationService::sendToCustomers($notificationData, $product->branch_id);
 
         return response()->json([
             'message' => 'Product created successfully',
@@ -184,11 +232,16 @@ class ProductController extends Controller
             'brand' => 'nullable|string|max:255',
             'description' => 'nullable|string',
             'unit_price' => 'required|numeric|min:0',
+            'discount_price' => 'nullable|numeric|min:0',
             'cost_price' => 'nullable|numeric|min:0',
             'stock_quantity' => 'required|integer|min:0',
             'reorder_level' => 'nullable|integer|min:0',
             'unit' => 'nullable|string|max:50',
             'status' => 'required|string|in:Active,Inactive',
+            'image_1' => 'nullable|image|mimes:jpeg,png,jpg,webp|max:5120',
+            'image_2' => 'nullable|image|mimes:jpeg,png,jpg,webp|max:5120',
+            'image_3' => 'nullable|image|mimes:jpeg,png,jpg,webp|max:5120',
+            'image_4' => 'nullable|image|mimes:jpeg,png,jpg,webp|max:5120',
         ]);
 
         if ($user && in_array($user->role, ['Store Administrator', 'Store Admin'])) {
@@ -200,6 +253,47 @@ class ProductController extends Controller
         }
 
         $product->update($validated);
+
+        // Handle image uploads and deletions
+        $urlBase = $request->getSchemeAndHttpHost() . '/storage/';
+        $updates = [];
+        
+        // Image 1
+        if ($request->hasFile('image_1')) {
+            $path = $request->file('image_1')->store('products', 'public');
+            $updates['image_url'] = $urlBase . $path;
+        } elseif ($request->input('remove_image_1') === 'true') {
+            $updates['image_url'] = null;
+        }
+
+        // Image 2
+        if ($request->hasFile('image_2')) {
+            $path = $request->file('image_2')->store('products', 'public');
+            $updates['image_url_2'] = $urlBase . $path;
+        } elseif ($request->input('remove_image_2') === 'true') {
+            $updates['image_url_2'] = null;
+        }
+
+        // Image 3
+        if ($request->hasFile('image_3')) {
+            $path = $request->file('image_3')->store('products', 'public');
+            $updates['image_url_3'] = $urlBase . $path;
+        } elseif ($request->input('remove_image_3') === 'true') {
+            $updates['image_url_3'] = null;
+        }
+
+        // Image 4
+        if ($request->hasFile('image_4')) {
+            $path = $request->file('image_4')->store('products', 'public');
+            $updates['image_url_4'] = $urlBase . $path;
+        } elseif ($request->input('remove_image_4') === 'true') {
+            $updates['image_url_4'] = null;
+        }
+
+        if (!empty($updates)) {
+            $product->update($updates);
+        }
+
         $product->load('branch');
 
         SystemLog::create([

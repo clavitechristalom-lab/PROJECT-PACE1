@@ -23,13 +23,22 @@ class CustomerDashboardController extends Controller
 
         $customerId = $user->customer_id;
 
-        // Products metrics
-        $totalProducts = Product::count();
-        $furnitureCount = Product::where('category', 'Furniture')->count();
-        $applianceCount = Product::where('category', 'Appliances')->count();
-        $outOfStockCount = Product::where('stock_quantity', '<=', 0)->count();
-        // Since there is no is_sale column, we'll use a placeholder for Sale Items or check if cost < price (just a dummy metric)
-        $saleItemCount = Product::where('status', 'Active')->count(); // Placeholder for "sale items"
+        // Products metrics scoped by branch
+        $branchId = $user->customer ? $user->customer->branch_id : null;
+        
+        if ($branchId) {
+            $totalProducts = Product::where('branch_id', $branchId)->count();
+            $outOfStockCount = Product::where('branch_id', $branchId)->where('stock_quantity', '<=', 0)->count();
+            $saleItemCount = Product::where('branch_id', $branchId)->where('status', 'Active')->whereNotNull('discount_price')->count(); 
+
+            $categories = Product::where('branch_id', $branchId)
+                ->select('category', \Illuminate\Support\Facades\DB::raw('count(*) as count'))
+                ->groupBy('category')
+                ->get();
+        } else {
+            $totalProducts = $outOfStockCount = $saleItemCount = 0;
+            $categories = [];
+        }
 
         // Financial metrics for this customer
         $activeInstallments = InstallmentAccount::where('customer_id', $customerId)
@@ -41,7 +50,6 @@ class CustomerDashboardController extends Controller
         // Calculate remaining credit balance
         $totalPayable = $activeInstallments->sum('total_payable');
         $totalPaid = Payment::whereIn('installment_id', $activeInstallments->pluck('installment_id'))
-            ->where('status', 'Completed')
             ->sum('amount');
         $totalCreditBalance = max(0, $totalPayable - $totalPaid);
 
@@ -54,8 +62,7 @@ class CustomerDashboardController extends Controller
         return response()->json([
             'metrics' => [
                 'total_products' => $totalProducts,
-                'furniture_count' => $furnitureCount,
-                'appliance_count' => $applianceCount,
+                'categories' => $categories,
                 'monthly_payment' => $monthlyPayment,
                 'total_credit_balance' => $totalCreditBalance,
                 'sale_items_count' => $saleItemCount,
@@ -84,10 +91,13 @@ class CustomerDashboardController extends Controller
 
         $formatted = $installments->map(function ($inst) {
             $productName = 'Multiple Items';
+            $imageUrl = null;
             if ($inst->sale && $inst->sale->items->count() === 1) {
                 $productName = $inst->sale->items->first()->product->product_name ?? 'Unknown';
+                $imageUrl = $inst->sale->items->first()->product->image_url ?? null;
             } elseif ($inst->sale && $inst->sale->items->count() > 1) {
                 $productName = $inst->sale->items->first()->product->product_name . ' + others';
+                $imageUrl = $inst->sale->items->first()->product->image_url ?? null;
             }
 
             $paidAmount = $inst->payments->sum('amount');
@@ -109,7 +119,9 @@ class CustomerDashboardController extends Controller
                 'balance' => $balance,
                 'next_due_date' => $nextDue ? $nextDue->due_date : null,
                 'status' => $inst->status,
-                'installment_id' => $inst->installment_id
+                'image_url' => $imageUrl,
+                'installment_id' => $inst->installment_id,
+                'paymentSchedules' => $inst->paymentSchedules
             ];
         });
 

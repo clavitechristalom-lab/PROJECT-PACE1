@@ -72,7 +72,7 @@ class DashboardController extends Controller
         $todayCollections = (float)(clone $paymentQuery)->whereDate('payment_date', $today)->sum('amount');
         $monthCollections = (float)(clone $paymentQuery)->whereMonth('payment_date', $currentMonth)->whereYear('payment_date', $currentYear)->sum('amount');
 
-        // 3. Installment Accounts & Outstanding Balance
+        // 3. Installment & Outstanding Balance
         $instQuery = InstallmentAccount::with('payments');
         if ($isStoreAdmin || ($branch !== 'All' && !empty($branch))) {
             $b = $isStoreAdmin ? ($user->employee ? $user->employee->branch_id : null) : $branch;
@@ -313,7 +313,7 @@ class DashboardController extends Controller
         $digitalCollections = (float)$payments->whereIn('payment_method', ['GCash', 'Maya', 'Bank Transfer', 'E-Wallet'])->sum('amount');
         $overdueCollected = (float)$payments->where('notes', 'like', '%Overdue%')->sum('amount');
 
-        // 3. Installment Accounts in Range
+        // 3. Installment in Range
         $instQuery = InstallmentAccount::with('payments');
         if ($branch !== 'All' && !empty($branch)) {
             $instQuery->whereHas('sale.processedBy.employee', function ($eq) use ($branch) {
@@ -379,7 +379,7 @@ class DashboardController extends Controller
                 $eq->where('branch_id', $branch);
             })->sum('amount');
 
-            // Installment Accounts
+            // Installment
             $insts = InstallmentAccount::with('payments')->whereHas('sale.processedBy.employee', function ($eq) use ($branch) {
                 $eq->where('branch_id', $branch);
             })->get();
@@ -389,11 +389,17 @@ class DashboardController extends Controller
             $outstanding = max(0, round($instSales - $instPaid, 2));
             $overdueCount = $insts->where('status', 'Overdue')->count();
 
+            // Find Store Administrator assigned to this branch
+            $manager = \App\Models\User::where('role', 'Store Administrator')
+                ->whereHas('employee', function ($q) use ($bp) {
+                    $q->where('branch_id', $bp->id);
+                })->first();
+
             $comparison[] = [
                 'id' => $bp->id,
                 'branch' => $branch,
                 'location' => $bp->location,
-                'manager' => $bp->manager_name,
+                'manager' => $manager ? $manager->username : null,
                 'contact' => $bp->contact_number,
                 'status' => $bp->status,
                 'color' => $bp->color,
@@ -458,8 +464,8 @@ class DashboardController extends Controller
             $alerts[] = [
                 'id' => 'overdue_installments',
                 'type' => 'danger',
-                'title' => 'Overdue Installment Accounts',
-                'message' => "{$overdueCount} installment account(s) have past-due schedules.",
+                'title' => 'Overdue Installment',
+                'message' => "{$overdueCount} installment(s) have past-due schedules.",
                 'action_url' => '/installments?tab=overdue',
             ];
         }

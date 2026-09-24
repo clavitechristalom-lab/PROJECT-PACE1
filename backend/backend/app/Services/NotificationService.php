@@ -65,7 +65,7 @@ class NotificationService
 
         if ($branch && $branch !== 'All' && $branch !== 'Main Branch') {
             $query->whereHas('employee', function ($q) use ($branch) {
-                $q->where('branch', $branch);
+                $q->where('branch_id', $branch);
             });
         }
 
@@ -106,6 +106,48 @@ class NotificationService
         if (!$employeeId) return null;
 
         $user = User::where('employee_id', $employeeId)
+            ->where('is_active', true)
+            ->first();
+
+        if (!$user) return null;
+
+        return self::sendToUser($user->user_id, $data);
+    }
+
+    /**
+     * Send a notification to Customers (optionally filtered by branch).
+     */
+    public static function sendToCustomers(array $data, ?string $branchId = null): array
+    {
+        $query = User::with('customer')
+            ->where('role', 'Customer')
+            ->where('is_active', true);
+
+        if ($branchId && $branchId !== 'All' && $branchId !== 'Main Branch') {
+            $query->whereHas('customer', function ($q) use ($branchId) {
+                $q->where('branch_id', $branchId);
+            });
+        }
+
+        $userIds = $query->pluck('user_id');
+        $created = [];
+
+        foreach ($userIds as $userId) {
+            $notif = self::sendToUser($userId, $data);
+            if ($notif) $created[] = $notif;
+        }
+
+        return $created;
+    }
+
+    /**
+     * Send a notification to the user account linked to a specific customer.
+     */
+    public static function sendToCustomer($customerId, array $data): ?Notification
+    {
+        if (!$customerId) return null;
+
+        $user = User::where('customer_id', $customerId)
             ->where('is_active', true)
             ->first();
 

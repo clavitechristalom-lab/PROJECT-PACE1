@@ -89,9 +89,9 @@ export default function InstallmentsPage({ branchFilter: propBranchFilter, embed
   const [payNotes, setPayNotes] = useState('')
 
   // ─── INITIAL DATA LOAD ──────────────────────────────────────────────────────
-  const loadInitialData = async () => {
-    setLoading(true)
-    setError('')
+  const loadInitialData = async (silent = false) => {
+    if (!silent) setLoading(true)
+    if (!silent) setError('')
     try {
       const [instRes, custRes, prodRes] = await Promise.all([
         api.installments.getAll({
@@ -106,15 +106,17 @@ export default function InstallmentsPage({ branchFilter: propBranchFilter, embed
       setProducts(prodRes.products || [])
     } catch (err) {
       console.error('Failed to load installment data:', err)
-      setError(err.message || 'Failed to fetch customer installment records')
+      if (!silent) setError(err.message || 'Failed to fetch customer installment records')
     } finally {
-      setLoading(false)
+      if (!silent) setLoading(false)
     }
   }
 
   useEffect(() => {
     loadInitialData()
-  }, [branchFilter])
+    const interval = setInterval(() => loadInitialData(true), 10000)
+    return () => clearInterval(interval)
+  }, [branchFilter, search, statusFilter, activeTab])
 
   useEffect(() => {
     const id = searchParams.get('id')
@@ -153,11 +155,12 @@ export default function InstallmentsPage({ branchFilter: propBranchFilter, embed
   const handleProductSelect = (prodId) => {
     const p = products.find(x => String(x.product_id) === String(prodId))
     if (p) {
+      const effectivePrice = p.discount_price ? p.discount_price : p.unit_price;
       setAddForm(prev => ({
         ...prev,
         product_id: prodId,
         product_name: p.product_name,
-        principal_amount: p.unit_price ? String(p.unit_price) : '',
+        principal_amount: effectivePrice ? String(effectivePrice) : '',
       }))
     } else {
       setAddForm(prev => ({
@@ -286,12 +289,12 @@ export default function InstallmentsPage({ branchFilter: propBranchFilter, embed
         setInstallments(prev => [res.account, ...prev])
       }
 
-      showToast(res.message || 'Customer installment account created successfully', 'success')
+      showToast(res.message || 'Customer installment created successfully', 'success')
       setAddModalOpen(false)
       setAddForm(initialAddForm)
     } catch (err) {
-      console.error('Failed to create installment account:', err)
-      showToast(err.message || 'Failed to create customer installment account', 'error')
+      console.error('Failed to create installment:', err)
+      showToast(err.message || 'Failed to create customer installment', 'error')
     } finally {
       setSaving(false)
     }
@@ -324,10 +327,10 @@ export default function InstallmentsPage({ branchFilter: propBranchFilter, embed
         ))
       }
 
-      showToast(res.message || 'Installment account updated successfully', 'success')
+      showToast(res.message || 'Installment updated successfully', 'success')
       setEditModalItem(null)
     } catch (err) {
-      showToast(err.message || 'Failed to update installment account', 'error')
+      showToast(err.message || 'Failed to update installment', 'error')
     } finally {
       setSaving(false)
     }
@@ -345,9 +348,9 @@ export default function InstallmentsPage({ branchFilter: propBranchFilter, embed
       // AUTOMATIC STATE UPDATE: Remove item from React state immediately
       setInstallments(prev => prev.filter(item => item.installment_id !== account.installment_id))
 
-      showToast(res.message || 'Installment account deleted successfully', 'success')
+      showToast(res.message || 'Installment deleted successfully', 'success')
     } catch (err) {
-      showToast(err.message || 'Failed to delete installment account', 'error')
+      showToast(err.message || 'Failed to delete installment', 'error')
     } finally {
       setSaving(false)
     }
@@ -474,7 +477,7 @@ export default function InstallmentsPage({ branchFilter: propBranchFilter, embed
       {/* ─── PAGE HEADER WITH ADD ACCOUNT BUTTON (NO REFRESH BUTTON) ─── */}
       {!embedded && (
         <PageHeader
-          title="Customer Installment Accounts"
+          title="Customer Installment"
           subtitle={
             isStoreAdmin
               ? `Store Branch Ledger (${user?.employee?.branch || 'Main Branch'})`
@@ -621,7 +624,7 @@ export default function InstallmentsPage({ branchFilter: propBranchFilter, embed
       ) : (
         <Card noPad className="border border-border overflow-hidden shadow-2xs">
           <CardHeader
-            title={activeTab === 'overdue' ? 'Overdue Installment Accounts' : 'Customer Installment Accounts Ledger'}
+            title={activeTab === 'overdue' ? 'Overdue Installment' : 'Customer Installment Ledger'}
             action={
               <div className="flex items-center gap-2 text-xs text-muted-foreground font-mono">
                 <span>Showing {paginated.length} of {filteredInstallments.length} accounts</span>
@@ -652,7 +655,7 @@ export default function InstallmentsPage({ branchFilter: propBranchFilter, embed
                     <td colSpan={11} className="py-12 text-center text-muted-foreground">
                       <div className="flex flex-col items-center justify-center gap-2">
                         <FiCreditCard className="w-8 h-8 text-muted-foreground/50" />
-                        <span className="font-semibold text-foreground">No customer installment accounts found</span>
+                        <span className="font-semibold text-foreground">No customer installment found</span>
                         <span className="text-xs">Click "Add Customer Account" to create a new installment financing agreement.</span>
                       </div>
                     </td>
@@ -799,7 +802,7 @@ export default function InstallmentsPage({ branchFilter: propBranchFilter, embed
         <Modal
           isOpen={true}
           onClose={() => setAddModalOpen(false)}
-          title="Add Customer Installment Account"
+          title="Add Customer Installment"
           size="lg"
         >
           <form onSubmit={handleAddAccount} className="space-y-4 text-xs">
@@ -926,11 +929,14 @@ export default function InstallmentsPage({ branchFilter: propBranchFilter, embed
                     className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground font-medium"
                   >
                     <option value="">-- Choose from Catalog (or custom) --</option>
-                    {products.map(p => (
-                      <option key={p.product_id} value={p.product_id}>
-                        {p.product_name} — {fmt(p.unit_price)} (Stock: {p.stock_quantity})
-                      </option>
-                    ))}
+                    {products.map(p => {
+                      const effPrice = p.discount_price ? p.discount_price : p.unit_price;
+                      return (
+                        <option key={p.product_id} value={p.product_id}>
+                          {p.product_name} — {fmt(effPrice)} (Stock: {p.stock_quantity}) {p.discount_price ? '[SALE]' : ''}
+                        </option>
+                      )
+                    })}
                   </select>
                 </div>
 
@@ -1108,7 +1114,7 @@ export default function InstallmentsPage({ branchFilter: propBranchFilter, embed
         <Modal
           isOpen={true}
           onClose={() => setEditModalItem(null)}
-          title={`Edit Installment Account — ${editModalItem.account_no}`}
+          title={`Edit Installment — ${editModalItem.account_no}`}
           size="md"
         >
           <form onSubmit={handleUpdateAccount} className="space-y-4 text-xs">
@@ -1203,7 +1209,7 @@ export default function InstallmentsPage({ branchFilter: propBranchFilter, embed
         <Modal
           isOpen={true}
           onClose={() => setDetailItem(null)}
-          title={`Installment Account — ${detailItem.account?.account_no}`}
+          title={`Installment — ${detailItem.account?.account_no}`}
           size="lg"
         >
           {detailLoading ? (

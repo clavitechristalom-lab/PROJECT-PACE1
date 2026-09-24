@@ -149,12 +149,12 @@ function AdminBusinessDashboard() {
   useEffect(() => {
     loadData()
     loadPerformance()
-    
+
     const interval = setInterval(() => {
       loadData()
       loadPerformance()
     }, 30000)
-    
+
     return () => clearInterval(interval)
   }, [])
 
@@ -181,7 +181,7 @@ function AdminBusinessDashboard() {
       <div className="space-y-4">
         <PageHeader title="DASHBOARD MONITORING" subtitle={`Organization-wide real-time operations`} />
         <StatSkeleton count={5} />
-        <LoadingState message="Querying live sales, collections, and installment accounts..." />
+        <LoadingState message="Querying live sales, collections, and installment..." />
       </div>
     )
   }
@@ -190,7 +190,7 @@ function AdminBusinessDashboard() {
     ...(isAdmin ? [{ label: 'QR Requests', icon: <FiShield className="w-4 h-4" />, action: () => setShowQrWidgetModal(true), color: 'bg-amber-600', badge: qrRequestSummary?.pending || 0 }] : []),
     { label: 'View Sales', icon: <FiShoppingCart className="w-4 h-4" />, path: '/sales', color: 'bg-emerald-600' },
     { label: 'Record Payment', icon: <TbCurrencyPeso className="w-4 h-4" />, path: '/payments', color: 'bg-blue-600' },
-    { label: 'Installment Accounts', icon: <FiCreditCard className="w-4 h-4" />, path: '/installments', color: 'bg-indigo-600' },
+    { label: 'Installment', icon: <FiCreditCard className="w-4 h-4" />, path: '/installments', color: 'bg-indigo-600' },
     { label: 'Overdue Monitoring', icon: <FiAlertTriangle className="w-4 h-4" />, path: '/installments?tab=overdue', color: 'bg-rose-600' },
     { label: 'Products / Stock', icon: <FiPackage className="w-4 h-4" />, path: '/products', color: 'bg-amber-600' },
     { label: 'Business Reports', icon: <FiBarChart2 className="w-4 h-4" />, path: '/reports', color: 'bg-purple-600' },
@@ -225,13 +225,13 @@ function AdminBusinessDashboard() {
           showLoading('Creating branch...')
           try {
             const res = await api.branches.create(formData)
-            
+
             if (imageFile && res.branch?.id) {
               const fileData = new FormData()
               fileData.append('image', imageFile)
               await api.branches.uploadImage(res.branch.id, fileData)
             }
-            
+
             showToast('Branch successfully created!', 'success')
             setShowCreateBranchModal(false)
             loadData() // Refresh dashboard
@@ -699,7 +699,7 @@ function StoreAdminBusinessDashboard() {
       </div>
 
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <StatCard title="Installment Accounts" value={stats?.active_installments?.toString() || '0'} sub="active branch accounts" icon={<FiCreditCard className="w-5 h-5" />} color="blue" />
+        <StatCard title="Installment" value={stats?.active_installments?.toString() || '0'} sub="active branch accounts" icon={<FiCreditCard className="w-5 h-5" />} color="blue" />
         <StatCard title="Outstanding Balance" value={fmt(stats?.total_outstanding_balance || 0)} sub="branch receivables" icon={<FiTrendingDown className="w-5 h-5 text-rose-500" />} color="red" />
         <StatCard title="Overdue Accounts" value={stats?.overdue_installments?.toString() || '0'} sub="past-due schedules" icon={<FiAlertTriangle className="w-5 h-5 text-amber-500" />} color="yellow" />
         <StatCard title="Low Stock Products" value={stats?.low_stock_products?.toString() || '0'} sub="in catalog" icon={<FiPackage className="w-5 h-5 text-rose-500" />} color="red" />

@@ -91,9 +91,9 @@ export default function PaymentsPage() {
   const [payDate, setPayDate] = useState(new Date().toISOString().slice(0, 10))
   const [payNotes, setPayNotes] = useState('')
 
-  const loadData = async () => {
-    setLoading(true)
-    setError('')
+  const loadData = async (silent = false) => {
+    if (!silent) setLoading(true)
+    if (!silent) setError('')
     try {
       const [paymentsRes, instRes, monRes] = await Promise.all([
         api.payments.getAll({
@@ -112,15 +112,17 @@ export default function PaymentsPage() {
       setMonitoring(monRes)
     } catch (err) {
       console.error('Failed to load payments:', err)
-      setError(err.message || 'Failed to fetch payment collections')
+      if (!silent) setError(err.message || 'Failed to fetch payment collections')
     } finally {
-      setLoading(false)
+      if (!silent) setLoading(false)
     }
   }
 
   useEffect(() => {
     loadData()
-  }, [methodFilter, branchFilter])
+    const interval = setInterval(() => loadData(true), 10000)
+    return () => clearInterval(interval)
+  }, [methodFilter, branchFilter, search, dateFrom, dateTo])
 
   useEffect(() => {
     const id = searchParams.get('id')
@@ -151,7 +153,7 @@ export default function PaymentsPage() {
   const handleRecordPayment = async (e) => {
     e.preventDefault()
     if (!selectedInstId) {
-      showToast('Please select an installment account', 'error')
+      showToast('Please select an installment', 'error')
       return
     }
     const val = parseFloat(payAmount)
@@ -420,7 +422,7 @@ export default function PaymentsPage() {
                 <span className="font-mono font-semibold text-foreground">{viewReceipt.payment_date}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-muted-foreground">Installment Account:</span>
+                <span className="text-muted-foreground">Installment:</span>
                 <span className="font-mono font-bold text-primary">{viewReceipt.account_no}</span>
               </div>
               <div className="flex justify-between">
@@ -486,7 +488,7 @@ export default function PaymentsPage() {
         >
           <form onSubmit={handleRecordPayment} className="space-y-3.5 text-xs">
             <div>
-              <label className="block font-bold text-muted-foreground mb-1">Select Installment Account *</label>
+              <label className="block font-bold text-muted-foreground mb-1">Select Installment *</label>
               <select
                 value={selectedInstId}
                 onChange={e => handleInstSelect(e.target.value)}

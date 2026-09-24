@@ -35,7 +35,11 @@ export default function LoginPage() {
   const [registrationOptions, setRegistrationOptions] = useState({ branches: [], departments: [] })
 
   const [signUpData, setSignUpData] = useState({
-    name: '',
+    first_name: '',
+    middle_name: '',
+    last_name: '',
+    phone: '',
+    address: '',
     email: '',
     username: '',
     employee_id: '',
@@ -144,8 +148,17 @@ export default function LoginPage() {
 
     const errors = {}
 
-    if (!signUpData.name.trim()) {
-      errors.name = 'Full name is required'
+    if (!signUpData.first_name.trim()) {
+      errors.first_name = 'First name is required'
+    }
+    if (!signUpData.last_name.trim()) {
+      errors.last_name = 'Last name is required'
+    }
+    if (!signUpData.phone.trim()) {
+      errors.phone = 'Phone number is required'
+    }
+    if (!signUpData.address.trim()) {
+      errors.address = 'Complete address is required'
     }
 
     if (!signUpData.email.trim()) {
@@ -709,45 +722,76 @@ export default function LoginPage() {
                     noValidate
                   >
 
-                    <div>
-                      <label className="block text-xs font-semibold text-slate-300 mb-1">
-                        Name
-                      </label>
-
-                      <div className="relative">
-                        <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none">
-                          <FiUser className="w-4 h-4" />
-                        </span>
-
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-300 mb-1">First Name</label>
                         <input
                           type="text"
-                          value={signUpData.name}
+                          value={signUpData.first_name}
                           onChange={(e) => {
-                            setSignUpData({
-                              ...signUpData,
-                              name: e.target.value,
-                            })
-
-                            if (signUpErrors.name) {
-                              setSignUpErrors({
-                                ...signUpErrors,
-                                name: '',
-                              })
-                            }
+                            setSignUpData({ ...signUpData, first_name: e.target.value })
+                            if (signUpErrors.first_name) setSignUpErrors({ ...signUpErrors, first_name: '' })
                           }}
-                          placeholder="Name"
-                          className={`w-full bg-[#121c29] border rounded-xl pl-10 pr-4 py-2.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 transition-all ${signUpErrors.name
-                            ? 'border-rose-500/80 focus:ring-rose-500/30'
-                            : 'border-slate-800 focus:border-blue-500 focus:ring-blue-500/20'
-                            }`}
+                          placeholder="First Name"
+                          className={`w-full bg-[#121c29] border rounded-xl px-4 py-2.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 transition-all ${signUpErrors.first_name ? 'border-rose-500/80 focus:ring-rose-500/30' : 'border-slate-800 focus:border-blue-500 focus:ring-blue-500/20'}`}
                         />
+                        {signUpErrors.first_name && <p className="text-[11px] text-rose-400 mt-1">{signUpErrors.first_name}</p>}
                       </div>
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-300 mb-1">Last Name</label>
+                        <input
+                          type="text"
+                          value={signUpData.last_name}
+                          onChange={(e) => {
+                            setSignUpData({ ...signUpData, last_name: e.target.value })
+                            if (signUpErrors.last_name) setSignUpErrors({ ...signUpErrors, last_name: '' })
+                          }}
+                          placeholder="Last Name"
+                          className={`w-full bg-[#121c29] border rounded-xl px-4 py-2.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 transition-all ${signUpErrors.last_name ? 'border-rose-500/80 focus:ring-rose-500/30' : 'border-slate-800 focus:border-blue-500 focus:ring-blue-500/20'}`}
+                        />
+                        {signUpErrors.last_name && <p className="text-[11px] text-rose-400 mt-1">{signUpErrors.last_name}</p>}
+                      </div>
+                    </div>
 
-                      {signUpErrors.name && (
-                        <p className="text-[11px] text-rose-400 mt-1">
-                          {signUpErrors.name}
-                        </p>
-                      )}
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-300 mb-1">Middle Name (Optional)</label>
+                      <input
+                        type="text"
+                        value={signUpData.middle_name}
+                        onChange={(e) => setSignUpData({ ...signUpData, middle_name: e.target.value })}
+                        placeholder="Middle Name"
+                        className="w-full bg-[#121c29] border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 transition-all"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-300 mb-1">Phone Number</label>
+                      <input
+                        type="tel"
+                        value={signUpData.phone}
+                        onChange={(e) => {
+                          setSignUpData({ ...signUpData, phone: e.target.value })
+                          if (signUpErrors.phone) setSignUpErrors({ ...signUpErrors, phone: '' })
+                        }}
+                        placeholder="e.g. 09123456789"
+                        className={`w-full bg-[#121c29] border rounded-xl px-4 py-2.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 transition-all ${signUpErrors.phone ? 'border-rose-500/80 focus:ring-rose-500/30' : 'border-slate-800 focus:border-blue-500 focus:ring-blue-500/20'}`}
+                      />
+                      {signUpErrors.phone && <p className="text-[11px] text-rose-400 mt-1">{signUpErrors.phone}</p>}
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-300 mb-1">Complete Address</label>
+                      <input
+                        type="text"
+                        value={signUpData.address}
+                        onChange={(e) => {
+                          setSignUpData({ ...signUpData, address: e.target.value })
+                          if (signUpErrors.address) setSignUpErrors({ ...signUpErrors, address: '' })
+                        }}
+                        placeholder="Street, Barangay, City, Province"
+                        className={`w-full bg-[#121c29] border rounded-xl px-4 py-2.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 transition-all ${signUpErrors.address ? 'border-rose-500/80 focus:ring-rose-500/30' : 'border-slate-800 focus:border-blue-500 focus:ring-blue-500/20'}`}
+                      />
+                      {signUpErrors.address && <p className="text-[11px] text-rose-400 mt-1">{signUpErrors.address}</p>}
                     </div>
 
                     <div>

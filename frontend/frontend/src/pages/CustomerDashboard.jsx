@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { api } from '../lib/api';
 import { fmt } from '../lib/utils';
 import { FiPackage, FiMonitor, FiCreditCard, FiAlertCircle, FiTrendingUp, FiUser, FiGitBranch } from 'react-icons/fi';
@@ -17,6 +18,7 @@ import {
 
 export default function CustomerDashboard() {
   const { user } = useAuth();
+  const [searchParams] = useSearchParams();
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState(null);
   const [installments, setInstallments] = useState([]);
@@ -38,6 +40,13 @@ export default function CustomerDashboard() {
   useEffect(() => {
     fetchDashboardData();
   }, []);
+
+  useEffect(() => {
+    const productId = searchParams.get('product_id');
+    if (productId) {
+      openModal('productList', { initialProductId: productId });
+    }
+  }, [searchParams]);
 
   const fetchDashboardData = async () => {
     try {
@@ -153,20 +162,16 @@ export default function CustomerDashboard() {
 
         {/* Secondary Stats Grid */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 mb-8">
-          <DashboardCard
-            title="Furniture"
-            value={stats?.furniture_count || 0}
-            icon={<FiMonitor size={20} />}
-            colorClass="bg-indigo-500"
-            onClick={() => openModal('productList', { category: 'Furniture' })}
-          />
-          <DashboardCard
-            title="Appliances"
-            value={stats?.appliance_count || 0}
-            icon={<FiMonitor size={20} />}
-            colorClass="bg-purple-500"
-            onClick={() => openModal('productList', { category: 'Appliances' })}
-          />
+          {stats?.categories?.map((cat, index) => (
+            <DashboardCard
+              key={cat.category}
+              title={cat.category}
+              value={cat.count || 0}
+              icon={<FiMonitor size={20} />}
+              colorClass={index % 2 === 0 ? "bg-indigo-500" : "bg-purple-500"}
+              onClick={() => openModal('productList', { category: cat.category })}
+            />
+          ))}
           <DashboardCard
             title="Sale Items"
             value={stats?.sale_items_count || 0}
@@ -189,15 +194,15 @@ export default function CustomerDashboard() {
             {/* Promo / Banner Card */}
             <div className="bg-gradient-to-br from-[#176B87] to-blue-800 rounded-xl p-6 text-white shadow-md relative overflow-hidden">
               <div className="absolute top-0 right-0 -mt-4 -mr-4 w-24 h-24 bg-white opacity-10 rounded-full blur-xl"></div>
-              <h3 className="text-xl font-bold mb-2 relative z-10">Need a New Appliance?</h3>
+              <h3 className="text-xl font-bold mb-2 relative z-10">New Appliance & Furniture?</h3>
               <p className="text-blue-100 text-sm mb-4 relative z-10">
                 Check out our latest arrivals and get exclusive installment plans for active customers.
               </p>
               <button
-                onClick={() => openModal('productList', { category: 'Appliances' })}
+                onClick={() => openModal('productList')}
                 className="bg-white text-[#176B87] px-4 py-2 rounded-lg text-sm font-bold shadow hover:bg-slate-100 transition-colors relative z-10 cursor-pointer"
               >
-                Browse Appliances
+                Browse Products
               </button>
             </div>
           </div>
@@ -210,6 +215,8 @@ export default function CustomerDashboard() {
         isOpen={activeModal === 'productList'}
         onClose={closeModal}
         category={modalArgs?.category}
+        initialProductId={modalArgs?.initialProductId}
+        availableCategories={stats?.categories?.map(c => c.category) || []}
       />
       <PaymentDetailsModal
         isOpen={activeModal === 'paymentDetails'}
