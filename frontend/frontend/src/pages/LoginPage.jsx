@@ -770,7 +770,7 @@ export default function LoginPage() {
                         type="tel"
                         value={signUpData.phone}
                         onChange={(e) => {
-                          setSignUpData({ ...signUpData, phone: e.target.value })
+                          setSignUpData({ ...signUpData, phone: e.target.value.replace(/\D/g, '') })
                           if (signUpErrors.phone) setSignUpErrors({ ...signUpErrors, phone: '' })
                         }}
                         placeholder="e.g. 09123456789"

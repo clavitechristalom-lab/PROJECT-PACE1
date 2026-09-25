@@ -885,10 +885,7 @@ export function MakePaymentModal({ isOpen, onClose, installments, onPaymentSucce
 
   return (
     <Modal isOpen={isOpen} onClose={onClose} title="Make a Payment" size="md">
-      {installments.length === 0 ? (
-        <EmptyState icon={<FiCheckCircle className="w-12 h-12 text-emerald-500/50 mx-auto" />} title="No installments" description="You have no active installments to pay." />
-      ) : (
-        <form onSubmit={handleSubmit} className="space-y-4">
+      <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <label className="block text-xs font-bold text-muted-foreground mb-1">Payment Type</label>
             <div className="grid grid-cols-2 gap-3">
@@ -905,8 +902,8 @@ export function MakePaymentModal({ isOpen, onClose, installments, onPaymentSucce
               <button
                 type="button"
                 onClick={() => setPaymentType('Get Product')}
-                className={`py-2.5 rounded-xl text-sm font-bold border transition-colors ${paymentType === 'Get New Product'
-                  ? 'bg-blue-600/20 border-blue-600 text-blue-600 dark:bg-blue-500/20 dark:border-blue-500 dark:text-blue-400'
+                className={`py-2.5 rounded-xl text-sm font-bold border transition-colors ${paymentType === 'Get Product'
+                  ? 'bg-emerald-600/20 border-emerald-600 text-emerald-600 dark:bg-emerald-500/20 dark:border-emerald-500 dark:text-emerald-400'
                   : 'bg-transparent border-border text-foreground hover:bg-muted/50'
                   }`}
               >
@@ -915,7 +912,11 @@ export function MakePaymentModal({ isOpen, onClose, installments, onPaymentSucce
             </div>
           </div>
 
-          {paymentType === 'Installment Payment' && (
+          {paymentType === 'Installment Payment' && installments.length === 0 && (
+            <EmptyState icon={<FiCheckCircle className="w-12 h-12 text-emerald-500/50 mx-auto" />} title="No installments" description="You have no active installments to pay. Switch to 'Get Product' to purchase a new product." />
+          )}
+
+          {paymentType === 'Installment Payment' && installments.length > 0 && (
             <div className="space-y-3">
               <div>
                 <label className="block text-xs font-bold text-muted-foreground mb-1">Select Payment Schedule</label>
@@ -967,7 +968,16 @@ export function MakePaymentModal({ isOpen, onClose, installments, onPaymentSucce
                 <label className="block text-xs font-bold text-muted-foreground mb-1">Select Product</label>
                 <select
                   value={selectedProductId}
-                  onChange={e => setSelectedProductId(e.target.value)}
+                  onChange={e => {
+                    setSelectedProductId(e.target.value);
+                    const prod = products.find(p => p.product_id.toString() === e.target.value);
+                    if (prod) {
+                      const price = prod.discount_price > 0 ? prod.discount_price : prod.unit_price;
+                      setAmount(price);
+                    } else {
+                      setAmount('');
+                    }
+                  }}
                   required
                   className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground text-sm"
                 >
@@ -980,8 +990,32 @@ export function MakePaymentModal({ isOpen, onClose, installments, onPaymentSucce
                 </select>
               </div>
 
+              {selectedProductId && (() => {
+                const prod = products.find(p => p.product_id.toString() === selectedProductId);
+                if (!prod) return null;
+                const price = prod.discount_price > 0 ? prod.discount_price : prod.unit_price;
+                return (
+                  <div className="bg-muted/30 p-4 rounded-xl text-sm border border-border space-y-2">
+                    <div className="flex justify-between items-center border-b border-border/50 pb-2 mb-2">
+                      <span className="text-muted-foreground">Product</span>
+                      <span className="font-bold text-foreground">{prod.product_name}</span>
+                    </div>
+                    <div className="flex justify-between items-center">
+                      <span className="text-muted-foreground">Price</span>
+                      <span className="font-bold text-emerald-600">{fmt(price)}</span>
+                    </div>
+                    {prod.stock_quantity !== undefined && (
+                      <div className="flex justify-between items-center">
+                        <span className="text-muted-foreground">Stock</span>
+                        <span className={`font-bold ${prod.stock_quantity > 0 ? 'text-foreground' : 'text-rose-500'}`}>{prod.stock_quantity > 0 ? `${prod.stock_quantity} available` : 'Out of stock'}</span>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+
               <div>
-                <label className="block text-xs font-bold text-muted-foreground mb-1">Downpayment Amount</label>
+                <label className="block text-xs font-bold text-muted-foreground mb-1">Payment Amount</label>
                 <div className="relative">
                   <TbCurrencyPeso className="absolute left-3 top-2.5 text-muted-foreground w-4 h-4" />
                   <input
@@ -998,6 +1032,8 @@ export function MakePaymentModal({ isOpen, onClose, installments, onPaymentSucce
             </div>
           )}
 
+          {(paymentType === 'Get Product' || (paymentType === 'Installment Payment' && installments.length > 0)) && (
+          <>
           <div>
             <label className="block text-xs font-bold text-muted-foreground mb-1">Payment Method</label>
             <div className="flex flex-wrap gap-2">
@@ -1029,7 +1065,7 @@ export function MakePaymentModal({ isOpen, onClose, installments, onPaymentSucce
             <input
               type="text"
               value={referenceNumber}
-              onChange={e => setReferenceNumber(e.target.value)}
+              onChange={e => setReferenceNumber(e.target.value.replace(/\D/g, ''))}
               placeholder="Enter reference number"
               className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground text-sm focus:ring-2 focus:ring-blue-500/20 outline-none"
               required={paymentMethod !== 'Cash'}
@@ -1065,17 +1101,18 @@ export function MakePaymentModal({ isOpen, onClose, installments, onPaymentSucce
           <div className="bg-blue-50 dark:bg-blue-950/20 p-3 rounded-xl border border-blue-100 dark:border-blue-900 text-xs text-blue-700 dark:text-blue-300">
             <strong>Note:</strong> Online payments are subject to review. It may take 1-2 business days for the payment to reflect in your account balance.
           </div>
+          </>
+          )}
 
           <button
             type="submit"
-            disabled={submitting || (paymentType === 'Installment Payment' && !selectedSchedule) || (paymentMethod !== 'Cash' && !proofImage)}
+            disabled={submitting || (paymentType === 'Installment Payment' && (!selectedSchedule || installments.length === 0)) || (paymentType === 'Get Product' && !selectedProductId) || (paymentMethod !== 'Cash' && !proofImage)}
             className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl flex items-center justify-center gap-2 transition-colors disabled:opacity-50"
           >
             {submitting ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div> : <TbCurrencyPeso className="w-4 h-4" />}
-            <span>{submitting ? 'Processing...' : 'Submit Payment'}</span>
+            <span>{submitting ? 'Processing...' : (paymentType === 'Get Product' ? 'Submit Product Request' : 'Submit Payment')}</span>
           </button>
         </form>
-      )}
     </Modal>
   );
 }

@@ -506,7 +506,7 @@ export default function InstallmentsPage({ branchFilter: propBranchFilter, embed
                   className="flex items-center gap-2 px-4 py-2 bg-primary hover:bg-primary/90 text-primary-foreground font-semibold text-xs rounded-xl shadow-xs transition-all cursor-pointer"
                 >
                   <FiPlus className="w-4 h-4" />
-                  <span>New Account</span>
+                  <span>New Installment</span>
                 </button>
               )}
             </div>
@@ -708,7 +708,7 @@ export default function InstallmentsPage({ branchFilter: propBranchFilter, embed
 
                         {/* Total Amount */}
                         <td className="py-3 px-4 text-right font-mono font-semibold text-foreground">
-                          {fmt(inst.total_payable)}
+                          {fmt((inst.principal_amount || 0) + (inst.interest_amount || 0))}
                         </td>
 
                         {/* Down Payment */}

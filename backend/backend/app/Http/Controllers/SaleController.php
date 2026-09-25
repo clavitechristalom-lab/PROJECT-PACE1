@@ -172,13 +172,13 @@ class SaleController extends Controller
 
     public function store(Request $request)
     {
-        if ($request->user() && in_array($request->user()->role, ['Administrator', 'Store Administrator', 'Store Admin'])) {
-            return response()->json(['success' => false, 'message' => 'Administrators and Store Administrators are not authorized to create sales.'], 403);
+        if ($request->user() && in_array($request->user()->role, ['Administrator'])) {
+            return response()->json(['success' => false, 'message' => 'Administrators are not authorized to create sales.'], 403);
         }
 
         $validated = $request->validate([
             'customer_id' => 'required|exists:customers,customer_id',
-            'payment_method' => 'required|in:Cash,Installment',
+            'payment_method' => 'required|in:Cash,GCash,Maya,Bank Account,Installment',
             'items' => 'required|array|min:1',
             'items.*.product_id' => 'required|exists:products,product_id',
             'items.*.quantity' => 'required|integer|min:1',

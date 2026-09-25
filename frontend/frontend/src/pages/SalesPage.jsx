@@ -20,7 +20,7 @@ import MySalesChart from '../components/MySalesChart'
 export default function SalesPage({ branchFilter, embedded }) {
   const { user } = useAuth()
   const isAdmin = user?.role === 'Administrator'
-  const canCreateSale = !isAdmin && user?.role !== 'Store Administrator' && user?.role !== 'Store Admin'
+  const canCreateSale = !isAdmin
   const [sales, setSales] = useState([])
   const [products, setProducts] = useState([])
   const [customers, setCustomers] = useState([])
@@ -186,7 +186,7 @@ export default function SalesPage({ branchFilter, embedded }) {
 
   // Live aggregates
   const totalSalesVal = sales.reduce((acc, s) => acc + (s.total_amount || 0), 0)
-  const cashSalesVal = sales.filter(s => s.payment_method === 'Cash').reduce((acc, s) => acc + (s.total_amount || 0), 0)
+  const cashSalesVal = sales.filter(s => ['Cash', 'GCash', 'Maya', 'Bank Account'].includes(s.payment_method)).reduce((acc, s) => acc + (s.total_amount || 0), 0)
   const installmentSalesVal = sales.filter(s => s.payment_method === 'Installment').reduce((acc, s) => acc + (s.total_amount || 0), 0)
   const avgVal = sales.length > 0 ? totalSalesVal / sales.length : 0
 
@@ -279,6 +279,9 @@ export default function SalesPage({ branchFilter, embedded }) {
             >
               <option value="All">All Methods</option>
               <option value="Cash">Cash</option>
+              <option value="GCash">GCash</option>
+              <option value="Maya">Maya</option>
+              <option value="Bank Account">Bank Account</option>
               <option value="Installment">Installment</option>
             </select>
             <select
@@ -352,8 +355,8 @@ export default function SalesPage({ branchFilter, embedded }) {
                       <td className="py-3 px-4">
                         <Badge
                           text={s.payment_method}
-                          variant={s.payment_method === 'Cash' ? 'success' : 'info'}
-                          icon={s.payment_method === 'Cash' ? <TbCurrencyPeso className="w-3 h-3" /> : <FiCreditCard className="w-3 h-3" />}
+                          variant={['Cash', 'GCash', 'Maya', 'Bank Account'].includes(s.payment_method) ? 'success' : 'info'}
+                          icon={['Cash', 'GCash', 'Maya', 'Bank Account'].includes(s.payment_method) ? <TbCurrencyPeso className="w-3 h-3" /> : <FiCreditCard className="w-3 h-3" />}
                         />
                       </td>
                       <td className="py-3 px-4 text-right font-mono font-bold text-foreground">{fmt(s.total_amount)}</td>
@@ -399,7 +402,7 @@ export default function SalesPage({ branchFilter, embedded }) {
                 <span className="text-[10px] uppercase font-bold text-muted-foreground block mb-0.5">Billed To</span>
                 <p className="font-bold text-foreground text-sm">{viewSale.sale.customer_name}</p>
                 <div className="mt-1">
-                  <Badge text={viewSale.sale.payment_method} variant={viewSale.sale.payment_method === 'Cash' ? 'success' : 'info'} />
+                  <Badge text={viewSale.sale.payment_method} variant={['Cash', 'GCash', 'Maya', 'Bank Account'].includes(viewSale.sale.payment_method) ? 'success' : 'info'} />
                 </div>
               </div>
               <div className="text-right">
@@ -514,7 +517,10 @@ export default function SalesPage({ branchFilter, embedded }) {
                   className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground font-semibold"
                   required
                 >
-                  <option value="Cash">Cash (Immediate Settlement)</option>
+                  <option value="Cash">Cash</option>
+                  <option value="GCash">GCash</option>
+                  <option value="Maya">Maya</option>
+                  <option value="Bank Account">Bank Account</option>
                   <option value="Installment">Installment (Financing Contract)</option>
                 </select>
               </div>

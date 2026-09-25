@@ -138,13 +138,13 @@ class CustomerDashboardController extends Controller
             ->get();
 
         $formatted = $installments->map(function ($inst) {
-            $productName = 'Multiple Items';
+            $productName = 'Unknown Product';
             $imageUrl = null;
             if ($inst->sale && $inst->sale->items->count() === 1) {
-                $productName = $inst->sale->items->first()->product?->product_name ?? 'Unknown';
+                $productName = $inst->sale->items->first()->product?->product_name ?? 'Unknown Product';
                 $imageUrl = $inst->sale->items->first()->product?->image_url ?? null;
             } elseif ($inst->sale && $inst->sale->items->count() > 1) {
-                $productName = $inst->sale->items->first()->product?->product_name . ' + others';
+                $productName = 'Multiple Items';
                 $imageUrl = $inst->sale->items->first()->product?->image_url ?? null;
             }
 
@@ -161,7 +161,7 @@ class CustomerDashboardController extends Controller
                 'account_no' => $inst->account_no,
                 'product' => $productName,
                 'purchase_date' => $inst->start_date,
-                'total_amount' => $inst->total_payable,
+                'total_amount' => $inst->principal_amount + $inst->interest_amount,
                 'monthly_payment' => $inst->installment_amount,
                 'paid_amount' => $paidAmount,
                 'balance' => $balance,
@@ -169,6 +169,7 @@ class CustomerDashboardController extends Controller
                 'status' => $inst->status,
                 'image_url' => $imageUrl,
                 'installment_id' => $inst->installment_id,
+                'payment_method' => $inst->sale?->payment_method ?? 'Installment',
                 'paymentSchedules' => $inst->paymentSchedules
             ];
         });
@@ -201,7 +202,16 @@ class CustomerDashboardController extends Controller
         $product = Product::findOrFail($validated['product_id']);
         $actualPrice = $product->discount_price > 0 ? $product->discount_price : $product->unit_price;
 
-        return DB::transaction(function () use ($validated, $customerId, $product, $actualPrice, $request) {
+        $isFullPaymentMethod = in_array($validated['payment_method'], ['Cash', 'GCash', 'Maya', 'Bank Account']);
+        if ($isFullPaymentMethod) {
+            if (abs($validated['amount'] - $actualPrice) > 0.01) {
+                return response()->json([
+                    'message' => "The selected payment method ({$validated['payment_method']}) requires full payment of ₱" . number_format($actualPrice, 2) . ". Please select Installment if you only want to pay a downpayment."
+                ], 422);
+            }
+        }
+
+        return DB::transaction(function () use ($validated, $customerId, $product, $actualPrice, $isFullPaymentMethod, $request) {
             $sale = \App\Models\SaleTransaction::create([
                 'invoice_no'      => 'REQ-' . date('Ymd') . '-' . rand(1000, 9999),
                 'customer_id'     => $customerId,
@@ -238,8 +248,9 @@ class CustomerDashboardController extends Controller
                     'payment_date'   => now(),
                     'payment_method' => $validated['payment_method'],
                     'reference_no'   => $validated['reference_no'] ?? null,
-                    'notes'          => 'Downpayment for product request',
+                    'notes'          => $isFullPaymentMethod ? "{$validated['payment_method']} payment for product" : 'Downpayment for product request',
                     'processed_by'   => $request->user()->user_id,
+                    'status'         => $isFullPaymentMethod ? 'Completed' : 'Pending',
                 ]);
 
                 if ($request->hasFile('proof_of_payment')) {
@@ -266,12 +277,32 @@ class CustomerDashboardController extends Controller
                     'installment_amount' => 0,
                     'number_of_installments' => 0,
                     'frequency' => 'Monthly',
-                    'status' => 'Pending',
-                    'notes' => 'Pending approval for new product request',
+                    'status' => $isFullPaymentMethod ? 'Completed' : 'Pending',
+                    'notes' => $isFullPaymentMethod ? "Fully paid via {$validated['payment_method']}" : 'Pending approval for new product request',
                 ]);
 
                 $payment->installment_id = $instAccount->installment_id;
                 $payment->save();
+
+                if ($isFullPaymentMethod) {
+                    $sale->payment_method = $validated['payment_method'];
+                    $sale->status = 'Completed';
+                    $sale->save();
+
+                    $notifData = [
+                        'type' => 'payment_received',
+                        'title' => "{$validated['payment_method']} Payment Automatically Processed",
+                        'message' => "Customer {$request->user()->first_name} {$request->user()->last_name} has fully paid (₱" . number_format($validated['amount'], 2) . ") via {$validated['payment_method']} for the product {$product->product_name}.",
+                        'module' => 'Sales',
+                        'related_id' => $sale->sale_id,
+                        'related_type' => 'App\Models\SaleTransaction',
+                        'action_url' => "/sales?id={$sale->sale_id}",
+                        'priority' => 'high',
+                    ];
+
+                    \App\Services\NotificationService::sendToAdmins($notifData);
+                    \App\Services\NotificationService::sendToStoreAdmins($notifData, $product->branch_id);
+                }
             }
 
             return response()->json([

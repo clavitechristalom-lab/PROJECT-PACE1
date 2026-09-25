@@ -289,7 +289,7 @@ class DashboardController extends Controller
         $grossSales = (float)$sales->sum('subtotal') ?: (float)$sales->sum('total_amount');
         $discounts = (float)$sales->sum('discount_amount');
         $netSales = (float)$sales->sum('total_amount');
-        $cashSales = (float)$sales->where('payment_method', 'Cash')->sum('total_amount');
+        $cashSales = (float)$sales->whereIn('payment_method', ['Cash', 'GCash', 'Maya', 'Bank Account'])->sum('total_amount');
         $installmentSales = (float)$sales->where('payment_method', 'Installment')->sum('total_amount');
 
         // 2. Collections Performance

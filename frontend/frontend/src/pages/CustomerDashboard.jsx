@@ -7,6 +7,7 @@ import { BiWallet } from 'react-icons/bi';
 import { Spinner } from '../components/ui';
 import { useAuth } from '../context/AuthContext';
 import { useRealtimeSync, triggerDataSync } from '../lib/realtimeSync';
+import Swal from 'sweetalert2';
 
 import DashboardCard from '../components/customer/DashboardCard';
 import InstallmentLedger from '../components/customer/InstallmentLedger';
@@ -75,6 +76,40 @@ export default function CustomerDashboard() {
 
   const handleViewLedger = (installment) => {
     openModal('installmentAccount', installment.installment_id);
+  };
+
+  const handleDeleteLedger = async (installment) => {
+    const result = await Swal.fire({
+      title: 'Are you sure?',
+      text: `Do you want to delete the ledger for ${installment.product}?`,
+      icon: 'warning',
+      showCancelButton: true,
+      confirmButtonColor: '#176B87',
+      cancelButtonColor: '#d33',
+      confirmButtonText: 'Yes, delete it!'
+    });
+
+    if (result.isConfirmed) {
+      try {
+        await api.installments.delete(installment.installment_id);
+        fetchDashboardData();
+        triggerDataSync();
+        Swal.fire({
+          title: 'Deleted!',
+          text: 'The ledger has been deleted.',
+          icon: 'success',
+          confirmButtonColor: '#176B87'
+        });
+      } catch (err) {
+        console.error('Failed to delete ledger', err);
+        Swal.fire({
+          title: 'Error!',
+          text: 'Failed to delete ledger: ' + (err.response?.data?.message || err.message),
+          icon: 'error',
+          confirmButtonColor: '#176B87'
+        });
+      }
+    }
   };
 
   const handleQuickAction = (actionName) => {
@@ -196,7 +231,7 @@ export default function CustomerDashboard() {
         <div className="grid grid-cols-1 xl:grid-cols-3 gap-8">
           {/* Main Ledger Area */}
           <div className="xl:col-span-2">
-            <InstallmentLedger installments={installments} onView={handleViewLedger} />
+            <InstallmentLedger installments={installments} onView={handleViewLedger} onDelete={handleDeleteLedger} />
           </div>
 
           {/* Sidebar Area */}
