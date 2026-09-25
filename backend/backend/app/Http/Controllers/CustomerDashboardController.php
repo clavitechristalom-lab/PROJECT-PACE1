@@ -177,4 +177,107 @@ class CustomerDashboardController extends Controller
             'installments' => $formatted
         ]);
     }
+
+    public function requestProduct(Request $request)
+    {
+        $user = $request->user();
+        if (!$user || $user->role !== 'Customer') {
+            return response()->json(['message' => 'Unauthorized or missing customer profile'], 403);
+        }
+
+        $customerId = $user->customer_id;
+        if (!$customerId && $user->customer) {
+            $customerId = $user->customer->customer_id;
+        }
+
+        $validated = $request->validate([
+            'product_id' => 'required|exists:products,product_id',
+            'amount' => 'required|numeric|min:0',
+            'payment_method' => 'required|string',
+            'reference_no' => 'nullable|string|max:100',
+            'proof_of_payment' => 'nullable|file|mimes:jpeg,png,webp|max:5120',
+        ]);
+
+        $product = Product::findOrFail($validated['product_id']);
+        $actualPrice = $product->discount_price > 0 ? $product->discount_price : $product->unit_price;
+
+        return DB::transaction(function () use ($validated, $customerId, $product, $actualPrice, $request) {
+            $sale = \App\Models\SaleTransaction::create([
+                'invoice_no'      => 'REQ-' . date('Ymd') . '-' . rand(1000, 9999),
+                'customer_id'     => $customerId,
+                'processed_by'    => $request->user()->user_id,
+                'branch_id'       => $product->branch_id,
+                'sale_date'       => now(),
+                'payment_method'  => 'Installment',
+                'subtotal'        => $actualPrice,
+                'discount_amount' => 0,
+                'total_amount'    => $actualPrice,
+                'amount_paid'     => $validated['amount'],
+                'balance_due'     => max(0, $actualPrice - $validated['amount']),
+                'status'          => 'Pending',
+                'notes'           => 'Customer requested product via dashboard.',
+            ]);
+
+            \App\Models\SaleItem::create([
+                'sale_id'         => $sale->sale_id,
+                'product_id'      => $product->product_id,
+                'quantity'        => 1,
+                'unit_price'      => $actualPrice,
+                'discount_amount' => 0,
+                'line_total'      => $actualPrice,
+            ]);
+
+            // Save payment if any
+            if ($validated['amount'] > 0) {
+                $paymentCount = Payment::count() + 1;
+                $receiptNo = 'REC-' . date('Y') . '-' . str_pad($paymentCount, 5, '0', STR_PAD_LEFT);
+                
+                $payment = new Payment([
+                    'receipt_no'     => $receiptNo,
+                    'amount'         => $validated['amount'],
+                    'payment_date'   => now(),
+                    'payment_method' => $validated['payment_method'],
+                    'reference_no'   => $validated['reference_no'] ?? null,
+                    'notes'          => 'Downpayment for product request',
+                    'processed_by'   => $request->user()->user_id,
+                ]);
+
+                if ($request->hasFile('proof_of_payment')) {
+                    $path = $request->file('proof_of_payment')->store('payments', 'public');
+                    $payment->proof_of_payment = $path;
+                }
+                
+                // Note: We don't have an installment account yet, so we attach the payment to the sale directly or leave it pending.
+                // Wait, Payment requires installment_id! Let's create a pending InstallmentAccount.
+                
+                $accCount = InstallmentAccount::count() + 1;
+                $accountNo = 'REQ-' . str_pad($accCount, 4, '0', STR_PAD_LEFT);
+                
+                $instAccount = InstallmentAccount::create([
+                    'account_no' => $accountNo,
+                    'sale_id' => $sale->sale_id,
+                    'customer_id' => $customerId,
+                    'start_date' => now()->toDateString(),
+                    'principal_amount' => $actualPrice,
+                    'down_payment' => $validated['amount'],
+                    'interest_rate' => 0,
+                    'interest_amount' => 0,
+                    'total_payable' => max(0, $actualPrice - $validated['amount']),
+                    'installment_amount' => 0,
+                    'number_of_installments' => 0,
+                    'frequency' => 'Monthly',
+                    'status' => 'Pending',
+                    'notes' => 'Pending approval for new product request',
+                ]);
+
+                $payment->installment_id = $instAccount->installment_id;
+                $payment->save();
+            }
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Product request submitted successfully.',
+            ]);
+        });
+    }
 }

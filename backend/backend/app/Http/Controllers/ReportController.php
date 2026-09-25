@@ -351,7 +351,7 @@ class ReportController extends Controller
     {
         $products = Product::all();
 
-        $lowStock = $products->filter(fn($p) => $p->stock_quantity > 0 && $p->stock_quantity <= $p->reorder_level)->count();
+        $lowStock = $products->filter(fn($p) => $p->stock_quantity === 1)->count();
         $outOfStock = $products->where('stock_quantity', '<=', 0)->count();
         $totalValue = (float)$products->reduce(fn($carry, $p) => $carry + ($p->unit_price * $p->stock_quantity), 0);
 
@@ -532,7 +532,7 @@ class ReportController extends Controller
             $content['inventory_summary'] = [
                 'total_products' => $products->count(),
                 'in_stock' => $products->where('stock_quantity', '>', 0)->count(),
-                'low_stock' => $products->filter(fn($p) => $p->stock_quantity > 0 && $p->stock_quantity <= $p->reorder_level)->count(),
+                'low_stock' => $products->filter(fn($p) => $p->stock_quantity === 1)->count(),
                 'out_of_stock' => $products->where('stock_quantity', '<=', 0)->count(),
             ];
         }

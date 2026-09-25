@@ -172,8 +172,8 @@ class SaleController extends Controller
 
     public function store(Request $request)
     {
-        if ($request->user() && $request->user()->role === 'Administrator') {
-            return response()->json(['success' => false, 'message' => 'Admin is not authorized to create sales.'], 403);
+        if ($request->user() && in_array($request->user()->role, ['Administrator', 'Store Administrator', 'Store Admin'])) {
+            return response()->json(['success' => false, 'message' => 'Administrators and Store Administrators are not authorized to create sales.'], 403);
         }
 
         $validated = $request->validate([

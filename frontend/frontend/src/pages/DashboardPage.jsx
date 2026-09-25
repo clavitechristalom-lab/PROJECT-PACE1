@@ -329,7 +329,7 @@ function AdminBusinessDashboard() {
         />
         <StatCard
           title="Installment Sales"
-          value={fmt(stats?.installment_sales || 0)}
+          value={fmt(stats?.total_installment_sales || 0)}
           sub="credit financing volume"
           icon={<FiCreditCard className="w-5 h-5" />}
           color="purple"

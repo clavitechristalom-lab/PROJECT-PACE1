@@ -585,6 +585,7 @@ export const api = {
   customerApp: {
     getDashboard: () => request('/customer/dashboard'),
     getInstallments: () => request('/customer/installments'),
+    requestProduct: (data) => request('/customer/product-requests', { method: 'POST', body: data }),
   },
 
   // ─── Support Messages ───

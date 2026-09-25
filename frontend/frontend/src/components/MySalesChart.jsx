@@ -6,37 +6,27 @@ import {
 import { Card } from './ui'
 import { api } from '../lib/api'
 
-export default function MySalesChart() {
-  const [data, setData] = useState([])
-  const [loading, setLoading] = useState(true)
-
-  useEffect(() => {
-    async function load() {
-      try {
-        const res = await api.dashboard.getCharts()
-        if (res?.sales_trend) {
-          setData(res.sales_trend)
-        }
-      } catch (e) {
-        console.error('Failed to load chart data', e)
-      } finally {
-        setLoading(false)
-      }
-    }
-    load()
-  }, [])
-
-  if (loading) {
-    return (
-      <Card noPad className="p-4 border border-border flex items-center justify-center h-[300px] mb-6">
-        <div className="text-xs text-muted-foreground animate-pulse">Loading chart data...</div>
-      </Card>
-    )
-  }
-
-  if (!data || data.length === 0) {
+export default function MySalesChart({ sales }) {
+  if (!sales || sales.length === 0) {
     return null
   }
+
+  const grouped = {}
+  sales.forEach(s => {
+    const d = new Date(s.transaction_date || s.created_at)
+    const month = d.toLocaleString('default', { month: 'short' })
+    if (!grouped[month]) {
+      grouped[month] = { month, total_sales: 0, units: 0 }
+    }
+    grouped[month].total_sales += Number(s.total_amount) || 0
+    grouped[month].units += (s.items || []).reduce((sum, item) => sum + Number(item.quantity || 1), 0)
+  })
+
+  const data = Object.values(grouped).sort((a, b) => {
+    const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+    return months.indexOf(a.month) - months.indexOf(b.month)
+  })
+
 
   return (
     <Card noPad className="p-6 border border-border mb-6 bg-white dark:bg-card">

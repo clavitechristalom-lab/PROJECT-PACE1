@@ -11,11 +11,11 @@ import Swal from 'sweetalert2';
 export function ProductListModal({ isOpen, onClose, category, availableCategories = [], initialProductId = null }) {
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
-  
+
   // Search and Filter State
   const [searchQuery, setSearchQuery] = useState('');
   const [activeCategory, setActiveCategory] = useState(category || 'All');
-  
+
   // Carousel state
   const [currentIndex, setCurrentIndex] = useState(0);
   const itemsPerPage = 3; // Desktop: 3 product cards visible
@@ -88,18 +88,17 @@ export function ProductListModal({ isOpen, onClose, category, availableCategorie
                 <button
                   key={cat}
                   onClick={() => { setActiveCategory(cat); setCurrentIndex(0); }}
-                  className={`px-4 py-1.5 rounded-full text-sm font-semibold whitespace-nowrap transition-colors ${
-                    activeCategory === cat 
-                      ? 'bg-[#176B87] text-white cursor-default shadow-sm' 
-                      : 'bg-muted text-muted-foreground hover:bg-slate-200 dark:hover:bg-slate-800 cursor-pointer'
-                  }`}
+                  className={`px-4 py-1.5 rounded-full text-sm font-semibold whitespace-nowrap transition-colors ${activeCategory === cat
+                    ? 'bg-[#176B87] text-white cursor-default shadow-sm'
+                    : 'bg-muted text-muted-foreground hover:bg-slate-200 dark:hover:bg-slate-800 cursor-pointer'
+                    }`}
                 >
                   {cat}
                 </button>
               ))}
             </div>
             <div className="relative w-full sm:w-64">
-              <input 
+              <input
                 type="text"
                 placeholder="Search products..."
                 value={searchQuery}
@@ -115,31 +114,31 @@ export function ProductListModal({ isOpen, onClose, category, availableCategorie
             </div>
           ) : products.length === 0 ? (
             <div className="flex-1 flex items-center justify-center">
-              <EmptyState 
-                icon={<FiPackage className="w-12 h-12 text-muted-foreground/30 mx-auto" />} 
-                title={searchQuery ? "No matching products" : "No products found"} 
-                description={searchQuery ? `No products matching "${searchQuery}" in ${activeCategory}.` : `No products available in your branch at the moment.`} 
+              <EmptyState
+                icon={<FiPackage className="w-12 h-12 text-muted-foreground/30 mx-auto" />}
+                title={searchQuery ? "No matching products" : "No products found"}
+                description={searchQuery ? `No products matching "${searchQuery}" in ${activeCategory}.` : `No products available in your branch at the moment.`}
               />
             </div>
           ) : (
             <div className="flex flex-col flex-1 relative justify-between">
               <div className="flex items-center gap-2 flex-1">
-                <button 
-                  onClick={handlePrev} 
+                <button
+                  onClick={handlePrev}
                   disabled={currentIndex === 0}
                   className="p-2 shrink-0 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-30 disabled:cursor-not-allowed text-[#176B87]"
                 >
                   <FiChevronLeft className="w-6 h-6" />
                 </button>
-                
+
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4 flex-1 items-start">
                   {visibleProducts.map(p => {
                     const salePrice = p.discount_price || null;
                     const image = p.image_url || 'https://via.placeholder.com/300x200?text=No+Image';
 
                     return (
-                      <div 
-                        key={p.product_id} 
+                      <div
+                        key={p.product_id}
                         onClick={() => setSelectedProduct(p)}
                         className="border border-border rounded-xl p-0 bg-card flex flex-col hover:border-primary transition-colors cursor-pointer overflow-hidden shadow-sm hover:shadow-md h-full"
                       >
@@ -159,9 +158,9 @@ export function ProductListModal({ isOpen, onClose, category, availableCategorie
                         <div className="p-3 flex flex-col flex-1">
                           <div className="font-bold text-sm text-foreground leading-tight line-clamp-2">{p.product_name}</div>
                           <div className="text-[10px] font-mono text-muted-foreground uppercase mt-1">{p.brand || 'No Brand'}</div>
-                          
+
                           <p className="text-xs text-muted-foreground line-clamp-2 mt-2 flex-1">{p.description || 'No description available.'}</p>
-                          
+
                           <div className="mt-3 pt-2 border-t border-border flex flex-col shrink-0">
                             {salePrice ? (
                               <>
@@ -178,8 +177,8 @@ export function ProductListModal({ isOpen, onClose, category, availableCategorie
                   })}
                 </div>
 
-                <button 
-                  onClick={handleNext} 
+                <button
+                  onClick={handleNext}
                   disabled={currentIndex + itemsPerPage >= products.length}
                   className="p-2 shrink-0 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-30 disabled:cursor-not-allowed text-[#176B87]"
                 >
@@ -206,9 +205,9 @@ export function ProductListModal({ isOpen, onClose, category, availableCategorie
 
       {/* FOREGROUND MODAL: PRODUCT DETAIL MODAL */}
       {selectedProduct && (
-        <ProductDetailModal 
-          product={selectedProduct} 
-          onClose={() => setSelectedProduct(null)} 
+        <ProductDetailModal
+          product={selectedProduct}
+          onClose={() => setSelectedProduct(null)}
         />
       )}
     </>
@@ -239,7 +238,7 @@ function ProductDetailModal({ product, onClose }) {
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-[fadeIn_0.2s_ease]">
       <div className="bg-background rounded-2xl shadow-2xl w-full max-w-3xl overflow-hidden relative flex flex-col md:flex-row">
-        
+
         {/* Left: Image Gallery */}
         <div className="w-full md:w-1/2 bg-slate-100 dark:bg-slate-800 relative flex flex-col">
           {/* Close button for mobile */}
@@ -250,7 +249,7 @@ function ProductDetailModal({ product, onClose }) {
           <div className="relative flex-1 min-h-[300px]">
             <img src={images[currentImageIndex]} alt={product.product_name} className="w-full h-full object-contain p-4 absolute inset-0" />
             <div className="absolute inset-0 bg-gradient-to-t from-black/20 to-transparent pointer-events-none"></div>
-            
+
             {/* Gallery Counter */}
             {images.length > 1 && (
               <div className="absolute bottom-3 right-3 bg-black/50 text-white text-xs font-mono px-2 py-1 rounded backdrop-blur-md">
@@ -261,14 +260,14 @@ function ProductDetailModal({ product, onClose }) {
             {/* Navigation Arrows */}
             {images.length > 1 && (
               <>
-                <button 
+                <button
                   onClick={() => setCurrentImageIndex(prev => Math.max(0, prev - 1))}
                   disabled={currentImageIndex === 0}
                   className="absolute left-2 top-1/2 -translate-y-1/2 bg-black/30 hover:bg-black/60 text-white rounded-full p-1.5 disabled:opacity-0 transition-all"
                 >
                   <FiChevronLeft className="w-5 h-5" />
                 </button>
-                <button 
+                <button
                   onClick={() => setCurrentImageIndex(prev => Math.min(images.length - 1, prev + 1))}
                   disabled={currentImageIndex === images.length - 1}
                   className="absolute right-2 top-1/2 -translate-y-1/2 bg-black/30 hover:bg-black/60 text-white rounded-full p-1.5 disabled:opacity-0 transition-all"
@@ -283,8 +282,8 @@ function ProductDetailModal({ product, onClose }) {
           {images.length > 1 && (
             <div className="flex gap-2 p-3 bg-slate-200 dark:bg-slate-900 overflow-x-auto">
               {images.map((img, idx) => (
-                <button 
-                  key={idx} 
+                <button
+                  key={idx}
                   onClick={() => setCurrentImageIndex(idx)}
                   className={`w-16 h-12 shrink-0 rounded overflow-hidden border-2 transition-colors ${idx === currentImageIndex ? 'border-[#176B87]' : 'border-transparent'}`}
                 >
@@ -305,7 +304,7 @@ function ProductDetailModal({ product, onClose }) {
             <Badge variant="outline">{product.category}</Badge>
             <Badge variant={product.stock_quantity > 0 ? "success" : "destructive"}>{product.stock_quantity > 0 ? `${product.stock_quantity} in stock` : 'Out of Stock'}</Badge>
           </div>
-          
+
           <h2 className="text-2xl font-bold text-foreground leading-tight mt-1 mb-6">{product.product_name}</h2>
 
           {product.discount_price ? (
@@ -362,8 +361,8 @@ function ProductDetailModal({ product, onClose }) {
 
           {/* View Only Indicator (Replaces Add to Cart) */}
           <div className="w-full mt-6 bg-blue-50 dark:bg-blue-950/30 text-blue-800 dark:text-blue-300 border border-blue-100 dark:border-blue-900 font-medium py-3 px-4 rounded-xl flex items-center justify-center gap-2 text-sm text-center">
-             <FiAlertCircle className="w-5 h-5 shrink-0" /> 
-             <span>Product Catalog is for viewing only. Please visit the store branch to purchase.</span>
+            <FiAlertCircle className="w-5 h-5 shrink-0" />
+            <span>Product Catalog is for viewing only. Please visit the store branch to purchase.</span>
           </div>
         </div>
 
@@ -374,7 +373,7 @@ function ProductDetailModal({ product, onClose }) {
 
 export function PaymentDetailsModal({ isOpen, onClose, installments }) {
   // Extract upcoming schedules from installments
-  const schedules = installments.flatMap(i => 
+  const schedules = installments.flatMap(i =>
     (i.paymentSchedules || []).filter(s => s.status === 'Pending').map(s => ({
       ...s,
       product: i.product,
@@ -459,8 +458,8 @@ export function CreditDetailsModal({ isOpen, onClose, installments }) {
 }
 
 export function OverduePaymentsModal({ isOpen, onClose, installments }) {
-  const overdueSchedules = installments.flatMap(i => 
-    (i.paymentSchedules || []).filter(s => s.status === 'Pending' && new Date(s.due_date) < new Date(new Date().setHours(0,0,0,0))).map(s => ({
+  const overdueSchedules = installments.flatMap(i =>
+    (i.paymentSchedules || []).filter(s => s.status === 'Pending' && new Date(s.due_date) < new Date(new Date().setHours(0, 0, 0, 0))).map(s => ({
       ...s,
       product: i.product,
       account_no: i.account_no
@@ -535,9 +534,9 @@ export function InstallmentAccountDetailsModal({ isOpen, onClose, installmentId 
           {/* Product Info Section */}
           <div className="flex flex-col sm:flex-row gap-6 p-5 bg-slate-50 dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800">
             {item && (item.image_url || item.image) ? (
-              <img 
-                src={(item.image_url || item.image)?.startsWith('http') ? (item.image_url || item.image) : `http://127.0.0.1:8000${item.image_url || item.image}`} 
-                alt={item.product_name} 
+              <img
+                src={(item.image_url || item.image)?.startsWith('http') ? (item.image_url || item.image) : `http://127.0.0.1:8000${item.image_url || item.image}`}
+                alt={item.product_name}
                 className="w-32 h-32 object-cover rounded-xl border border-slate-200 dark:border-slate-700 bg-white shrink-0 shadow-sm"
                 onError={(e) => { e.target.src = 'https://via.placeholder.com/150?text=No+Image'; }}
               />
@@ -553,7 +552,7 @@ export function InstallmentAccountDetailsModal({ isOpen, onClose, installmentId 
                 </h3>
                 <StatusBadge status={acc.status} />
               </div>
-              
+
               {item && item.description && (
                 <p className="text-sm text-slate-500 dark:text-slate-400 mb-3 line-clamp-2">
                   {item.description}
@@ -571,7 +570,7 @@ export function InstallmentAccountDetailsModal({ isOpen, onClose, installmentId 
 
           {/* Financials Section */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-             <div className="p-4 bg-[var(--card)] border border-slate-200 dark:border-slate-800 rounded-xl">
+            <div className="p-4 bg-[var(--card)] border border-slate-200 dark:border-slate-800 rounded-xl">
               <div className="text-xs text-slate-500 uppercase font-semibold mb-1">Total Price</div>
               <div className="text-lg font-mono font-bold text-slate-800 dark:text-slate-100">{fmt(acc.total_payable)}</div>
             </div>
@@ -676,30 +675,30 @@ export function StatementModal({ isOpen, onClose }) {
         api.transactions.getAll({ customer_id: user.customer_id, type: 'Sale' }),
         api.payments.getAll({ customer_id: user.customer_id })
       ])
-      .then(([salesRes, paymentsRes]) => {
-        const sales = (salesRes.transactions || []).map(s => ({
-          date: s.sale_date,
-          reference: s.invoice_no,
-          type: 'Purchase',
-          amount: parseFloat(s.total_amount),
-          status: s.status,
-          rawDate: new Date(s.sale_date)
-        }));
-        
-        const payments = (paymentsRes.payments || []).map(p => ({
-          date: p.payment_date,
-          reference: p.receipt_no,
-          type: 'Payment',
-          amount: parseFloat(p.amount),
-          status: p.status,
-          rawDate: new Date(p.payment_date)
-        }));
+        .then(([salesRes, paymentsRes]) => {
+          const sales = (salesRes.transactions || []).map(s => ({
+            date: s.sale_date,
+            reference: s.invoice_no,
+            type: 'Purchase',
+            amount: parseFloat(s.total_amount),
+            status: s.status,
+            rawDate: new Date(s.sale_date)
+          }));
 
-        const combined = [...sales, ...payments].sort((a, b) => b.rawDate - a.rawDate);
-        setStatements(combined);
-      })
-      .catch(err => console.error(err))
-      .finally(() => setLoading(false));
+          const payments = (paymentsRes.payments || []).map(p => ({
+            date: p.payment_date,
+            reference: p.receipt_no,
+            type: 'Payment',
+            amount: parseFloat(p.amount),
+            status: p.status,
+            rawDate: new Date(p.payment_date)
+          }));
+
+          const combined = [...sales, ...payments].sort((a, b) => b.rawDate - a.rawDate);
+          setStatements(combined);
+        })
+        .catch(err => console.error(err))
+        .finally(() => setLoading(false));
     }
   }, [isOpen, user]);
 
@@ -753,6 +752,9 @@ export function MakePaymentModal({ isOpen, onClose, installments, onPaymentSucce
   const [proofPreview, setProofPreview] = useState(null);
   const [submitting, setSubmitting] = useState(false);
 
+  const [products, setProducts] = useState([]);
+  const [selectedProductId, setSelectedProductId] = useState('');
+
   const pendingSchedules = installments.flatMap(i => {
     const paid = (i.payments || []).reduce((sum, p) => sum + Number(p.amount), 0);
     const balance = Math.max(0, Number(i.total_payable || 0) - paid);
@@ -767,11 +769,14 @@ export function MakePaymentModal({ isOpen, onClose, installments, onPaymentSucce
 
   // Auto-clear when type changes
   useEffect(() => {
-    if (paymentType === 'Get New Product') {
+    if (paymentType === 'Get Product') {
       setSelectedSchedule('');
       setAmount('');
+      if (products.length === 0) {
+        api.products.getAll({ status: 'Active' }).then(res => setProducts(res.products || [])).catch(console.error);
+      }
     }
-  }, [paymentType]);
+  }, [paymentType, products.length]);
 
   const handleScheduleChange = (e) => {
     const val = e.target.value;
@@ -798,7 +803,7 @@ export function MakePaymentModal({ isOpen, onClose, installments, onPaymentSucce
       });
       return;
     }
-    
+
     if (file.size > 5 * 1024 * 1024) {
       Swal.fire({
         title: 'File Too Large',
@@ -817,39 +822,42 @@ export function MakePaymentModal({ isOpen, onClose, installments, onPaymentSucce
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (paymentType === 'Installment Payment' && !selectedSchedule) return;
+    if (paymentType === 'Get Product' && !selectedProductId) {
+      Swal.fire({ icon: 'warning', title: 'Missing Product', text: 'Please select a product first.' });
+      return;
+    }
     if (!amount) return;
-    
+
     setSubmitting(true);
     try {
       const formData = new FormData();
-      
-      let instId = '';
+
       if (paymentType === 'Installment Payment') {
         const schedule = pendingSchedules.find(s => s.schedule_id.toString() === selectedSchedule);
-        if (schedule) instId = schedule.installment_id;
+        if (!schedule) throw new Error('No active installment account found.');
+
+        formData.append('installment_id', schedule.installment_id);
         formData.append('schedule_id', selectedSchedule);
+        formData.append('amount', amount);
+        formData.append('payment_method', paymentMethod);
+        if (referenceNumber) formData.append('reference_no', referenceNumber);
+        if (proofImage) formData.append('proof_of_payment', proofImage);
+
+        await api.payments.create(formData);
       } else {
-        if (installments.length > 0) {
-          instId = installments[0].installment_id;
-        }
-      }
-      
-      if (!instId) {
-        throw new Error('No active installment account found.');
-      }
+        formData.append('product_id', selectedProductId);
+        formData.append('amount', amount);
+        formData.append('payment_method', paymentMethod);
+        if (referenceNumber) formData.append('reference_no', referenceNumber);
+        if (proofImage) formData.append('proof_of_payment', proofImage);
 
-      formData.append('installment_id', instId);
-      formData.append('amount', amount);
-      formData.append('payment_method', paymentMethod);
-      if (referenceNumber) formData.append('reference_no', referenceNumber);
-      if (proofImage) formData.append('proof_of_payment', proofImage);
-
-      await api.payments.create(formData);
+        await api.customerApp.requestProduct(formData);
+      }
 
       Swal.fire({
         icon: 'success',
-        title: 'Payment Submitted',
-        text: 'Your payment request has been received and applied.',
+        title: paymentType === 'Get Product' ? 'Request Submitted' : 'Payment Submitted',
+        text: paymentType === 'Get Product' ? 'Your new product request has been successfully submitted.' : 'Your payment request has been received and applied.',
         background: document.documentElement.classList.contains('dark') ? '#1e293b' : '#fff',
         color: document.documentElement.classList.contains('dark') ? '#f8fafc' : '#0f172a',
         confirmButtonColor: '#176B87'
@@ -857,7 +865,7 @@ export function MakePaymentModal({ isOpen, onClose, installments, onPaymentSucce
       triggerDataSync('payments');
       triggerDataSync('installments');
       onClose();
-      if(onPaymentSuccess) onPaymentSuccess();
+      if (onPaymentSuccess) onPaymentSuccess();
     } catch (err) {
       console.error(err);
       Swal.fire({
@@ -887,28 +895,26 @@ export function MakePaymentModal({ isOpen, onClose, installments, onPaymentSucce
               <button
                 type="button"
                 onClick={() => setPaymentType('Installment Payment')}
-                className={`py-2.5 rounded-xl text-sm font-bold border transition-colors ${
-                  paymentType === 'Installment Payment'
-                    ? 'bg-blue-600/20 border-blue-600 text-blue-600 dark:bg-blue-500/20 dark:border-blue-500 dark:text-blue-400'
-                    : 'bg-transparent border-border text-foreground hover:bg-muted/50'
-                }`}
+                className={`py-2.5 rounded-xl text-sm font-bold border transition-colors ${paymentType === 'Installment Payment'
+                  ? 'bg-blue-600/20 border-blue-600 text-blue-600 dark:bg-blue-500/20 dark:border-blue-500 dark:text-blue-400'
+                  : 'bg-transparent border-border text-foreground hover:bg-muted/50'
+                  }`}
               >
                 Installment Payment
               </button>
               <button
                 type="button"
-                onClick={() => setPaymentType('Get New Product')}
-                className={`py-2.5 rounded-xl text-sm font-bold border transition-colors ${
-                  paymentType === 'Get New Product'
-                    ? 'bg-blue-600/20 border-blue-600 text-blue-600 dark:bg-blue-500/20 dark:border-blue-500 dark:text-blue-400'
-                    : 'bg-transparent border-border text-foreground hover:bg-muted/50'
-                }`}
+                onClick={() => setPaymentType('Get Product')}
+                className={`py-2.5 rounded-xl text-sm font-bold border transition-colors ${paymentType === 'Get New Product'
+                  ? 'bg-blue-600/20 border-blue-600 text-blue-600 dark:bg-blue-500/20 dark:border-blue-500 dark:text-blue-400'
+                  : 'bg-transparent border-border text-foreground hover:bg-muted/50'
+                  }`}
               >
-                Get New Product
+                Get Product
               </button>
             </div>
           </div>
-          
+
           {paymentType === 'Installment Payment' && (
             <div className="space-y-3">
               <div>
@@ -955,20 +961,39 @@ export function MakePaymentModal({ isOpen, onClose, installments, onPaymentSucce
             </div>
           )}
 
-          {paymentType === 'Get New Product' && (
-            <div>
-              <label className="block text-xs font-bold text-muted-foreground mb-1">Payment Amount</label>
-              <div className="relative">
-                <TbCurrencyPeso className="absolute left-3 top-2.5 text-muted-foreground w-4 h-4" />
-                <input 
-                  type="number"
-                  step="0.01"
-                  min="1"
-                  value={amount}
-                  onChange={e => setAmount(e.target.value)}
+          {paymentType === 'Get Product' && (
+            <div className="space-y-3">
+              <div>
+                <label className="block text-xs font-bold text-muted-foreground mb-1">Select Product</label>
+                <select
+                  value={selectedProductId}
+                  onChange={e => setSelectedProductId(e.target.value)}
                   required
-                  className="w-full pl-9 pr-3 py-2 rounded-xl border border-border bg-card text-foreground font-mono focus:ring-2 focus:ring-blue-500/20 outline-none"
-                />
+                  className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground text-sm"
+                >
+                  <option value="">-- Choose a Product --</option>
+                  {products.map(p => (
+                    <option key={p.product_id} value={p.product_id}>
+                      {p.product_name} - {fmt(p.discount_price > 0 ? p.discount_price : p.unit_price)}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-muted-foreground mb-1">Downpayment Amount</label>
+                <div className="relative">
+                  <TbCurrencyPeso className="absolute left-3 top-2.5 text-muted-foreground w-4 h-4" />
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={amount}
+                    onChange={e => setAmount(e.target.value)}
+                    required
+                    className="w-full pl-9 pr-3 py-2 rounded-xl border border-border bg-card text-foreground font-mono focus:ring-2 focus:ring-blue-500/20 outline-none"
+                  />
+                </div>
               </div>
             </div>
           )}
@@ -976,32 +1001,32 @@ export function MakePaymentModal({ isOpen, onClose, installments, onPaymentSucce
           <div>
             <label className="block text-xs font-bold text-muted-foreground mb-1">Payment Method</label>
             <div className="flex flex-wrap gap-2">
-              {(paymentType === 'Get New Product' ? ['Cash', 'GCash', 'Maya', 'Bank Account', 'Installment'] : ['Cash', 'GCash', 'Maya', 'Bank Account']).map(method => {
+              {(paymentType === 'Get Product' ? ['Cash', 'GCash', 'Maya', 'Bank Account', 'Installment'] : ['Cash', 'GCash', 'Maya', 'Bank Account']).map(method => {
                 const isDisabled = method === 'Installment' && pendingSchedules.length > 0;
                 return (
-                <button
-                  key={method}
-                  type="button"
-                  disabled={isDisabled}
-                  onClick={() => setPaymentMethod(method)}
-                  className={`py-2 px-4 flex-1 min-w-[80px] rounded-xl text-xs font-bold border transition-colors ${
-                    isDisabled 
+                  <button
+                    key={method}
+                    type="button"
+                    disabled={isDisabled}
+                    onClick={() => setPaymentMethod(method)}
+                    className={`py-2 px-4 flex-1 min-w-[80px] rounded-xl text-xs font-bold border transition-colors ${isDisabled
                       ? 'bg-muted/50 text-muted-foreground opacity-50 cursor-not-allowed border-transparent'
                       : paymentMethod === method
                         ? 'bg-blue-600/20 border-blue-600 text-blue-600 dark:bg-blue-500/20 dark:border-blue-500 dark:text-blue-400'
                         : 'bg-transparent border-border text-foreground hover:bg-muted/50'
-                  }`}
-                  title={isDisabled ? "Cannot use Installment while you have a pending balance" : ""}
-                >
-                  {method}
-                </button>
-              )})}
+                      }`}
+                    title={isDisabled ? "Cannot use Installment while you have a pending balance" : ""}
+                  >
+                    {method}
+                  </button>
+                )
+              })}
             </div>
           </div>
 
           <div>
             <label className="block text-xs font-bold text-muted-foreground mb-1">Transaction Reference</label>
-            <input 
+            <input
               type="text"
               value={referenceNumber}
               onChange={e => setReferenceNumber(e.target.value)}
@@ -1016,7 +1041,7 @@ export function MakePaymentModal({ isOpen, onClose, installments, onPaymentSucce
               Proof of Payment {paymentMethod !== 'Cash' && <span className="text-blue-500">*</span>}
             </label>
             <div className="relative w-full border-2 border-dashed border-border rounded-xl p-4 flex flex-col items-center justify-center bg-card text-center overflow-hidden hover:bg-muted/30 transition-colors">
-              <input 
+              <input
                 type="file"
                 accept="image/jpeg, image/png, image/webp"
                 onChange={handleImageChange}
@@ -1036,11 +1061,11 @@ export function MakePaymentModal({ isOpen, onClose, installments, onPaymentSucce
               )}
             </div>
           </div>
-          
+
           <div className="bg-blue-50 dark:bg-blue-950/20 p-3 rounded-xl border border-blue-100 dark:border-blue-900 text-xs text-blue-700 dark:text-blue-300">
             <strong>Note:</strong> Online payments are subject to review. It may take 1-2 business days for the payment to reflect in your account balance.
           </div>
-          
+
           <button
             type="submit"
             disabled={submitting || (paymentType === 'Installment Payment' && !selectedSchedule) || (paymentMethod !== 'Cash' && !proofImage)}
@@ -1091,7 +1116,7 @@ export function SupportModal({ isOpen, onClose }) {
   const handleSubmit = async (e) => {
     e.preventDefault();
     setSubmitting(true);
-    
+
     try {
       await api.supportMessages.create({ topic, message });
       Swal.fire({
@@ -1170,11 +1195,10 @@ export function SupportModal({ isOpen, onClose }) {
         <button
           type="button"
           onClick={() => setActiveTab('submit')}
-          className={`flex-1 py-2.5 text-sm font-bold text-center border-b-2 transition-colors cursor-pointer ${
-            activeTab === 'submit'
-              ? 'border-primary text-primary'
-              : 'border-transparent text-muted-foreground hover:text-foreground'
-          }`}
+          className={`flex-1 py-2.5 text-sm font-bold text-center border-b-2 transition-colors cursor-pointer ${activeTab === 'submit'
+            ? 'border-primary text-primary'
+            : 'border-transparent text-muted-foreground hover:text-foreground'
+            }`}
         >
           <span className="flex items-center justify-center gap-2">
             <FiMessageCircle className="w-4 h-4" />
@@ -1184,11 +1208,10 @@ export function SupportModal({ isOpen, onClose }) {
         <button
           type="button"
           onClick={() => setActiveTab('history')}
-          className={`flex-1 py-2.5 text-sm font-bold text-center border-b-2 transition-colors cursor-pointer ${
-            activeTab === 'history'
-              ? 'border-primary text-primary'
-              : 'border-transparent text-muted-foreground hover:text-foreground'
-          }`}
+          className={`flex-1 py-2.5 text-sm font-bold text-center border-b-2 transition-colors cursor-pointer ${activeTab === 'history'
+            ? 'border-primary text-primary'
+            : 'border-transparent text-muted-foreground hover:text-foreground'
+            }`}
         >
           <span className="flex items-center justify-center gap-2">
             <FiClock className="w-4 h-4" />
@@ -1207,7 +1230,7 @@ export function SupportModal({ isOpen, onClose }) {
           <div className="text-sm text-muted-foreground mb-4">
             Need help with your account or an appliance? Send us a message and our support team will assist you.
           </div>
-          
+
           <div>
             <label className="block text-xs font-bold text-muted-foreground mb-1">Topic</label>
             <select
@@ -1223,7 +1246,7 @@ export function SupportModal({ isOpen, onClose }) {
               <option value="Other">Other Inquiry</option>
             </select>
           </div>
-          
+
           <div>
             <label className="block text-xs font-bold text-muted-foreground mb-1">Message</label>
             <textarea
@@ -1235,7 +1258,7 @@ export function SupportModal({ isOpen, onClose }) {
               className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground text-sm resize-none"
             ></textarea>
           </div>
-          
+
           <button
             type="submit"
             disabled={submitting}
@@ -1264,11 +1287,10 @@ export function SupportModal({ isOpen, onClose }) {
                 <div>
                   <div className="flex items-center gap-2 mb-1.5 flex-wrap">
                     <span className="text-xs font-bold text-primary uppercase tracking-wider">{m.topic}</span>
-                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${
-                      m.status === 'Responded'
-                        ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400'
-                        : 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400'
-                    }`}>
+                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${m.status === 'Responded'
+                      ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400'
+                      : 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400'
+                      }`}>
                       {m.status}
                     </span>
                     <span className="text-[10px] text-muted-foreground font-mono ml-auto">
@@ -1321,11 +1343,10 @@ export function SupportModal({ isOpen, onClose }) {
                 {m.chat_history?.map((chat, idx) => {
                   const isCustomer = chat.sender === 'Customer';
                   return (
-                    <div key={idx} className={`mt-2 border-l-2 pl-3 py-2 rounded-r-xl ${
-                      isCustomer 
-                        ? 'border-primary/50 bg-primary/5' 
-                        : 'border-emerald-500 bg-emerald-50/50 dark:bg-emerald-900/10'
-                    }`}>
+                    <div key={idx} className={`mt-2 border-l-2 pl-3 py-2 rounded-r-xl ${isCustomer
+                      ? 'border-primary/50 bg-primary/5'
+                      : 'border-emerald-500 bg-emerald-50/50 dark:bg-emerald-900/10'
+                      }`}>
                       <div className="flex items-center gap-2 mb-1">
                         {isCustomer ? <FiMessageCircle className="w-3.5 h-3.5 text-primary" /> : <FiCheckCircle className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />}
                         <span className={`text-xs font-bold ${isCustomer ? 'text-primary' : 'text-emerald-700 dark:text-emerald-400'}`}>
@@ -1368,40 +1389,40 @@ export function SupportModal({ isOpen, onClose }) {
                   }
 
                   return (
-                      <form onSubmit={async (e) => {
-                        e.preventDefault();
-                        const formData = new FormData(e.target);
-                        const reply = formData.get('reply');
-                        if (!reply.trim()) return;
-                        const btn = e.target.querySelector('button[type="submit"]');
-                        btn.disabled = true;
-                        btn.innerHTML = '<span class="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin block"></span>';
-                        try {
-                          await api.supportMessages.update(m.id, { new_message: reply });
-                          loadMyMessages(true);
-                          e.target.reset();
-                        } catch (err) {
-                          console.error(err);
-                          alert('Failed to send reply: ' + (err.response?.data?.message || err.message));
-                        } finally {
-                          btn.disabled = false;
-                          btn.innerText = 'Reply';
-                        }
-                      }} className="mt-3 flex gap-2">
-                        <input
-                          type="text"
-                          name="reply"
-                          placeholder="Type your reply to the admin..."
-                          className="flex-1 px-3 py-1.5 rounded-lg border border-emerald-200 dark:border-emerald-800 bg-white dark:bg-card text-xs focus:outline-none focus:ring-1 focus:ring-emerald-500"
-                          required
-                        />
-                        <button
-                          type="submit"
-                          className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg transition-colors flex items-center justify-center min-w-[60px]"
-                        >
-                          Reply
-                        </button>
-                      </form>
+                    <form onSubmit={async (e) => {
+                      e.preventDefault();
+                      const formData = new FormData(e.target);
+                      const reply = formData.get('reply');
+                      if (!reply.trim()) return;
+                      const btn = e.target.querySelector('button[type="submit"]');
+                      btn.disabled = true;
+                      btn.innerHTML = '<span class="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin block"></span>';
+                      try {
+                        await api.supportMessages.update(m.id, { new_message: reply });
+                        loadMyMessages(true);
+                        e.target.reset();
+                      } catch (err) {
+                        console.error(err);
+                        alert('Failed to send reply: ' + (err.response?.data?.message || err.message));
+                      } finally {
+                        btn.disabled = false;
+                        btn.innerText = 'Reply';
+                      }
+                    }} className="mt-3 flex gap-2">
+                      <input
+                        type="text"
+                        name="reply"
+                        placeholder="Type your reply to the admin..."
+                        className="flex-1 px-3 py-1.5 rounded-lg border border-emerald-200 dark:border-emerald-800 bg-white dark:bg-card text-xs focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                        required
+                      />
+                      <button
+                        type="submit"
+                        className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg transition-colors flex items-center justify-center min-w-[60px]"
+                      >
+                        Reply
+                      </button>
+                    </form>
                   );
                 })()}
               </div>

@@ -19,7 +19,7 @@ import MySalesChart from '../components/MySalesChart'
 
 import { useAuth } from '../context/AuthContext'
 
-const STOCK_STATUSES = ['All', 'In Stock', 'Low Stock', 'Out of Stock']
+const STOCK_STATUSES = ['All', 'High Stock', 'Medium Stock', 'Low Stock', 'Out of Stock']
 
 export default function ProductsPage({ branchFilter, embedded }) {
   const { user } = useAuth()
@@ -325,7 +325,9 @@ export default function ProductsPage({ branchFilter, embedded }) {
 
   // Quick stats computed from current product collection
   const totalProducts = products.length
-  const lowStockCount = products.filter(p => p.stock_quantity > 0 && p.stock_quantity <= p.reorder_level).length
+  const lowStockCount = products.filter(p => p.stock_quantity === 1).length
+  const mediumStockCount = products.filter(p => p.stock_quantity >= 2 && p.stock_quantity <= 4).length
+  const highStockCount = products.filter(p => p.stock_quantity >= 5).length
   const outOfStockCount = products.filter(p => p.stock_quantity === 0).length
   const totalValue = products.reduce((acc, p) => acc + ((p.unit_price || 0) * (p.stock_quantity || 0)), 0)
 
@@ -453,7 +455,9 @@ export default function ProductsPage({ branchFilter, embedded }) {
                 <tbody className="divide-y divide-border">
                   {paginated.map((p, i) => {
                     const isOut = p.stock_quantity === 0
-                    const isLow = p.stock_quantity > 0 && p.stock_quantity <= p.reorder_level
+                    const isLow = p.stock_quantity === 1
+                    const isMedium = p.stock_quantity >= 2 && p.stock_quantity <= 4
+                    const isHigh = p.stock_quantity >= 5
                     return (
                       <tr key={p.product_id} className={`hover:bg-muted/40 transition-colors ${i % 2 === 1 ? 'bg-muted/10' : ''}`}>
                         <td className="py-3 px-4 font-mono font-bold text-foreground">
@@ -498,11 +502,13 @@ export default function ProductsPage({ branchFilter, embedded }) {
                         </td>
                         <td className="py-3 px-4 text-center">
                           <div className="flex items-center justify-center gap-1.5 font-mono font-bold">
-                            <span className={isOut ? 'text-rose-600' : isLow ? 'text-amber-600' : 'text-emerald-600'}>
+                            <span className={isOut ? 'text-rose-600' : isLow ? 'text-rose-400' : isMedium ? 'text-amber-500' : 'text-emerald-500'}>
                               {p.stock_quantity} {p.unit}
                             </span>
                             {isOut && <span className="text-[9px] bg-rose-100 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300 font-bold px-1.5 py-0.2 rounded-full border border-rose-300">OUT</span>}
-                            {isLow && <span className="text-[9px] bg-amber-100 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 font-bold px-1.5 py-0.2 rounded-full border border-amber-300">LOW</span>}
+                            {isLow && <span className="text-[9px] bg-rose-50 dark:bg-rose-950/40 text-rose-600 dark:text-rose-400 font-bold px-1.5 py-0.2 rounded-full border border-rose-200">LOW</span>}
+                            {isMedium && <span className="text-[9px] bg-amber-100 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 font-bold px-1.5 py-0.2 rounded-full border border-amber-300">MED</span>}
+                            {isHigh && <span className="text-[9px] bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 font-bold px-1.5 py-0.2 rounded-full border border-emerald-300">HIGH</span>}
                           </div>
                         </td>
                         <td className="py-3 px-4 text-center">

@@ -545,7 +545,7 @@ class SystemController extends Controller
         }
 
         // 2. Low stock alert
-        $lowStock = Product::whereColumn('stock_quantity', '<=', 'reorder_level')->take(2)->get();
+        $lowStock = Product::where('stock_quantity', 1)->take(2)->get();
         foreach ($lowStock as $lp) {
             $notifs[] = [
                 'id' => $id++,

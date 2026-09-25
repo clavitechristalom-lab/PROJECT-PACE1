@@ -150,7 +150,7 @@ const STATUS_COLORS = {
   Overdue: 'red', Inactive: 'red', Absent: 'red', Cancelled: 'red',
   Pending: 'yellow', Draft: 'yellow', Late: 'yellow', Open: 'yellow', 'Half Day': 'yellow',
   'Partially Paid': 'purple', Processing: 'blue', 'On Leave': 'indigo', 'Rest Day': 'gray',
-  'In Stock': 'green', 'Low Stock': 'yellow', 'Out of Stock': 'red',
+  'In Stock': 'green', 'High Stock': 'blue', 'Medium Stock': 'orange', 'Low Stock': 'yellow', 'Out of Stock': 'red',
   Administrator: 'blue', 'Store Administrator': 'indigo', Employee: 'gray',
   Closed: 'gray',
 }

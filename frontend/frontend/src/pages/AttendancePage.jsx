@@ -398,7 +398,7 @@ export default function AttendancePage() {
             setPunchResult({
               ...punchResult,
               action: res.action.replace('ATTENDANCE_', ''),
-              time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+              time: res.time || new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
               date: new Date().toLocaleDateString(),
               message: `ATTENDANCE SUCCESS`,
             })

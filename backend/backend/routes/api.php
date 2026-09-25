@@ -218,6 +218,7 @@ Route::middleware('auth:sanctum')->group(function () {
     // 🌟 Customer App 🌟
     Route::get('/customer/dashboard', [CustomerDashboardController::class, 'getDashboard']);
     Route::get('/customer/installments', [CustomerDashboardController::class, 'getInstallments']);
+    Route::post('/customer/product-requests', [CustomerDashboardController::class, 'requestProduct']);
     
     // Support Messages
     Route::get('/support-messages', [\App\Http\Controllers\SupportMessageController::class, 'index']);

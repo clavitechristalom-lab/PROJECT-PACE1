@@ -547,9 +547,10 @@ class AttendanceController extends Controller
         $employee->pin_locked_until = null;
         $employee->save();
 
-        $today = date('Y-m-d');
-        $now = date('H:i:s');
-        $timeStr = date('h:i A');
+        $scanTime = $log->created_at ? \Carbon\Carbon::parse($log->created_at) : now();
+        $today = $scanTime->format('Y-m-d');
+        $now = $scanTime->format('H:i:s');
+        $timeStr = $scanTime->format('h:i A');
 
         $record = \App\Models\Attendance::where('employee_id', $employee->employee_id)
             ->where('attendance_date', $today)
@@ -585,8 +586,8 @@ class AttendanceController extends Controller
                 $record->total_hours = 0;
                 $record->overtime_hours = 0;
                 
-                $hour = (int)date('H');
-                $min = (int)date('i');
+                $hour = (int)$scanTime->format('H');
+                $min = (int)$scanTime->format('i');
                 if ($hour > 8 || ($hour === 8 && $min > 15)) {
                     $record->status = 'Late';
                 } else {
@@ -731,10 +732,12 @@ class AttendanceController extends Controller
     public function checkVerification(Request $request, $id)
     {
         $log = AttendanceScanLog::with('employee')->findOrFail($id);
+        $scanTime = $log->created_at ? \Carbon\Carbon::parse($log->created_at) : now();
         return response()->json([
             'status' => $log->status,
             'action' => $log->action_type,
-            'log' => $log
+            'log' => $log,
+            'time' => $scanTime->format('h:i A')
         ]);
     }
 
@@ -814,9 +817,10 @@ class AttendanceController extends Controller
         // ─── ATTENDANCE BELONGS TO THE SCANNED EMPLOYEE ───
         $storeAdminUser = \App\Models\User::with('employee')->find($log->scanned_by);
         
-        $today = date('Y-m-d');
-        $now = date('H:i:s');
-        $timeStr = date('h:i A');
+        $scanTime = $log->created_at ? \Carbon\Carbon::parse($log->created_at) : now();
+        $today = $scanTime->format('Y-m-d');
+        $now = $scanTime->format('H:i:s');
+        $timeStr = $scanTime->format('h:i A');
 
         $record = \App\Models\Attendance::where('employee_id', $employee->employee_id)
             ->where('attendance_date', $today)
@@ -851,8 +855,8 @@ class AttendanceController extends Controller
             $record->total_hours = 0;
             $record->overtime_hours = 0;
             
-            $hour = (int)date('H');
-            $min = (int)date('i');
+            $hour = (int)$scanTime->format('H');
+            $min = (int)$scanTime->format('i');
             if ($hour > 8 || ($hour === 8 && $min > 15)) {
                 $record->status = 'Late';
             } else {

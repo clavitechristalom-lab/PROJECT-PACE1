@@ -350,7 +350,7 @@ class NotificationController extends Controller
 
         // 3. Low Stock Alert (Administrators and Store Administrators)
         if ($user->role === 'Administrator' || $isStoreAdmin) {
-            $lowStockCount = \App\Models\Product::whereColumn('stock_quantity', '<=', 'reorder_level')
+            $lowStockCount = \App\Models\Product::where('stock_quantity', 1)
                 ->where('stock_quantity', '>', 0)
                 ->count();
             if ($lowStockCount > 0) {

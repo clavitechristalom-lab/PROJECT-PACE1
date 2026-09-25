@@ -20,6 +20,7 @@ import MySalesChart from '../components/MySalesChart'
 export default function SalesPage({ branchFilter, embedded }) {
   const { user } = useAuth()
   const isAdmin = user?.role === 'Administrator'
+  const canCreateSale = !isAdmin && user?.role !== 'Store Administrator' && user?.role !== 'Store Admin'
   const [sales, setSales] = useState([])
   const [products, setProducts] = useState([])
   const [customers, setCustomers] = useState([])
@@ -222,7 +223,7 @@ export default function SalesPage({ branchFilter, embedded }) {
                 {exporting ? <FiAlertTriangle className="w-4 h-4 animate-spin" /> : <FiDownload className="w-4 h-4" />}
                 <span>{exporting ? 'Exporting...' : 'Export CSV'}</span>
               </button>
-              {!isAdmin && (
+              {canCreateSale && (
                 <button
                   onClick={() => setNewSaleModal(true)}
                   className="flex items-center gap-2 px-4 py-2 bg-primary hover:bg-primary/90 text-primary-foreground font-semibold text-xs rounded-xl shadow-xs transition-all cursor-pointer"
@@ -236,7 +237,7 @@ export default function SalesPage({ branchFilter, embedded }) {
         />
       )}
 
-      <MySalesChart />
+      <MySalesChart sales={sales} />
 
       {/* Stats */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
@@ -304,7 +305,7 @@ export default function SalesPage({ branchFilter, embedded }) {
             title="No sales transactions found"
             description={search || methodFilter !== 'All' ? 'Try adjusting your search filters' : 'Create your first sale to get started'}
             action={
-              !isAdmin ? (
+              canCreateSale ? (
                 <button
                   onClick={() => setNewSaleModal(true)}
                   className="flex items-center gap-1.5 px-3.5 py-1.5 bg-primary text-primary-foreground font-bold text-xs rounded-xl cursor-pointer"

@@ -94,7 +94,7 @@ class DashboardController extends Controller
 
         // 4. Products & Stock
         $totalProducts = Product::count();
-        $lowStockProducts = Product::whereColumn('stock_quantity', '<=', 'reorder_level')->where('stock_quantity', '>', 0)->count();
+        $lowStockProducts = Product::where('stock_quantity', 1)->where('stock_quantity', '>', 0)->count();
         $outOfStockProducts = Product::where('stock_quantity', '<=', 0)->count();
 
         // 5. Customers & Branches
@@ -430,7 +430,7 @@ class DashboardController extends Controller
         $alerts = [];
 
         // 1. Low Stock Alert
-        $lowStock = Product::whereColumn('stock_quantity', '<=', 'reorder_level')
+        $lowStock = Product::where('stock_quantity', 1)
             ->where('stock_quantity', '>', 0)
             ->get();
         if ($lowStock->count() > 0) {
@@ -598,7 +598,7 @@ class DashboardController extends Controller
                 ];
             });
 
-        $lowStock = Product::whereColumn('stock_quantity', '<=', 'reorder_level')
+        $lowStock = Product::where('stock_quantity', 1)
             ->orderBy('stock_quantity')
             ->take(6)
             ->get();

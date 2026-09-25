@@ -718,7 +718,7 @@ export default function ReportsPage() {
                           <td className="py-3 px-4 text-center font-mono font-bold">{p.stock_quantity}</td>
                           <td className="py-3 px-4 text-right font-mono font-bold text-emerald-600">{fmt((p.unit_price || 0) * (p.stock_quantity || 0))}</td>
                           <td className="py-3 px-4 text-center">
-                            <StatusBadge status={p.stock_quantity <= 0 ? 'Out of Stock' : p.stock_quantity <= p.reorder_level ? 'Low Stock' : 'In Stock'} />
+                            <StatusBadge status={p.stock_quantity <= 0 ? 'Out of Stock' : p.stock_quantity === 1 ? 'Low Stock' : p.stock_quantity >= 2 && p.stock_quantity <= 4 ? 'Medium Stock' : 'High Stock'} />
                           </td>
                         </tr>
                       ))}

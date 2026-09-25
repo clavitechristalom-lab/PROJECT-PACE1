@@ -70,9 +70,11 @@ class ProductController extends Controller
             if ($stockStatus === 'Out of Stock') {
                 $query->where('stock_quantity', '<=', 0);
             } elseif ($stockStatus === 'Low Stock') {
-                $query->where('stock_quantity', '>', 0)->whereColumn('stock_quantity', '<=', 'reorder_level');
-            } elseif ($stockStatus === 'In Stock') {
-                $query->whereColumn('stock_quantity', '>', 'reorder_level');
+                $query->where('stock_quantity', 1);
+            } elseif ($stockStatus === 'Medium Stock') {
+                $query->whereBetween('stock_quantity', [2, 4]);
+            } elseif ($stockStatus === 'High Stock') {
+                $query->where('stock_quantity', '>=', 5);
             }
         }
 

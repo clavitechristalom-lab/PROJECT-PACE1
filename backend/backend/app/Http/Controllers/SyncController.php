@@ -43,9 +43,9 @@ class SyncController extends Controller
         // 3. Pending Attendance Verifications (for Employees / Store Admins)
         $pendingVerifications = 0;
         if ($user && in_array($user->role, ['Employee', 'Store Administrator', 'Store Admin']) && $user->employee_id) {
-            $pendingVerifications = AttendanceVerificationRequest::where('employee_id', $user->employee_id)
-                ->where('status', 'pending')
-                ->count();
+            // $pendingVerifications = AttendanceVerificationRequest::where('employee_id', $user->employee_id)
+            //     ->where('status', 'pending')
+            //     ->count();
         }
 
         // 4. Pending QR requests (for Administrator)
