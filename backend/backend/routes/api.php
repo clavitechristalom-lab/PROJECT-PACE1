@@ -223,4 +223,14 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/support-messages', [\App\Http\Controllers\SupportMessageController::class, 'index']);
     Route::post('/support-messages', [\App\Http\Controllers\SupportMessageController::class, 'store']);
     Route::put('/support-messages/{id}', [\App\Http\Controllers\SupportMessageController::class, 'update']);
+    Route::delete('/support-messages/{id}', [\App\Http\Controllers\SupportMessageController::class, 'destroy']);
+
+    // Carousel Images
+    Route::get('/carousel-images/active', [\App\Http\Controllers\CarouselImageController::class, 'active']);
+    Route::middleware('role:Administrator')->group(function () {
+        Route::get('/carousel-images', [\App\Http\Controllers\CarouselImageController::class, 'index']);
+        Route::post('/carousel-images', [\App\Http\Controllers\CarouselImageController::class, 'store']);
+        Route::put('/carousel-images/{id}', [\App\Http\Controllers\CarouselImageController::class, 'update']);
+        Route::delete('/carousel-images/{id}', [\App\Http\Controllers\CarouselImageController::class, 'destroy']);
+    });
 });

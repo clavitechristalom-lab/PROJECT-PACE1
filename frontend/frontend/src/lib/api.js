@@ -246,7 +246,7 @@ export const api = {
     create: (data) =>
       request('/payments', {
         method: 'POST',
-        body: JSON.stringify(data),
+        body: data instanceof FormData ? data : JSON.stringify(data),
       }),
     getSchedules: (params = {}) => {
       const qs = new URLSearchParams(cleanParams(params)).toString();
@@ -384,6 +384,7 @@ export const api = {
         method: 'POST',
         body: JSON.stringify(data),
       }),
+    checkVerification: (id) => request(`/attendance/check-verification/${id}`),
     pendingVerifications: () => request('/employee/me/pending-verifications'),
     approveVerification: (data) =>
       request('/employee/me/verify-attendance-pin', {
@@ -591,6 +592,21 @@ export const api = {
     getAll: () => request('/support-messages'),
     create: (data) => request('/support-messages', { method: 'POST', body: JSON.stringify(data) }),
     update: (id, data) => request(`/support-messages/${id}`, { method: 'PUT', body: JSON.stringify(typeof data === 'string' ? { status: data } : data) }),
+    delete: (id) => request(`/support-messages/${id}`, { method: 'DELETE' }),
+  },
+
+  // ─── Carousel Images ───
+  carouselImages: {
+    getAll: () => request('/carousel-images'),
+    getActive: () => request('/carousel-images/active'),
+    create: (data) => {
+      return request('/carousel-images', { method: 'POST', body: data }); // FormData
+    },
+    update: (id, data) => {
+      data.append('_method', 'PUT'); // For FormData with PUT
+      return request(`/carousel-images/${id}`, { method: 'POST', body: data });
+    },
+    delete: (id) => request(`/carousel-images/${id}`, { method: 'DELETE' }),
   },
 
   search: (query) => request(`/search?q=${encodeURIComponent(query)}`),

@@ -26,6 +26,7 @@ import SupportPage from './pages/SupportPage'
 import { UsersPage, SystemLogsPage, BackupsPage, SettingsPage } from './pages/SystemPage'
 import SystemAdminDashboard from './pages/SystemAdminDashboard'
 import BranchesPage from './pages/BranchesPage'
+import CarouselPage from './pages/CarouselPage'
 
 // Synchronize initial URL hash with browser pathname or saved route if needed
 if (typeof window !== 'undefined') {
@@ -208,6 +209,7 @@ function AppRoutes() {
           <Route path="/system-logs" element={<RequireAuth roles={['Administrator']}><SystemLogsPage /></RequireAuth>} />
           <Route path="/backups" element={<RequireAuth roles={['Administrator']}><BackupsPage /></RequireAuth>} />
           <Route path="/settings" element={<RequireAuth roles={['Administrator']}><SettingsPage /></RequireAuth>} />
+          <Route path="/settings/carousel" element={<RequireAuth roles={['Administrator']}><CarouselPage /></RequireAuth>} />
           
           {/* Customer Route inside AppShell */}
           <Route path="/customer/dashboard" element={<RequireAuth roles={['Customer']}><CustomerDashboard /></RequireAuth>} />

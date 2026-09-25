@@ -2,9 +2,10 @@ import React, { useState, useEffect } from 'react';
 import { Modal, LoadingState, EmptyState, Badge, StatusBadge } from '../ui';
 import { api } from '../../lib/api';
 import { fmt } from '../../lib/utils';
-import { FiPackage, FiCalendar, FiClock, FiCreditCard, FiAlertCircle, FiCheckCircle, FiFileText, FiMessageCircle, FiChevronLeft, FiChevronRight, FiShoppingCart, FiX } from 'react-icons/fi';
+import { FiPackage, FiCalendar, FiClock, FiCreditCard, FiAlertCircle, FiCheckCircle, FiFileText, FiMessageCircle, FiChevronLeft, FiChevronRight, FiShoppingCart, FiX, FiTrash2 } from 'react-icons/fi';
 import { TbCurrencyPeso } from 'react-icons/tb';
 import { useAuth } from '../../context/AuthContext';
+import { triggerDataSync } from '../../lib/realtimeSync';
 import Swal from 'sweetalert2';
 
 export function ProductListModal({ isOpen, onClose, category, availableCategories = [], initialProductId = null }) {
@@ -743,89 +744,296 @@ export function StatementModal({ isOpen, onClose }) {
 }
 
 export function MakePaymentModal({ isOpen, onClose, installments, onPaymentSuccess }) {
+  const [paymentType, setPaymentType] = useState('Installment Payment');
+  const [paymentMethod, setPaymentMethod] = useState('GCash');
   const [selectedSchedule, setSelectedSchedule] = useState('');
   const [amount, setAmount] = useState('');
+  const [referenceNumber, setReferenceNumber] = useState('');
+  const [proofImage, setProofImage] = useState(null);
+  const [proofPreview, setProofPreview] = useState(null);
   const [submitting, setSubmitting] = useState(false);
 
-  const pendingSchedules = installments.flatMap(i => 
-    (i.paymentSchedules || []).filter(s => s.status === 'Pending').map(s => ({
+  const pendingSchedules = installments.flatMap(i => {
+    const paid = (i.payments || []).reduce((sum, p) => sum + Number(p.amount), 0);
+    const balance = Math.max(0, Number(i.total_payable || 0) - paid);
+    return (i.paymentSchedules || []).filter(s => s.status === 'Pending').map(s => ({
       ...s,
-      product: i.product,
+      product: i.product || i.productName || 'Product',
       account_no: i.account_no,
-      installment_id: i.installment_id
-    }))
-  ).sort((a, b) => new Date(a.due_date) - new Date(b.due_date));
+      installment_id: i.installment_id,
+      installment_balance: i.balance !== undefined ? i.balance : balance
+    }));
+  }).sort((a, b) => new Date(a.due_date) - new Date(b.due_date));
+
+  // Auto-clear when type changes
+  useEffect(() => {
+    if (paymentType === 'Get New Product') {
+      setSelectedSchedule('');
+      setAmount('');
+    }
+  }, [paymentType]);
 
   const handleScheduleChange = (e) => {
     const val = e.target.value;
     setSelectedSchedule(val);
     const schedule = pendingSchedules.find(s => s.schedule_id.toString() === val);
     if (schedule) {
-      setAmount(schedule.amount);
+      setAmount(schedule.balance_due ?? schedule.amount_due ?? 0);
     } else {
       setAmount('');
     }
   };
 
-  const handleSubmit = (e) => {
+  const handleImageChange = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
+      Swal.fire({
+        title: 'Invalid File',
+        text: 'Only JPG, PNG, or WEBP images are allowed.',
+        icon: 'error',
+        background: document.documentElement.classList.contains('dark') ? '#1e293b' : '#fff',
+        color: document.documentElement.classList.contains('dark') ? '#f8fafc' : '#0f172a',
+      });
+      return;
+    }
+    
+    if (file.size > 5 * 1024 * 1024) {
+      Swal.fire({
+        title: 'File Too Large',
+        text: 'Image size should be up to 5 MB.',
+        icon: 'error',
+        background: document.documentElement.classList.contains('dark') ? '#1e293b' : '#fff',
+        color: document.documentElement.classList.contains('dark') ? '#f8fafc' : '#0f172a',
+      });
+      return;
+    }
+
+    setProofImage(file);
+    setProofPreview(URL.createObjectURL(file));
+  };
+
+  const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!selectedSchedule || !amount) return;
+    if (paymentType === 'Installment Payment' && !selectedSchedule) return;
+    if (!amount) return;
     
     setSubmitting(true);
-    // Simulate payment process or hit real endpoint if one exists for customer payment
-    setTimeout(() => {
-      setSubmitting(false);
+    try {
+      const formData = new FormData();
+      
+      let instId = '';
+      if (paymentType === 'Installment Payment') {
+        const schedule = pendingSchedules.find(s => s.schedule_id.toString() === selectedSchedule);
+        if (schedule) instId = schedule.installment_id;
+        formData.append('schedule_id', selectedSchedule);
+      } else {
+        if (installments.length > 0) {
+          instId = installments[0].installment_id;
+        }
+      }
+      
+      if (!instId) {
+        throw new Error('No active installment account found.');
+      }
+
+      formData.append('installment_id', instId);
+      formData.append('amount', amount);
+      formData.append('payment_method', paymentMethod);
+      if (referenceNumber) formData.append('reference_no', referenceNumber);
+      if (proofImage) formData.append('proof_of_payment', proofImage);
+
+      await api.payments.create(formData);
+
       Swal.fire({
         icon: 'success',
         title: 'Payment Submitted',
-        text: 'Your payment request has been received and is processing.',
+        text: 'Your payment request has been received and applied.',
         background: document.documentElement.classList.contains('dark') ? '#1e293b' : '#fff',
         color: document.documentElement.classList.contains('dark') ? '#f8fafc' : '#0f172a',
         confirmButtonColor: '#176B87'
       });
+      triggerDataSync('payments');
+      triggerDataSync('installments');
       onClose();
       if(onPaymentSuccess) onPaymentSuccess();
-    }, 1500);
+    } catch (err) {
+      console.error(err);
+      Swal.fire({
+        icon: 'error',
+        title: 'Payment Failed',
+        text: err.message || 'An error occurred while submitting your payment.',
+        background: document.documentElement.classList.contains('dark') ? '#1e293b' : '#fff',
+        color: document.documentElement.classList.contains('dark') ? '#f8fafc' : '#0f172a',
+      });
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   if (!isOpen) return null;
+  const selectedScheduleDetails = pendingSchedules.find(s => s.schedule_id.toString() === selectedSchedule);
 
   return (
     <Modal isOpen={isOpen} onClose={onClose} title="Make a Payment" size="md">
-      {pendingSchedules.length === 0 ? (
-        <EmptyState icon={<FiCheckCircle className="w-12 h-12 text-emerald-500/50 mx-auto" />} title="No payments due" description="You have no pending installments to pay at this time." />
+      {installments.length === 0 ? (
+        <EmptyState icon={<FiCheckCircle className="w-12 h-12 text-emerald-500/50 mx-auto" />} title="No installments" description="You have no active installments to pay." />
       ) : (
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="block text-xs font-bold text-muted-foreground mb-1">Select Payment Schedule</label>
-            <select
-              value={selectedSchedule}
-              onChange={handleScheduleChange}
-              required
-              className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground text-sm"
-            >
-              <option value="">-- Select Schedule --</option>
-              {pendingSchedules.map(s => (
-                <option key={s.schedule_id} value={s.schedule_id}>
-                  {s.due_date} - {s.product} ({fmt(s.amount)})
-                </option>
-              ))}
-            </select>
+            <label className="block text-xs font-bold text-muted-foreground mb-1">Payment Type</label>
+            <div className="grid grid-cols-2 gap-3">
+              <button
+                type="button"
+                onClick={() => setPaymentType('Installment Payment')}
+                className={`py-2.5 rounded-xl text-sm font-bold border transition-colors ${
+                  paymentType === 'Installment Payment'
+                    ? 'bg-blue-600/20 border-blue-600 text-blue-600 dark:bg-blue-500/20 dark:border-blue-500 dark:text-blue-400'
+                    : 'bg-transparent border-border text-foreground hover:bg-muted/50'
+                }`}
+              >
+                Installment Payment
+              </button>
+              <button
+                type="button"
+                onClick={() => setPaymentType('Get New Product')}
+                className={`py-2.5 rounded-xl text-sm font-bold border transition-colors ${
+                  paymentType === 'Get New Product'
+                    ? 'bg-blue-600/20 border-blue-600 text-blue-600 dark:bg-blue-500/20 dark:border-blue-500 dark:text-blue-400'
+                    : 'bg-transparent border-border text-foreground hover:bg-muted/50'
+                }`}
+              >
+                Get New Product
+              </button>
+            </div>
           </div>
           
+          {paymentType === 'Installment Payment' && (
+            <div className="space-y-3">
+              <div>
+                <label className="block text-xs font-bold text-muted-foreground mb-1">Select Payment Schedule</label>
+                <select
+                  value={selectedSchedule}
+                  onChange={handleScheduleChange}
+                  required
+                  className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground text-sm"
+                >
+                  <option value="">-- Select Schedule --</option>
+                  {pendingSchedules.map(s => (
+                    <option key={s.schedule_id} value={s.schedule_id}>
+                      {s.due_date} - {s.product} ({fmt(s.balance_due ?? s.amount_due ?? 0)})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {selectedScheduleDetails && (
+                <div className="bg-muted/30 p-4 rounded-xl text-sm border border-border space-y-2">
+                  <div className="flex justify-between items-center border-b border-border/50 pb-2 mb-2">
+                    <span className="text-muted-foreground">Product</span>
+                    <span className="font-bold text-foreground truncate max-w-[200px]" title={selectedScheduleDetails.product}>{selectedScheduleDetails.product}</span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-muted-foreground">Installment Schedule</span>
+                    <span className="font-bold text-foreground">{selectedScheduleDetails.due_date}</span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-muted-foreground">Current Payment Due</span>
+                    <span className="font-bold text-rose-500">{fmt(selectedScheduleDetails.balance_due ?? selectedScheduleDetails.amount_due ?? 0)}</span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-muted-foreground">Remaining Balance</span>
+                    <span className="font-bold text-foreground">{fmt(selectedScheduleDetails.installment_balance)}</span>
+                  </div>
+                  <div className="flex justify-between items-center pt-1">
+                    <span className="text-muted-foreground">Payment Status</span>
+                    <span className="font-bold text-blue-500">{selectedScheduleDetails.status}</span>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {paymentType === 'Get New Product' && (
+            <div>
+              <label className="block text-xs font-bold text-muted-foreground mb-1">Payment Amount</label>
+              <div className="relative">
+                <TbCurrencyPeso className="absolute left-3 top-2.5 text-muted-foreground w-4 h-4" />
+                <input 
+                  type="number"
+                  step="0.01"
+                  min="1"
+                  value={amount}
+                  onChange={e => setAmount(e.target.value)}
+                  required
+                  className="w-full pl-9 pr-3 py-2 rounded-xl border border-border bg-card text-foreground font-mono focus:ring-2 focus:ring-blue-500/20 outline-none"
+                />
+              </div>
+            </div>
+          )}
+
           <div>
-            <label className="block text-xs font-bold text-muted-foreground mb-1">Payment Amount</label>
-            <div className="relative">
-              <TbCurrencyPeso className="absolute left-3 top-2.5 text-muted-foreground w-4 h-4" />
+            <label className="block text-xs font-bold text-muted-foreground mb-1">Payment Method</label>
+            <div className="flex flex-wrap gap-2">
+              {(paymentType === 'Get New Product' ? ['Cash', 'GCash', 'Maya', 'Bank Account', 'Installment'] : ['Cash', 'GCash', 'Maya', 'Bank Account']).map(method => {
+                const isDisabled = method === 'Installment' && pendingSchedules.length > 0;
+                return (
+                <button
+                  key={method}
+                  type="button"
+                  disabled={isDisabled}
+                  onClick={() => setPaymentMethod(method)}
+                  className={`py-2 px-4 flex-1 min-w-[80px] rounded-xl text-xs font-bold border transition-colors ${
+                    isDisabled 
+                      ? 'bg-muted/50 text-muted-foreground opacity-50 cursor-not-allowed border-transparent'
+                      : paymentMethod === method
+                        ? 'bg-blue-600/20 border-blue-600 text-blue-600 dark:bg-blue-500/20 dark:border-blue-500 dark:text-blue-400'
+                        : 'bg-transparent border-border text-foreground hover:bg-muted/50'
+                  }`}
+                  title={isDisabled ? "Cannot use Installment while you have a pending balance" : ""}
+                >
+                  {method}
+                </button>
+              )})}
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-xs font-bold text-muted-foreground mb-1">Transaction Reference</label>
+            <input 
+              type="text"
+              value={referenceNumber}
+              onChange={e => setReferenceNumber(e.target.value)}
+              placeholder="Enter reference number"
+              className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground text-sm focus:ring-2 focus:ring-blue-500/20 outline-none"
+              required={paymentMethod !== 'Cash'}
+            />
+          </div>
+
+          <div>
+            <label className="block text-xs font-bold text-muted-foreground mb-1">
+              Proof of Payment {paymentMethod !== 'Cash' && <span className="text-blue-500">*</span>}
+            </label>
+            <div className="relative w-full border-2 border-dashed border-border rounded-xl p-4 flex flex-col items-center justify-center bg-card text-center overflow-hidden hover:bg-muted/30 transition-colors">
               <input 
-                type="number"
-                step="0.01"
-                min="0"
-                value={amount}
-                onChange={e => setAmount(e.target.value)}
-                required
-                className="w-full pl-9 pr-3 py-2 rounded-xl border border-border bg-card text-foreground font-mono"
+                type="file"
+                accept="image/jpeg, image/png, image/webp"
+                onChange={handleImageChange}
+                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
+                required={paymentMethod !== 'Cash' && !proofPreview}
               />
+              {proofPreview ? (
+                <div className="flex flex-col items-center z-20 relative">
+                  <img src={proofPreview} alt="Proof" className="max-h-32 object-contain mb-2 rounded border border-border" />
+                  <button type="button" className="text-xs text-rose-500 font-bold hover:underline" onClick={(e) => { e.preventDefault(); setProofImage(null); setProofPreview(null); }}>Remove Image</button>
+                </div>
+              ) : (
+                <>
+                  <div className="font-bold text-blue-600 dark:text-blue-400 text-sm mb-1">Choose or upload image</div>
+                  <div className="text-[10px] text-muted-foreground">JPG, PNG, or WEBP up to 5 MB</div>
+                </>
+              )}
             </div>
           </div>
           
@@ -835,8 +1043,8 @@ export function MakePaymentModal({ isOpen, onClose, installments, onPaymentSucce
           
           <button
             type="submit"
-            disabled={submitting || !selectedSchedule}
-            className="w-full py-2.5 bg-primary hover:bg-primary/90 text-primary-foreground font-bold rounded-xl flex items-center justify-center gap-2 transition-colors disabled:opacity-50"
+            disabled={submitting || (paymentType === 'Installment Payment' && !selectedSchedule) || (paymentMethod !== 'Cash' && !proofImage)}
+            className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl flex items-center justify-center gap-2 transition-colors disabled:opacity-50"
           >
             {submitting ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div> : <TbCurrencyPeso className="w-4 h-4" />}
             <span>{submitting ? 'Processing...' : 'Submit Payment'}</span>
@@ -909,6 +1117,47 @@ export function SupportModal({ isOpen, onClose }) {
       });
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const handleDeleteMessage = async (id) => {
+    const res = await Swal.fire({
+      title: 'Are you sure?',
+      text: 'This will permanently delete this feedback and all its history.',
+      icon: 'warning',
+      showCancelButton: true,
+      confirmButtonText: 'Yes, delete it!',
+      cancelButtonText: 'Cancel',
+      confirmButtonColor: '#ef4444',
+      cancelButtonColor: '#64748b',
+      background: document.documentElement.classList.contains('dark') ? '#1e293b' : '#fff',
+      color: document.documentElement.classList.contains('dark') ? '#f8fafc' : '#0f172a',
+    });
+    if (res.isConfirmed) {
+      try {
+        await api.supportMessages.delete(id);
+        loadMyMessages(true);
+        Swal.fire({
+          icon: 'success',
+          title: 'Deleted!',
+          text: 'Your feedback has been deleted.',
+          toast: true,
+          position: 'bottom-end',
+          showConfirmButton: false,
+          timer: 3000,
+          background: document.documentElement.classList.contains('dark') ? '#1e293b' : '#fff',
+          color: document.documentElement.classList.contains('dark') ? '#f8fafc' : '#0f172a',
+        });
+      } catch (err) {
+        console.error(err);
+        Swal.fire({
+          icon: 'error',
+          title: 'Error',
+          text: 'Failed to delete feedback.',
+          background: document.documentElement.classList.contains('dark') ? '#1e293b' : '#fff',
+          color: document.documentElement.classList.contains('dark') ? '#f8fafc' : '#0f172a',
+        });
+      }
     }
   };
 
@@ -1025,13 +1274,20 @@ export function SupportModal({ isOpen, onClose }) {
                     <span className="text-[10px] text-muted-foreground font-mono ml-auto">
                       {new Date(m.created_at).toLocaleString()}
                     </span>
+                    <button
+                      onClick={() => handleDeleteMessage(m.id)}
+                      className="p-1 hover:bg-rose-500/10 text-rose-500 rounded-md transition-colors"
+                      title="Delete Feedback"
+                    >
+                      <FiTrash2 className="w-3.5 h-3.5" />
+                    </button>
                   </div>
                   <p className="text-sm text-foreground/80 whitespace-pre-wrap leading-relaxed">{m.message}</p>
                 </div>
 
-                {/* Admin Response */}
-                {m.response ? (
-                  <div className="border-l-2 border-emerald-500 pl-3 py-2 bg-emerald-50/50 dark:bg-emerald-900/10 rounded-r-xl">
+                {/* Legacy Admin Response */}
+                {m.response && (
+                  <div className="border-l-2 border-emerald-500 pl-3 py-2 bg-emerald-50/50 dark:bg-emerald-900/10 rounded-r-xl mt-2">
                     <div className="flex items-center gap-2 mb-1">
                       <FiCheckCircle className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
                       <span className="text-xs font-bold text-emerald-700 dark:text-emerald-400">Store Admin Response</span>
@@ -1042,22 +1298,76 @@ export function SupportModal({ isOpen, onClose }) {
                       )}
                     </div>
                     <p className="text-sm text-foreground/80 leading-relaxed mb-3">{m.response}</p>
-                    
-                    {/* Customer Reply Section */}
-                    {m.customer_reply ? (
-                      <div className="mt-3 border-t border-emerald-200/50 dark:border-emerald-800/50 pt-3">
-                        <div className="flex items-center gap-2 mb-1">
-                          <FiMessageCircle className="w-3.5 h-3.5 text-primary" />
-                          <span className="text-xs font-bold text-primary">Your Reply</span>
-                          {m.customer_reply_at && (
-                            <span className="text-[10px] text-muted-foreground font-mono">
-                              {new Date(m.customer_reply_at).toLocaleString()}
-                            </span>
-                          )}
-                        </div>
-                        <p className="text-sm text-foreground/80 leading-relaxed">{m.customer_reply}</p>
+                  </div>
+                )}
+
+                {/* Legacy Customer Reply */}
+                {m.customer_reply && (
+                  <div className="border-l-2 border-primary/50 pl-3 py-2 bg-primary/5 rounded-r-xl mt-2">
+                    <div className="flex items-center gap-2 mb-1">
+                      <FiMessageCircle className="w-3.5 h-3.5 text-primary" />
+                      <span className="text-xs font-bold text-primary">Your Reply</span>
+                      {m.customer_reply_at && (
+                        <span className="text-[10px] text-muted-foreground font-mono">
+                          {new Date(m.customer_reply_at).toLocaleString()}
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-sm text-foreground/80 leading-relaxed">{m.customer_reply}</p>
+                  </div>
+                )}
+
+                {/* New Chat History */}
+                {m.chat_history?.map((chat, idx) => {
+                  const isCustomer = chat.sender === 'Customer';
+                  return (
+                    <div key={idx} className={`mt-2 border-l-2 pl-3 py-2 rounded-r-xl ${
+                      isCustomer 
+                        ? 'border-primary/50 bg-primary/5' 
+                        : 'border-emerald-500 bg-emerald-50/50 dark:bg-emerald-900/10'
+                    }`}>
+                      <div className="flex items-center gap-2 mb-1">
+                        {isCustomer ? <FiMessageCircle className="w-3.5 h-3.5 text-primary" /> : <FiCheckCircle className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />}
+                        <span className={`text-xs font-bold ${isCustomer ? 'text-primary' : 'text-emerald-700 dark:text-emerald-400'}`}>
+                          {isCustomer ? 'Your Reply' : 'Store Admin Response'}
+                        </span>
+                        <span className="text-[10px] text-muted-foreground font-mono">
+                          {new Date(chat.timestamp).toLocaleString()}
+                        </span>
                       </div>
-                    ) : (
+                      <p className="text-sm text-foreground/80 leading-relaxed">{chat.text}</p>
+                    </div>
+                  );
+                })}
+
+                {/* Reply Form (if not locked and not pending initial) */}
+                {(() => {
+                  const legacyCount = 1 + (m.response ? 1 : 0) + (m.customer_reply ? 1 : 0);
+                  const historyCount = m.chat_history?.length || 0;
+                  const totalMessages = legacyCount + historyCount;
+                  const isLocked = totalMessages >= 20;
+
+                  if (m.status === 'Pending' && !m.response && historyCount === 0) {
+                    return (
+                      <div className="border-l-2 border-amber-400 pl-3 py-2 bg-amber-50/50 dark:bg-amber-900/10 rounded-r-xl mt-2">
+                        <div className="flex items-center gap-2">
+                          <FiClock className="w-3.5 h-3.5 text-amber-500 animate-pulse" />
+                          <span className="text-xs font-medium text-amber-600 dark:text-amber-400">Awaiting response from our team...</span>
+                        </div>
+                      </div>
+                    );
+                  }
+
+                  if (isLocked) {
+                    return (
+                      <div className="p-3 bg-muted/50 border border-border rounded-xl text-center mt-3">
+                        <p className="text-xs text-muted-foreground font-semibold">Conversation limit reached (20 messages).</p>
+                        <p className="text-[10px] text-muted-foreground mt-1">Please start a new feedback ticket if you need further assistance.</p>
+                      </div>
+                    );
+                  }
+
+                  return (
                       <form onSubmit={async (e) => {
                         e.preventDefault();
                         const formData = new FormData(e.target);
@@ -1067,11 +1377,13 @@ export function SupportModal({ isOpen, onClose }) {
                         btn.disabled = true;
                         btn.innerHTML = '<span class="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin block"></span>';
                         try {
-                          await api.supportMessages.update(m.id, { customer_reply: reply });
+                          await api.supportMessages.update(m.id, { new_message: reply });
                           loadMyMessages(true);
+                          e.target.reset();
                         } catch (err) {
                           console.error(err);
-                          alert('Failed to send reply');
+                          alert('Failed to send reply: ' + (err.response?.data?.message || err.message));
+                        } finally {
                           btn.disabled = false;
                           btn.innerText = 'Reply';
                         }
@@ -1090,16 +1402,8 @@ export function SupportModal({ isOpen, onClose }) {
                           Reply
                         </button>
                       </form>
-                    )}
-                  </div>
-                ) : (
-                  <div className="border-l-2 border-amber-400 pl-3 py-2 bg-amber-50/50 dark:bg-amber-900/10 rounded-r-xl">
-                    <div className="flex items-center gap-2">
-                      <FiClock className="w-3.5 h-3.5 text-amber-500 animate-pulse" />
-                      <span className="text-xs font-medium text-amber-600 dark:text-amber-400">Awaiting response from our team...</span>
-                    </div>
-                  </div>
-                )}
+                  );
+                })()}
               </div>
             ))
           )}

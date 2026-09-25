@@ -278,6 +278,7 @@ class PaymentController extends Controller
             'reference_no' => 'nullable|string|max:100',
             'payment_date' => 'nullable|date',
             'notes' => 'nullable|string',
+            'proof_of_payment' => 'nullable|file|mimes:jpeg,png,webp|max:5120',
         ]);
 
         return DB::transaction(function () use ($validated, $request, $user) {
@@ -313,6 +314,11 @@ class PaymentController extends Controller
             $receiptNo = 'REC-' . date('Y') . '-' . str_pad($paymentCount, 5, '0', STR_PAD_LEFT);
             $payDate = $validated['payment_date'] ?? now()->toDateString();
 
+            $proofPath = null;
+            if ($request->hasFile('proof_of_payment')) {
+                $proofPath = $request->file('proof_of_payment')->store('proofs', 'public');
+            }
+
             // 1. Create Payment Entry
             $payment = Payment::create([
                 'installment_id' => $inst->installment_id,
@@ -324,6 +330,8 @@ class PaymentController extends Controller
                 'reference_no' => $validated['reference_no'] ?? null,
                 'received_by' => $user ? $user->user_id : $request->input('user_id', 1),
                 'notes' => $validated['notes'] ?? '',
+                'status' => $user && $user->role === 'Customer' ? 'Pending' : 'Completed',
+                'proof_of_payment' => $proofPath,
                 'created_at' => now(),
             ]);
 

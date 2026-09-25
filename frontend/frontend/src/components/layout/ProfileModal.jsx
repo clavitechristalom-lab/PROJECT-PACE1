@@ -105,6 +105,7 @@ export default function ProfileModal({ open, isOpen, onClose }) {
             emergency_contact_name: res.employee.emergency_contact_name || '',
             emergency_contact_relation: res.employee.emergency_contact_relation || '',
             emergency_contact_phone: res.employee.emergency_contact_phone || '',
+            branch_id: res.employee.branch_id || res.employee.branch?.id || '',
           })
         } else {
           setError('Employee information was not found.')
@@ -295,6 +296,7 @@ export default function ProfileModal({ open, isOpen, onClose }) {
                           emergency_contact_name: employee.emergency_contact_name || '',
                           emergency_contact_relation: employee.emergency_contact_relation || '',
                           emergency_contact_phone: employee.emergency_contact_phone || '',
+                          branch_id: employee.branch_id || employee.branch?.id || '',
                         })
                       }
                     }
@@ -833,6 +835,7 @@ export default function ProfileModal({ open, isOpen, onClose }) {
                               <FiChevronDown className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
                             </div>
                           </div>
+
                         </div>
                       )}
                     </div>

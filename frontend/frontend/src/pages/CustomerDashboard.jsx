@@ -11,6 +11,7 @@ import { useRealtimeSync, triggerDataSync } from '../lib/realtimeSync';
 import DashboardCard from '../components/customer/DashboardCard';
 import InstallmentLedger from '../components/customer/InstallmentLedger';
 import QuickActions from '../components/customer/QuickActions';
+import ImageCarousel from '../components/customer/ImageCarousel';
 import {
   ProductListModal, PaymentDetailsModal, CreditDetailsModal,
   OverduePaymentsModal, InstallmentAccountDetailsModal,
@@ -130,6 +131,9 @@ export default function CustomerDashboard() {
             </div>
           </div>
         </div>
+
+        {/* Carousel Section */}
+        <ImageCarousel />
 
         {/* 4-Column Stats Grid */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">

@@ -10,7 +10,8 @@ class Payment extends Model
 
     protected $fillable = [
         'installment_id', 'schedule_id', 'receipt_no', 'payment_date', 
-        'amount', 'payment_method', 'reference_no', 'received_by', 'notes'
+        'amount', 'payment_method', 'reference_no', 'received_by', 'notes',
+        'status', 'proof_of_payment'
     ];
 
     // Relationships

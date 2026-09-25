@@ -100,6 +100,7 @@ function navByRole(role) {
       { label: 'Admin Interface', path: '/admin-dashboard', icon: icons.shield },
       { label: 'Branches', path: '/branches', icon: icons.products },
       { label: 'Users', path: '/users', icon: icons.users },
+      { label: 'Carousel', path: '/settings/carousel', icon: icons.products },
       { label: 'System Logs', path: '/system-logs', icon: icons.logs },
       { label: 'Backup & Restore', path: '/backups', icon: icons.backup },
     ],

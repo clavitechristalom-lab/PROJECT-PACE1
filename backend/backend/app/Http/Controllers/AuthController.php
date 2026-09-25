@@ -220,7 +220,17 @@ class AuthController extends Controller
             'password' => 'required|string',
         ]);
 
-        $user = User::with(['employee.branch', 'customer.branch'])->where('username', $credentials['username'])->first();
+        $user = User::with(['employee.branch', 'customer.branch'])
+            ->where(function($query) use ($credentials) {
+                $query->where('username', $credentials['username'])
+                      ->orWhereHas('employee', function($q) use ($credentials) {
+                          $q->where('email', $credentials['username']);
+                      })
+                      ->orWhereHas('customer', function($q) use ($credentials) {
+                          $q->where('email', $credentials['username']);
+                      });
+            })
+            ->first();
 
         if ($user && Hash::check($credentials['password'], $user->password_hash)) {
             if (!$user->is_active) {

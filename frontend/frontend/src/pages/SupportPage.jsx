@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react'
 import {
-  FiMessageSquare, FiX, FiCheckCircle, FiSend, FiUser, FiClock, FiTag, FiZap
+  FiMessageSquare, FiX, FiCheckCircle, FiSend, FiUser, FiClock, FiTag, FiZap, FiTrash2
 } from 'react-icons/fi'
 import {
   PageHeader, Card, StatusBadge, LoadingState, EmptyState, Pagination, SearchBar
@@ -68,7 +68,7 @@ function RespondModal({ isOpen, onClose, message, onSend }) {
         </div>
 
         <div className="flex-1 overflow-y-auto p-5 space-y-5">
-          {/* Customer Feedback Card */}
+          {/* Customer Feedback Card (Initial Message) */}
           <div className="bg-muted/30 rounded-xl p-4 border border-border space-y-3">
             <div className="flex items-center gap-3">
               <div className="w-9 h-9 rounded-full bg-primary/10 flex items-center justify-center">
@@ -89,7 +89,10 @@ function RespondModal({ isOpen, onClose, message, onSend }) {
             <div className="text-sm text-foreground/80 whitespace-pre-wrap leading-relaxed pl-12">
               {message.message}
             </div>
-            
+          </div>
+
+          {/* Legacy & New Chat History */}
+          <div className="space-y-4">
             {message.response && (
               <div className="ml-12 border-l-2 border-emerald-500 pl-4 py-2 bg-emerald-50/50 dark:bg-emerald-900/10 rounded-r-xl">
                 <div className="flex items-center gap-2 mb-1">
@@ -106,7 +109,7 @@ function RespondModal({ isOpen, onClose, message, onSend }) {
             )}
 
             {message.customer_reply && (
-              <div className="ml-12 mt-2 border-l-2 border-primary/50 pl-4 py-2 bg-primary/5 rounded-r-xl">
+              <div className="mr-12 border-l-2 border-primary/50 pl-4 py-2 bg-primary/5 rounded-r-xl">
                 <div className="flex items-center gap-2 mb-1">
                   <FiMessageSquare className="w-3.5 h-3.5 text-primary" />
                   <span className="text-xs font-bold text-primary">Customer's Reply</span>
@@ -119,55 +122,79 @@ function RespondModal({ isOpen, onClose, message, onSend }) {
                 <p className="text-sm text-foreground/80 leading-relaxed">{message.customer_reply}</p>
               </div>
             )}
+
+            {message.chat_history?.map((chat, idx) => {
+              const isAdmin = chat.sender !== 'Customer';
+              return (
+                <div key={idx} className={isAdmin ? "ml-12 border-l-2 border-emerald-500 pl-4 py-2 bg-emerald-50/50 dark:bg-emerald-900/10 rounded-r-xl" : "mr-12 border-l-2 border-primary/50 pl-4 py-2 bg-primary/5 rounded-r-xl"}>
+                  <div className="flex items-center gap-2 mb-1">
+                    {isAdmin ? <FiCheckCircle className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" /> : <FiMessageSquare className="w-3.5 h-3.5 text-primary" />}
+                    <span className={`text-xs font-bold ${isAdmin ? 'text-emerald-700 dark:text-emerald-400' : 'text-primary'}`}>{isAdmin ? 'Admin' : 'Customer'}</span>
+                    <span className="text-xs text-muted-foreground font-mono">
+                      {new Date(chat.timestamp).toLocaleString()}
+                    </span>
+                  </div>
+                  <p className="text-sm text-foreground/80 leading-relaxed">{chat.text}</p>
+                </div>
+              )
+            })}
           </div>
 
           {/* Quick Responses */}
-          {!message.customer_reply && (
-            <>
-              <div>
-                <div className="flex items-center gap-2 mb-3">
-                  <FiZap className="w-4 h-4 text-amber-500" />
-                  <h4 className="text-sm font-bold text-foreground">Quick Responses</h4>
-                  <span className="text-xs text-muted-foreground">(click to select)</span>
-                </div>
-                <div className="grid gap-2 max-h-48 overflow-y-auto pr-1">
-                  {QUICK_RESPONSES.map((qr, i) => (
-                    <button
-                      key={i}
-                      type="button"
-                      onClick={() => setResponse(qr)}
-                      className={`text-left px-3.5 py-2.5 rounded-xl border text-xs leading-relaxed transition-all cursor-pointer ${
-                        response === qr
-                          ? 'border-primary bg-primary/10 text-primary font-medium shadow-sm'
-                          : 'border-border hover:border-primary/30 hover:bg-muted/50 text-foreground/80'
-                      }`}
-                    >
-                      {qr}
-                    </button>
-                  ))}
-                </div>
-              </div>
+          {(() => {
+            const legacyCount = 1 + (message.response ? 1 : 0) + (message.customer_reply ? 1 : 0);
+            const historyCount = message.chat_history?.length || 0;
+            const totalMessages = legacyCount + historyCount;
+            const isLocked = totalMessages >= 20;
 
-              {/* Custom Response Textarea */}
-              <div>
-                <label className="block text-xs font-bold text-muted-foreground mb-2">
-                  Your Response {response ? '' : '(select a quick response or type below)'}
-                </label>
-                <textarea
-                  value={response}
-                  onChange={e => setResponse(e.target.value)}
-                  rows={4}
-                  placeholder="Type your custom response here or select a quick response above..."
-                  className="w-full px-4 py-3 rounded-xl border border-border bg-card text-foreground text-sm resize-none focus:ring-2 focus:ring-primary/30 focus:border-primary transition-all"
-                />
-              </div>
-            </>
-          )}
-          {message.customer_reply && (
-            <div className="p-4 bg-muted/50 border border-border rounded-xl text-center">
-              <p className="text-sm text-muted-foreground">The customer has replied. This conversation is now in view-only mode.</p>
-            </div>
-          )}
+            if (isLocked) {
+              return (
+                <div className="p-4 bg-muted/50 border border-border rounded-xl text-center">
+                  <p className="text-sm text-muted-foreground font-semibold">Conversation limit reached (20 messages).</p>
+                  <p className="text-xs text-muted-foreground mt-1">Please ask the customer to start a new feedback ticket.</p>
+                </div>
+              );
+            }
+
+            return (
+              <>
+                <div>
+                  <div className="flex items-center gap-2 mb-3">
+                    <FiZap className="w-4 h-4 text-amber-500" />
+                    <h4 className="text-sm font-bold text-foreground">Quick Responses</h4>
+                  </div>
+                  <div className="grid gap-2 max-h-48 overflow-y-auto pr-1">
+                    {QUICK_RESPONSES.map((qr, i) => (
+                      <button
+                        key={i}
+                        type="button"
+                        onClick={() => setResponse(qr)}
+                        className={`text-left px-3.5 py-2.5 rounded-xl border text-xs leading-relaxed transition-all cursor-pointer ${
+                          response === qr
+                            ? 'border-primary bg-primary/10 text-primary font-medium shadow-sm'
+                            : 'border-border hover:border-primary/30 hover:bg-muted/50 text-foreground/80'
+                        }`}
+                      >
+                        {qr}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-muted-foreground mb-2">
+                    Your Response {response ? '' : '(select a quick response or type below)'}
+                  </label>
+                  <textarea
+                    value={response}
+                    onChange={e => setResponse(e.target.value)}
+                    rows={4}
+                    placeholder="Type your response here..."
+                    className="w-full px-4 py-3 rounded-xl border border-border bg-card text-foreground text-sm resize-none focus:ring-2 focus:ring-primary/30 focus:border-primary transition-all"
+                  />
+                </div>
+              </>
+            );
+          })()}
         </div>
 
         {/* Footer */}
@@ -178,20 +205,27 @@ function RespondModal({ isOpen, onClose, message, onSend }) {
           >
             Cancel
           </button>
-          {!message.customer_reply && (
-            <button
-              onClick={handleSend}
-              disabled={sending || !response.trim()}
-              className="flex items-center gap-2 px-6 py-2.5 bg-primary hover:bg-primary/90 text-primary-foreground font-bold rounded-xl text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {sending ? (
-                <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
-              ) : (
-                <FiSend className="w-4 h-4" />
-              )}
-              <span>{sending ? 'Sending...' : 'Send Response'}</span>
-            </button>
-          )}
+          {(() => {
+            const legacyCount = 1 + (message.response ? 1 : 0) + (message.customer_reply ? 1 : 0);
+            const historyCount = message.chat_history?.length || 0;
+            const isLocked = (legacyCount + historyCount) >= 20;
+            if (!isLocked) {
+              return (
+                <button
+                  onClick={handleSend}
+                  disabled={sending || !response.trim()}
+                  className="flex items-center gap-2 px-6 py-2.5 bg-primary hover:bg-primary/90 text-primary-foreground font-bold rounded-xl text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {sending ? (
+                    <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                  ) : (
+                    <FiSend className="w-4 h-4" />
+                  )}
+                  <span>{sending ? 'Sending...' : 'Send'}</span>
+                </button>
+              );
+            }
+          })()}
         </div>
       </div>
     </div>
@@ -248,11 +282,11 @@ export default function SupportPage() {
   const respondedCount = messages.filter(m => m.status === 'Responded').length
 
   const handleSendResponse = async (id, responseText) => {
-    await api.supportMessages.update(id, { status: 'Responded', response: responseText })
+    await api.supportMessages.update(id, { new_message: responseText })
     loadMessages(true)
     Swal.fire({
       icon: 'success',
-      title: 'Response Sent',
+      title: 'Message Sent',
       text: 'The customer has been notified of your response.',
       toast: true,
       position: 'bottom-end',
@@ -261,6 +295,47 @@ export default function SupportPage() {
       background: document.documentElement.classList.contains('dark') ? '#1e293b' : '#fff',
       color: document.documentElement.classList.contains('dark') ? '#f8fafc' : '#0f172a',
     })
+  }
+
+  const handleDeleteMessage = async (id) => {
+    const res = await Swal.fire({
+      title: 'Are you sure?',
+      text: 'This will permanently delete this conversation and all its history.',
+      icon: 'warning',
+      showCancelButton: true,
+      confirmButtonText: 'Yes, delete it!',
+      cancelButtonText: 'Cancel',
+      confirmButtonColor: '#ef4444',
+      cancelButtonColor: '#64748b',
+      background: document.documentElement.classList.contains('dark') ? '#1e293b' : '#fff',
+      color: document.documentElement.classList.contains('dark') ? '#f8fafc' : '#0f172a',
+    });
+    if (res.isConfirmed) {
+      try {
+        await api.supportMessages.delete(id);
+        loadMessages(true);
+        Swal.fire({
+          icon: 'success',
+          title: 'Deleted!',
+          text: 'The support message has been deleted.',
+          toast: true,
+          position: 'bottom-end',
+          showConfirmButton: false,
+          timer: 3000,
+          background: document.documentElement.classList.contains('dark') ? '#1e293b' : '#fff',
+          color: document.documentElement.classList.contains('dark') ? '#f8fafc' : '#0f172a',
+        });
+      } catch (err) {
+        console.error(err);
+        Swal.fire({
+          icon: 'error',
+          title: 'Error',
+          text: 'Failed to delete support message.',
+          background: document.documentElement.classList.contains('dark') ? '#1e293b' : '#fff',
+          color: document.documentElement.classList.contains('dark') ? '#f8fafc' : '#0f172a',
+        });
+      }
+    }
   }
 
   return (
@@ -355,47 +430,25 @@ export default function SupportPage() {
                           {m.message}
                         </div>
                       </div>
-                      
-                      <button
-                        onClick={() => setRespondModal({ open: true, message: m })}
-                        className="shrink-0 flex items-center gap-2 px-4 py-2 bg-primary/10 text-primary hover:bg-primary/20 rounded-xl text-xs font-bold transition-colors cursor-pointer"
-                      >
-                        <FiSend className="w-4 h-4" />
-                        {m.customer_reply ? 'View Conversation' : m.status === 'Pending' ? 'Respond' : 'View / Re-respond'}
-                      </button>
+                      <div className="shrink-0 flex items-center gap-2">
+                        <button
+                          onClick={() => setRespondModal({ open: true, message: m })}
+                          className="flex items-center gap-2 px-4 py-2 bg-primary/10 text-primary hover:bg-primary/20 rounded-xl text-xs font-bold transition-colors cursor-pointer"
+                        >
+                          <FiSend className="w-4 h-4" />
+                          {m.customer_reply ? 'View Conversation' : m.status === 'Pending' ? 'Respond' : 'View / Re-respond'}
+                        </button>
+                        <button
+                          onClick={() => handleDeleteMessage(m.id)}
+                          className="flex items-center gap-2 px-4 py-2 bg-rose-500/10 text-rose-600 hover:bg-rose-500/20 rounded-xl text-xs font-bold transition-colors cursor-pointer"
+                          title="Delete Message"
+                        >
+                          <FiTrash2 className="w-4 h-4" />
+                        </button>
+                      </div>
                     </div>
 
-                    {/* Show existing response if any */}
-                    {m.response && (
-                      <div className="ml-11 border-l-2 border-emerald-500 pl-4 py-2 bg-emerald-50/50 dark:bg-emerald-900/10 rounded-r-xl mt-4">
-                        <div className="flex items-center gap-2 mb-1">
-                          <FiCheckCircle className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
-                          <span className="text-xs font-bold text-emerald-700 dark:text-emerald-400">Admin Response</span>
-                          {m.responded_at && (
-                            <span className="text-xs text-muted-foreground font-mono">
-                              {new Date(m.responded_at).toLocaleString()}
-                            </span>
-                          )}
-                        </div>
-                        <p className="text-sm text-foreground/80 leading-relaxed">{m.response}</p>
-                      </div>
-                    )}
-                    
-                    {/* Show existing customer reply if any */}
-                    {m.customer_reply && (
-                      <div className="ml-11 border-l-2 border-primary/50 pl-4 py-2 bg-primary/5 rounded-r-xl mt-2">
-                        <div className="flex items-center gap-2 mb-1">
-                          <FiMessageSquare className="w-3.5 h-3.5 text-primary" />
-                          <span className="text-xs font-bold text-primary">Customer's Reply</span>
-                          {m.customer_reply_at && (
-                            <span className="text-xs text-muted-foreground font-mono">
-                              {new Date(m.customer_reply_at).toLocaleString()}
-                            </span>
-                          )}
-                        </div>
-                        <p className="text-sm text-foreground/80 leading-relaxed">{m.customer_reply}</p>
-                      </div>
-                    )}
+                    {/* Responses are now hidden in the list view. Click the button to view full conversation. */}
                   </div>
                 </Card>
               )

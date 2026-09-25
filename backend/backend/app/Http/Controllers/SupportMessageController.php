@@ -68,78 +68,87 @@ class SupportMessageController extends Controller
     public function update(Request $request, $id)
     {
         $msg = SupportMessage::findOrFail($id);
-        $updateData = [];
-        if ($request->has('status')) {
-            $updateData['status'] = $request->input('status');
-        }
+        $user = $request->user();
+        $isCustomer = $user && $user->role === 'Customer';
 
-        if ($request->has('response')) {
-            $updateData['response'] = $request->input('response');
-            $updateData['responded_by'] = $request->user() ? $request->user()->user_id : null;
-            $updateData['responded_at'] = now();
-            // Default status to Responded if response is provided
-            if (!isset($updateData['status'])) {
-                 $updateData['status'] = 'Responded';
+        if ($request->has('new_message')) {
+            $history = $msg->chat_history ?? [];
+            
+            // Count total messages including initial message + legacy response + legacy reply + history
+            $legacyCount = 1 + ($msg->response ? 1 : 0) + ($msg->customer_reply ? 1 : 0);
+            $totalMessages = $legacyCount + count($history);
+
+            if ($totalMessages >= 20) {
+                return response()->json(['message' => 'Conversation limit reached (20 messages). Please start a new conversation.'], 422);
             }
-        }
 
-        if ($request->has('customer_reply')) {
-            $updateData['customer_reply'] = $request->input('customer_reply');
-            $updateData['customer_reply_at'] = now();
-            // Default status to Awaiting response if customer replies? No, requirement says admin viewing only
-            // Let's keep status as Responded or whatever it was. 
-        }
+            $history[] = [
+                'sender' => $isCustomer ? 'Customer' : 'Admin',
+                'text' => $request->input('new_message'),
+                'timestamp' => now()->toDateTimeString(),
+            ];
 
-        if (!empty($updateData)) {
-            $msg->update($updateData);
-        }
-        
-        $action = $request->has('customer_reply') ? 'Customer Replied to Support Message' : 'Updated Support Status';
-        $description = $request->has('customer_reply') ? "Customer replied to support message #{$id}" : "Responded to support message #{$id}";
+            $msg->chat_history = $history;
+            $msg->status = 'Responded';
+            $msg->save();
 
-        SystemLog::create([
-            'user_id' => $request->user() ? $request->user()->user_id : 1,
-            'module' => 'Support',
-            'action' => $action,
-            'description' => $description,
-            'ip_address' => $request->ip()
-        ]);
-
-        if ($request->has('response') && $msg->customer) {
-            // Notify Customer
-            $customerUserId = \App\Models\User::where('customer_id', $msg->customer_id)->value('user_id');
-            if ($customerUserId) {
-                NotificationService::sendToUser($customerUserId, [
-                    'type' => 'support_response',
-                    'title' => 'Response to your Feedback',
-                    'message' => 'An admin has responded to your feedback regarding "' . $msg->topic . '".',
+            // Send Notifications
+            if ($isCustomer) {
+                $customerName = $msg->customer ? "{$msg->customer->first_name} {$msg->customer->last_name}" : 'A customer';
+                $notifData = [
+                    'type' => 'support_reply',
+                    'title' => 'New Customer Message',
+                    'message' => "{$customerName} sent a message in conversation '{$msg->topic}'.",
                     'module' => 'Support',
-                    'action_url' => '/customer/dashboard',
+                    'action_url' => '/support',
                     'priority' => 'normal',
-                ]);
+                ];
+                NotificationService::sendToAdmins($notifData);
+                NotificationService::sendToStoreAdmins($notifData);
+            } else {
+                $customerUserId = \App\Models\User::where('customer_id', $msg->customer_id)->value('user_id');
+                if ($customerUserId) {
+                    NotificationService::sendToUser($customerUserId, [
+                        'type' => 'support_response',
+                        'title' => 'New Support Message',
+                        'message' => 'An admin has sent a message in your conversation "' . $msg->topic . '".',
+                        'module' => 'Support',
+                        'action_url' => '/customer/dashboard',
+                        'priority' => 'normal',
+                    ]);
+                }
+            }
+
+            return response()->json(['message' => 'Message added to conversation successfully', 'data' => $msg]);
+        }
+
+        // Legacy status update
+        if ($request->has('status')) {
+            $msg->update(['status' => $request->input('status')]);
+            return response()->json(['message' => 'Status updated']);
+        }
+
+        return response()->json(['message' => 'No action performed']);
+    }
+
+    public function destroy($id)
+    {
+        $msg = SupportMessage::find($id);
+        if (!$msg) {
+            return response()->json(['message' => 'Support message not found'], 404);
+        }
+
+        // Only allow customer to delete their own, or Admin to delete any.
+        // For simplicity, relying on Auth logic similar to update() if needed,
+        // but since both Customer and Admin can delete it, we'll check if the user is a customer
+        $user = auth()->user();
+        if ($user->role === 'Customer') {
+            if ($msg->customer_id != $user->customer_id) {
+                return response()->json(['message' => 'Unauthorized to delete this message'], 403);
             }
         }
 
-        if ($request->has('customer_reply')) {
-            $customerName = $msg->customer ? "{$msg->customer->first_name} {$msg->customer->last_name}" : 'A customer';
-            NotificationService::sendToAdmins([
-                'type' => 'support_reply',
-                'title' => 'New Customer Reply',
-                'message' => "{$customerName} replied to their feedback regarding '{$msg->topic}'.",
-                'module' => 'Support',
-                'action_url' => '/support',
-                'priority' => 'normal',
-            ]);
-            NotificationService::sendToStoreAdmins([
-                'type' => 'support_reply',
-                'title' => 'New Customer Reply',
-                'message' => "{$customerName} replied to their feedback regarding '{$msg->topic}'.",
-                'module' => 'Support',
-                'action_url' => '/support',
-                'priority' => 'normal',
-            ]);
-        }
-
-        return response()->json(['message' => 'Status updated']);
+        $msg->delete();
+        return response()->json(['message' => 'Support message deleted successfully']);
     }
 }
