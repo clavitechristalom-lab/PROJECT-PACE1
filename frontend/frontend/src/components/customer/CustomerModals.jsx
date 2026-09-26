@@ -886,233 +886,233 @@ export function MakePaymentModal({ isOpen, onClose, installments, onPaymentSucce
   return (
     <Modal isOpen={isOpen} onClose={onClose} title="Make a Payment" size="md">
       <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <label className="block text-xs font-bold text-muted-foreground mb-1">Payment Type</label>
-            <div className="grid grid-cols-2 gap-3">
-              <button
-                type="button"
-                onClick={() => setPaymentType('Installment Payment')}
-                className={`py-2.5 rounded-xl text-sm font-bold border transition-colors ${paymentType === 'Installment Payment'
-                  ? 'bg-blue-600/20 border-blue-600 text-blue-600 dark:bg-blue-500/20 dark:border-blue-500 dark:text-blue-400'
-                  : 'bg-transparent border-border text-foreground hover:bg-muted/50'
-                  }`}
-              >
-                Installment Payment
-              </button>
-              <button
-                type="button"
-                onClick={() => setPaymentType('Get Product')}
-                className={`py-2.5 rounded-xl text-sm font-bold border transition-colors ${paymentType === 'Get Product'
-                  ? 'bg-emerald-600/20 border-emerald-600 text-emerald-600 dark:bg-emerald-500/20 dark:border-emerald-500 dark:text-emerald-400'
-                  : 'bg-transparent border-border text-foreground hover:bg-muted/50'
-                  }`}
-              >
-                Get Product
-              </button>
-            </div>
+        <div>
+          <label className="block text-xs font-bold text-muted-foreground mb-1">Payment Type</label>
+          <div className="grid grid-cols-2 gap-3">
+            <button
+              type="button"
+              onClick={() => setPaymentType('Installment Payment')}
+              className={`py-2.5 rounded-xl text-sm font-bold border transition-colors ${paymentType === 'Installment Payment'
+                ? 'bg-blue-600/20 border-blue-600 text-blue-600 dark:bg-blue-500/20 dark:border-blue-500 dark:text-blue-400'
+                : 'bg-transparent border-border text-foreground hover:bg-muted/50'
+                }`}
+            >
+              Installment Payment
+            </button>
+            <button
+              type="button"
+              onClick={() => setPaymentType('Get Product')}
+              className={`py-2.5 rounded-xl text-sm font-bold border transition-colors ${paymentType === 'Get Product'
+                ? 'bg-emerald-600/20 border-emerald-600 text-emerald-600 dark:bg-emerald-500/20 dark:border-emerald-500 dark:text-emerald-400'
+                : 'bg-transparent border-border text-foreground hover:bg-muted/50'
+                }`}
+            >
+              Get Product
+            </button>
           </div>
+        </div>
 
-          {paymentType === 'Installment Payment' && installments.length === 0 && (
-            <EmptyState icon={<FiCheckCircle className="w-12 h-12 text-emerald-500/50 mx-auto" />} title="No installments" description="You have no active installments to pay. Switch to 'Get Product' to purchase a new product." />
-          )}
+        {paymentType === 'Installment Payment' && installments.length === 0 && (
+          <EmptyState icon={<FiCheckCircle className="w-12 h-12 text-emerald-500/50 mx-auto" />} title="No installments" description="You have no active installments to pay. Switch to 'Get Product' to purchase a new product." />
+        )}
 
-          {paymentType === 'Installment Payment' && installments.length > 0 && (
-            <div className="space-y-3">
-              <div>
-                <label className="block text-xs font-bold text-muted-foreground mb-1">Select Payment Schedule</label>
-                <select
-                  value={selectedSchedule}
-                  onChange={handleScheduleChange}
-                  required
-                  className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground text-sm"
-                >
-                  <option value="">-- Select Schedule --</option>
-                  {pendingSchedules.map(s => (
-                    <option key={s.schedule_id} value={s.schedule_id}>
-                      {s.due_date} - {s.product} ({fmt(s.balance_due ?? s.amount_due ?? 0)})
-                    </option>
-                  ))}
-                </select>
+        {paymentType === 'Installment Payment' && installments.length > 0 && (
+          <div className="space-y-3">
+            <div>
+              <label className="block text-xs font-bold text-muted-foreground mb-1">Select Payment Schedule</label>
+              <select
+                value={selectedSchedule}
+                onChange={handleScheduleChange}
+                required
+                className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground text-sm"
+              >
+                <option value="">-- Select Schedule --</option>
+                {pendingSchedules.map(s => (
+                  <option key={s.schedule_id} value={s.schedule_id}>
+                    {s.due_date} - {s.product} ({fmt(s.balance_due ?? s.amount_due ?? 0)})
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {selectedScheduleDetails && (
+              <div className="bg-muted/30 p-4 rounded-xl text-sm border border-border space-y-2">
+                <div className="flex justify-between items-center border-b border-border/50 pb-2 mb-2">
+                  <span className="text-muted-foreground">Product</span>
+                  <span className="font-bold text-foreground truncate max-w-[200px]" title={selectedScheduleDetails.product}>{selectedScheduleDetails.product}</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-muted-foreground">Installment Schedule</span>
+                  <span className="font-bold text-foreground">{selectedScheduleDetails.due_date}</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-muted-foreground">Current Payment Due</span>
+                  <span className="font-bold text-rose-500">{fmt(selectedScheduleDetails.balance_due ?? selectedScheduleDetails.amount_due ?? 0)}</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-muted-foreground">Remaining Balance</span>
+                  <span className="font-bold text-foreground">{fmt(selectedScheduleDetails.installment_balance)}</span>
+                </div>
+                <div className="flex justify-between items-center pt-1">
+                  <span className="text-muted-foreground">Payment Status</span>
+                  <span className="font-bold text-blue-500">{selectedScheduleDetails.status}</span>
+                </div>
               </div>
+            )}
+          </div>
+        )}
 
-              {selectedScheduleDetails && (
+        {paymentType === 'Get Product' && (
+          <div className="space-y-3">
+            <div>
+              <label className="block text-xs font-bold text-muted-foreground mb-1">Select Product</label>
+              <select
+                value={selectedProductId}
+                onChange={e => {
+                  setSelectedProductId(e.target.value);
+                  const prod = products.find(p => p.product_id.toString() === e.target.value);
+                  if (prod) {
+                    const price = prod.discount_price > 0 ? prod.discount_price : prod.unit_price;
+                    setAmount(price);
+                  } else {
+                    setAmount('');
+                  }
+                }}
+                required
+                className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground text-sm"
+              >
+                <option value="">-- Choose a Product --</option>
+                {products.map(p => (
+                  <option key={p.product_id} value={p.product_id}>
+                    {p.product_name} - {fmt(p.discount_price > 0 ? p.discount_price : p.unit_price)}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {selectedProductId && (() => {
+              const prod = products.find(p => p.product_id.toString() === selectedProductId);
+              if (!prod) return null;
+              const price = prod.discount_price > 0 ? prod.discount_price : prod.unit_price;
+              return (
                 <div className="bg-muted/30 p-4 rounded-xl text-sm border border-border space-y-2">
                   <div className="flex justify-between items-center border-b border-border/50 pb-2 mb-2">
                     <span className="text-muted-foreground">Product</span>
-                    <span className="font-bold text-foreground truncate max-w-[200px]" title={selectedScheduleDetails.product}>{selectedScheduleDetails.product}</span>
+                    <span className="font-bold text-foreground">{prod.product_name}</span>
                   </div>
                   <div className="flex justify-between items-center">
-                    <span className="text-muted-foreground">Installment Schedule</span>
-                    <span className="font-bold text-foreground">{selectedScheduleDetails.due_date}</span>
+                    <span className="text-muted-foreground">Price</span>
+                    <span className="font-bold text-emerald-600">{fmt(price)}</span>
                   </div>
-                  <div className="flex justify-between items-center">
-                    <span className="text-muted-foreground">Current Payment Due</span>
-                    <span className="font-bold text-rose-500">{fmt(selectedScheduleDetails.balance_due ?? selectedScheduleDetails.amount_due ?? 0)}</span>
-                  </div>
-                  <div className="flex justify-between items-center">
-                    <span className="text-muted-foreground">Remaining Balance</span>
-                    <span className="font-bold text-foreground">{fmt(selectedScheduleDetails.installment_balance)}</span>
-                  </div>
-                  <div className="flex justify-between items-center pt-1">
-                    <span className="text-muted-foreground">Payment Status</span>
-                    <span className="font-bold text-blue-500">{selectedScheduleDetails.status}</span>
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-
-          {paymentType === 'Get Product' && (
-            <div className="space-y-3">
-              <div>
-                <label className="block text-xs font-bold text-muted-foreground mb-1">Select Product</label>
-                <select
-                  value={selectedProductId}
-                  onChange={e => {
-                    setSelectedProductId(e.target.value);
-                    const prod = products.find(p => p.product_id.toString() === e.target.value);
-                    if (prod) {
-                      const price = prod.discount_price > 0 ? prod.discount_price : prod.unit_price;
-                      setAmount(price);
-                    } else {
-                      setAmount('');
-                    }
-                  }}
-                  required
-                  className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground text-sm"
-                >
-                  <option value="">-- Choose a Product --</option>
-                  {products.map(p => (
-                    <option key={p.product_id} value={p.product_id}>
-                      {p.product_name} - {fmt(p.discount_price > 0 ? p.discount_price : p.unit_price)}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              {selectedProductId && (() => {
-                const prod = products.find(p => p.product_id.toString() === selectedProductId);
-                if (!prod) return null;
-                const price = prod.discount_price > 0 ? prod.discount_price : prod.unit_price;
-                return (
-                  <div className="bg-muted/30 p-4 rounded-xl text-sm border border-border space-y-2">
-                    <div className="flex justify-between items-center border-b border-border/50 pb-2 mb-2">
-                      <span className="text-muted-foreground">Product</span>
-                      <span className="font-bold text-foreground">{prod.product_name}</span>
-                    </div>
+                  {prod.stock_quantity !== undefined && (
                     <div className="flex justify-between items-center">
-                      <span className="text-muted-foreground">Price</span>
-                      <span className="font-bold text-emerald-600">{fmt(price)}</span>
+                      <span className="text-muted-foreground">Stock</span>
+                      <span className={`font-bold ${prod.stock_quantity > 0 ? 'text-foreground' : 'text-rose-500'}`}>{prod.stock_quantity > 0 ? `${prod.stock_quantity} available` : 'Out of stock'}</span>
                     </div>
-                    {prod.stock_quantity !== undefined && (
-                      <div className="flex justify-between items-center">
-                        <span className="text-muted-foreground">Stock</span>
-                        <span className={`font-bold ${prod.stock_quantity > 0 ? 'text-foreground' : 'text-rose-500'}`}>{prod.stock_quantity > 0 ? `${prod.stock_quantity} available` : 'Out of stock'}</span>
-                      </div>
-                    )}
-                  </div>
-                );
-              })()}
-
-              <div>
-                <label className="block text-xs font-bold text-muted-foreground mb-1">Payment Amount</label>
-                <div className="relative">
-                  <TbCurrencyPeso className="absolute left-3 top-2.5 text-muted-foreground w-4 h-4" />
-                  <input
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    value={amount}
-                    onChange={e => setAmount(e.target.value)}
-                    required
-                    className="w-full pl-9 pr-3 py-2 rounded-xl border border-border bg-card text-foreground font-mono focus:ring-2 focus:ring-blue-500/20 outline-none"
-                  />
+                  )}
                 </div>
+              );
+            })()}
+
+            <div>
+              <label className="block text-xs font-bold text-muted-foreground mb-1">Payment Amount</label>
+              <div className="relative">
+                <TbCurrencyPeso className="absolute left-3 top-2.5 text-muted-foreground w-4 h-4" />
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={amount}
+                  onChange={e => setAmount(e.target.value)}
+                  required
+                  className="w-full pl-9 pr-3 py-2 rounded-xl border border-border bg-card text-foreground font-mono focus:ring-2 focus:ring-blue-500/20 outline-none"
+                />
               </div>
             </div>
-          )}
+          </div>
+        )}
 
-          {(paymentType === 'Get Product' || (paymentType === 'Installment Payment' && installments.length > 0)) && (
+        {(paymentType === 'Get Product' || (paymentType === 'Installment Payment' && installments.length > 0)) && (
           <>
-          <div>
-            <label className="block text-xs font-bold text-muted-foreground mb-1">Payment Method</label>
-            <div className="flex flex-wrap gap-2">
-              {(paymentType === 'Get Product' ? ['Cash', 'GCash', 'Maya', 'Bank Account', 'Installment'] : ['Cash', 'GCash', 'Maya', 'Bank Account']).map(method => {
-                const isDisabled = method === 'Installment' && pendingSchedules.length > 0;
-                return (
-                  <button
-                    key={method}
-                    type="button"
-                    disabled={isDisabled}
-                    onClick={() => setPaymentMethod(method)}
-                    className={`py-2 px-4 flex-1 min-w-[80px] rounded-xl text-xs font-bold border transition-colors ${isDisabled
-                      ? 'bg-muted/50 text-muted-foreground opacity-50 cursor-not-allowed border-transparent'
-                      : paymentMethod === method
-                        ? 'bg-blue-600/20 border-blue-600 text-blue-600 dark:bg-blue-500/20 dark:border-blue-500 dark:text-blue-400'
-                        : 'bg-transparent border-border text-foreground hover:bg-muted/50'
-                      }`}
-                    title={isDisabled ? "Cannot use Installment while you have a pending balance" : ""}
-                  >
-                    {method}
-                  </button>
-                )
-              })}
+            <div>
+              <label className="block text-xs font-bold text-muted-foreground mb-1">Payment Method</label>
+              <div className="flex flex-wrap gap-2">
+                {(paymentType === 'Get Product' ? ['Cash', 'GCash', 'Maya', 'Bank Account', 'Installment'] : ['Cash', 'GCash', 'Maya', 'Bank Account']).map(method => {
+                  const isDisabled = method === 'Installment' && pendingSchedules.length > 0;
+                  return (
+                    <button
+                      key={method}
+                      type="button"
+                      disabled={isDisabled}
+                      onClick={() => setPaymentMethod(method)}
+                      className={`py-2 px-4 flex-1 min-w-[80px] rounded-xl text-xs font-bold border transition-colors ${isDisabled
+                        ? 'bg-muted/50 text-muted-foreground opacity-50 cursor-not-allowed border-transparent'
+                        : paymentMethod === method
+                          ? 'bg-blue-600/20 border-blue-600 text-blue-600 dark:bg-blue-500/20 dark:border-blue-500 dark:text-blue-400'
+                          : 'bg-transparent border-border text-foreground hover:bg-muted/50'
+                        }`}
+                      title={isDisabled ? "Cannot use Installment while you have a pending balance" : ""}
+                    >
+                      {method}
+                    </button>
+                  )
+                })}
+              </div>
             </div>
-          </div>
 
-          <div>
-            <label className="block text-xs font-bold text-muted-foreground mb-1">Transaction Reference</label>
-            <input
-              type="text"
-              value={referenceNumber}
-              onChange={e => setReferenceNumber(e.target.value.replace(/\D/g, ''))}
-              placeholder="Enter reference number"
-              className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground text-sm focus:ring-2 focus:ring-blue-500/20 outline-none"
-              required={paymentMethod !== 'Cash'}
-            />
-          </div>
-
-          <div>
-            <label className="block text-xs font-bold text-muted-foreground mb-1">
-              Proof of Payment {paymentMethod !== 'Cash' && <span className="text-blue-500">*</span>}
-            </label>
-            <div className="relative w-full border-2 border-dashed border-border rounded-xl p-4 flex flex-col items-center justify-center bg-card text-center overflow-hidden hover:bg-muted/30 transition-colors">
+            <div>
+              <label className="block text-xs font-bold text-muted-foreground mb-1">Transaction Reference</label>
               <input
-                type="file"
-                accept="image/jpeg, image/png, image/webp"
-                onChange={handleImageChange}
-                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
-                required={paymentMethod !== 'Cash' && !proofPreview}
+                type="text"
+                value={referenceNumber}
+                onChange={e => setReferenceNumber(e.target.value.replace(/\D/g, ''))}
+                placeholder="Enter reference number"
+                className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground text-sm focus:ring-2 focus:ring-blue-500/20 outline-none"
+                required={paymentMethod !== 'Cash'}
               />
-              {proofPreview ? (
-                <div className="flex flex-col items-center z-20 relative">
-                  <img src={proofPreview} alt="Proof" className="max-h-32 object-contain mb-2 rounded border border-border" />
-                  <button type="button" className="text-xs text-rose-500 font-bold hover:underline" onClick={(e) => { e.preventDefault(); setProofImage(null); setProofPreview(null); }}>Remove Image</button>
-                </div>
-              ) : (
-                <>
-                  <div className="font-bold text-blue-600 dark:text-blue-400 text-sm mb-1">Choose or upload image</div>
-                  <div className="text-[10px] text-muted-foreground">JPG, PNG, or WEBP up to 5 MB</div>
-                </>
-              )}
             </div>
-          </div>
 
-          <div className="bg-blue-50 dark:bg-blue-950/20 p-3 rounded-xl border border-blue-100 dark:border-blue-900 text-xs text-blue-700 dark:text-blue-300">
-            <strong>Note:</strong> Online payments are subject to review. It may take 1-2 business days for the payment to reflect in your account balance.
-          </div>
+            <div>
+              <label className="block text-xs font-bold text-muted-foreground mb-1">
+                Proof of Payment {paymentMethod !== 'Cash' && <span className="text-blue-500">*</span>}
+              </label>
+              <div className="relative w-full border-2 border-dashed border-border rounded-xl p-4 flex flex-col items-center justify-center bg-card text-center overflow-hidden hover:bg-muted/30 transition-colors">
+                <input
+                  type="file"
+                  accept="image/jpeg, image/png, image/webp"
+                  onChange={handleImageChange}
+                  className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
+                  required={paymentMethod !== 'Cash' && !proofPreview}
+                />
+                {proofPreview ? (
+                  <div className="flex flex-col items-center z-20 relative">
+                    <img src={proofPreview} alt="Proof" className="max-h-32 object-contain mb-2 rounded border border-border" />
+                    <button type="button" className="text-xs text-rose-500 font-bold hover:underline" onClick={(e) => { e.preventDefault(); setProofImage(null); setProofPreview(null); }}>Remove Image</button>
+                  </div>
+                ) : (
+                  <>
+                    <div className="font-bold text-blue-600 dark:text-blue-400 text-sm mb-1">Choose or upload image</div>
+                    <div className="text-[10px] text-muted-foreground">JPG, PNG, or WEBP up to 5 MB</div>
+                  </>
+                )}
+              </div>
+            </div>
+
+            <div className="bg-blue-50 dark:bg-blue-950/20 p-3 rounded-xl border border-blue-100 dark:border-blue-900 text-xs text-blue-700 dark:text-blue-300">
+              <strong>Note:</strong> Online payments are subject to review. It may take 1-2 business days for the payment to reflect in your account balance.
+            </div>
           </>
-          )}
+        )}
 
-          <button
-            type="submit"
-            disabled={submitting || (paymentType === 'Installment Payment' && (!selectedSchedule || installments.length === 0)) || (paymentType === 'Get Product' && !selectedProductId) || (paymentMethod !== 'Cash' && !proofImage)}
-            className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl flex items-center justify-center gap-2 transition-colors disabled:opacity-50"
-          >
-            {submitting ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div> : <TbCurrencyPeso className="w-4 h-4" />}
-            <span>{submitting ? 'Processing...' : (paymentType === 'Get Product' ? 'Submit Product Request' : 'Submit Payment')}</span>
-          </button>
-        </form>
+        <button
+          type="submit"
+          disabled={submitting || (paymentType === 'Installment Payment' && (!selectedSchedule || installments.length === 0)) || (paymentType === 'Get Product' && !selectedProductId) || (paymentMethod !== 'Cash' && !proofImage)}
+          className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl flex items-center justify-center gap-2 transition-colors disabled:opacity-50"
+        >
+          {submitting ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div> : <TbCurrencyPeso className="w-4 h-4" />}
+          <span>{submitting ? 'Processing...' : (paymentType === 'Get Product' ? 'Submit Product Request' : 'Submit Payment')}</span>
+        </button>
+      </form>
     </Modal>
   );
 }
