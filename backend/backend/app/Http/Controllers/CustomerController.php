@@ -14,7 +14,7 @@ class CustomerController extends Controller
 {
     public function index(Request $request)
     {
-        $query = Customer::with(['installmentAccounts.payments', 'saleTransactions', 'branch']);
+        $query = Customer::with(['installmentAccounts.payments', 'saleTransactions', 'branch', 'user']);
 
         $user = auth()->user();
 
@@ -116,7 +116,7 @@ class CustomerController extends Controller
                 'phone'               => $c->phone,
                 'email'               => $c->email,
                 'address'             => $c->address,
-                'status'              => $c->status,
+                'status'              => $c->user ? ($c->user->is_active ? 'Active' : 'Inactive') : $c->status,
                 'notes'               => $c->notes,
                 'branch_id'           => $c->branch_id,
                 'branch_name'         => $c->branch ? $c->branch->name : null,
@@ -155,6 +155,7 @@ class CustomerController extends Controller
 
         $customer = Customer::with([
             'branch',
+            'user',
             'saleTransactions' => function ($q) {
                 $q->orderByDesc('sale_date');
             },
@@ -237,7 +238,7 @@ class CustomerController extends Controller
                 'phone'               => $customer->phone,
                 'email'               => $customer->email,
                 'address'             => $customer->address,
-                'status'              => $customer->status,
+                'status'              => $customer->user ? ($customer->user->is_active ? 'Active' : 'Inactive') : $customer->status,
                 'notes'               => $customer->notes,
                 'branch_id'           => $customer->branch_id,
                 'branch_name'         => $customer->branch ? $customer->branch->name : null,

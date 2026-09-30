@@ -135,6 +135,10 @@ export const api = {
 
   // ─── Products ───
   products: {
+    getPublicProducts: (params = {}) => {
+      const qs = new URLSearchParams(cleanParams(params)).toString();
+      return request(`/public/products${qs ? `?${qs}` : ''}`);
+    },
     getAll: (params = {}) => {
       const qs = new URLSearchParams(cleanParams(params)).toString();
       return request(`/products${qs ? `?${qs}` : ''}`);
@@ -378,6 +382,11 @@ export const api = {
       request('/attendance/verify-qr', {
         method: 'POST',
         body: JSON.stringify(data),
+      }),
+    scanImage: (formData) =>
+      request('/attendance/scan-image', {
+        method: 'POST',
+        body: formData,
       }),
     verifyPin: (data) =>
       request('/attendance/verify-pin', {

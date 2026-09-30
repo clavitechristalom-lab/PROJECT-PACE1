@@ -425,7 +425,7 @@ export default function SystemPage({ defaultTab = 'users' }) {
                           </td>
                           <td className="py-3 px-4">
                             <span className="text-xs font-semibold text-foreground/80">
-                              {u.employee?.branch?.name || u.customer?.branch?.name || (u.role === 'Customer' ? 'Online' : '—')}
+                              {u.employee?.branch || u.customer?.branch_name || '—'}
                             </span>
                           </td>
                           <td className="py-3 px-4">
@@ -773,51 +773,53 @@ export default function SystemPage({ defaultTab = 'users' }) {
               </div>
             </div>
 
-            {/* Employee Information Card */}
-            <div className="p-3.5 bg-muted/20 rounded-xl border border-border space-y-2.5">
-              <div className="flex items-center justify-between border-b border-border pb-2">
-                <span className="text-xs font-bold uppercase tracking-wider text-foreground">Employee Profile</span>
-                {selectedUserDetail.employee && (
-                  <span className="font-mono font-bold text-xs text-primary bg-primary/10 px-2 py-0.5 rounded-md">
-                    {selectedUserDetail.employee.employee_code}
-                  </span>
+            {/* Employee Information Card - Employee/Admin Only */}
+            {selectedUserDetail.role !== 'Customer' && (
+              <div className="p-3.5 bg-muted/20 rounded-xl border border-border space-y-2.5">
+                <div className="flex items-center justify-between border-b border-border pb-2">
+                  <span className="text-xs font-bold uppercase tracking-wider text-foreground">Employee Profile</span>
+                  {selectedUserDetail.employee && (
+                    <span className="font-mono font-bold text-xs text-primary bg-primary/10 px-2 py-0.5 rounded-md">
+                      {selectedUserDetail.employee.employee_code}
+                    </span>
+                  )}
+                </div>
+
+                {selectedUserDetail.employee ? (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2.5">
+                    <div>
+                      <span className="text-[10px] uppercase font-bold text-muted-foreground block">Employee ID</span>
+                      <p className="font-mono font-bold text-primary">{selectedUserDetail.employee.employee_code}</p>
+                    </div>
+                    <div>
+                      <span className="text-[10px] uppercase font-bold text-muted-foreground block">Full Name</span>
+                      <p className="font-semibold text-foreground">{trimName(selectedUserDetail.employee)}</p>
+                    </div>
+                    <div>
+                      <span className="text-[10px] uppercase font-bold text-muted-foreground block">Department</span>
+                      <p className="font-semibold text-foreground">{selectedUserDetail.employee.department || '—'}</p>
+                    </div>
+                    <div>
+                      <span className="text-[10px] uppercase font-bold text-muted-foreground block">Position</span>
+                      <p className="font-semibold text-foreground">{selectedUserDetail.employee.position || '—'}</p>
+                    </div>
+                    <div>
+                      <span className="text-[10px] uppercase font-bold text-muted-foreground block">Branch</span>
+                      <p className="font-semibold text-foreground">{selectedUserDetail.employee.branch?.name || '—'}</p>
+                    </div>
+                    <div>
+                      <span className="text-[10px] uppercase font-bold text-muted-foreground block">Phone</span>
+                      <p className="font-mono font-semibold text-foreground">{selectedUserDetail.employee.phone || '—'}</p>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="p-3 bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800 text-amber-800 dark:text-amber-300 rounded-xl text-xs flex items-center gap-2">
+                    <FiAlertTriangle className="w-4 h-4 shrink-0 text-amber-500" />
+                    <span>This user account is not linked to an employee profile.</span>
+                  </div>
                 )}
               </div>
-
-              {selectedUserDetail.employee ? (
-                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2.5">
-                  <div>
-                    <span className="text-[10px] uppercase font-bold text-muted-foreground block">Employee ID</span>
-                    <p className="font-mono font-bold text-primary">{selectedUserDetail.employee.employee_code}</p>
-                  </div>
-                  <div>
-                    <span className="text-[10px] uppercase font-bold text-muted-foreground block">Full Name</span>
-                    <p className="font-semibold text-foreground">{trimName(selectedUserDetail.employee)}</p>
-                  </div>
-                  <div>
-                    <span className="text-[10px] uppercase font-bold text-muted-foreground block">Department</span>
-                    <p className="font-semibold text-foreground">{selectedUserDetail.employee.department || '—'}</p>
-                  </div>
-                  <div>
-                    <span className="text-[10px] uppercase font-bold text-muted-foreground block">Position</span>
-                    <p className="font-semibold text-foreground">{selectedUserDetail.employee.position || '—'}</p>
-                  </div>
-                  <div>
-                    <span className="text-[10px] uppercase font-bold text-muted-foreground block">Branch</span>
-                    <p className="font-semibold text-foreground">{selectedUserDetail.employee.branch?.name || '—'}</p>
-                  </div>
-                  <div>
-                    <span className="text-[10px] uppercase font-bold text-muted-foreground block">Phone</span>
-                    <p className="font-mono font-semibold text-foreground">{selectedUserDetail.employee.phone || '—'}</p>
-                  </div>
-                </div>
-              ) : (
-                <div className="p-3 bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800 text-amber-800 dark:text-amber-300 rounded-xl text-xs flex items-center gap-2">
-                  <FiAlertTriangle className="w-4 h-4 shrink-0 text-amber-500" />
-                  <span>This user account is not linked to an employee profile.</span>
-                </div>
-              )}
-            </div>
+            )}
 
             {/* Account Verification Section - Employee/Admin Only */}
             {selectedUserDetail.role !== 'Customer' && (

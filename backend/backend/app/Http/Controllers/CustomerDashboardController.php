@@ -78,10 +78,13 @@ class CustomerDashboardController extends Controller
             $monthlyPayment = $activeInstallments->sum('installment_amount');
             
             // Calculate remaining credit balance
-            $totalPayable = $activeInstallments->sum('total_payable');
-            $totalPaid = Payment::whereIn('installment_id', $activeInstallments->pluck('installment_id'))
-                ->sum('amount');
-            $totalCreditBalance = max(0, $totalPayable - $totalPaid);
+            $activeInstallments->load('paymentSchedules');
+            $totalCreditBalance = $activeInstallments->reduce(function ($carry, $inst) {
+                if ($inst->status === 'Pending') {
+                    return $carry + (float)$inst->total_payable;
+                }
+                return $carry + (float)$inst->paymentSchedules->sum('balance_due');
+            }, 0);
 
             // Overdue count
             $overdueCount = PaymentSchedule::whereIn('installment_id', $activeInstallments->pluck('installment_id'))
@@ -148,7 +151,7 @@ class CustomerDashboardController extends Controller
                 $imageUrl = $inst->sale->items->first()->product?->image_url ?? null;
             }
 
-            $paidAmount = $inst->payments->sum('amount');
+            $paidAmount = $inst->payments->sum('amount') + $inst->down_payment;
             $balance = max(0, $inst->total_payable - $paidAmount);
             
             $nextDue = $inst->paymentSchedules
@@ -170,7 +173,14 @@ class CustomerDashboardController extends Controller
                 'image_url' => $imageUrl,
                 'installment_id' => $inst->installment_id,
                 'payment_method' => $inst->sale?->payment_method ?? 'Installment',
-                'paymentSchedules' => $inst->paymentSchedules
+                'paymentSchedules' => $inst->paymentSchedules->map(function ($s) use ($balance) {
+                    if ($balance <= 0) {
+                        $s->balance_due = 0;
+                        $s->status = 'Paid';
+                        $s->amount_paid = max((float)$s->amount_paid, (float)$s->amount_due);
+                    }
+                    return $s;
+                })
             ];
         });
 
@@ -202,16 +212,9 @@ class CustomerDashboardController extends Controller
         $product = Product::findOrFail($validated['product_id']);
         $actualPrice = $product->discount_price > 0 ? $product->discount_price : $product->unit_price;
 
-        $isFullPaymentMethod = in_array($validated['payment_method'], ['Cash', 'GCash', 'Maya', 'Bank Account']);
-        if ($isFullPaymentMethod) {
-            if (abs($validated['amount'] - $actualPrice) > 0.01) {
-                return response()->json([
-                    'message' => "The selected payment method ({$validated['payment_method']}) requires full payment of ₱" . number_format($actualPrice, 2) . ". Please select Installment if you only want to pay a downpayment."
-                ], 422);
-            }
-        }
+        $isFullPayment = $validated['amount'] >= $actualPrice;
 
-        return DB::transaction(function () use ($validated, $customerId, $product, $actualPrice, $isFullPaymentMethod, $request) {
+        return DB::transaction(function () use ($validated, $customerId, $product, $actualPrice, $isFullPayment, $request) {
             $sale = \App\Models\SaleTransaction::create([
                 'invoice_no'      => 'REQ-' . date('Ymd') . '-' . rand(1000, 9999),
                 'customer_id'     => $customerId,
@@ -237,10 +240,51 @@ class CustomerDashboardController extends Controller
                 'line_total'      => $actualPrice,
             ]);
 
+            // Create the InstallmentAccount for this request
+            $accCount = InstallmentAccount::count() + 1;
+            $accountNo = 'REQ-' . str_pad($accCount, 4, '0', STR_PAD_LEFT);
+            
+            $instAccount = InstallmentAccount::create([
+                'account_no' => $accountNo,
+                'sale_id' => $sale->sale_id,
+                'customer_id' => $customerId,
+                'start_date' => now()->toDateString(),
+                'principal_amount' => $actualPrice,
+                'down_payment' => $validated['amount'],
+                'interest_rate' => 0,
+                'interest_amount' => 0,
+                'total_payable' => max(0, $actualPrice - $validated['amount']),
+                'installment_amount' => 0,
+                'number_of_installments' => 0,
+                'frequency' => 'Monthly',
+                'status' => $isFullPayment ? 'Completed' : 'Pending',
+                'notes' => $isFullPayment ? "Fully paid via {$validated['payment_method']}" : 'Pending approval for new product request',
+            ]);
+
+            $scheduleId = null;
+            if ($isFullPayment) {
+                $schedule = \App\Models\PaymentSchedule::create([
+                    'installment_id' => $instAccount->installment_id,
+                    'installment_no' => 1,
+                    'due_date' => now()->toDateString(),
+                    'amount_due' => $actualPrice,
+                    'amount_paid' => $validated['amount'],
+                    'balance_due' => 0,
+                    'status' => 'Paid',
+                    'paid_date' => now()->toDateString(),
+                    'notes' => 'Full Payment',
+                ]);
+                $scheduleId = $schedule->schedule_id;
+            }
+
             // Save payment if any
             if ($validated['amount'] > 0) {
-                $paymentCount = Payment::count() + 1;
+                $paymentCount = (\App\Models\Payment::max('payment_id') ?? 0) + 1;
                 $receiptNo = 'REC-' . date('Y') . '-' . str_pad($paymentCount, 5, '0', STR_PAD_LEFT);
+                while (\App\Models\Payment::where('receipt_no', $receiptNo)->exists()) {
+                    $paymentCount++;
+                    $receiptNo = 'REC-' . date('Y') . '-' . str_pad($paymentCount, 5, '0', STR_PAD_LEFT);
+                }
                 
                 $payment = new Payment([
                     'receipt_no'     => $receiptNo,
@@ -248,43 +292,22 @@ class CustomerDashboardController extends Controller
                     'payment_date'   => now(),
                     'payment_method' => $validated['payment_method'],
                     'reference_no'   => $validated['reference_no'] ?? null,
-                    'notes'          => $isFullPaymentMethod ? "{$validated['payment_method']} payment for product" : 'Downpayment for product request',
+                    'notes'          => $isFullPayment ? "{$validated['payment_method']} payment for product" : 'Downpayment for product request',
                     'processed_by'   => $request->user()->user_id,
-                    'status'         => $isFullPaymentMethod ? 'Completed' : 'Pending',
+                    'status'         => $isFullPayment ? 'Completed' : 'Pending',
                 ]);
+
 
                 if ($request->hasFile('proof_of_payment')) {
                     $path = $request->file('proof_of_payment')->store('payments', 'public');
                     $payment->proof_of_payment = $path;
                 }
                 
-                // Note: We don't have an installment account yet, so we attach the payment to the sale directly or leave it pending.
-                // Wait, Payment requires installment_id! Let's create a pending InstallmentAccount.
-                
-                $accCount = InstallmentAccount::count() + 1;
-                $accountNo = 'REQ-' . str_pad($accCount, 4, '0', STR_PAD_LEFT);
-                
-                $instAccount = InstallmentAccount::create([
-                    'account_no' => $accountNo,
-                    'sale_id' => $sale->sale_id,
-                    'customer_id' => $customerId,
-                    'start_date' => now()->toDateString(),
-                    'principal_amount' => $actualPrice,
-                    'down_payment' => $validated['amount'],
-                    'interest_rate' => 0,
-                    'interest_amount' => 0,
-                    'total_payable' => max(0, $actualPrice - $validated['amount']),
-                    'installment_amount' => 0,
-                    'number_of_installments' => 0,
-                    'frequency' => 'Monthly',
-                    'status' => $isFullPaymentMethod ? 'Completed' : 'Pending',
-                    'notes' => $isFullPaymentMethod ? "Fully paid via {$validated['payment_method']}" : 'Pending approval for new product request',
-                ]);
-
                 $payment->installment_id = $instAccount->installment_id;
+                $payment->schedule_id = $scheduleId;
                 $payment->save();
 
-                if ($isFullPaymentMethod) {
+                if ($isFullPayment) {
                     $sale->payment_method = $validated['payment_method'];
                     $sale->status = 'Completed';
                     $sale->save();

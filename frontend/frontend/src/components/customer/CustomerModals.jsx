@@ -374,7 +374,7 @@ function ProductDetailModal({ product, onClose }) {
 export function PaymentDetailsModal({ isOpen, onClose, installments }) {
   // Extract upcoming schedules from installments
   const schedules = installments.flatMap(i =>
-    (i.paymentSchedules || []).filter(s => s.status === 'Pending').map(s => ({
+    (i.paymentSchedules || []).filter(s => Number(s.balance_due) > 0).map(s => ({
       ...s,
       product: i.product,
       account_no: i.account_no
@@ -459,7 +459,7 @@ export function CreditDetailsModal({ isOpen, onClose, installments }) {
 
 export function OverduePaymentsModal({ isOpen, onClose, installments }) {
   const overdueSchedules = installments.flatMap(i =>
-    (i.paymentSchedules || []).filter(s => s.status === 'Pending' && new Date(s.due_date) < new Date(new Date().setHours(0, 0, 0, 0))).map(s => ({
+    (i.paymentSchedules || []).filter(s => Number(s.balance_due) > 0 && new Date(s.due_date) < new Date(new Date().setHours(0, 0, 0, 0))).map(s => ({
       ...s,
       product: i.product,
       account_no: i.account_no
@@ -745,6 +745,7 @@ export function StatementModal({ isOpen, onClose }) {
 export function MakePaymentModal({ isOpen, onClose, installments, onPaymentSuccess }) {
   const [paymentType, setPaymentType] = useState('Installment Payment');
   const [paymentMethod, setPaymentMethod] = useState('GCash');
+  const [bankName, setBankName] = useState('BDO');
   const [selectedSchedule, setSelectedSchedule] = useState('');
   const [amount, setAmount] = useState('');
   const [referenceNumber, setReferenceNumber] = useState('');
@@ -758,7 +759,7 @@ export function MakePaymentModal({ isOpen, onClose, installments, onPaymentSucce
   const pendingSchedules = installments.flatMap(i => {
     const paid = (i.payments || []).reduce((sum, p) => sum + Number(p.amount), 0);
     const balance = Math.max(0, Number(i.total_payable || 0) - paid);
-    return (i.paymentSchedules || []).filter(s => s.status === 'Pending').map(s => ({
+    return (i.paymentSchedules || []).filter(s => Number(s.balance_due) > 0).map(s => ({
       ...s,
       product: i.product || i.productName || 'Product',
       account_no: i.account_no,
@@ -783,7 +784,9 @@ export function MakePaymentModal({ isOpen, onClose, installments, onPaymentSucce
     setSelectedSchedule(val);
     const schedule = pendingSchedules.find(s => s.schedule_id.toString() === val);
     if (schedule) {
-      setAmount(schedule.balance_due ?? schedule.amount_due ?? 0);
+      const due = Number(schedule.balance_due ?? schedule.amount_due ?? 0);
+      const balance = Number(schedule.installment_balance ?? 0);
+      setAmount(Math.min(due, balance));
     } else {
       setAmount('');
     }
@@ -831,6 +834,7 @@ export function MakePaymentModal({ isOpen, onClose, installments, onPaymentSucce
     setSubmitting(true);
     try {
       const formData = new FormData();
+      const finalPaymentMethod = paymentMethod === 'Bank Account' ? bankName : paymentMethod;
 
       if (paymentType === 'Installment Payment') {
         const schedule = pendingSchedules.find(s => s.schedule_id.toString() === selectedSchedule);
@@ -839,7 +843,7 @@ export function MakePaymentModal({ isOpen, onClose, installments, onPaymentSucce
         formData.append('installment_id', schedule.installment_id);
         formData.append('schedule_id', selectedSchedule);
         formData.append('amount', amount);
-        formData.append('payment_method', paymentMethod);
+        formData.append('payment_method', finalPaymentMethod);
         if (referenceNumber) formData.append('reference_no', referenceNumber);
         if (proofImage) formData.append('proof_of_payment', proofImage);
 
@@ -847,7 +851,7 @@ export function MakePaymentModal({ isOpen, onClose, installments, onPaymentSucce
       } else {
         formData.append('product_id', selectedProductId);
         formData.append('amount', amount);
-        formData.append('payment_method', paymentMethod);
+        formData.append('payment_method', finalPaymentMethod);
         if (referenceNumber) formData.append('reference_no', referenceNumber);
         if (proofImage) formData.append('proof_of_payment', proofImage);
 
@@ -947,7 +951,7 @@ export function MakePaymentModal({ isOpen, onClose, installments, onPaymentSucce
                 </div>
                 <div className="flex justify-between items-center">
                   <span className="text-muted-foreground">Current Payment Due</span>
-                  <span className="font-bold text-rose-500">{fmt(selectedScheduleDetails.balance_due ?? selectedScheduleDetails.amount_due ?? 0)}</span>
+                  <span className="font-bold text-rose-500">{fmt(Math.min(Number(selectedScheduleDetails.balance_due ?? selectedScheduleDetails.amount_due ?? 0), Number(selectedScheduleDetails.installment_balance ?? 0)))}</span>
                 </div>
                 <div className="flex justify-between items-center">
                   <span className="text-muted-foreground">Remaining Balance</span>
@@ -1013,9 +1017,37 @@ export function MakePaymentModal({ isOpen, onClose, installments, onPaymentSucce
                 </div>
               );
             })()}
+          </div>
+        )}
 
+        {(paymentType === 'Get Product' || (paymentType === 'Installment Payment' && installments.length > 0)) && (
+          <>
             <div>
-              <label className="block text-xs font-bold text-muted-foreground mb-1">Payment Amount</label>
+              <div className="flex justify-between items-center mb-1">
+                <label className="block text-xs font-bold text-muted-foreground">Payment Amount</label>
+                {paymentType === 'Installment Payment' && selectedScheduleDetails && (
+                  <button 
+                    type="button" 
+                    onClick={() => setAmount(selectedScheduleDetails.installment_balance || 0)}
+                    className="text-[10px] font-bold text-blue-500 hover:text-blue-600 transition-colors cursor-pointer"
+                  >
+                    Pay Full Balance
+                  </button>
+                )}
+                {paymentType === 'Get Product' && selectedProductId && (() => {
+                  const prod = products.find(p => p.product_id.toString() === selectedProductId);
+                  const price = prod ? (prod.discount_price > 0 ? prod.discount_price : prod.unit_price) : 0;
+                  return (
+                    <button 
+                      type="button" 
+                      onClick={() => setAmount(price)}
+                      className="text-[10px] font-bold text-blue-500 hover:text-blue-600 transition-colors cursor-pointer"
+                    >
+                      Pay Full Price
+                    </button>
+                  );
+                })()}
+              </div>
               <div className="relative">
                 <TbCurrencyPeso className="absolute left-3 top-2.5 text-muted-foreground w-4 h-4" />
                 <input
@@ -1029,16 +1061,12 @@ export function MakePaymentModal({ isOpen, onClose, installments, onPaymentSucce
                 />
               </div>
             </div>
-          </div>
-        )}
-
-        {(paymentType === 'Get Product' || (paymentType === 'Installment Payment' && installments.length > 0)) && (
-          <>
+            
             <div>
               <label className="block text-xs font-bold text-muted-foreground mb-1">Payment Method</label>
               <div className="flex flex-wrap gap-2">
-                {(paymentType === 'Get Product' ? ['Cash', 'GCash', 'Maya', 'Bank Account', 'Installment'] : ['Cash', 'GCash', 'Maya', 'Bank Account']).map(method => {
-                  const isDisabled = method === 'Installment' && pendingSchedules.length > 0;
+                {['GCash', 'Maya', 'Bank Account'].map(method => {
+                  const isDisabled = false;
                   return (
                     <button
                       key={method}
@@ -1060,21 +1088,38 @@ export function MakePaymentModal({ isOpen, onClose, installments, onPaymentSucce
               </div>
             </div>
 
-            <div>
-              <label className="block text-xs font-bold text-muted-foreground mb-1">Transaction Reference</label>
-              <input
-                type="text"
-                value={referenceNumber}
-                onChange={e => setReferenceNumber(e.target.value.replace(/\D/g, ''))}
-                placeholder="Enter reference number"
-                className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground text-sm focus:ring-2 focus:ring-blue-500/20 outline-none"
-                required={paymentMethod !== 'Cash'}
-              />
-            </div>
+            {paymentMethod === 'Bank Account' && (
+              <div>
+                <label className="block text-xs font-bold text-muted-foreground mb-1">Select Bank</label>
+                <select
+                  value={bankName}
+                  onChange={(e) => setBankName(e.target.value)}
+                  className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground text-sm focus:ring-2 focus:ring-blue-500/20 outline-none"
+                >
+                  <option value="BDO">BDO</option>
+                  <option value="BPI">BPI</option>
+                  <option value="Bank Transfer/InstaPay">Bank Transfer / InstaPay</option>
+                </select>
+              </div>
+            )}
+
+            {paymentMethod !== 'Installment' && (
+              <div>
+                <label className="block text-xs font-bold text-muted-foreground mb-1">Transaction Reference</label>
+                <input
+                  type="text"
+                  value={referenceNumber}
+                  onChange={e => setReferenceNumber(e.target.value.replace(/\D/g, ''))}
+                  placeholder="Enter reference number"
+                  className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground text-sm focus:ring-2 focus:ring-blue-500/20 outline-none"
+                  required
+                />
+              </div>
+            )}
 
             <div>
               <label className="block text-xs font-bold text-muted-foreground mb-1">
-                Proof of Payment {paymentMethod !== 'Cash' && <span className="text-blue-500">*</span>}
+                Proof of Payment <span className="text-blue-500">*</span>
               </label>
               <div className="relative w-full border-2 border-dashed border-border rounded-xl p-4 flex flex-col items-center justify-center bg-card text-center overflow-hidden hover:bg-muted/30 transition-colors">
                 <input
@@ -1082,7 +1127,7 @@ export function MakePaymentModal({ isOpen, onClose, installments, onPaymentSucce
                   accept="image/jpeg, image/png, image/webp"
                   onChange={handleImageChange}
                   className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
-                  required={paymentMethod !== 'Cash' && !proofPreview}
+                  required={!proofPreview}
                 />
                 {proofPreview ? (
                   <div className="flex flex-col items-center z-20 relative">
@@ -1106,7 +1151,7 @@ export function MakePaymentModal({ isOpen, onClose, installments, onPaymentSucce
 
         <button
           type="submit"
-          disabled={submitting || (paymentType === 'Installment Payment' && (!selectedSchedule || installments.length === 0)) || (paymentType === 'Get Product' && !selectedProductId) || (paymentMethod !== 'Cash' && !proofImage)}
+          disabled={submitting || (paymentType === 'Installment Payment' && (!selectedSchedule || installments.length === 0)) || (paymentType === 'Get Product' && !selectedProductId) || !proofImage}
           className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl flex items-center justify-center gap-2 transition-colors disabled:opacity-50"
         >
           {submitting ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div> : <TbCurrencyPeso className="w-4 h-4" />}

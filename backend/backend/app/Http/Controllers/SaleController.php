@@ -26,9 +26,12 @@ class SaleController extends Controller
         if ($user && in_array($user->role, ['Store Administrator', 'Store Admin'])) {
             $userBranch = $user->employee ? $user->employee->branch_id : null;
             if ($userBranch) {
-                $query->where('branch_id', $userBranch);
+                $query->where(function($q) use ($userBranch, $user) {
+                    $q->where('branch_id', $userBranch)
+                      ->orWhere('processed_by', $user->user_id);
+                });
             } else {
-                $query->where('sale_id', -1); // No branch — return empty
+                $query->where('processed_by', $user->user_id);
             }
         }
 
@@ -236,8 +239,8 @@ class SaleController extends Controller
             $sale = SaleTransaction::create([
                 'invoice_no'      => $invoiceNo,
                 'customer_id'     => $validated['customer_id'],
-                'processed_by'    => $request->user() ? $request->user()->user_id : $request->input('user_id', 1),
-                'branch_id'       => $request->user() && $request->user()->employee ? $request->user()->employee->branch_id : null,
+                'processed_by'    => $user ? $user->user_id : $request->input('user_id', 1),
+                'branch_id'       => $userBranch,
                 'sale_date'       => now(),
                 'payment_method'  => $payMethod,
                 'subtotal'        => $subtotal,

@@ -8,6 +8,16 @@ use App\Models\SystemLog;
 
 class ProductController extends Controller
 {
+    public function indexPublic(Request $request)
+    {
+        $query = Product::where('status', 'Active');
+        if ($request->filled('category')) {
+            $query->where('category', $request->query('category'));
+        }
+        $products = $query->limit(12)->get();
+        return response()->json(['products' => $products]);
+    }
+
     public function index(Request $request)
     {
         $query = Product::with('branch');
@@ -152,8 +162,25 @@ class ProductController extends Controller
         ]);
 
         if (empty($validated['product_code'])) {
-            $count = Product::count() + 1;
-            $validated['product_code'] = 'PRD-' . str_pad($count, 3, '0', STR_PAD_LEFT);
+            $catPrefix = 'PRD';
+            if (strcasecmp($validated['category'], 'Appliances') === 0) {
+                $catPrefix = 'APP';
+            } elseif (strcasecmp($validated['category'], 'Furniture') === 0) {
+                $catPrefix = 'FUR';
+            } else {
+                $catPrefix = strtoupper(substr(preg_replace('/[^A-Za-z0-9]/', '', $validated['category']), 0, 3));
+                if (empty($catPrefix)) $catPrefix = 'PRD';
+            }
+
+            $count = Product::where('product_code', 'like', $catPrefix . '-%')->count() + 1;
+            $newCode = $catPrefix . '-' . str_pad($count, 3, '0', STR_PAD_LEFT);
+            
+            while (Product::where('product_code', $newCode)->exists()) {
+                $count++;
+                $newCode = $catPrefix . '-' . str_pad($count, 3, '0', STR_PAD_LEFT);
+            }
+            
+            $validated['product_code'] = $newCode;
         }
 
         $validated['cost_price'] = $validated['cost_price'] ?? 0;

@@ -431,21 +431,41 @@ export default function AttendancePage() {
     const file = e.target.files[0]
     if (!file) return
 
+    setVerifyingQr(true)
+    setCameraError('')
+    
     try {
-      if (!html5QrCodeRef.current) {
-        html5QrCodeRef.current = new Html5Qrcode('qr-reader-container')
-      }
-      setVerifyingQr(true)
-      const decodedText = await html5QrCodeRef.current.scanFile(file, true)
-      if (decodedText) {
-        setVerifyingQr(false) // Reset before calling verify since onQrCodeScanned expects it false
-        onQrCodeScanned(decodedText)
+      const formData = new FormData()
+      formData.append('qr_image', file)
+      formData.append('device_info', `${navigator.platform} (${navigator.userAgent})`)
+
+      const res = await api.attendance.scanImage(formData)
+      
+      if (res.success && res.status === 'PENDING') {
+        setScannedQrToken(res.qr_token || 'IMAGE_SCANNED')
+        setIdentifiedEmployee(res.employee)
+        setPunchResult({ ...res, log_id: res.scan_log_id }) // Store log_id
+        await stopCamera()
+        setStationStep('waiting') // Move to polling state
+        showToast(`Employee Identified: ${res.employee.name}`, 'success')
+      } else {
+        playTone('error')
+        showToast(res.message || 'Invalid or inactive QR code', 'error')
       }
     } catch (err) {
+      playTone('error')
+      if (err.status === 423) {
+        setIsLockedOut(true)
+        showToast(err.message || 'Account temporarily locked', 'error')
+      } else if (err.status === 403) {
+        showToast(err.message || 'Cross-branch scan unauthorized', 'error')
+      } else {
+        showToast(err.message || 'Could not decode QR code from the uploaded image.', 'error')
+      }
+    } finally {
       setVerifyingQr(false)
-      showToast('Could not find a valid QR code in this image. Please try another.', 'error')
+      e.target.value = ''
     }
-    e.target.value = ''
   }
 
   const handlePinDigit = (digit) => {

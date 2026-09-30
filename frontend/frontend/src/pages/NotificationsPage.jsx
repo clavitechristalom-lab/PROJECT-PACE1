@@ -236,6 +236,13 @@ export default function NotificationsPage() {
                 <span>Mark All Read</span>
               </button>
             )}
+            <button
+              onClick={() => navigate(-1)}
+              className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl border border-border bg-card hover:bg-muted font-bold text-xs text-foreground cursor-pointer shadow-2xs transition-colors"
+            >
+              <FiX className="w-3.5 h-3.5 text-muted-foreground" />
+              <span>Exit</span>
+            </button>
           </div>
         }
       />

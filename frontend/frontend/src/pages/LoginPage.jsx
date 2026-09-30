@@ -38,18 +38,37 @@ export default function LoginPage() {
     first_name: '',
     middle_name: '',
     last_name: '',
+    username: '',
+    email: '',
     phone: '',
     address: '',
-    email: '',
-    username: '',
-    employee_id: '',
-    branch_id: '',
-    department: '',
     password: '',
     confirmPassword: '',
-    agree: true,
     role: 'Customer',
+    branch_id: '',
+    agree: false,
   })
+
+  const [appliances, setAppliances] = useState([])
+  const [furniture, setFurniture] = useState([])
+  const [loadingProducts, setLoadingProducts] = useState(true)
+
+  useEffect(() => {
+    const fetchPublicData = async () => {
+      try {
+        const appRes = await api.products.getPublicProducts({ category: 'Appliances' })
+        setAppliances(appRes.products || [])
+        const furnRes = await api.products.getPublicProducts({ category: 'Furniture' })
+        setFurniture(furnRes.products || [])
+      } catch (err) {
+        console.error('Failed to load products', err)
+      } finally {
+        setLoadingProducts(false)
+      }
+    }
+    fetchPublicData()
+  }, [])
+
 
   const [signUpErrors, setSignUpErrors] = useState({})
 
@@ -417,6 +436,88 @@ export default function LoginPage() {
                 className="border w-full max-h-[300px] sm:max-h-[400px] md:max-h-[500px] object-cover rounded-xl shadow-lg"
               />
             </div>
+          </div>
+        </section>
+
+        <section id="about" className={`px-4 md:px-16 py-16 ${isDark ? 'bg-slate-900' : 'bg-gray-50'}`}>
+          <div className="max-w-6xl mx-auto text-center">
+            <h2 className={`text-3xl font-bold mb-6 ${isDark ? 'text-white' : 'text-gray-900'}`}>About ZLICS</h2>
+            <p className={`text-lg max-w-3xl mx-auto leading-relaxed ${isDark ? 'text-gray-300' : 'text-gray-600'}`}>
+              ZLICS Furniture and Appliances is your one-stop shop for premium quality home essentials. We provide top-of-the-line products ranging from elegant furniture pieces to state-of-the-art appliances, ensuring that your life journey starts with comfort and style. Our commitment is to offer simple, easy, and ready-for-you solutions that transform your house into a home.
+            </p>
+          </div>
+        </section>
+
+        <section id="support" className={`px-4 md:px-16 py-16 ${isDark ? 'bg-[#090d16]' : 'bg-white'}`}>
+          <div className="max-w-6xl mx-auto text-center">
+            <h2 className={`text-3xl font-bold mb-6 ${isDark ? 'text-white' : 'text-gray-900'}`}>Support & Service</h2>
+            <p className={`text-lg max-w-3xl mx-auto leading-relaxed ${isDark ? 'text-gray-300' : 'text-gray-600'}`}>
+              We are here to help you every step of the way. From product inquiries to after-sales service, our dedicated support team ensures your complete satisfaction. Whether you need assistance with an installment plan, warranty claims, or product maintenance, ZLICS provides reliable and fast customer support.
+            </p>
+          </div>
+        </section>
+
+        <section id="appliances" className={`px-4 md:px-16 py-16 ${isDark ? 'bg-slate-900' : 'bg-gray-50'}`}>
+          <div className="max-w-6xl mx-auto">
+            <div className="flex items-center justify-between mb-8">
+              <h2 className={`text-2xl md:text-3xl font-bold ${isDark ? 'text-white' : 'text-gray-900'}`}>Appliances</h2>
+            </div>
+            
+            {loadingProducts ? (
+              <div className="flex justify-center py-12"><Spinner className={`w-8 h-8 ${isDark ? 'text-white' : 'text-gray-900'}`} /></div>
+            ) : appliances.length > 0 ? (
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
+                {appliances.map(product => (
+                  <div key={product.id} className={`rounded-xl overflow-hidden border transition-transform hover:-translate-y-1 ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-gray-200 shadow-sm'}`}>
+                    <div className="h-48 bg-gray-200 overflow-hidden relative">
+                      {product.image_url ? (
+                        <img src={product.image_url} alt={product.product_name} className="w-full h-full object-cover" />
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center text-gray-400 bg-gray-100 dark:bg-slate-700">No Image</div>
+                      )}
+                    </div>
+                    <div className="p-4">
+                      <h3 className={`font-semibold mb-1 truncate ${isDark ? 'text-white' : 'text-gray-900'}`}>{product.product_name}</h3>
+                      <p className="text-emerald-500 font-bold">₱{Number(product.unit_price).toLocaleString()}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className={`text-center py-10 ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>No appliances available at the moment.</p>
+            )}
+          </div>
+        </section>
+
+        <section id="furniture" className={`px-4 md:px-16 py-16 ${isDark ? 'bg-[#090d16]' : 'bg-white'}`}>
+          <div className="max-w-6xl mx-auto">
+            <div className="flex items-center justify-between mb-8">
+              <h2 className={`text-2xl md:text-3xl font-bold ${isDark ? 'text-white' : 'text-gray-900'}`}>Furniture</h2>
+            </div>
+            
+            {loadingProducts ? (
+              <div className="flex justify-center py-12"><Spinner className={`w-8 h-8 ${isDark ? 'text-white' : 'text-gray-900'}`} /></div>
+            ) : furniture.length > 0 ? (
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
+                {furniture.map(product => (
+                  <div key={product.id} className={`rounded-xl overflow-hidden border transition-transform hover:-translate-y-1 ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-gray-200 shadow-sm'}`}>
+                    <div className="h-48 bg-gray-200 overflow-hidden relative">
+                      {product.image_url ? (
+                        <img src={product.image_url} alt={product.product_name} className="w-full h-full object-cover" />
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center text-gray-400 bg-gray-100 dark:bg-slate-700">No Image</div>
+                      )}
+                    </div>
+                    <div className="p-4">
+                      <h3 className={`font-semibold mb-1 truncate ${isDark ? 'text-white' : 'text-gray-900'}`}>{product.product_name}</h3>
+                      <p className="text-emerald-500 font-bold">₱{Number(product.unit_price).toLocaleString()}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className={`text-center py-10 ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>No furniture available at the moment.</p>
+            )}
           </div>
         </section>
       </main>

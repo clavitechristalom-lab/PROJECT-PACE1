@@ -35,7 +35,7 @@ export default function QrMonitoringPage() {
   const loadData = async (silent = false) => {
     if (!silent) setLoading(true)
     try {
-      const res = await api.admin.getQrMonitoring()
+      const res = await api.system.getQrMonitoring()
       if (res.success) {
         setStats(res.stats || {})
         setLogs(res.recent_logs || [])

@@ -862,9 +862,15 @@ export default function ProductsPage({ branchFilter, embedded }) {
         >
           <div className="space-y-4 text-xs">
             <div className="flex flex-col sm:flex-row gap-3">
-              <div className="w-full sm:w-28 h-28 rounded-2xl bg-primary/10 flex flex-col items-center justify-center text-primary border border-primary/20 shrink-0 shadow-2xs">
-                <FiPackage className="w-10 h-10" />
-                <span className="text-[10px] text-muted-foreground mt-1 font-mono uppercase">Item</span>
+              <div className="w-full sm:w-28 h-28 rounded-2xl bg-primary/10 flex flex-col items-center justify-center text-primary border border-primary/20 shrink-0 shadow-2xs overflow-hidden">
+                {viewItem.image_url ? (
+                  <img src={viewItem.image_url} alt={viewItem.product_name} className="w-full h-full object-cover" />
+                ) : (
+                  <>
+                    <FiPackage className="w-10 h-10" />
+                    <span className="text-[10px] text-muted-foreground mt-1 font-mono uppercase">Item</span>
+                  </>
+                )}
               </div>
               <div className="flex-1 grid grid-cols-2 gap-2.5 p-3.5 bg-muted/20 rounded-2xl border border-border">
                 <div><span className="text-[10px] text-muted-foreground uppercase font-bold block mb-0.5">SKU Code:</span> <p className="font-mono font-bold text-foreground">{viewItem.product_code}</p></div>

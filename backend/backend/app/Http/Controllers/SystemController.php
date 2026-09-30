@@ -645,4 +645,71 @@ class SystemController extends Controller
             'settings' => $validated,
         ]);
     }
+
+    public function qrMonitoring(Request $request)
+    {
+        $totalEmployees = \App\Models\Employee::count();
+        $qrGenerated = \App\Models\Employee::whereNotNull('qr_token')->count();
+        $qrNotGenerated = \App\Models\Employee::whereNull('qr_token')->count();
+        $activeQr = \App\Models\Employee::whereNotNull('qr_token')->where('qr_active', true)->count();
+        $revokedQr = \App\Models\Employee::whereNotNull('qr_token')->where('qr_active', false)->count();
+
+        $today = now()->startOfDay();
+        $todayScans = \App\Models\AttendanceScanLog::where('scan_time', '>=', $today)->count();
+        $successfulScans = \App\Models\AttendanceScanLog::where('scan_time', '>=', $today)
+            ->where('status', 'SUCCESS')->count();
+        $failedScans = \App\Models\AttendanceScanLog::where('scan_time', '>=', $today)
+            ->where('status', 'FAILED')->count();
+
+        $logsData = \App\Models\AttendanceScanLog::with(['employee.branch', 'scannedBy.employee'])
+            ->orderByDesc('scan_time')
+            ->limit(100)
+            ->get()
+            ->map(function($log) {
+                $emp = $log->employee;
+                $scannedBy = $log->scannedBy;
+                $scannedByName = $scannedBy ? ($scannedBy->employee ? trim("{$scannedBy->employee->first_name} {$scannedBy->employee->last_name}") : $scannedBy->username) : 'System';
+                
+                $verificationMethod = 'Failed';
+                if ($log->qr_verified && $log->pin_verified) {
+                    $verificationMethod = 'QR + PIN';
+                } elseif ($log->qr_verified) {
+                    $verificationMethod = 'QR Only';
+                }
+
+                $branchName = $log->branch;
+                if ($emp && $emp->branch) {
+                    $branchName = $emp->branch->name;
+                }
+
+                return [
+                    'id' => $log->id,
+                    'employee_name' => $emp ? trim("{$emp->first_name} {$emp->last_name}") : 'Unknown',
+                    'employee_code' => $emp ? $emp->employee_code : '—',
+                    'branch' => $branchName,
+                    'department' => $emp ? $emp->department : '—',
+                    'action_type' => $log->action_type,
+                    'verification_method' => $verificationMethod,
+                    'scanned_by' => $scannedByName,
+                    'status' => $log->status,
+                    'details' => $log->failure_reason ?? 'Verified successfully',
+                    'timestamp' => $log->scan_time ? $log->scan_time->format('Y-m-d H:i:s') : null,
+                ];
+            });
+
+        return response()->json([
+            'success' => true,
+            'stats' => [
+                'total_employees' => $totalEmployees,
+                'qr_generated' => $qrGenerated,
+                'qr_not_generated' => $qrNotGenerated,
+                'active_qr' => $activeQr,
+                'revoked_qr' => $revokedQr,
+                'today_scans' => $todayScans,
+                'successful_scans' => $successfulScans,
+                'failed_scans' => $failedScans,
+            ],
+            'recent_logs' => $logsData,
+        ]);
+    }
 }

@@ -820,75 +820,24 @@ export default function InstallmentsPage({ branchFilter: propBranchFilter, embed
                   <FiUser className="w-4 h-4" />
                   <span>Customer Information</span>
                 </div>
-                <div className="flex gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setAddForm(p => ({ ...p, customer_mode: 'existing' }))}
-                    className={`px-2.5 py-1 rounded-lg font-semibold text-[11px] cursor-pointer transition-all ${
-                      addForm.customer_mode === 'existing'
-                        ? 'bg-primary text-primary-foreground'
-                        : 'bg-card border border-border text-muted-foreground'
-                    }`}
-                  >
-                    Existing Customer
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setAddForm(p => ({ ...p, customer_mode: 'new', customer_id: '' }))}
-                    className={`px-2.5 py-1 rounded-lg font-semibold text-[11px] cursor-pointer transition-all ${
-                      addForm.customer_mode === 'new'
-                        ? 'bg-primary text-primary-foreground'
-                        : 'bg-card border border-border text-muted-foreground'
-                    }`}
-                  >
-                    + New Customer
-                  </button>
-                </div>
               </div>
 
-              {addForm.customer_mode === 'existing' ? (
-                <div>
-                  <label className="block font-bold text-muted-foreground mb-1">Select Existing Customer *</label>
-                  <select
-                    value={addForm.customer_id}
-                    onChange={e => handleCustomerSelect(e.target.value)}
-                    required
-                    className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground font-medium"
-                  >
-                    <option value="">-- Choose Customer --</option>
-                    {customers.map(c => (
-                      <option key={c.customer_id} value={c.customer_id}>
-                        {c.customer_code ? `[${c.customer_code}] ` : ''}{c.first_name} {c.last_name} {c.phone ? `(${c.phone})` : ''}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              ) : (
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                  <div>
-                    <label className="block font-bold text-muted-foreground mb-1">First Name *</label>
-                    <input
-                      type="text"
-                      placeholder="e.g. Maria"
-                      value={addForm.first_name}
-                      onChange={e => setAddForm(p => ({ ...p, first_name: e.target.value }))}
-                      required
-                      className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground"
-                    />
-                  </div>
-                  <div>
-                    <label className="block font-bold text-muted-foreground mb-1">Last Name *</label>
-                    <input
-                      type="text"
-                      placeholder="e.g. Santos"
-                      value={addForm.last_name}
-                      onChange={e => setAddForm(p => ({ ...p, last_name: e.target.value }))}
-                      required
-                      className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground"
-                    />
-                  </div>
-                </div>
-              )}
+              <div>
+                <label className="block font-bold text-muted-foreground mb-1">Select Existing Customer *</label>
+                <select
+                  value={addForm.customer_id}
+                  onChange={e => handleCustomerSelect(e.target.value)}
+                  required
+                  className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground font-medium"
+                >
+                  <option value="">-- Choose Customer --</option>
+                  {customers.map(c => (
+                    <option key={c.customer_id} value={c.customer_id}>
+                      {c.customer_code ? `[${c.customer_code}] ` : ''}{c.first_name} {c.last_name} {c.phone ? `(${c.phone})` : ''}
+                    </option>
+                  ))}
+                </select>
+              </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                 <div>

@@ -713,19 +713,32 @@ export function NotificationBell({
                 </span>
               )}
             </div>
-            {unreadCount > 0 && onMarkAllRead && (
-              <button
-                type="button"
+            <div className="flex items-center gap-3">
+              {unreadCount > 0 && onMarkAllRead && (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    onMarkAllRead()
+                  }}
+                  className="text-[11px] font-semibold text-primary hover:underline cursor-pointer flex items-center gap-1"
+                >
+                  <FiCheckCircle className="w-3.5 h-3.5" />
+                  <span>Mark all read</span>
+                </button>
+              )}
+              <button 
+                type="button" 
                 onClick={(e) => {
                   e.stopPropagation()
-                  onMarkAllRead()
+                  setOpen(false)
                 }}
-                className="text-[11px] font-semibold text-primary hover:underline cursor-pointer flex items-center gap-1"
+                className="text-muted-foreground hover:text-foreground cursor-pointer"
+                aria-label="Close"
               >
-                <FiCheckCircle className="w-3.5 h-3.5" />
-                <span>Mark all read</span>
+                <FiX className="w-4 h-4" />
               </button>
-            )}
+            </div>
           </div>
 
           <div className="overflow-y-auto divide-y divide-border/60 flex-1">

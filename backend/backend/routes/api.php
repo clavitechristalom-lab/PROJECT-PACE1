@@ -26,6 +26,7 @@ use App\Http\Controllers\SyncController;
 Route::post('/login', [AuthController::class, 'login']);
 Route::post('/register', [AuthController::class, 'register']);
 Route::get('/registration-options', [AuthController::class, 'registrationOptions']);
+Route::get('/public/products', [ProductController::class, 'indexPublic']);
 
 // ─── Protected Routes (Sanctum Authenticated) ─────────────────────────────────
 Route::middleware('auth:sanctum')->group(function () {
@@ -109,6 +110,7 @@ Route::middleware('auth:sanctum')->group(function () {
     // ─── Store Administrator QR Attendance Scanner (STRICT: Store Admin Only) ───
     Route::middleware('role:Store Administrator,Store Admin')->group(function () {
         Route::post('/attendance/scan', [AttendanceController::class, 'scan']);
+        Route::post('/attendance/scan-image', [AttendanceController::class, 'scanImage']);
         Route::post('/attendance/verify-qr', [AttendanceController::class, 'verifyQr']);
         Route::post('/attendance/verify-pin', [AttendanceController::class, 'verifyPin']);
         Route::get('/attendance/check-verification/{id}', [AttendanceController::class, 'checkVerification']);
@@ -126,7 +128,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/admin/qr-requests/{id}/review', [QrRequestController::class, 'review']);
         Route::post('/admin/qr-requests/{id}/approve', [QrRequestController::class, 'approve']);
         Route::post('/admin/qr-requests/{id}/reject', [QrRequestController::class, 'reject']);
-
+        Route::get('/admin/qr-monitoring', [SystemController::class, 'qrMonitoring']);
     });
 
     // ─── Employee Management (Role-based access is handled in the controller) ────────

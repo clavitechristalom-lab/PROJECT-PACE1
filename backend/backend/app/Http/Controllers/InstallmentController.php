@@ -132,7 +132,10 @@ class InstallmentController extends Controller
             'sale.items.product',
             'payments',
             'paymentSchedules'
-        ]);
+        ])->where(function ($q) {
+            $q->where('number_of_installments', '>', 0)
+              ->orWhere('status', '!=', 'Completed');
+        });
 
         // Branch scoping for Store Administrator — use customer.branch_id for direct relationship
         if ($user && in_array($user->role, ['Store Administrator', 'Store Admin'])) {
@@ -468,8 +471,12 @@ class InstallmentController extends Controller
 
             // 6. Record Down Payment Receipt if paid upfront
             if ($downPayment > 0) {
-                $payCount = Payment::count() + 1;
+                $payCount = (\App\Models\Payment::max('payment_id') ?? 0) + 1;
                 $receiptNo = 'REC-' . date('Y') . '-' . str_pad($payCount, 5, '0', STR_PAD_LEFT);
+                while (\App\Models\Payment::where('receipt_no', $receiptNo)->exists()) {
+                    $payCount++;
+                    $receiptNo = 'REC-' . date('Y') . '-' . str_pad($payCount, 5, '0', STR_PAD_LEFT);
+                }
 
                 Payment::create([
                     'installment_id' => $account->installment_id,
@@ -709,16 +716,21 @@ class InstallmentController extends Controller
         }
 
         // Payment Schedules
-        $schedules = $account->paymentSchedules->map(function ($s) use ($today) {
-            $status = $s->status;
-            if ((float)$s->balance_due <= 0) {
-                $status = 'Paid';
-            } elseif ($s->due_date < $today && (float)$s->balance_due > 0) {
-                $status = 'Overdue';
-            } elseif ($s->due_date == $today && (float)$s->balance_due > 0) {
-                $status = 'Due';
+        $schedules = $account->paymentSchedules->map(function ($s) use ($today, $balance) {
+            $schedBalanceDue = (float)$s->balance_due;
+            $schedStatus = $s->status;
+
+            if ($balance <= 0) {
+                $schedBalanceDue = 0;
+                $schedStatus = 'Paid';
+            } elseif ($schedBalanceDue <= 0) {
+                $schedStatus = 'Paid';
+            } elseif ($s->due_date < $today && $schedBalanceDue > 0) {
+                $schedStatus = 'Overdue';
+            } elseif ($s->due_date == $today && $schedBalanceDue > 0) {
+                $schedStatus = 'Due';
             } elseif ($s->due_date > $today && (float)$s->amount_paid == 0) {
-                $status = 'Upcoming';
+                $schedStatus = 'Upcoming';
             }
 
             return [
@@ -727,9 +739,9 @@ class InstallmentController extends Controller
                 'installment_no' => $s->installment_no,
                 'due_date' => $s->due_date,
                 'amount_due' => (float)$s->amount_due,
-                'amount_paid' => (float)$s->amount_paid,
-                'balance_due' => (float)$s->balance_due,
-                'status' => $status,
+                'amount_paid' => $balance <= 0 ? (float)$s->amount_due : (float)$s->amount_paid,
+                'balance_due' => $schedBalanceDue,
+                'status' => $schedStatus,
                 'paid_date' => $s->paid_date,
                 'notes' => $s->notes,
             ];
@@ -820,6 +832,7 @@ class InstallmentController extends Controller
             'installment_amount' => 'nullable|numeric|min:1',
         ]);
 
+        $oldStatus = $account->status;
         if (isset($validated['status'])) {
             $account->status = $validated['status'];
         }
@@ -836,6 +849,21 @@ class InstallmentController extends Controller
                 'phone' => $validated['phone'] ?? null,
                 'address' => $validated['address'] ?? null,
             ]));
+        }
+
+        if (isset($validated['status']) && $oldStatus !== 'Active' && $validated['status'] === 'Active') {
+            if ($account->customer_id) {
+                \App\Services\NotificationService::sendToCustomer($account->customer_id, [
+                    'type' => 'installment_approved',
+                    'title' => 'Installment Plan Approved',
+                    'message' => "Congratulations! Your installment plan for {$account->account_no} has been approved. You can now view your schedule and make payments.",
+                    'module' => 'Installments',
+                    'related_id' => $account->installment_id,
+                    'related_type' => 'App\Models\InstallmentAccount',
+                    'action_url' => "/installments?id={$account->installment_id}",
+                    'priority' => 'high',
+                ]);
+            }
         }
 
         SystemLog::create([

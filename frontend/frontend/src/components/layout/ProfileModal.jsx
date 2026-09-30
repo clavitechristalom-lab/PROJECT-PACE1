@@ -387,7 +387,7 @@ export default function ProfileModal({ open, isOpen, onClose }) {
                       <h3 className="font-bold text-base text-foreground truncate">
                         {employee.first_name} {employee.middle_name ? `${employee.middle_name} ` : ''}{employee.last_name}
                       </h3>
-                      {!isCustomer && (
+                      {!isCustomer && !isAdmin && (
                         isVerified ? (
                         <span className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-700 dark:text-emerald-300 bg-emerald-100 dark:bg-emerald-950/50 border border-emerald-300 dark:border-emerald-800 px-2.5 py-0.5 rounded-full shadow-2xs">
                           <FiCheckCircle className="w-3 h-3" />
@@ -412,8 +412,8 @@ export default function ProfileModal({ open, isOpen, onClose }) {
                   </div>
                 </div>
 
-                {/* Account Verification Banner - Employee Only */}
-                {!isCustomer && (
+                {/* Account Verification Banner - Employee Only (Exclude Admin) */}
+                {!isCustomer && !isAdmin && (
                   <div className={`p-4 rounded-2xl border ${isVerified
                       ? 'bg-emerald-50/40 dark:bg-emerald-950/20 border-emerald-200 dark:border-emerald-900/60'
                       : 'bg-amber-50/40 dark:bg-amber-950/20 border-amber-200 dark:border-amber-900/60'

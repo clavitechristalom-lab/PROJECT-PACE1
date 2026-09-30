@@ -83,6 +83,7 @@ export default function PaymentsPage() {
   // Modals
   const [newPayModal, setNewPayModal] = useState(false)
   const [viewReceipt, setViewReceipt] = useState(null)
+  const [viewPayment, setViewPayment] = useState(null)
   const [saving, setSaving] = useState(false)
 
   // New Payment Form State
@@ -391,7 +392,14 @@ export default function PaymentsPage() {
                       <td className="py-3 px-4 text-right font-mono font-bold text-emerald-600">{fmt(p.amount)}</td>
                       <td className="py-3 px-4"><PaymentMethodBadge method={p.payment_method} /></td>
                       <td className="py-3 px-4 text-muted-foreground">{p.received_by}</td>
-                      <td className="py-3 px-4 text-center">
+                      <td className="py-3 px-4 text-center flex items-center justify-center gap-1.5">
+                        <button
+                          onClick={() => setViewPayment(p)}
+                          className="inline-flex items-center justify-center w-7 h-7 rounded-lg border border-border hover:bg-muted font-semibold cursor-pointer transition-colors"
+                          title="View Payment"
+                        >
+                          <FiEye className="w-4 h-4 text-blue-500" />
+                        </button>
                         <button
                           onClick={() => setViewReceipt(p)}
                           className="inline-flex items-center gap-1 px-2.5 py-1 text-xs rounded-lg border border-border hover:bg-muted font-semibold cursor-pointer transition-colors"
@@ -596,6 +604,72 @@ export default function PaymentsPage() {
               </button>
             </div>
           </form>
+        </Modal>
+      )}
+
+      {/* VIEW PAYMENT DETAILS MODAL */}
+      {viewPayment && (
+        <Modal
+          isOpen={true}
+          onClose={() => setViewPayment(null)}
+          title="Payment Details"
+          size="md"
+        >
+          <div className="space-y-4 text-xs">
+            <div className="space-y-2 p-3 bg-muted/20 rounded-xl border border-border">
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Receipt #:</span>
+                <span className="font-mono font-bold text-foreground">{viewPayment.receipt_no}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Payment Date:</span>
+                <span className="font-mono font-semibold text-foreground">{viewPayment.payment_date}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Account #:</span>
+                <span className="font-mono font-bold text-primary">{viewPayment.account_no}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Customer:</span>
+                <span className="font-semibold text-foreground">{viewPayment.customer_name}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Method:</span>
+                <PaymentMethodBadge method={viewPayment.payment_method} />
+              </div>
+              {viewPayment.reference_no && (
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Reference Number:</span>
+                  <span className="font-mono text-foreground">{viewPayment.reference_no}</span>
+                </div>
+              )}
+              <div className="flex justify-between items-center pt-2 border-t border-border mt-2">
+                <span className="text-xs font-bold text-emerald-900 dark:text-emerald-300 uppercase">Amount Paid:</span>
+                <span className="text-lg font-mono font-bold text-emerald-600">{fmt(viewPayment.amount)}</span>
+              </div>
+            </div>
+
+            {viewPayment.proof_of_payment ? (
+              <div className="space-y-1">
+                <label className="block font-bold text-muted-foreground mb-1 text-[11px] uppercase">Proof of Payment</label>
+                <div className="border border-border rounded-xl overflow-hidden bg-muted/20 flex justify-center p-2">
+                  <a href={viewPayment.proof_of_payment} target="_blank" rel="noopener noreferrer">
+                    <img src={viewPayment.proof_of_payment} alt="Proof of Payment" className="max-h-64 object-contain rounded-lg shadow-sm" />
+                  </a>
+                </div>
+              </div>
+            ) : (
+              <div className="p-4 border border-dashed border-border rounded-xl text-center text-muted-foreground bg-muted/10">
+                No proof of payment uploaded.
+              </div>
+            )}
+
+            {viewPayment.notes && (
+              <div className="text-[11px] text-muted-foreground bg-muted/30 p-2.5 rounded-xl border border-border">
+                <strong>Remarks:</strong> {viewPayment.notes}
+              </div>
+            )}
+          </div>
         </Modal>
       )}
     </div>

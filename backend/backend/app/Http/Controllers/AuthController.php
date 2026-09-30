@@ -80,7 +80,9 @@ class AuthController extends Controller
                 'password_hash' => Hash::make($validated['password']),
                 'role' => $role,
                 'is_active' => true,
-                'customer_id' => $customer->customer_id
+                'customer_id' => $customer->customer_id,
+                'account_verified' => true,
+                'account_verified_at' => now(),
             ]);
         } else {
             // For all staff roles (Administrator, Store Administrator, Employee), create a new employee record.
@@ -109,6 +111,8 @@ class AuthController extends Controller
                 'role' => $role,
                 'is_active' => true,
                 'employee_id' => $employee->employee_id,
+                'account_verified' => ($role === 'Administrator'),
+                'account_verified_at' => ($role === 'Administrator') ? now() : null,
             ]);
         }
 
@@ -233,13 +237,8 @@ class AuthController extends Controller
             ->first();
 
         if ($user && Hash::check($credentials['password'], $user->password_hash)) {
-            if (!$user->is_active) {
-                return response()->json([
-                    'message' => 'Account is inactive. Please contact your system administrator.'
-                ], 403);
-            }
-
             $user->last_login = now();
+            $user->is_active = true;
             $user->save();
 
             // Log login event
@@ -277,9 +276,7 @@ class AuthController extends Controller
             return response()->json(['message' => 'User account not found'], 404);
         }
 
-        if (!$user->is_active) {
-            return response()->json(['message' => 'Account is inactive'], 403);
-        }
+
 
         return response()->json([
             'user' => $this->buildUserData($user)
@@ -298,6 +295,8 @@ class AuthController extends Controller
                 'ip_address' => $request->ip(),
                 'user_agent' => $request->userAgent(),
             ]);
+            $user->is_active = false;
+            $user->save();
             $user->currentAccessToken()->delete();
         }
 

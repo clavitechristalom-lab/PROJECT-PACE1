@@ -45,9 +45,14 @@ class DashboardController extends Controller
         $salesQuery = SaleTransaction::query();
         if ($isStoreAdmin || ($branch !== 'All' && !empty($branch))) {
             $b = $isStoreAdmin ? ($user->employee ? $user->employee->branch_id : null) : $branch;
-            $salesQuery->whereHas('processedBy.employee', function ($eq) use ($b) {
-                $eq->where('branch_id', $b);
-            });
+            if ($b) {
+                $salesQuery->where(function($q) use ($b, $user) {
+                    $q->where('branch_id', $b)
+                      ->orWhere('processed_by', $user->user_id);
+                });
+            } else {
+                $salesQuery->where('processed_by', $user->user_id);
+            }
         }
         $totalSales = (float)(clone $salesQuery)->sum('total_amount');
         $salesCount = (clone $salesQuery)->count();
@@ -60,33 +65,50 @@ class DashboardController extends Controller
         $paymentQuery = Payment::query();
         if ($isStoreAdmin || ($branch !== 'All' && !empty($branch))) {
             $b = $isStoreAdmin ? ($user->employee ? $user->employee->branch_id : null) : $branch;
-            $paymentQuery->where(function ($q) use ($b) {
-                $q->whereHas('installmentAccount.sale.processedBy.employee', function ($eq) use ($b) {
-                    $eq->where('branch_id', $b);
-                })->orWhereHas('receivedBy.employee', function ($eq) use ($b) {
-                    $eq->where('branch_id', $b);
+            if ($b) {
+                $paymentQuery->where(function ($q) use ($b, $user) {
+                    $q->whereHas('installmentAccount.sale', function ($eq) use ($b, $user) {
+                        $eq->where('branch_id', $b)->orWhere('processed_by', $user->user_id);
+                    })->orWhereHas('receivedBy.employee', function ($eq) use ($b) {
+                        $eq->where('branch_id', $b);
+                    })->orWhere('received_by', $user->user_id);
                 });
-            });
+            } else {
+                $paymentQuery->where(function ($q) use ($user) {
+                    $q->whereHas('installmentAccount.sale', function ($eq) use ($user) {
+                        $eq->where('processed_by', $user->user_id);
+                    })->orWhere('received_by', $user->user_id);
+                });
+            }
         }
         $totalCollections = (float)(clone $paymentQuery)->sum('amount');
         $todayCollections = (float)(clone $paymentQuery)->whereDate('payment_date', $today)->sum('amount');
         $monthCollections = (float)(clone $paymentQuery)->whereMonth('payment_date', $currentMonth)->whereYear('payment_date', $currentYear)->sum('amount');
 
         // 3. Installment & Outstanding Balance
-        $instQuery = InstallmentAccount::with('payments');
+        $instQuery = InstallmentAccount::with(['payments', 'paymentSchedules']);
         if ($isStoreAdmin || ($branch !== 'All' && !empty($branch))) {
             $b = $isStoreAdmin ? ($user->employee ? $user->employee->branch_id : null) : $branch;
-            $instQuery->whereHas('sale.processedBy.employee', function ($eq) use ($b) {
-                $eq->where('branch_id', $b);
-            });
+            if ($b) {
+                $instQuery->whereHas('sale', function ($eq) use ($b, $user) {
+                    $eq->where('branch_id', $b)
+                      ->orWhere('processed_by', $user->user_id);
+                });
+            } else {
+                $instQuery->whereHas('sale', function ($eq) use ($user) {
+                    $eq->where('processed_by', $user->user_id);
+                });
+            }
         }
         $allInsts = (clone $instQuery)->get();
         $totalInstallmentSales = (float)$allInsts->sum('total_payable');
         
-        $totalPaidSum = $allInsts->reduce(function ($carry, $inst) {
-            return $carry + (float)$inst->payments->sum('amount') + (float)$inst->down_payment;
+        $totalOutstandingBalance = $allInsts->reduce(function ($carry, $inst) {
+            if ($inst->status === 'Pending') {
+                return $carry + (float)$inst->total_payable;
+            }
+            return $carry + (float)$inst->paymentSchedules->sum('balance_due');
         }, 0);
-        $totalOutstandingBalance = max(0, round($totalInstallmentSales - $totalPaidSum, 2));
 
         $activeInstallments = $allInsts->where('status', 'Active')->count();
         $overdueInstallments = $allInsts->where('status', 'Overdue')->count();
@@ -278,10 +300,16 @@ class DashboardController extends Controller
         $salesQuery = SaleTransaction::whereDate('sale_date', '>=', $startDate)
             ->whereDate('sale_date', '<=', $endDate);
 
-        if ($branch !== 'All' && !empty($branch)) {
-            $salesQuery->whereHas('processedBy.employee', function ($eq) use ($branch) {
-                $eq->where('branch_id', $branch);
-            });
+        if ($isStoreAdmin || ($branch !== 'All' && !empty($branch))) {
+            $b = $isStoreAdmin ? ($user->employee ? $user->employee->branch_id : null) : $branch;
+            if ($b) {
+                $salesQuery->where(function($q) use ($b, $user) {
+                    $q->where('branch_id', $b)
+                      ->orWhere('processed_by', $user->user_id);
+                });
+            } else {
+                $salesQuery->where('processed_by', $user->user_id);
+            }
         }
 
         $sales = $salesQuery->get();
@@ -296,14 +324,23 @@ class DashboardController extends Controller
         $paymentQuery = Payment::whereDate('payment_date', '>=', $startDate)
             ->whereDate('payment_date', '<=', $endDate);
 
-        if ($branch !== 'All' && !empty($branch)) {
-            $paymentQuery->where(function ($q) use ($branch) {
-                $q->whereHas('installmentAccount.sale.processedBy.employee', function ($eq) use ($branch) {
-                    $eq->where('branch_id', $branch);
-                })->orWhereHas('receivedBy.employee', function ($eq) use ($branch) {
-                    $eq->where('branch_id', $branch);
+        if ($isStoreAdmin || ($branch !== 'All' && !empty($branch))) {
+            $b = $isStoreAdmin ? ($user->employee ? $user->employee->branch_id : null) : $branch;
+            if ($b) {
+                $paymentQuery->where(function ($q) use ($b, $user) {
+                    $q->whereHas('installmentAccount.sale', function ($eq) use ($b, $user) {
+                        $eq->where('branch_id', $b)->orWhere('processed_by', $user->user_id);
+                    })->orWhereHas('receivedBy.employee', function ($eq) use ($b) {
+                        $eq->where('branch_id', $b);
+                    })->orWhere('received_by', $user->user_id);
                 });
-            });
+            } else {
+                $paymentQuery->where(function ($q) use ($user) {
+                    $q->whereHas('installmentAccount.sale', function ($eq) use ($user) {
+                        $eq->where('processed_by', $user->user_id);
+                    })->orWhere('received_by', $user->user_id);
+                });
+            }
         }
 
         $payments = $paymentQuery->get();
@@ -315,10 +352,18 @@ class DashboardController extends Controller
 
         // 3. Installment in Range
         $instQuery = InstallmentAccount::with('payments');
-        if ($branch !== 'All' && !empty($branch)) {
-            $instQuery->whereHas('sale.processedBy.employee', function ($eq) use ($branch) {
-                $eq->where('branch_id', $branch);
-            });
+        if ($isStoreAdmin || ($branch !== 'All' && !empty($branch))) {
+            $b = $isStoreAdmin ? ($user->employee ? $user->employee->branch_id : null) : $branch;
+            if ($b) {
+                $instQuery->whereHas('sale', function ($eq) use ($b, $user) {
+                    $eq->where('branch_id', $b)
+                      ->orWhere('processed_by', $user->user_id);
+                });
+            } else {
+                $instQuery->whereHas('sale', function ($eq) use ($user) {
+                    $eq->where('processed_by', $user->user_id);
+                });
+            }
         }
         $allInsts = $instQuery->get();
         $totalInstPayable = (float)$allInsts->sum('total_payable');
@@ -458,7 +503,15 @@ class DashboardController extends Controller
         // 3. Overdue Installments Alert
         $instQuery = InstallmentAccount::where('status', 'Overdue');
         if ($isStoreAdmin) {
-            $instQuery->whereHas('sale.processedBy.employee', fn($eq) => $eq->where('branch_id', $branch));
+            if ($branch) {
+                $instQuery->whereHas('sale', function ($eq) use ($branch, $user) {
+                    $eq->where('branch_id', $branch)->orWhere('processed_by', $user->user_id);
+                });
+            } else {
+                $instQuery->whereHas('sale', function ($eq) use ($user) {
+                    $eq->where('processed_by', $user->user_id);
+                });
+            }
         }
         $overdueCount = $instQuery->count();
         if ($overdueCount > 0) {

@@ -19,7 +19,7 @@ class PaymentController extends Controller
     public function index(Request $request)
     {
         $user = $request->user();
-        $query = Payment::with(['installmentAccount.customer', 'installmentAccount.sale.processedBy.employee', 'receivedBy.employee']);
+        $query = Payment::with(['installmentAccount.customer', 'installmentAccount.sale.processedBy.employee.branch', 'receivedBy.employee.branch']);
 
         // Scoping
         if ($user && in_array($user->role, ['Store Administrator', 'Store Admin'])) {
@@ -90,10 +90,10 @@ class PaymentController extends Controller
                     $accNo = $inst ? $inst->account_no : 'N/A';
                     
                     $branch = 'Main Branch';
-                    if ($inst && $inst->sale && $inst->sale->processedBy && $inst->sale->processedBy->employee) {
-                        $branch = $inst->sale->processedBy->employee->branch_id ?: null;
-                    } elseif ($p->receivedBy && $p->receivedBy->employee) {
-                        $branch = $p->receivedBy->employee->branch_id ?: null;
+                    if ($inst && $inst->sale && $inst->sale->processedBy && $inst->sale->processedBy->employee && $inst->sale->processedBy->employee->branch) {
+                        $branch = $inst->sale->processedBy->employee->branch->name;
+                    } elseif ($p->receivedBy && $p->receivedBy->employee && $p->receivedBy->employee->branch) {
+                        $branch = $p->receivedBy->employee->branch->name;
                     }
 
                     $receivedBy = $p->receivedBy ? ($p->receivedBy->employee ? "{$p->receivedBy->employee->first_name} {$p->receivedBy->employee->last_name}" : $p->receivedBy->username) : 'Staff';
@@ -122,10 +122,10 @@ class PaymentController extends Controller
             $accNo = $inst ? $inst->account_no : 'N/A';
 
             $branch = 'Main Branch';
-            if ($inst && $inst->sale && $inst->sale->processedBy && $inst->sale->processedBy->employee) {
-                $branch = $inst->sale->processedBy->employee->branch_id ?: null;
-            } elseif ($p->receivedBy && $p->receivedBy->employee) {
-                $branch = $p->receivedBy->employee->branch_id ?: null;
+            if ($inst && $inst->sale && $inst->sale->processedBy && $inst->sale->processedBy->employee && $inst->sale->processedBy->employee->branch) {
+                $branch = $inst->sale->processedBy->employee->branch->name;
+            } elseif ($p->receivedBy && $p->receivedBy->employee && $p->receivedBy->employee->branch) {
+                $branch = $p->receivedBy->employee->branch->name;
             }
 
             $receivedBy = $p->receivedBy ? ($p->receivedBy->employee ? "{$p->receivedBy->employee->first_name} {$p->receivedBy->employee->last_name}" : $p->receivedBy->username) : 'Staff';
@@ -146,6 +146,7 @@ class PaymentController extends Controller
                 'branch' => $branch,
                 'status' => 'Completed',
                 'notes' => $p->notes,
+                'proof_of_payment' => $p->proof_of_payment ? asset('storage/' . $p->proof_of_payment) : null,
             ];
         });
 
@@ -170,13 +171,23 @@ class PaymentController extends Controller
 
         if ($user && in_array($user->role, ['Store Administrator', 'Store Admin'])) {
             $userBranch = $user->employee ? $user->employee->branch_id : null;
-            $query->whereHas('installmentAccount.sale.processedBy.employee', function ($eq) use ($userBranch) {
-                $eq->where('branch_id', $userBranch);
-            });
+            if ($userBranch) {
+                $query->whereHas('installmentAccount', function ($iq) use ($userBranch) {
+                    $iq->whereHas('customer', function ($cq) use ($userBranch) {
+                        $cq->where('branch_id', $userBranch);
+                    })->orWhereHas('sale', function ($sq) use ($userBranch) {
+                        $sq->where('branch_id', $userBranch);
+                    });
+                });
+            }
         } elseif ($request->filled('branch') && $request->query('branch') !== 'All') {
             $branch = $request->query('branch');
-            $query->whereHas('installmentAccount.sale.processedBy.employee', function ($eq) use ($branch) {
-                $eq->where('branch_id', $branch);
+            $query->whereHas('installmentAccount', function ($iq) use ($branch) {
+                $iq->whereHas('customer', function ($cq) use ($branch) {
+                    $cq->where('branch_id', $branch);
+                })->orWhereHas('sale', function ($sq) use ($branch) {
+                    $sq->where('branch_id', $branch);
+                });
             });
         }
 
@@ -195,7 +206,7 @@ class PaymentController extends Controller
         $monthCount = $monthPayments->count();
 
         $cashTotal = (float)$allPayments->where('payment_method', 'Cash')->sum('amount');
-        $digitalTotal = (float)$allPayments->whereIn('payment_method', ['GCash', 'Maya', 'Bank Transfer', 'E-Wallet'])->sum('amount');
+        $digitalTotal = (float)$allPayments->whereIn('payment_method', ['GCash', 'Maya', 'Bank Transfer', 'E-Wallet', 'BDO', 'BPI', 'Bank Transfer/InstaPay'])->sum('amount');
 
         // Overdue collected: payments on accounts with overdue schedules
         $overdueCollected = (float)$todayPayments->where('notes', 'like', '%Overdue%')->sum('amount');
@@ -256,6 +267,7 @@ class PaymentController extends Controller
                 'branch' => $branch,
                 'status' => 'Completed',
                 'notes' => $p->notes,
+                'proof_of_payment' => $p->proof_of_payment ? asset('storage/' . $p->proof_of_payment) : null,
             ]
         ]);
     }
@@ -305,18 +317,36 @@ class PaymentController extends Controller
             }
 
             $payAmount = (float)$validated['amount'];
+            
+            if (isset($validated['schedule_id']) && $validated['schedule_id']) {
+                $sched = PaymentSchedule::find($validated['schedule_id']);
+                // We keep the logic to fetch schedule, but no longer enforce exact amount
+            }
+
             if ($payAmount > $outstanding) {
                 return response()->json(['message' => "Payment amount (₱{$payAmount}) exceeds the remaining balance of ₱{$outstanding}."], 422);
             }
 
             // Generate Sequential Receipt No
-            $paymentCount = Payment::count() + 1;
+            $paymentCount = (\App\Models\Payment::max('payment_id') ?? 0) + 1;
             $receiptNo = 'REC-' . date('Y') . '-' . str_pad($paymentCount, 5, '0', STR_PAD_LEFT);
+            while (\App\Models\Payment::where('receipt_no', $receiptNo)->exists()) {
+                $paymentCount++;
+                $receiptNo = 'REC-' . date('Y') . '-' . str_pad($paymentCount, 5, '0', STR_PAD_LEFT);
+            }
             $payDate = $validated['payment_date'] ?? now()->toDateString();
 
             $proofPath = null;
             if ($request->hasFile('proof_of_payment')) {
                 $proofPath = $request->file('proof_of_payment')->store('proofs', 'public');
+            }
+
+            // Determine who receives the payment
+            $receivedById = null;
+            if ($user && $user->role === 'Customer') {
+                $receivedById = $inst->sale ? $inst->sale->processed_by : null;
+            } else {
+                $receivedById = $user ? $user->user_id : $request->input('user_id', 1);
             }
 
             // 1. Create Payment Entry
@@ -328,7 +358,7 @@ class PaymentController extends Controller
                 'amount' => $payAmount,
                 'payment_method' => $validated['payment_method'],
                 'reference_no' => $validated['reference_no'] ?? null,
-                'received_by' => $user ? $user->user_id : $request->input('user_id', 1),
+                'received_by' => $receivedById,
                 'notes' => $validated['notes'] ?? '',
                 'status' => $user && $user->role === 'Customer' ? 'Pending' : 'Completed',
                 'proof_of_payment' => $proofPath,
@@ -379,6 +409,16 @@ class PaymentController extends Controller
             $newAccStatus = $inst->status;
             if ($newBalance <= 0) {
                 $newAccStatus = 'Completed';
+                
+                // The account is completely paid off. Clear any remaining schedule balances.
+                PaymentSchedule::where('installment_id', $inst->installment_id)
+                    ->where('balance_due', '>', 0)
+                    ->update([
+                        'balance_due' => 0,
+                        'amount_paid' => DB::raw('amount_due'),
+                        'status' => 'Paid',
+                        'paid_date' => $payDate,
+                    ]);
             } else {
                 $hasOverdue = PaymentSchedule::where('installment_id', $inst->installment_id)
                     ->where('due_date', '<', date('Y-m-d'))
@@ -478,13 +518,23 @@ class PaymentController extends Controller
 
         if ($user && in_array($user->role, ['Store Administrator', 'Store Admin'])) {
             $userBranch = $user->employee ? $user->employee->branch_id : null;
-            $query->whereHas('installmentAccount.sale.processedBy.employee', function ($eq) use ($userBranch) {
-                $eq->where('branch_id', $userBranch);
-            });
+            if ($userBranch) {
+                $query->whereHas('installmentAccount', function ($iq) use ($userBranch) {
+                    $iq->whereHas('customer', function ($cq) use ($userBranch) {
+                        $cq->where('branch_id', $userBranch);
+                    })->orWhereHas('sale', function ($sq) use ($userBranch) {
+                        $sq->where('branch_id', $userBranch);
+                    });
+                });
+            }
         } elseif ($request->filled('branch') && $request->query('branch') !== 'All') {
             $branch = $request->query('branch');
-            $query->whereHas('installmentAccount.sale.processedBy.employee', function ($eq) use ($branch) {
-                $eq->where('branch_id', $branch);
+            $query->whereHas('installmentAccount', function ($iq) use ($branch) {
+                $iq->whereHas('customer', function ($cq) use ($branch) {
+                    $cq->where('branch_id', $branch);
+                })->orWhereHas('sale', function ($sq) use ($branch) {
+                    $sq->where('branch_id', $branch);
+                });
             });
         }
 

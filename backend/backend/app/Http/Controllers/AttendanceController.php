@@ -271,6 +271,52 @@ class AttendanceController extends Controller
         return $this->verifyQr($request);
     }
 
+    public function scanImage(Request $request)
+    {
+        $user = $request->user('sanctum') ?? $request->user();
+        if (!$user || !in_array($user->role, ['Store Administrator', 'Store Admin'])) {
+            return response()->json([
+                'success' => false,
+                'message' => '403 Forbidden: Only authorized Store Administrators can access the QR Attendance Scanner.',
+            ], 403);
+        }
+
+        $request->validate([
+            'qr_image' => 'required|image',
+            'device_info' => 'nullable|string',
+        ]);
+
+        try {
+            $options = new \chillerlan\QRCode\QROptions([
+                'readerUseImagickIfAvailable' => false,
+            ]);
+            $qrcode = new \chillerlan\QRCode\QRCode($options);
+            
+            $result = $qrcode->readFromFile($request->file('qr_image')->getPathname());
+            $token = $result->data;
+
+            // Prepare request for verifyQr
+            $request->merge(['qr_token' => $token]);
+            
+            // Call verifyQr and intercept response to add qr_token
+            $response = $this->verifyQr($request);
+            $data = $response->getData(true);
+            
+            if (isset($data['success']) && $data['success']) {
+                $data['qr_token'] = $token;
+                return response()->json($data, $response->getStatusCode());
+            }
+            
+            return $response;
+            
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Could not find a valid QR code in this image. Please try another.',
+            ], 400);
+        }
+    }
+
     public function verifyQr(Request $request)
     {
         $user = $request->user('sanctum') ?? $request->user();
