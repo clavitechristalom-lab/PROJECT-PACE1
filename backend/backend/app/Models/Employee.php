@@ -43,9 +43,7 @@ class Employee extends Model
     protected static function booted()
     {
         static::creating(function ($employee) {
-            if (empty($employee->attendance_pin)) {
-                $employee->attendance_pin = \Illuminate\Support\Facades\Hash::make('1234');
-            }
+            // Removing the default 1234 fallback so employees must set it themselves
         });
     }
 

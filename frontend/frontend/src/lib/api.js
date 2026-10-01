@@ -396,6 +396,11 @@ export const api = {
       }),
     checkVerification: (id) => request(`/attendance/check-verification/${id}`),
     pendingVerifications: () => request('/employee/me/pending-verifications'),
+    updateMyPin: (data) =>
+      request('/employee/me/pin', {
+        method: 'PUT',
+        body: JSON.stringify(data),
+      }),
     approveVerification: (data) =>
       request('/employee/me/verify-attendance-pin', {
         method: 'POST',

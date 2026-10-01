@@ -38,6 +38,8 @@ class AuthController extends Controller
             'gender' => 'required|string',
             'date_of_birth' => 'required|date',
             'marital_status' => 'required|string',
+            'attendance_pin' => 'required_if:role,Store Admin,Store Administrator,Employee,Administrator|string|min:4|max:6|regex:/^[0-9]+$/|same:confirm_attendance_pin',
+            'confirm_attendance_pin' => 'required_if:role,Store Admin,Store Administrator,Employee,Administrator|string',
         ];
 
         if ($role === 'Customer') {
@@ -115,6 +117,8 @@ class AuthController extends Controller
                 'basic_salary' => 0,
                 'branch_id' => in_array($role, ['Store Administrator', 'Employee']) ? ($validated['branch_id'] ?? null) : null,
                 'department' => null,
+                'attendance_pin' => Hash::make($validated['attendance_pin']),
+                'pin_failed_attempts' => 0,
             ]);
 
             $user = User::create([

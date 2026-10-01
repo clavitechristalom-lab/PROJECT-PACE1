@@ -208,9 +208,12 @@ class EmployeeController extends Controller
         $validated['qr_active'] = false;
         $validated['qr_generated_at'] = null;
 
-        // Securely hash attendance PIN
-        $pin = !empty($validated['attendance_pin']) ? $validated['attendance_pin'] : '1234';
-        $validated['attendance_pin'] = Hash::make($pin);
+        $pin = !empty($validated['attendance_pin']) ? $validated['attendance_pin'] : null;
+        if ($pin) {
+            $validated['attendance_pin'] = Hash::make($pin);
+        } else {
+            unset($validated['attendance_pin']);
+        }
 
         $employee = Employee::create($validated);
         $employee->has_pin = true;
@@ -420,9 +423,7 @@ class EmployeeController extends Controller
         $employee->qr_token = (string)Str::uuid();
         $employee->qr_active = true;
         $employee->qr_generated_at = now();
-        if (empty($employee->attendance_pin)) {
-            $employee->attendance_pin = Hash::make('1234');
-        }
+
         $employee->save();
 
         SystemLog::create([
@@ -733,7 +734,6 @@ class EmployeeController extends Controller
                 'daily_rate' => round(($user->role === 'Administrator' ? 50000 : 25000) / 26, 2),
                 'hourly_rate' => round(($user->role === 'Administrator' ? 50000 : 25000) / 26 / 8, 2),
                 'status' => 'Active',
-                'attendance_pin' => Hash::make('1234'),
             ]);
 
             $user->employee_id = $employee->employee_id;
@@ -927,6 +927,53 @@ class EmployeeController extends Controller
             'employee' => $employee->fresh(),
         ]);
     }
+
+    public function updateMyPin(Request $request)
+    {
+        $user = $request->user();
+        if (!$user) {
+            return response()->json(['success' => false, 'message' => 'Unauthenticated session.'], 401);
+        }
+
+        $employee = ($user->employee_id ? Employee::find($user->employee_id) : null) ?: ($user->employee ?: Employee::where('email', $user->username)->first());
+        if (!$employee) {
+            return response()->json(['success' => false, 'message' => 'Employee record not found.'], 404);
+        }
+
+        $rules = [
+            'new_pin' => 'required|string|min:4|max:6|regex:/^[0-9]+$/',
+        ];
+
+        if (!empty($employee->attendance_pin)) {
+            $rules['current_pin'] = 'required|string';
+        }
+
+        $validated = $request->validate($rules);
+
+        if (!empty($employee->attendance_pin) && !\Illuminate\Support\Facades\Hash::check($validated['current_pin'], $employee->attendance_pin)) {
+            return response()->json(['success' => false, 'message' => 'The current PIN you entered is incorrect.'], 422);
+        }
+
+        $employee->attendance_pin = \Illuminate\Support\Facades\Hash::make($validated['new_pin']);
+        $employee->pin_failed_attempts = 0;
+        $employee->pin_locked_until = null;
+        $employee->save();
+
+        SystemLog::create([
+            'user_id' => $user->user_id,
+            'action' => 'UPDATE',
+            'module' => 'Employees',
+            'description' => "Employee updated their own attendance PIN securely",
+            'ip_address' => $request->ip(),
+            'user_agent' => $request->userAgent(),
+        ]);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Your secure Attendance PIN has been updated successfully.'
+        ]);
+    }
+
 
     /**
      * Verify employee account by Administrator

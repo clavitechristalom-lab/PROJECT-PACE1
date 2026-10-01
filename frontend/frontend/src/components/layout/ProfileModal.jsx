@@ -27,6 +27,10 @@ export default function ProfileModal({ open, isOpen, onClose }) {
   const [activeTab, setActiveTab] = useState('profile')
   const [showDisplayQrModal, setShowDisplayQrModal] = useState(false)
 
+  // Attendance log state
+  const [myAttendance, setMyAttendance] = useState([])
+  const [loadingAttendance, setLoadingAttendance] = useState(false)
+
   // Verification states
   const [verificationModalOpen, setVerificationModalOpen] = useState(false)
   const [verificationDetailsOpen, setVerificationDetailsOpen] = useState(false)
@@ -54,6 +58,11 @@ export default function ProfileModal({ open, isOpen, onClose }) {
 
   const [branchesList, setBranchesList] = useState([])
 
+  const [pinForm, setPinForm] = useState({ current_pin: '', new_pin: '', confirm_pin: '' })
+  const [pinLoading, setPinLoading] = useState(false)
+  const [pinError, setPinError] = useState('')
+  const [pinSuccess, setPinSuccess] = useState('')
+
   useEffect(() => {
     if (isVisible) {
       api.branches.getAll()
@@ -63,6 +72,16 @@ export default function ProfileModal({ open, isOpen, onClose }) {
         .catch(err => console.error("Error fetching branches:", err))
     }
   }, [isVisible])
+
+  useEffect(() => {
+    if (activeTab === 'attendance_log' && isVisible) {
+      setLoadingAttendance(true)
+      api.employees.getMeAttendance()
+        .then(res => setMyAttendance(res.attendance || res.records || []))
+        .catch(err => showToast(err.message || 'Failed to fetch attendance', 'error'))
+        .finally(() => setLoadingAttendance(false))
+    }
+  }, [activeTab, isVisible])
 
   const loadProfile = async () => {
     if (!isVisible) return
@@ -133,6 +152,9 @@ export default function ProfileModal({ open, isOpen, onClose }) {
       setVerificationModalOpen(false)
       setVerificationDetailsOpen(false)
       setVerificationError('')
+      setPinForm({ current_pin: '', new_pin: '', confirm_pin: '' })
+      setPinError('')
+      setPinSuccess('')
       loadProfile()
     }
   }, [isVisible])
@@ -193,6 +215,45 @@ export default function ProfileModal({ open, isOpen, onClose }) {
       showToast(err.message || 'Failed to update profile', 'error')
     } finally {
       setSaving(false)
+    }
+  }
+
+  const handleChangePin = async (e) => {
+    e.preventDefault()
+    setPinError('')
+    setPinSuccess('')
+
+    if (employee?.has_pin && !pinForm.current_pin) {
+      setPinError('Current PIN is required.')
+      return
+    }
+    if (!pinForm.new_pin || pinForm.new_pin.length < 4 || pinForm.new_pin.length > 6 || !/^\d+$/.test(pinForm.new_pin)) {
+      setPinError('New PIN must be 4 to 6 numeric digits.')
+      return
+    }
+    if (pinForm.new_pin !== pinForm.confirm_pin) {
+      setPinError('New PINs do not match.')
+      return
+    }
+
+    setPinLoading(true)
+    try {
+      const res = await api.employees.updateMyPin({
+        current_pin: pinForm.current_pin,
+        new_pin: pinForm.new_pin,
+      })
+      if (res.success) {
+        setPinSuccess(res.message || 'PIN updated successfully.')
+        setPinForm({ current_pin: '', new_pin: '', confirm_pin: '' })
+        showToast('Security PIN updated successfully.', 'success')
+      } else {
+        setPinError(res.message || 'Failed to update PIN.')
+      }
+    } catch (err) {
+      console.error('Update PIN error:', err)
+      setPinError(err.message || 'An error occurred while updating your PIN.')
+    } finally {
+      setPinLoading(false)
     }
   }
 
@@ -342,6 +403,8 @@ export default function ProfileModal({ open, isOpen, onClose }) {
                 tabs={[
                   { id: 'profile', label: 'My Profile Information', icon: <FiUser className="w-3.5 h-3.5" /> },
                   ...(isAdmin ? [] : [{ id: 'attendance_qr', label: 'Attendance QR', icon: <FiSmartphone className="w-3.5 h-3.5" /> }]),
+                  ...((user?.role === 'Store Administrator' || user?.role === 'Store Admin') ? [{ id: 'attendance_log', label: 'My Attendance Log', icon: <FiCalendar className="w-3.5 h-3.5" /> }] : []),
+                  ...(isAdmin || isCustomer ? [] : [{ id: 'security', label: 'Security & PIN', icon: <FiKey className="w-3.5 h-3.5" /> }]),
                 ]}
                 activeTab={activeTab}
                 onChange={setActiveTab}
@@ -984,6 +1047,114 @@ export default function ProfileModal({ open, isOpen, onClose }) {
                 )}
               </div>
             )}
+
+            {/* TAB 3: ATTENDANCE LOG (STORE ADMIN ONLY) */}
+            {activeTab === 'attendance_log' && (
+              <div className="space-y-4">
+                <div className="p-4 bg-card rounded-2xl border border-border">
+                  <h4 className="font-bold text-sm text-foreground mb-4">My Attendance Log</h4>
+                  
+                  {loadingAttendance ? (
+                    <div className="py-8 text-center text-muted-foreground text-xs animate-pulse">Loading attendance records...</div>
+                  ) : myAttendance.length === 0 ? (
+                    <div className="py-8 text-center text-muted-foreground text-xs">No attendance records found.</div>
+                  ) : (
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left text-xs whitespace-nowrap">
+                        <thead>
+                          <tr className="border-b border-border text-muted-foreground">
+                            <th className="py-2 pr-4 font-semibold">Date</th>
+                            <th className="py-2 px-4 font-semibold">Time In</th>
+                            <th className="py-2 px-4 font-semibold">Time Out</th>
+                            <th className="py-2 px-4 font-semibold">Status</th>
+                            <th className="py-2 pl-4 font-semibold">Hours</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-border">
+                          {myAttendance.map((record, index) => (
+                            <tr key={record.id || index} className="hover:bg-muted/30">
+                              <td className="py-2 pr-4 font-mono">{record.attendance_date}</td>
+                              <td className="py-2 px-4">{record.time_in ? new Date(`2000-01-01T${record.time_in}`).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }) : '—'}</td>
+                              <td className="py-2 px-4">{record.time_out ? new Date(`2000-01-01T${record.time_out}`).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }) : '—'}</td>
+                              <td className="py-2 px-4">
+                                <Badge text={record.status || 'Present'} variant={record.status === 'Absent' ? 'danger' : record.status === 'Late' ? 'warning' : 'success'} />
+                              </td>
+                              <td className="py-2 pl-4 font-semibold">{record.total_hours || '—'}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* TAB: SECURITY & PIN */}
+        {activeTab === 'security' && (
+          <div className="space-y-4">
+            <div className="p-4 bg-card rounded-2xl border border-border">
+              <h4 className="font-bold text-sm text-foreground mb-4 flex items-center gap-2">
+                <FiKey className="w-4 h-4 text-primary" /> Change Attendance PIN
+              </h4>
+              
+              {pinSuccess && (
+                <div className="mb-4 p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-500 text-xs font-semibold flex items-center gap-2">
+                  <FiCheckCircle /> {pinSuccess}
+                </div>
+              )}
+
+              {pinError && (
+                <div className="mb-4 p-3 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-500 text-xs font-semibold flex items-center gap-2">
+                  <FiAlertTriangle /> {pinError}
+                </div>
+              )}
+
+              <form onSubmit={handleChangePin} className="max-w-xs space-y-4">
+                {employee?.has_pin && (
+                  <div>
+                    <label className="block text-[10px] text-muted-foreground uppercase tracking-wider font-bold mb-1">Current PIN</label>
+                    <input
+                      type="password"
+                      maxLength={6}
+                      value={pinForm.current_pin}
+                      onChange={e => setPinForm(p => ({ ...p, current_pin: e.target.value.replace(/\D/g, '') }))}
+                      className="w-full px-3 py-2 rounded-xl border border-border bg-black/5 text-foreground text-sm font-mono tracking-widest focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition-all"
+                      placeholder="••••"
+                    />
+                  </div>
+                )}
+                <div>
+                  <label className="block text-[10px] text-muted-foreground uppercase tracking-wider font-bold mb-1">New PIN (4-6 digits)</label>
+                  <input
+                    type="password"
+                    maxLength={6}
+                    value={pinForm.new_pin}
+                    onChange={e => setPinForm(p => ({ ...p, new_pin: e.target.value.replace(/\D/g, '') }))}
+                    className="w-full px-3 py-2 rounded-xl border border-border bg-black/5 text-foreground text-sm font-mono tracking-widest focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition-all"
+                    placeholder="••••"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] text-muted-foreground uppercase tracking-wider font-bold mb-1">Confirm New PIN</label>
+                  <input
+                    type="password"
+                    maxLength={6}
+                    value={pinForm.confirm_pin}
+                    onChange={e => setPinForm(p => ({ ...p, confirm_pin: e.target.value.replace(/\D/g, '') }))}
+                    className="w-full px-3 py-2 rounded-xl border border-border bg-black/5 text-foreground text-sm font-mono tracking-widest focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition-all"
+                    placeholder="••••"
+                  />
+                </div>
+                <div className="pt-2">
+                  <Btn variant="primary" type="submit" className="w-full" disabled={pinLoading}>
+                    {pinLoading ? 'Updating PIN...' : 'Update PIN'}
+                  </Btn>
+                </div>
+              </form>
+            </div>
           </div>
         )}
       </Modal>

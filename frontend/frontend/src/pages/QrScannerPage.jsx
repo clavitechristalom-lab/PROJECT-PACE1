@@ -78,6 +78,7 @@ export default function QrScannerPage() {
   const html5QrCodeRef = useRef(null)
   const scannerContainerId = 'qr-terminal-camera-box'
   const resetTimerRef = useRef(null)
+  const isProcessingScan = useRef(false) // Debouncing lock
 
   // Real-time Clock
   const [currentTime, setCurrentTime] = useState(new Date())
@@ -187,7 +188,11 @@ export default function QrScannerPage() {
 
   // Handle scanned QR token
   const handleQrScanned = async (token) => {
-    if (loading || !token) return
+    if (loading || !token || isProcessingScan.current) return
+    
+    // Lock the scanner immediately
+    isProcessingScan.current = true
+    
     const cleanToken = token.trim()
     playSound('beep')
     setScannedToken(cleanToken)
@@ -219,6 +224,8 @@ export default function QrScannerPage() {
       setStep('scan')
     } finally {
       setLoading(false)
+      // Release the lock after backend processing completes
+      isProcessingScan.current = false
     }
   }
 

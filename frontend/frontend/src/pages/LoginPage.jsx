@@ -44,6 +44,8 @@ export default function LoginPage() {
     address: '',
     password: '',
     confirmPassword: '',
+    attendance_pin: '',
+    confirm_attendance_pin: '',
     role: 'Customer',
     gender: 'Male',
     date_of_birth: '',
@@ -218,6 +220,15 @@ export default function LoginPage() {
       signUpData.confirmPassword
     ) {
       errors.confirmPassword = 'Passwords do not match'
+    }
+
+    if (signUpData.role !== 'Customer') {
+      if (!signUpData.attendance_pin || signUpData.attendance_pin.length < 4 || signUpData.attendance_pin.length > 6 || !/^\d+$/.test(signUpData.attendance_pin)) {
+        errors.attendance_pin = 'A 4-6 digit numerical PIN is required'
+      }
+      if (signUpData.attendance_pin !== signUpData.confirm_attendance_pin) {
+        errors.confirm_attendance_pin = 'Attendance PINs do not match'
+      }
     }
 
     setSignUpErrors(errors)
@@ -1114,6 +1125,84 @@ export default function LoginPage() {
                         )}
                       </div>
                     </div>
+
+                    {signUpData.role !== 'Customer' && (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-1">
+                        <div>
+                          <label className="block text-xs font-semibold text-slate-300 mb-1">
+                            Attendance PIN (4-6 digits)
+                          </label>
+
+                          <input
+                            type="password"
+                            maxLength={6}
+                            value={signUpData.attendance_pin}
+                            onChange={(e) => {
+                              const val = e.target.value.replace(/\D/g, '')
+                              setSignUpData({
+                                ...signUpData,
+                                attendance_pin: val,
+                              })
+
+                              if (signUpErrors.attendance_pin) {
+                                setSignUpErrors({
+                                  ...signUpErrors,
+                                  attendance_pin: '',
+                                })
+                              }
+                            }}
+                            placeholder="••••"
+                            className={`w-full bg-[#121c29] border rounded-xl px-3.5 py-2.5 text-sm font-mono tracking-widest text-center text-white placeholder-slate-500 focus:outline-none focus:ring-2 transition-all ${signUpErrors.attendance_pin
+                              ? 'border-rose-500/80 focus:ring-rose-500/30'
+                              : 'border-slate-800 focus:border-blue-500 focus:ring-blue-500/20'
+                              }`}
+                          />
+
+                          {signUpErrors.attendance_pin && (
+                            <p className="text-[11px] text-rose-400 mt-1">
+                              {signUpErrors.attendance_pin}
+                            </p>
+                          )}
+                        </div>
+
+                        <div>
+                          <label className="block text-xs font-semibold text-slate-300 mb-1">
+                            Confirm PIN
+                          </label>
+
+                          <input
+                            type="password"
+                            maxLength={6}
+                            value={signUpData.confirm_attendance_pin}
+                            onChange={(e) => {
+                              const val = e.target.value.replace(/\D/g, '')
+                              setSignUpData({
+                                ...signUpData,
+                                confirm_attendance_pin: val,
+                              })
+
+                              if (signUpErrors.confirm_attendance_pin) {
+                                setSignUpErrors({
+                                  ...signUpErrors,
+                                  confirm_attendance_pin: '',
+                                })
+                              }
+                            }}
+                            placeholder="••••"
+                            className={`w-full bg-[#121c29] border rounded-xl px-3.5 py-2.5 text-sm font-mono tracking-widest text-center text-white placeholder-slate-500 focus:outline-none focus:ring-2 transition-all ${signUpErrors.confirm_attendance_pin
+                              ? 'border-rose-500/80 focus:ring-rose-500/30'
+                              : 'border-slate-800 focus:border-blue-500 focus:ring-blue-500/20'
+                              }`}
+                          />
+
+                          {signUpErrors.confirm_attendance_pin && (
+                            <p className="text-[11px] text-rose-400 mt-1">
+                              {signUpErrors.confirm_attendance_pin}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    )}
 
                     <div className="flex items-center pt-1">
                       <label className="flex items-center gap-2 cursor-pointer select-none">

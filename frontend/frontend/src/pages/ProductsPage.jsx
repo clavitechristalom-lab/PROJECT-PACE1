@@ -328,7 +328,7 @@ export default function ProductsPage({ branchFilter, embedded }) {
   const lowStockCount = products.filter(p => p.stock_quantity === 1).length
   const mediumStockCount = products.filter(p => p.stock_quantity >= 2 && p.stock_quantity <= 4).length
   const highStockCount = products.filter(p => p.stock_quantity >= 5).length
-  const outOfStockCount = products.filter(p => p.stock_quantity === 0).length
+  const outOfStockCount = products.filter(p => p.stock_quantity <= 0).length
   const totalValue = products.reduce((acc, p) => acc + ((p.unit_price || 0) * (p.stock_quantity || 0)), 0)
 
   return (
@@ -454,7 +454,7 @@ export default function ProductsPage({ branchFilter, embedded }) {
                 </thead>
                 <tbody className="divide-y divide-border">
                   {paginated.map((p, i) => {
-                    const isOut = p.stock_quantity === 0
+                    const isOut = p.stock_quantity <= 0
                     const isLow = p.stock_quantity === 1
                     const isMedium = p.stock_quantity >= 2 && p.stock_quantity <= 4
                     const isHigh = p.stock_quantity >= 5
@@ -480,7 +480,7 @@ export default function ProductsPage({ branchFilter, embedded }) {
                         {isAdmin && (
                           <td className="py-3 px-4">
                             <span className="text-[11px] font-semibold text-foreground bg-muted/50 px-2 py-1 rounded-md">
-                              {p.branch?.branch_name || 'Unassigned'}
+                              {p.branch?.name || 'Unassigned'}
                             </span>
                           </td>
                         )}
@@ -616,7 +616,7 @@ export default function ProductsPage({ branchFilter, embedded }) {
                   >
                     <option value="">Select Branch</option>
                     {branches.map(b => (
-                      <option key={b.id} value={b.id}>{b.branch_name}</option>
+                      <option key={b.id} value={b.id}>{b.name}</option>
                     ))}
                   </select>
                 </div>
@@ -877,7 +877,7 @@ export default function ProductsPage({ branchFilter, embedded }) {
                 <div><span className="text-[10px] text-muted-foreground uppercase font-bold block mb-0.5">Category:</span> <p className="font-semibold text-foreground">{viewItem.category}</p></div>
                 <div><span className="text-[10px] text-muted-foreground uppercase font-bold block mb-0.5">Brand:</span> <p className="font-medium text-foreground">{viewItem.brand || '—'}</p></div>
                 <div><span className="text-[10px] text-muted-foreground uppercase font-bold block mb-0.5">Status:</span> <div><StatusBadge status={viewItem.status} /></div></div>
-                {isAdmin && <div className="col-span-2"><span className="text-[10px] text-muted-foreground uppercase font-bold block mb-0.5">Branch:</span> <p className="font-medium text-primary">{viewItem.branch?.branch_name || 'Unassigned'}</p></div>}
+                {isAdmin && <div className="col-span-2"><span className="text-[10px] text-muted-foreground uppercase font-bold block mb-0.5">Branch:</span> <p className="font-medium text-primary">{viewItem.branch?.name || 'Unassigned'}</p></div>}
               </div>
             </div>
 

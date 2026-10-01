@@ -95,6 +95,7 @@ Route::middleware('auth:sanctum')->group(function () {
     // ─── Employee Self-Service (Employee Role / Scoped) ─────────────────────────
     Route::get('/employee/me', [EmployeeController::class, 'me']);
     Route::put('/employee/me', [EmployeeController::class, 'updateMe']);
+    Route::put('/employee/me/pin', [EmployeeController::class, 'updateMyPin']);
     Route::get('/employee/me/attendance', [AttendanceController::class, 'meAttendance']);
     Route::get('/employee/me/payroll', [PayrollController::class, 'mePayroll']);
     Route::get('/employee/me/payslip/{id}', [PayrollController::class, 'mePayslip']);

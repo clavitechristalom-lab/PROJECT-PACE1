@@ -131,6 +131,7 @@ export default function AttendancePage() {
 
   const html5QrCodeRef = useRef(null)
   const isScannerRunningRef = useRef(false)
+  const isProcessingScan = useRef(false) // Debouncing lock
   const fileInputRef = useRef(null)
 
   const loadData = async (silent = false) => {
@@ -345,9 +346,16 @@ export default function AttendancePage() {
   }
 
   const onQrCodeScanned = async (decodedText) => {
-    if (!decodedText || verifyingQr) return
+    if (!decodedText || verifyingQr || isProcessingScan.current) return
+    
+    // Lock the scanner immediately
+    isProcessingScan.current = true
+    
     playTone('beep')
     await handleVerifyQr(decodedText.trim())
+    
+    // Release the lock after the backend responds
+    isProcessingScan.current = false
   }
 
   const handleVerifyQr = async (token) => {
@@ -919,7 +927,7 @@ export default function AttendancePage() {
                 )}
                 <div className="flex justify-between py-1 border-b border-border">
                   <span className="text-muted-foreground">Branch:</span>
-                  <span className="font-semibold text-foreground">{punchResult.branch || userBranch}</span>
+                  <span className="font-semibold text-foreground">{punchResult.branch?.name || (typeof punchResult.branch === 'string' ? punchResult.branch : userBranch)}</span>
                 </div>
                 <div className="flex justify-between py-1">
                   <span className="text-muted-foreground">Verification Method:</span>
@@ -967,7 +975,7 @@ export default function AttendancePage() {
                   {myProfile.first_name} {myProfile.last_name}
                 </h3>
                 <p className="text-xs text-primary font-semibold mt-0.5">{myProfile.position}</p>
-                <p className="text-[11px] text-slate-400">{myProfile.department} · {myProfile.branch || 'Main Branch'}</p>
+                <p className="text-[11px] text-slate-400">{myProfile.department} · {myProfile.branch?.name || (typeof myProfile.branch === 'string' ? myProfile.branch : 'Main Branch')}</p>
 
                 <div className="mt-2 font-mono text-xs font-bold text-slate-200 bg-slate-800/80 px-3 py-1 rounded-full border border-slate-700">
                   {myProfile.employee_code}
@@ -1157,7 +1165,7 @@ export default function AttendancePage() {
                 </div>
                 <div>
                   <span className="text-[10px] text-muted-foreground uppercase font-bold block">Branch</span>
-                  <span className="font-semibold text-foreground">{myProfile.branch || userBranch}</span>
+                  <span className="font-semibold text-foreground">{myProfile.branch?.name || (typeof myProfile.branch === 'string' ? myProfile.branch : userBranch)}</span>
                 </div>
                 <div>
                   <span className="text-[10px] text-muted-foreground uppercase font-bold block">Phone</span>
@@ -1258,7 +1266,7 @@ export default function AttendancePage() {
                           <td className="py-3 px-4 font-mono text-muted-foreground">{a.attendance_date}</td>
                           <td className="py-3 px-4 font-mono font-bold text-foreground">{a.employee_code}</td>
                           <td className="py-3 px-4 font-semibold text-foreground">{a.employee_name}</td>
-                          <td className="py-3 px-4 font-medium text-foreground">{a.branch || 'Main Branch'}</td>
+                          <td className="py-3 px-4 font-medium text-foreground">{a.branch?.name || (typeof a.branch === 'string' ? a.branch : 'Main Branch')}</td>
                           <td className="py-3 px-4"><Badge text={a.department || 'General'} variant="neutral" /></td>
                           <td className="py-3 px-4">
                             <div className="font-mono">{a.time_in ? a.time_in.substring(0,5) : '—'}</div>
@@ -1401,7 +1409,7 @@ export default function AttendancePage() {
                             <div className="font-semibold text-foreground">{l.employee_name}</div>
                             <div className="text-[11px] font-mono text-muted-foreground">{l.employee_code}</div>
                           </td>
-                          <td className="py-3 px-4 font-medium text-foreground">{l.branch || 'Main Branch'}</td>
+                          <td className="py-3 px-4 font-medium text-foreground">{l.branch?.name || (typeof l.branch === 'string' ? l.branch : 'Main Branch')}</td>
                           <td className="py-3 px-4 font-mono font-bold text-primary">{l.action_type}</td>
                           <td className="py-3 px-4 text-center">
                             {l.qr_verified ? (

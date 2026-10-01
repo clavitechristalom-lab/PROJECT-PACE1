@@ -544,7 +544,7 @@ export function FullyPaidProductDetailsModal({ isOpen, onClose, accountData }) {
             <div className="grid grid-cols-2 gap-y-2 text-sm mt-auto">
               <div className="text-slate-500">Account No: <span className="font-mono font-bold text-slate-700 dark:text-slate-300">{acc.account_no}</span></div>
               <div className="text-slate-500">Purchase Date: <span className="font-medium text-slate-700 dark:text-slate-300">{acc.start_date || acc.sale_date}</span></div>
-              <div className="text-slate-500">Branch: <span className="font-medium text-slate-700 dark:text-slate-300">{acc.branch || 'Main Branch'}</span></div>
+              <div className="text-slate-500">Branch: <span className="font-medium text-slate-700 dark:text-slate-300">{acc.branch?.name || (typeof acc.branch === 'string' ? acc.branch : 'Main Branch')}</span></div>
               <div className="text-slate-500">Processed By: <span className="font-medium text-slate-700 dark:text-slate-300">{acc.store_admin || 'System/Admin'}</span></div>
             </div>
           </div>
@@ -717,7 +717,7 @@ export function InstallmentAccountDetailsModal({ isOpen, onClose, installmentId 
             <div className="grid grid-cols-2 gap-y-2 text-sm mt-auto">
               <div className="text-slate-500">Account No: <span className="font-mono font-bold text-slate-700 dark:text-slate-300">{acc.account_no}</span></div>
               <div className="text-slate-500">Purchase Date: <span className="font-medium text-slate-700 dark:text-slate-300">{acc.start_date || acc.sale_date}</span></div>
-              <div className="text-slate-500">Branch: <span className="font-medium text-slate-700 dark:text-slate-300">{acc.branch || 'Main Branch'}</span></div>
+              <div className="text-slate-500">Branch: <span className="font-medium text-slate-700 dark:text-slate-300">{acc.branch?.name || (typeof acc.branch === 'string' ? acc.branch : 'Main Branch')}</span></div>
               <div className="text-slate-500">Processed By: <span className="font-medium text-slate-700 dark:text-slate-300">{acc.store_admin || 'System/Admin'}</span></div>
             </div>
           </div>
@@ -836,7 +836,7 @@ export function InstallmentAccountDetailsModal({ isOpen, onClose, installmentId 
           <div className="space-y-4 text-xs">
             <div className="text-center pb-3 border-b border-slate-200 dark:border-slate-800 space-y-0.5">
               <div className="text-base font-black tracking-wider text-slate-800 dark:text-slate-100">PROJECT PACE APPLIANCES & FURNITURE</div>
-              <div className="text-[11px] text-slate-500 dark:text-slate-400">{acc.branch || 'Main Branch'} · Official Collection Receipt</div>
+              <div className="text-[11px] text-slate-500 dark:text-slate-400">{acc.branch?.name || (typeof acc.branch === 'string' ? acc.branch : 'Main Branch')} · Official Collection Receipt</div>
               <div className="text-xs font-mono font-bold text-[#176B87] dark:text-[#64ccc5] pt-1">Receipt #{viewReceipt.receipt_no}</div>
             </div>
 

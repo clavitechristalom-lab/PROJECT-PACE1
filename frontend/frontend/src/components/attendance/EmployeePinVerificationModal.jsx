@@ -192,7 +192,7 @@ export default function EmployeePinVerificationModal({ request, onClose, onSucce
 
         <div className="p-4 border-t border-border bg-muted/20 flex gap-3">
           <Btn variant="outline" className="flex-1" onClick={onClose} disabled={verifying}>
-            Ignore
+            Cancel
           </Btn>
           <Btn 
             variant="primary" 

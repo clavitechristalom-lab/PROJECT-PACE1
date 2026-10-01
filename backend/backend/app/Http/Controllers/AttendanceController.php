@@ -547,8 +547,7 @@ class AttendanceController extends Controller
         }
 
         if (empty($employee->attendance_pin)) {
-            $employee->attendance_pin = \Illuminate\Support\Facades\Hash::make('1234');
-            $employee->save();
+            return response()->json(['success' => false, 'message' => 'Your secure Attendance PIN has not been set. Please update it in your profile settings.'], 422);
         }
 
         // Find the pending scan log
@@ -837,8 +836,7 @@ class AttendanceController extends Controller
         }
 
         if (empty($employee->attendance_pin)) {
-            $employee->attendance_pin = \Illuminate\Support\Facades\Hash::make('1234');
-            $employee->save();
+            return response()->json(['success' => false, 'message' => 'Your secure Attendance PIN has not been set. Please update it in your profile settings.'], 422);
         }
 
         // Verify PIN
