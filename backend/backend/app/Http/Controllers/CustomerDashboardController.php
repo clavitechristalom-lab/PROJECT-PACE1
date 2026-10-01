@@ -83,7 +83,8 @@ class CustomerDashboardController extends Controller
                 if ($inst->status === 'Pending') {
                     return $carry + (float)$inst->total_payable;
                 }
-                return $carry + (float)$inst->paymentSchedules->sum('balance_due');
+                $paid = (float)$inst->payments->sum('amount');
+                return $carry + max(0, round($inst->total_payable - $paid, 2));
             }, 0);
 
             // Overdue count
@@ -151,8 +152,8 @@ class CustomerDashboardController extends Controller
                 $imageUrl = $inst->sale->items->first()->product?->image_url ?? null;
             }
 
-            $paidAmount = $inst->payments->sum('amount') + $inst->down_payment;
-            $balance = max(0, $inst->total_payable - $paidAmount);
+            $paidAmount = (float)$inst->payments->sum('amount');
+            $balance = max(0, round($inst->total_payable - $paidAmount, 2));
             
             $nextDue = $inst->paymentSchedules
                 ->where('status', 'Pending')
@@ -221,7 +222,7 @@ class CustomerDashboardController extends Controller
                 'processed_by'    => $request->user()->user_id,
                 'branch_id'       => $product->branch_id,
                 'sale_date'       => now(),
-                'payment_method'  => 'Installment',
+                'payment_method'  => $isFullPayment ? 'Cash' : 'Installment',
                 'subtotal'        => $actualPrice,
                 'discount_amount' => 0,
                 'total_amount'    => $actualPrice,
@@ -270,7 +271,7 @@ class CustomerDashboardController extends Controller
                     'amount_due' => $actualPrice,
                     'amount_paid' => $validated['amount'],
                     'balance_due' => 0,
-                    'status' => 'Paid',
+                    'status' => 'Fully Paid',
                     'paid_date' => now()->toDateString(),
                     'notes' => 'Full Payment',
                 ]);

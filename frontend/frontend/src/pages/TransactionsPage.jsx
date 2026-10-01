@@ -74,6 +74,7 @@ export default function TransactionsPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [search, setSearch] = useState('')
+  const [settings, setSettings] = useState(null)
   const [activeChannelTab, setActiveChannelTab] = useState('All')
   const [typeFilter, setTypeFilter] = useState('All')
   const [providerFilter, setProviderFilter] = useState('All')
@@ -112,6 +113,10 @@ export default function TransactionsPage() {
 
       setTransactions(res.transactions || [])
       setSummary(res.summary || null)
+
+      if (!settings && api.system?.getSettings) {
+        api.system.getSettings().then(s => setSettings(s)).catch(() => {})
+      }
     } catch (err) {
       console.error('Failed to load transaction history:', err)
       if (!silent) setError(err.message || 'Failed to fetch transaction history')
@@ -187,10 +192,10 @@ export default function TransactionsPage() {
           tx.channel === 'ewallet'
             ? 'E-Wallet'
             : tx.channel === 'online_bank'
-            ? 'Online Banking'
-            : tx.channel === 'installment'
-            ? 'Installment'
-            : 'Cash'
+              ? 'Online Banking'
+              : tx.channel === 'installment'
+                ? 'Installment'
+                : 'Cash'
         ),
         escapeCSV(tx.provider || tx.payment_method),
         escapeCSV(tx.reference_no || ''),
@@ -234,8 +239,9 @@ export default function TransactionsPage() {
   const paged = filtered.slice((page - 1) * pageSize, page * pageSize)
 
   return (
-    <div className="space-y-6">
-      <PageHeader
+    <>
+      <div className="space-y-6 print:hidden">
+        <PageHeader
         title="Transaction History"
         subtitle="Comprehensive audit trail of E-Wallet, Online Banking, Cash, and Installment transactions"
         action={
@@ -311,18 +317,16 @@ export default function TransactionsPage() {
                 setActiveChannelTab(tab.id)
                 setPage(1)
               }}
-              className={`flex items-center gap-2 px-4 py-2.5 text-xs font-semibold cursor-pointer border-b-2 transition-all whitespace-nowrap ${
-                isActive
+              className={`flex items-center gap-2 px-4 py-2.5 text-xs font-semibold cursor-pointer border-b-2 transition-all whitespace-nowrap ${isActive
                   ? 'border-primary text-primary bg-primary/5 rounded-t-xl'
                   : 'border-transparent text-muted-foreground hover:text-foreground hover:bg-muted/40'
-              }`}
+                }`}
             >
               <span>{tab.icon}</span>
               <span>{tab.label}</span>
               {tab.count !== undefined && (
-                <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono font-bold ${
-                  isActive ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'
-                }`}>
+                <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono font-bold ${isActive ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'
+                  }`}>
                   {tab.count}
                 </span>
               )}
@@ -508,6 +512,158 @@ export default function TransactionsPage() {
           </>
         )}
       </Card>
+      </div>
+
+      {/* Printable Report View (Visible only during print on the main page) */}
+      {!selectedTx && (
+        <div className="hidden print:block bg-white text-black min-h-screen w-full font-sans print:m-0 print:p-0">
+          
+          {/* TOP HEADER SECTION */}
+          <div className="mb-4">
+            <h1 className="text-xl font-bold tracking-widest uppercase text-gray-700 mb-4">TRANSACTION HISTORY REPORT</h1>
+            
+            <div className="flex justify-between items-start">
+              {/* Company Info Left */}
+              <div className="text-xs space-y-1">
+                <p className="font-bold text-sm text-gray-800 uppercase">{settings?.company_name || 'PROJECT PACE COMPANY'}</p>
+                <p className="text-gray-600 uppercase">{user?.employee?.branch?.name || user?.customer?.branch_name || 'Main Branch / Headquarters'}</p>
+                <p className="text-gray-600">Project PACE • System Generated Report</p>
+              </div>
+
+              {/* Meta Info Right */}
+              <table className="text-[10px] border-collapse border border-gray-300">
+                <tbody>
+                  <tr>
+                    <td className="p-1.5 px-3 border border-gray-300 text-gray-500 text-right uppercase tracking-wider">Date Prepared</td>
+                    <td className="p-1.5 px-3 border border-gray-300 font-bold text-center bg-gray-50 print-exact w-24">{new Date().toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' })}</td>
+                  </tr>
+                  <tr>
+                    <td className="p-1.5 px-3 border border-gray-300 text-gray-500 text-right uppercase tracking-wider">Start Date</td>
+                    <td className="p-1.5 px-3 border border-gray-300 font-bold text-center bg-gray-50 print-exact w-24">{dateFrom ? new Date(dateFrom).toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' }) : 'All Time'}</td>
+                  </tr>
+                  <tr>
+                    <td className="p-1.5 px-3 border border-gray-300 text-gray-500 text-right uppercase tracking-wider">End Date</td>
+                    <td className="p-1.5 px-3 border border-gray-300 font-bold text-center bg-gray-50 print-exact w-24">{dateTo ? new Date(dateTo).toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' }) : 'Present'}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* MAIN TABLE */}
+          <table className="w-full text-[10px] text-left border-collapse">
+            <thead>
+              <tr className="border-y-2 border-black">
+                <th className="py-2 px-2 uppercase tracking-wider text-gray-700">Reference / Date</th>
+                <th className="py-2 px-2 uppercase tracking-wider text-gray-700">Customer Name</th>
+                <th className="py-2 px-2 uppercase tracking-wider text-gray-700">Provider / Method</th>
+                <th className="py-2 px-2 uppercase tracking-wider text-gray-700">Status</th>
+                <th className="py-2 px-2 text-right uppercase tracking-wider text-gray-700">Amount Paid</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(() => {
+                const groups = {
+                  'sales': { title: 'REVENUE & SALES INVOICES', items: [] },
+                  'ewallet': { title: 'E-WALLET COLLECTIONS', items: [] },
+                  'online_bank': { title: 'ONLINE BANK TRANSACTIONS', items: [] },
+                  'installment': { title: 'INSTALLMENT COLLECTIONS', items: [] },
+                  'cash': { title: 'CASH PAYMENTS', items: [] }
+                };
+                
+                // Group the items
+                filtered.forEach(tx => {
+                  if (tx.category === 'sales' || tx.type === 'Sale') {
+                    groups['sales'].items.push(tx);
+                    return;
+                  }
+                  const ch = tx.channel || 'cash';
+                  if (groups[ch]) groups[ch].items.push(tx);
+                  else groups['cash'].items.push(tx);
+                });
+
+                let allElements = [];
+                let grandTotal = 0;
+
+                Object.keys(groups).forEach(key => {
+                  const group = groups[key];
+                  if (group.items.length === 0) return;
+
+                  let groupTotal = 0;
+
+                  // Gray Header for the Group (like the REVENUE bar)
+                  allElements.push(
+                    <tr key={`group-${key}`} className="bg-slate-200 border-y border-slate-300 print:bg-slate-200 print-exact">
+                      <td colSpan="5" className="py-1.5 px-2 font-black text-slate-800 uppercase tracking-widest">{group.title}</td>
+                    </tr>
+                  );
+
+                  // Items
+                  group.items.forEach(tx => {
+                    groupTotal += tx.amount;
+                    grandTotal += tx.amount;
+                    
+                    allElements.push(
+                      <tr key={tx.id || tx.reference_code} className="border-b border-gray-100 last:border-b-0">
+                        <td className="py-1.5 px-2">
+                          <span className="font-mono">{tx.reference_code}</span>
+                          <span className="text-gray-500 ml-2">{tx.date}</span>
+                        </td>
+                        <td className="py-1.5 px-2 font-semibold text-gray-800">{tx.customer_name}</td>
+                        <td className="py-1.5 px-2 text-gray-700">{tx.provider || tx.payment_method}</td>
+                        <td className="py-1.5 px-2 text-gray-700">{tx.status}</td>
+                        <td className="py-1.5 px-2 text-right">
+                          <span className="text-gray-500 mr-2">₱</span>
+                          <span className="font-mono">{tx.amount.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
+                        </td>
+                      </tr>
+                    );
+                  });
+
+                  // Group Subtotal (like TOTAL SELLING EXPENSES)
+                  allElements.push(
+                    <tr key={`subtotal-${key}`} className="border-t border-b-2 border-slate-300 bg-slate-50 print:bg-slate-50 print-exact">
+                      <td colSpan="4" className="py-2 px-2 text-right font-bold uppercase text-slate-700 tracking-widest text-[9px]">TOTAL {group.title}</td>
+                      <td className="py-2 px-2 text-right font-bold">
+                        <span className="text-gray-500 mr-2">₱</span>
+                        <span className="font-mono">{groupTotal.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
+                      </td>
+                    </tr>
+                  );
+
+                  // Spacer
+                  allElements.push(
+                    <tr key={`spacer-${key}`}>
+                      <td colSpan="5" className="h-6"></td>
+                    </tr>
+                  );
+                });
+
+                if (allElements.length === 0) {
+                  return (
+                    <tr>
+                      <td colSpan="5" className="py-6 text-center italic text-gray-500">No transactions match the selected filters.</td>
+                    </tr>
+                  );
+                }
+
+                // Grand Total Row (like NET INCOME)
+                allElements.push(
+                  <tr key="grand-total" className="bg-slate-200 border-y-2 border-black print:bg-slate-200 print-exact">
+                    <td colSpan="4" className="py-3 px-2 text-right font-black uppercase text-slate-900 tracking-widest text-[11px]">NET TOTAL TRANSACTION VOLUME</td>
+                    <td className="py-3 px-2 text-right font-black text-slate-900 text-xs">
+                      <span className="text-gray-600 mr-2">₱</span>
+                      <span className="font-mono">{grandTotal.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
+                    </td>
+                  </tr>
+                );
+
+                return allElements;
+              })()}
+            </tbody>
+          </table>
+        </div>
+      )}
 
       {/* Transaction Details & Digital Payment Proof Modal */}
       {selectedTx && (
@@ -618,6 +774,6 @@ export default function TransactionsPage() {
           </div>
         </Modal>
       )}
-    </div>
+    </>
   )
 }

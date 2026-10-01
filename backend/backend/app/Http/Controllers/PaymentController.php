@@ -410,14 +410,13 @@ class PaymentController extends Controller
             if ($newBalance <= 0) {
                 $newAccStatus = 'Completed';
                 
-                // The account is completely paid off. Clear any remaining schedule balances.
+                // The account is completely paid off. Clear any remaining schedule balances and mark all as Fully Paid.
                 PaymentSchedule::where('installment_id', $inst->installment_id)
-                    ->where('balance_due', '>', 0)
                     ->update([
                         'balance_due' => 0,
                         'amount_paid' => DB::raw('amount_due'),
-                        'status' => 'Paid',
-                        'paid_date' => $payDate,
+                        'status' => 'Fully Paid',
+                        'paid_date' => DB::raw("IFNULL(paid_date, '{$payDate}')"),
                     ]);
             } else {
                 $hasOverdue = PaymentSchedule::where('installment_id', $inst->installment_id)
@@ -592,5 +591,43 @@ class PaymentController extends Controller
             'total' => $schedules->count(),
         ]);
     }
-}
 
+    /**
+     * Delete a payment and reverse balances.
+     */
+    public function destroy($id)
+    {
+        $payment = Payment::find($id);
+        if (!$payment) {
+            return response()->json(['message' => 'Payment not found'], 404);
+        }
+
+        DB::transaction(function() use ($payment) {
+            if ($payment->installment_id) {
+                $account = InstallmentAccount::find($payment->installment_id);
+                if ($account) {
+                    $account->total_paid = max(0, $account->total_paid - $payment->amount);
+                    $account->balance_due = $account->total_amount - $account->total_paid;
+                    if ($account->balance_due > 0) {
+                        $account->status = 'Active';
+                    }
+                    $account->save();
+                }
+            }
+
+            if ($payment->schedule_id) {
+                $schedule = PaymentSchedule::find($payment->schedule_id);
+                if ($schedule) {
+                    $schedule->amount_paid = max(0, $schedule->amount_paid - $payment->amount);
+                    $schedule->balance_due = $schedule->amount_due - $schedule->amount_paid;
+                    $schedule->status = $schedule->balance_due > 0 ? 'Pending' : 'Paid';
+                    $schedule->save();
+                }
+            }
+            
+            $payment->delete();
+        });
+
+        return response()->json(['message' => 'Payment deleted successfully.', 'success' => true]);
+    }
+}

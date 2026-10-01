@@ -132,7 +132,7 @@ function navByRole(role) {
   base.push({ label: isAdmin ? 'Attendance Logs' : 'Branch Attendance', path: '/attendance', icon: icons.attendance })
 
   base.push({ label: 'Reports', path: '/reports', icon: icons.reports })
-  
+
   base.push({ label: 'Customer Support', path: '/support', icon: icons.support })
 
   if (isAdmin) {
@@ -152,9 +152,8 @@ function SidebarGroup({ group, collapsed }) {
       <button
         onClick={() => !collapsed && setOpen(o => !o)}
         title={collapsed ? group.label : undefined}
-        className={`w-full flex items-center gap-2.5 px-3 py-2 text-xs font-semibold uppercase tracking-wider transition-colors cursor-pointer rounded-xl mx-1 ${
-          isActive ? 'text-white' : 'text-white/50 hover:text-white/80'
-        }`}
+        className={`w-full flex items-center gap-2.5 px-3 py-2 text-xs font-semibold uppercase tracking-wider transition-colors cursor-pointer rounded-xl mx-1 ${isActive ? 'text-white' : 'text-white/50 hover:text-white/80'
+          }`}
         style={{ width: collapsed ? 44 : 'calc(100% - 8px)' }}
       >
         <span className="flex-shrink-0">{group.icon}</span>
@@ -173,10 +172,9 @@ function SidebarGroup({ group, collapsed }) {
               to={item.path}
               title={collapsed ? item.label : undefined}
               className={({ isActive }) =>
-                `flex items-center gap-2.5 px-3 py-2 text-xs rounded-xl transition-colors cursor-pointer ${
-                  location.pathname === item.path
-                    ? 'bg-primary text-primary-foreground font-semibold shadow-xs'
-                    : 'text-white/60 hover:bg-white/5 hover:text-white'
+                `flex items-center gap-2.5 px-3 py-2 text-xs rounded-xl transition-colors cursor-pointer ${location.pathname === item.path
+                  ? 'bg-primary text-primary-foreground font-semibold shadow-xs'
+                  : 'text-white/60 hover:bg-white/5 hover:text-white'
                 }`
               }
             >
@@ -198,7 +196,7 @@ function Sidebar({ collapsed }) {
 
   return (
     <aside
-      className="flex flex-col h-full overflow-hidden flex-shrink-0 transition-[width] duration-200"
+      className="flex flex-col h-full overflow-hidden flex-shrink-0 transition-[width] duration-200 print:hidden"
       style={{ width: collapsed ? 64 : 240, background: '#0f1f3d' }}
     >
       {/* Logo */}
@@ -223,10 +221,9 @@ function Sidebar({ collapsed }) {
               to={entry.path}
               title={collapsed ? entry.label : undefined}
               className={({ isActive }) =>
-                `flex items-center gap-2.5 px-3 py-2 text-xs rounded-xl transition-colors cursor-pointer ${
-                  isActive
-                    ? 'bg-primary text-primary-foreground font-semibold shadow-xs'
-                    : 'text-white/60 hover:bg-white/5 hover:text-white'
+                `flex items-center gap-2.5 px-3 py-2 text-xs rounded-xl transition-colors cursor-pointer ${isActive
+                  ? 'bg-primary text-primary-foreground font-semibold shadow-xs'
+                  : 'text-white/60 hover:bg-white/5 hover:text-white'
                 }`
               }
             >
@@ -394,7 +391,7 @@ function Header({
   }
 
   return (
-    <header className="h-14 border-b border-border bg-card px-4 flex items-center justify-between gap-4 flex-shrink-0 z-30">
+    <header className="h-14 border-b border-border bg-card px-4 flex items-center justify-between gap-4 flex-shrink-0 z-30 print:hidden">
       {/* Left: toggle + title */}
       <div className="flex items-center gap-3">
         {user?.role !== 'Customer' && (
@@ -493,9 +490,8 @@ function Header({
                           key={item.id}
                           onClick={() => handleSelectResult(item)}
                           onMouseEnter={() => setSelectedIndex(flatIndex)}
-                          className={`px-3 py-2 text-xs rounded-xl cursor-pointer flex items-center justify-between gap-3 transition-colors ${
-                            isSelected ? 'bg-primary text-primary-foreground font-medium shadow-xs' : 'hover:bg-muted text-foreground'
-                          }`}
+                          className={`px-3 py-2 text-xs rounded-xl cursor-pointer flex items-center justify-between gap-3 transition-colors ${isSelected ? 'bg-primary text-primary-foreground font-medium shadow-xs' : 'hover:bg-muted text-foreground'
+                            }`}
                         >
                           <div className="flex items-center gap-2.5 min-w-0">
                             <span className="text-xs shrink-0">{getSearchIcon(item)}</span>
@@ -560,8 +556,8 @@ function Header({
         </button>
 
         {/* Real Notification Bell with Live DB Count & Dropdown */}
-        <NotificationBell 
-          notifications={notifs} 
+        <NotificationBell
+          notifications={notifs}
           unreadCount={unreadCount}
           onMarkAllRead={onMarkAllRead}
           onNotificationClick={onNotificationClick}
@@ -679,17 +675,17 @@ export default function AppShell() {
     try {
       const res = await api.notifications.getLatest({ limit: 15 })
       const fetchedNotifs = res.notifications || []
-      
+
       if (fetchedNotifs.length > 0) {
         const currentHighest = Math.max(...fetchedNotifs.map(n => n.id || n.notification_id || 0))
-        
+
         if (latestNotifIdRef.current !== null && currentHighest > latestNotifIdRef.current) {
           const newNotifs = fetchedNotifs.filter(n => (n.id || n.notification_id || 0) > latestNotifIdRef.current)
           newNotifs.forEach(n => {
             showToast(`${n.title}: ${n.message}`, 'info')
           })
         }
-        
+
         latestNotifIdRef.current = Math.max(latestNotifIdRef.current || 0, currentHighest)
       }
 
@@ -740,9 +736,9 @@ export default function AppShell() {
     if (!notif.is_read) {
       try {
         await api.notifications.markAsRead(notif.id || notif.notification_id)
-        setNotifs(prev => prev.map(n => 
-          (n.id === notif.id || n.notification_id === notif.notification_id) 
-            ? { ...n, is_read: true } 
+        setNotifs(prev => prev.map(n =>
+          (n.id === notif.id || n.notification_id === notif.notification_id)
+            ? { ...n, is_read: true }
             : n
         ))
         setUnreadCount(prev => Math.max(0, prev - 1))
@@ -766,8 +762,8 @@ export default function AppShell() {
 
   return (
     <div className="flex h-screen bg-background text-foreground overflow-hidden font-sans">
-      <Sidebar 
-        collapsed={collapsed} 
+      <Sidebar
+        collapsed={collapsed}
       />
 
       <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
@@ -789,9 +785,9 @@ export default function AppShell() {
         </main>
       </div>
 
-      <ProfileModal 
-        isOpen={profileOpen} 
-        onClose={() => setProfileOpen(false)} 
+      <ProfileModal
+        isOpen={profileOpen}
+        onClose={() => setProfileOpen(false)}
       />
 
       <EmployeePinVerificationModal

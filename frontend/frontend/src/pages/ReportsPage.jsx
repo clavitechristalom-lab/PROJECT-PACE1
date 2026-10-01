@@ -28,11 +28,12 @@ export default function ReportsPage() {
 
   const [activeTab, setActiveTab] = useState(isEmployee ? 'attendance' : 'employees')
   const [reportData, setReportData] = useState(null)
+  const [dashboardStats, setDashboardStats] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
 
   // Reusable Filter States
-  const [branch, setBranch] = useState(isStoreAdmin ? (user?.employee?.branch || 'Main Branch') : 'All')
+  const [branch, setBranch] = useState(isStoreAdmin ? (user?.employee?.branch?.name || 'Main Branch') : 'All')
   const [department, setDepartment] = useState('All')
   const [status, setStatus] = useState('All')
   const [startDate, setStartDate] = useState('')
@@ -49,6 +50,8 @@ export default function ReportsPage() {
         if (res?.branches) setBranchesList(res.branches)
       })
       .catch(() => {})
+
+    api.dashboard.getStats().then(setDashboardStats).catch(()=>{})
   }, [])
 
   useEffect(() => {
@@ -260,12 +263,13 @@ export default function ReportsPage() {
   ]
 
   return (
-    <div className="space-y-6">
+    <>
+    <div className="space-y-6 print:hidden">
       <PageHeader
         title="Reports & Analytics Center"
         subtitle={
           isStoreAdmin 
-            ? `Store Branch Reports (${user?.employee?.branch || 'Main Branch'})` 
+            ? `Store Branch Reports (${user?.employee?.branch?.name || 'Main Branch'})` 
             : isEmployee 
               ? 'Personal Attendance & Payroll Records' 
               : 'Organization-wide analytics and filtered database summaries'
@@ -783,5 +787,175 @@ export default function ReportsPage() {
         />
       )}
     </div>
+
+    {/* MASTER PRINT REPORT (Only visible when printing) */}
+    <div className="hidden print:block print:w-full print:m-0 print:p-0 bg-white font-serif text-slate-800">
+      <div className="border-b-2 border-slate-800 pb-2 mb-6 mt-4">
+        <h1 className="text-3xl font-bold text-slate-900 tracking-tight" style={{ color: '#1e3a5f' }}>Reports & Analytics Dashboard 2026</h1>
+        <p className="text-sm text-slate-500 font-sans mt-1">Comprehensive Operational & Financial Metrics Overview</p>
+      </div>
+
+      <div className="grid grid-cols-12 gap-8 font-sans">
+        {/* Left Column: Contents */}
+        <div className="col-span-4">
+          <h2 className="font-bold text-sm uppercase mb-3 text-slate-800" style={{ color: '#1e3a5f' }}>Contents</h2>
+          <table className="w-full text-xs">
+            <tbody>
+              <tr className="border-b border-transparent">
+                <td className="py-1.5 font-medium">• Employees Report</td>
+                <td className="py-1.5 text-right font-bold">5%</td>
+              </tr>
+              <tr className="border-b border-transparent">
+                <td className="py-1.5 font-medium">• Attendance Report</td>
+                <td className="py-1.5 text-right font-bold">6%</td>
+              </tr>
+              <tr className="border-b border-transparent">
+                <td className="py-1.5 font-medium">• Payroll Report</td>
+                <td className="py-1.5 text-right font-bold">{dashboardStats ? fmt(dashboardStats.net_payroll).replace('₱','') : '0'}</td>
+              </tr>
+              <tr className="border-b border-transparent">
+                <td className="py-1.5 font-medium">• Sales & Revenue</td>
+                <td className="py-1.5 text-right font-bold">22.0%</td>
+              </tr>
+              <tr className="border-b border-transparent">
+                <td className="py-1.5 font-medium">• Inventory Valuation</td>
+                <td className="py-1.5 text-right font-bold">20%</td>
+              </tr>
+              <tr className="border-b border-transparent">
+                <td className="py-1.5 font-medium">• Installments & Aging</td>
+                <td className="py-1.5 text-right font-bold">—</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        {/* Right Column: Tables */}
+        <div className="col-span-8 space-y-8">
+          {/* Executive Summary */}
+          <div>
+            <h2 className="font-bold text-sm mb-2" style={{ color: '#1e3a5f' }}>Executive Summary</h2>
+            <table className="w-full text-xs border-collapse">
+              <thead>
+                <tr className="text-white" style={{ backgroundColor: '#1e3a5f' }}>
+                  <th className="py-1.5 px-3 text-left font-semibold">Metric/Item</th>
+                  <th className="py-1.5 px-3 text-left font-semibold">1H Trend</th>
+                  <th className="py-1.5 px-3 text-left font-semibold">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr className="bg-slate-50 border-b border-white">
+                  <td className="py-1.5 px-3">Workforce Growth</td>
+                  <td className="py-1.5 px-3">30.0%</td>
+                  <td className="py-1.5 px-3">55.0%</td>
+                </tr>
+                <tr className="bg-white border-b border-white">
+                  <td className="py-1.5 px-3">Attendance Rate</td>
+                  <td className="py-1.5 px-3">25.8%</td>
+                  <td className="py-1.5 px-3">51.8%</td>
+                </tr>
+                <tr className="bg-slate-50 border-b border-white">
+                  <td className="py-1.5 px-3">Payroll Expense</td>
+                  <td className="py-1.5 px-3">33.3%</td>
+                  <td className="py-1.5 px-3">53.2%</td>
+                </tr>
+                <tr className="bg-white border-b border-white">
+                  <td className="py-1.5 px-3">Sales Efficiency</td>
+                  <td className="py-1.5 px-3">33.0%</td>
+                  <td className="py-1.5 px-3">53.0%</td>
+                </tr>
+                <tr className="bg-slate-50 border-b border-white">
+                  <td className="py-1.5 px-3">Inventory Turn</td>
+                  <td className="py-1.5 px-3">30.8%</td>
+                  <td className="py-1.5 px-3">50.5%</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          {/* Employees & Attendance Overview */}
+          <div>
+            <h2 className="font-bold text-sm mb-2" style={{ color: '#1e3a5f' }}>Employees & Attendance Overview</h2>
+            <table className="w-full text-xs border-collapse">
+              <thead>
+                <tr className="text-white" style={{ backgroundColor: '#1e3a5f' }}>
+                  <th className="py-1.5 px-3 text-left font-semibold">Metric Category</th>
+                  <th className="py-1.5 px-3 text-left font-semibold">Target Value</th>
+                  <th className="py-1.5 px-3 text-left font-semibold">Current Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr className="bg-slate-50 border-b border-white">
+                  <td className="py-1.5 px-3">Workforce Headcount</td>
+                  <td className="py-1.5 px-3">50.00%</td>
+                  <td className="py-1.5 px-3">{dashboardStats ? dashboardStats.total_employees : 0} Total</td>
+                </tr>
+                <tr className="bg-white border-b border-white">
+                  <td className="py-1.5 px-3">Department Distribution</td>
+                  <td className="py-1.5 px-3">30.00%</td>
+                  <td className="py-1.5 px-3">50.0%</td>
+                </tr>
+                <tr className="bg-slate-50 border-b border-white">
+                  <td className="py-1.5 px-3">Daily Attendance</td>
+                  <td className="py-1.5 px-3">45.00%</td>
+                  <td className="py-1.5 px-3">{dashboardStats ? dashboardStats.attendance_ratio : '0/0'}</td>
+                </tr>
+                <tr className="bg-white border-b border-white">
+                  <td className="py-1.5 px-3">Leave Usage Tracking</td>
+                  <td className="py-1.5 px-3">30.00%</td>
+                  <td className="py-1.5 px-3">50.5%</td>
+                </tr>
+                <tr className="bg-slate-50 border-b border-white">
+                  <td className="py-1.5 px-3">Absenteeism Control</td>
+                  <td className="py-1.5 px-3">53.00%</td>
+                  <td className="py-1.5 px-3">{dashboardStats ? dashboardStats.absent_today : 0} Absent</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          {/* Financial & Operational Metrics */}
+          <div>
+            <h2 className="font-bold text-sm mb-2" style={{ color: '#1e3a5f' }}>Financial & Operational Metrics (Payroll, Sales, Inventory)</h2>
+            <table className="w-full text-xs border-collapse">
+              <thead>
+                <tr className="text-white" style={{ backgroundColor: '#1e3a5f' }}>
+                  <th className="py-1.5 px-3 text-left font-semibold">Report Section</th>
+                  <th className="py-1.5 px-3 text-left font-semibold">Performance Metric</th>
+                  <th className="py-1.5 px-3 text-left font-semibold">Variance Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr className="bg-slate-50 border-b border-white">
+                  <td className="py-1.5 px-3">Payroll Disbursements</td>
+                  <td className="py-1.5 px-3">{dashboardStats ? fmt(dashboardStats.net_payroll) : '₱0.00'}</td>
+                  <td className="py-1.5 px-3">63.0%</td>
+                </tr>
+                <tr className="bg-white border-b border-white">
+                  <td className="py-1.5 px-3">Overtime & Bonuses</td>
+                  <td className="py-1.5 px-3">44.50%</td>
+                  <td className="py-1.5 px-3">35.8%</td>
+                </tr>
+                <tr className="bg-slate-50 border-b border-white">
+                  <td className="py-1.5 px-3">Sales Volume Growth</td>
+                  <td className="py-1.5 px-3">{dashboardStats ? fmt(dashboardStats.monthly_sales) : '₱0.00'}</td>
+                  <td className="py-1.5 px-3">32.0%</td>
+                </tr>
+                <tr className="bg-white border-b border-white">
+                  <td className="py-1.5 px-3">Inventory Valuation</td>
+                  <td className="py-1.5 px-3">{dashboardStats ? dashboardStats.total_products : 0} Products</td>
+                  <td className="py-1.5 px-3">75.0%</td>
+                </tr>
+                <tr className="bg-slate-50 border-b border-white">
+                  <td className="py-1.5 px-3">Installments Aging</td>
+                  <td className="py-1.5 px-3">{dashboardStats ? fmt(dashboardStats.total_outstanding_balance) : '₱0.00'}</td>
+                  <td className="py-1.5 px-3">23.0%</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+    </>
   )
 }

@@ -500,9 +500,154 @@ export function OverduePaymentsModal({ isOpen, onClose, installments }) {
   );
 }
 
+export function FullyPaidProductDetailsModal({ isOpen, onClose, accountData }) {
+  const [viewReceipt, setViewReceipt] = useState(null);
+
+  if (!isOpen || !accountData) return null;
+
+  const acc = accountData?.account || {};
+  const saleItems = accountData?.sale_items || [];
+  const payments = accountData?.payments || [];
+  const item = saleItems.length > 0 ? saleItems[0] : null;
+
+  return (
+    <Modal isOpen={isOpen} onClose={onClose} title="Fully Paid Product & Product Details" size="lg">
+      <div className="space-y-6">
+        {/* Product Info Section */}
+        <div className="flex flex-col sm:flex-row gap-6 p-5 bg-emerald-50/50 dark:bg-emerald-900/10 rounded-xl border border-emerald-100 dark:border-emerald-800/50">
+          {item && (item.image_url || item.image) ? (
+            <img
+              src={(item.image_url || item.image)?.startsWith('http') ? (item.image_url || item.image) : `http://127.0.0.1:8000${item.image_url || item.image}`}
+              alt={item.product_name}
+              className="w-32 h-32 object-cover rounded-xl border border-emerald-200 dark:border-emerald-700/50 bg-white shrink-0 shadow-sm"
+              onError={(e) => { e.target.src = 'https://via.placeholder.com/150?text=No+Image'; }}
+            />
+          ) : (
+            <div className="w-32 h-32 bg-emerald-100/50 dark:bg-emerald-800/30 border border-emerald-200 dark:border-emerald-700/50 rounded-xl flex items-center justify-center shrink-0 shadow-sm">
+              <FiPackage className="w-10 h-10 text-emerald-400" />
+            </div>
+          )}
+          <div className="flex-1 flex flex-col justify-center">
+            <div className="flex justify-between items-start mb-2">
+              <h3 className="text-xl font-bold text-slate-800 dark:text-slate-100 leading-tight">
+                {item ? item.product_name : 'Multiple Items / Custom Product'}
+              </h3>
+              <StatusBadge status="Fully Paid" />
+            </div>
+
+            {item && item.description && (
+              <p className="text-sm text-slate-500 dark:text-slate-400 mb-3 line-clamp-2">
+                {item.description}
+              </p>
+            )}
+
+            <div className="grid grid-cols-2 gap-y-2 text-sm mt-auto">
+              <div className="text-slate-500">Account No: <span className="font-mono font-bold text-slate-700 dark:text-slate-300">{acc.account_no}</span></div>
+              <div className="text-slate-500">Purchase Date: <span className="font-medium text-slate-700 dark:text-slate-300">{acc.start_date || acc.sale_date}</span></div>
+              <div className="text-slate-500">Branch: <span className="font-medium text-slate-700 dark:text-slate-300">{acc.branch || 'Main Branch'}</span></div>
+              <div className="text-slate-500">Processed By: <span className="font-medium text-slate-700 dark:text-slate-300">{acc.store_admin || 'System/Admin'}</span></div>
+            </div>
+          </div>
+        </div>
+
+        {/* Financials & Payment Info */}
+        <div>
+          <h4 className="text-sm font-bold text-slate-800 dark:text-slate-200 mb-3">Full Payment Details</h4>
+          <div className="overflow-y-auto border border-slate-200 dark:border-slate-800 rounded-xl shadow-sm bg-[var(--card)]">
+            <table className="w-full text-xs">
+              <thead className="bg-slate-50 dark:bg-slate-800/80 text-slate-500">
+                <tr>
+                  <th className="py-3 px-4 text-left font-semibold">Product</th>
+                  <th className="py-3 px-4 text-left font-semibold">Payment Date</th>
+                  <th className="py-3 px-4 text-left font-semibold">Payment Method</th>
+                  <th className="py-3 px-4 text-left font-semibold">Status</th>
+                  <th className="py-3 px-4 text-right font-semibold">Total Paid</th>
+                  <th className="py-3 px-4 text-center font-semibold">Action</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 dark:divide-slate-800/50">
+                <tr className="hover:bg-slate-50 dark:hover:bg-slate-800/30">
+                  <td className="py-3 px-4 font-semibold text-slate-700 dark:text-slate-200 truncate max-w-[150px]">{item ? item.product_name : 'Product'}</td>
+                  <td className="py-3 px-4 text-slate-600 dark:text-slate-300">{acc.start_date || acc.sale_date}</td>
+                  <td className="py-3 px-4 text-slate-600 dark:text-slate-300">{payments.length > 0 ? payments[0].payment_method : 'Cash'}</td>
+                  <td className="py-3 px-4"><StatusBadge status="Fully Paid" /></td>
+                  <td className="py-3 px-4 text-right font-mono font-bold text-emerald-600 dark:text-emerald-400">{fmt(acc.total_payable)}</td>
+                  <td className="py-3 px-4 text-center">
+                    {payments.length > 0 && (
+                      <button
+                        onClick={() => setViewReceipt(payments[0])}
+                        className="inline-flex items-center gap-1 px-2 py-1 text-[10px] rounded border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 font-semibold cursor-pointer transition-colors text-slate-600 dark:text-slate-300"
+                      >
+                        <FiFileText className="w-3 h-3" />
+                        <span>Receipt</span>
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      {/* OFFICIAL RECEIPT MODAL */}
+      {viewReceipt && (
+        <Modal
+          isOpen={true}
+          onClose={() => setViewReceipt(null)}
+          title="Official Payment Receipt"
+          size="md"
+        >
+          <div className="p-4 space-y-4">
+            <div className="text-center pb-4 border-b border-border/50">
+              <h3 className="font-bold text-lg text-foreground">PAYMENT RECEIPT</h3>
+              <p className="text-xs text-muted-foreground">{viewReceipt.receipt_no}</p>
+            </div>
+
+            <div className="space-y-3 text-sm">
+              <div className="flex justify-between">
+                <span className="text-slate-500">Payment Date:</span>
+                <span className="font-mono font-semibold text-slate-800 dark:text-slate-200">{viewReceipt.payment_date}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500">Request / Order:</span>
+                <span className="font-mono font-bold text-[#176B87] dark:text-[#64ccc5]">{acc.account_no}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500">Payment Method:</span>
+                <span className="font-semibold text-slate-800 dark:text-slate-200">{viewReceipt.payment_method}</span>
+              </div>
+              {viewReceipt.reference_no && (
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Reference No:</span>
+                  <span className="font-mono font-semibold text-slate-800 dark:text-slate-200">{viewReceipt.reference_no}</span>
+                </div>
+              )}
+              <div className="pt-3 mt-3 border-t border-border/50 flex justify-between items-center">
+                <span className="font-bold text-slate-600 dark:text-slate-400">Total Amount</span>
+                <span className="text-xl font-mono font-black text-emerald-600 dark:text-emerald-400">{fmt(viewReceipt.amount)}</span>
+              </div>
+            </div>
+
+            <div className="pt-4 mt-4 border-t border-border/50">
+              <button
+                onClick={() => window.print()}
+                className="w-full py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 font-bold rounded-xl transition-colors flex items-center justify-center gap-2"
+              >
+                <FiFileText /> Print / Save PDF
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
+    </Modal>
+  );
+}
+
 export function InstallmentAccountDetailsModal({ isOpen, onClose, installmentId }) {
   const [accountData, setAccountData] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [viewReceipt, setViewReceipt] = useState(null);
 
   useEffect(() => {
     if (isOpen && installmentId) {
@@ -524,139 +669,241 @@ export function InstallmentAccountDetailsModal({ isOpen, onClose, installmentId 
   const schedules = accountData?.schedules || [];
   const payments = accountData?.payments || [];
   const item = saleItems.length > 0 ? saleItems[0] : null;
+  const isFullPayment = acc.account_no?.startsWith('REQ') || acc.number_of_installments === 0 || acc.status === 'Completed';
+
+  if (loading || !accountData) {
+    return (
+      <Modal isOpen={isOpen} onClose={onClose} title="Loading Details" size="lg">
+        <LoadingState message="Loading account details..." />
+      </Modal>
+    );
+  }
+
+  if (isFullPayment) {
+    return <FullyPaidProductDetailsModal isOpen={isOpen} onClose={onClose} accountData={accountData} />;
+  }
 
   return (
     <Modal isOpen={isOpen} onClose={onClose} title="Installment & Product Details" size="lg">
-      {loading || !accountData ? (
-        <LoadingState message="Loading account details..." />
-      ) : (
-        <div className="space-y-6">
-          {/* Product Info Section */}
-          <div className="flex flex-col sm:flex-row gap-6 p-5 bg-slate-50 dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800">
-            {item && (item.image_url || item.image) ? (
-              <img
-                src={(item.image_url || item.image)?.startsWith('http') ? (item.image_url || item.image) : `http://127.0.0.1:8000${item.image_url || item.image}`}
-                alt={item.product_name}
-                className="w-32 h-32 object-cover rounded-xl border border-slate-200 dark:border-slate-700 bg-white shrink-0 shadow-sm"
-                onError={(e) => { e.target.src = 'https://via.placeholder.com/150?text=No+Image'; }}
-              />
-            ) : (
-              <div className="w-32 h-32 bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl flex items-center justify-center shrink-0 shadow-sm">
-                <FiPackage className="w-10 h-10 text-slate-400" />
-              </div>
+      <div className="space-y-6">
+        {/* Product Info Section */}
+        <div className="flex flex-col sm:flex-row gap-6 p-5 bg-slate-50 dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800">
+          {item && (item.image_url || item.image) ? (
+            <img
+              src={(item.image_url || item.image)?.startsWith('http') ? (item.image_url || item.image) : `http://127.0.0.1:8000${item.image_url || item.image}`}
+              alt={item.product_name}
+              className="w-32 h-32 object-cover rounded-xl border border-slate-200 dark:border-slate-700 bg-white shrink-0 shadow-sm"
+              onError={(e) => { e.target.src = 'https://via.placeholder.com/150?text=No+Image'; }}
+            />
+          ) : (
+            <div className="w-32 h-32 bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl flex items-center justify-center shrink-0 shadow-sm">
+              <FiPackage className="w-10 h-10 text-slate-400" />
+            </div>
+          )}
+          <div className="flex-1 flex flex-col justify-center">
+            <div className="flex justify-between items-start mb-2">
+              <h3 className="text-xl font-bold text-slate-800 dark:text-slate-100 leading-tight">
+                {item ? item.product_name : 'Multiple Items / Custom Product'}
+              </h3>
+              <StatusBadge status={acc.status} />
+            </div>
+
+            {item && item.description && (
+              <p className="text-sm text-slate-500 dark:text-slate-400 mb-3 line-clamp-2">
+                {item.description}
+              </p>
             )}
-            <div className="flex-1 flex flex-col justify-center">
-              <div className="flex justify-between items-start mb-2">
-                <h3 className="text-xl font-bold text-slate-800 dark:text-slate-100 leading-tight">
-                  {item ? item.product_name : 'Multiple Items / Custom Product'}
-                </h3>
-                <StatusBadge status={acc.status} />
-              </div>
 
-              {item && item.description && (
-                <p className="text-sm text-slate-500 dark:text-slate-400 mb-3 line-clamp-2">
-                  {item.description}
-                </p>
-              )}
-
-              <div className="grid grid-cols-2 gap-y-2 text-sm mt-auto">
-                <div className="text-slate-500">Account No: <span className="font-mono font-bold text-slate-700 dark:text-slate-300">{acc.account_no}</span></div>
-                <div className="text-slate-500">Purchase Date: <span className="font-medium text-slate-700 dark:text-slate-300">{acc.start_date || acc.sale_date}</span></div>
-                <div className="text-slate-500">Branch: <span className="font-medium text-slate-700 dark:text-slate-300">{acc.branch || 'Main Branch'}</span></div>
-                <div className="text-slate-500">Processed By: <span className="font-medium text-slate-700 dark:text-slate-300">{acc.store_admin || 'System/Admin'}</span></div>
-              </div>
-            </div>
-          </div>
-
-          {/* Financials Section */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-            <div className="p-4 bg-[var(--card)] border border-slate-200 dark:border-slate-800 rounded-xl">
-              <div className="text-xs text-slate-500 uppercase font-semibold mb-1">Total Price</div>
-              <div className="text-lg font-mono font-bold text-slate-800 dark:text-slate-100">{fmt(acc.total_payable)}</div>
-            </div>
-            <div className="p-4 bg-[var(--card)] border border-slate-200 dark:border-slate-800 rounded-xl">
-              <div className="text-xs text-slate-500 uppercase font-semibold mb-1">Down Payment</div>
-              <div className="text-lg font-mono font-bold text-slate-800 dark:text-slate-100">{fmt(acc.down_payment)}</div>
-            </div>
-            <div className="p-4 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-xl">
-              <div className="text-xs text-emerald-600 dark:text-emerald-400 uppercase font-semibold mb-1">Remaining Bal</div>
-              <div className="text-lg font-mono font-bold text-emerald-700 dark:text-emerald-300">{fmt(acc.balance)}</div>
-            </div>
-            <div className="p-4 bg-[#176B87]/5 border border-[#176B87]/20 rounded-xl">
-              <div className="text-xs text-[#176B87] dark:text-[#64ccc5] uppercase font-semibold mb-1">Monthly Pay</div>
-              <div className="text-lg font-mono font-bold text-[#176B87] dark:text-[#64ccc5]">{fmt(acc.installment_amount)}</div>
-            </div>
-          </div>
-
-          {/* Tables Section */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-4">
-            {/* Payment History */}
-            <div>
-              <h4 className="text-sm font-bold text-slate-800 dark:text-slate-200 mb-3">Payments Made (History)</h4>
-              <div className="overflow-y-auto border border-slate-200 dark:border-slate-800 rounded-xl max-h-[250px] shadow-sm">
-                <table className="w-full text-xs">
-                  <thead className="bg-slate-50 dark:bg-slate-800/80 text-slate-500 sticky top-0">
-                    <tr>
-                      <th className="py-2.5 px-3 text-left font-semibold">Date</th>
-                      <th className="py-2.5 px-3 text-left font-semibold">Receipt</th>
-                      <th className="py-2.5 px-3 text-left font-semibold">Method</th>
-                      <th className="py-2.5 px-3 text-right font-semibold">Amount</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100 dark:divide-slate-800/50 bg-[var(--card)]">
-                    {payments.length === 0 ? (
-                      <tr>
-                        <td colSpan="4" className="py-6 text-center text-slate-400">No payments made yet.</td>
-                      </tr>
-                    ) : (
-                      payments.map(p => (
-                        <tr key={p.payment_id} className="hover:bg-slate-50 dark:hover:bg-slate-800/30">
-                          <td className="py-2.5 px-3 text-slate-600 dark:text-slate-300">{p.payment_date}</td>
-                          <td className="py-2.5 px-3 font-mono text-slate-500">{p.receipt_no}</td>
-                          <td className="py-2.5 px-3 text-slate-600 dark:text-slate-300">{p.payment_method}</td>
-                          <td className="py-2.5 px-3 text-right font-mono font-bold text-emerald-600 dark:text-emerald-400">{fmt(p.amount)}</td>
-                        </tr>
-                      ))
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-
-            {/* Payment Schedule */}
-            <div>
-              <h4 className="text-sm font-bold text-slate-800 dark:text-slate-200 mb-3">Payment Schedule & Due Dates</h4>
-              <div className="overflow-y-auto border border-slate-200 dark:border-slate-800 rounded-xl max-h-[250px] shadow-sm">
-                <table className="w-full text-xs">
-                  <thead className="bg-slate-50 dark:bg-slate-800/80 text-slate-500 sticky top-0">
-                    <tr>
-                      <th className="py-2.5 px-3 text-left font-semibold">No.</th>
-                      <th className="py-2.5 px-3 text-left font-semibold">Due Date</th>
-                      <th className="py-2.5 px-3 text-left font-semibold">Status</th>
-                      <th className="py-2.5 px-3 text-right font-semibold">Amount Due</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100 dark:divide-slate-800/50 bg-[var(--card)]">
-                    {schedules.length === 0 ? (
-                      <tr>
-                        <td colSpan="4" className="py-6 text-center text-slate-400">No schedules found.</td>
-                      </tr>
-                    ) : (
-                      schedules.map(s => (
-                        <tr key={s.schedule_id} className="hover:bg-slate-50 dark:hover:bg-slate-800/30">
-                          <td className="py-2.5 px-3 font-mono text-slate-500">{s.installment_no}</td>
-                          <td className="py-2.5 px-3 text-slate-600 dark:text-slate-300">{s.due_date}</td>
-                          <td className="py-2.5 px-3"><StatusBadge status={s.status} /></td>
-                          <td className="py-2.5 px-3 text-right font-mono font-bold text-slate-700 dark:text-slate-200">{fmt(s.amount_due)}</td>
-                        </tr>
-                      ))
-                    )}
-                  </tbody>
-                </table>
-              </div>
+            <div className="grid grid-cols-2 gap-y-2 text-sm mt-auto">
+              <div className="text-slate-500">Account No: <span className="font-mono font-bold text-slate-700 dark:text-slate-300">{acc.account_no}</span></div>
+              <div className="text-slate-500">Purchase Date: <span className="font-medium text-slate-700 dark:text-slate-300">{acc.start_date || acc.sale_date}</span></div>
+              <div className="text-slate-500">Branch: <span className="font-medium text-slate-700 dark:text-slate-300">{acc.branch || 'Main Branch'}</span></div>
+              <div className="text-slate-500">Processed By: <span className="font-medium text-slate-700 dark:text-slate-300">{acc.store_admin || 'System/Admin'}</span></div>
             </div>
           </div>
         </div>
+
+        {/* Financials Section */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+          <div className="p-4 bg-[var(--card)] border border-slate-200 dark:border-slate-800 rounded-xl">
+            <div className="text-xs text-slate-500 uppercase font-semibold mb-1">Total Price</div>
+            <div className="text-lg font-mono font-bold text-slate-800 dark:text-slate-100">{fmt(acc.total_payable)}</div>
+          </div>
+          <div className="p-4 bg-[var(--card)] border border-slate-200 dark:border-slate-800 rounded-xl">
+            <div className="text-xs text-slate-500 uppercase font-semibold mb-1">Down Payment</div>
+            <div className="text-lg font-mono font-bold text-slate-800 dark:text-slate-100">{fmt(acc.down_payment)}</div>
+          </div>
+          <div className="p-4 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-xl">
+            <div className="text-xs text-emerald-600 dark:text-emerald-400 uppercase font-semibold mb-1">Remaining Bal</div>
+            <div className="text-lg font-mono font-bold text-emerald-700 dark:text-emerald-300">{fmt(acc.balance)}</div>
+          </div>
+          <div className="p-4 bg-[#176B87]/5 border border-[#176B87]/20 rounded-xl">
+            <div className="text-xs text-[#176B87] dark:text-[#64ccc5] uppercase font-semibold mb-1">Monthly Pay</div>
+            <div className="text-lg font-mono font-bold text-[#176B87] dark:text-[#64ccc5]">{fmt(acc.installment_amount)}</div>
+          </div>
+        </div>
+
+        {/* Tables Section */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-4">
+          {/* Payment History */}
+          <div>
+            <h4 className="text-sm font-bold text-slate-800 dark:text-slate-200 mb-3">Payments Made (History)</h4>
+            <div className="overflow-y-auto border border-slate-200 dark:border-slate-800 rounded-xl max-h-[250px] shadow-sm">
+              <table className="w-full text-xs">
+                <thead className="bg-slate-50 dark:bg-slate-800/80 text-slate-500 sticky top-0">
+                  <tr>
+                    <th className="py-2.5 px-3 text-left font-semibold">Date</th>
+                    <th className="py-2.5 px-3 text-left font-semibold">Receipt</th>
+                    <th className="py-2.5 px-3 text-left font-semibold">Method</th>
+                    <th className="py-2.5 px-3 text-right font-semibold">Amount</th>
+                    <th className="py-2.5 px-3 text-center font-semibold">Action</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-800/50 bg-[var(--card)]">
+                  {payments.length === 0 ? (
+                    <tr>
+                      <td colSpan="5" className="py-6 text-center text-slate-400">No payments made yet.</td>
+                    </tr>
+                  ) : (
+                    payments.map(p => (
+                      <tr key={p.payment_id} className="hover:bg-slate-50 dark:hover:bg-slate-800/30">
+                        <td className="py-2.5 px-3 text-slate-600 dark:text-slate-300">{p.payment_date}</td>
+                        <td className="py-2.5 px-3 font-mono text-slate-500">{p.receipt_no}</td>
+                        <td className="py-2.5 px-3 text-slate-600 dark:text-slate-300">{p.payment_method}</td>
+                        <td className="py-2.5 px-3 text-right font-mono font-bold text-emerald-600 dark:text-emerald-400">{fmt(p.amount)}</td>
+                        <td className="py-2.5 px-3 text-center">
+                          <button
+                            onClick={() => setViewReceipt(p)}
+                            className="inline-flex items-center gap-1 px-2 py-1 text-[10px] rounded border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 font-semibold cursor-pointer transition-colors text-slate-600 dark:text-slate-300"
+                          >
+                            <FiFileText className="w-3 h-3" />
+                            <span>Receipt</span>
+                          </button>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* Payment Schedule */}
+          <div>
+            <h4 className="text-sm font-bold text-slate-800 dark:text-slate-200 mb-3">
+              Payment Schedule & Due Dates
+            </h4>
+            <div className="overflow-y-auto border border-slate-200 dark:border-slate-800 rounded-xl max-h-[250px] shadow-sm">
+              <table className="w-full text-xs">
+                <thead className="bg-slate-50 dark:bg-slate-800/80 text-slate-500 sticky top-0">
+                  <tr>
+                    <th className="py-2.5 px-3 text-left font-semibold">No.</th>
+                    <th className="py-2.5 px-3 text-left font-semibold">Due Date</th>
+                    <th className="py-2.5 px-3 text-left font-semibold">Status</th>
+                    <th className="py-2.5 px-3 text-right font-semibold">Amount Due</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-800/50 bg-[var(--card)]">
+                  {schedules.length === 0 ? (
+                    <tr>
+                      <td colSpan="4" className="py-6 text-center text-slate-400">No schedules found.</td>
+                    </tr>
+                  ) : (
+                    schedules.map(s => (
+                      <tr key={s.schedule_id} className="hover:bg-slate-50 dark:hover:bg-slate-800/30">
+                        <td className="py-2.5 px-3 font-mono text-slate-500">{s.installment_no}</td>
+                        <td className="py-2.5 px-3 text-slate-600 dark:text-slate-300">{s.status === 'Paid' && s.paid_date ? s.paid_date : s.due_date}</td>
+                        <td className="py-2.5 px-3"><StatusBadge status={s.status} /></td>
+                        <td className="py-2.5 px-3 text-right font-mono font-bold text-slate-700 dark:text-slate-200">{fmt(s.amount_due)}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* OFFICIAL RECEIPT MODAL */}
+      {viewReceipt && (
+        <Modal
+          isOpen={true}
+          onClose={() => setViewReceipt(null)}
+          title="Official Payment Receipt"
+          size="md"
+        >
+          <div className="space-y-4 text-xs">
+            <div className="text-center pb-3 border-b border-slate-200 dark:border-slate-800 space-y-0.5">
+              <div className="text-base font-black tracking-wider text-slate-800 dark:text-slate-100">PROJECT PACE APPLIANCES & FURNITURE</div>
+              <div className="text-[11px] text-slate-500 dark:text-slate-400">{acc.branch || 'Main Branch'} · Official Collection Receipt</div>
+              <div className="text-xs font-mono font-bold text-[#176B87] dark:text-[#64ccc5] pt-1">Receipt #{viewReceipt.receipt_no}</div>
+            </div>
+
+            <div className="space-y-2 p-3 bg-slate-50 dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800">
+              <div className="flex justify-between">
+                <span className="text-slate-500">{"Payment Date:"}</span>
+                <span className="font-mono font-semibold text-slate-800 dark:text-slate-200">{viewReceipt.payment_date}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500">{isFullPayment ? 'Request / Order:' : 'Installment:'}</span>
+                <span className="font-mono font-bold text-[#176B87] dark:text-[#64ccc5]">{acc.account_no}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500">Received From (Customer):</span>
+                <span className="font-semibold text-slate-800 dark:text-slate-200">{acc.customer_name}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500">Payment Method:</span>
+                <span className="font-semibold text-slate-800 dark:text-slate-200">{viewReceipt.payment_method}</span>
+              </div>
+              {viewReceipt.reference_no && (
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Ref / Trace No:</span>
+                  <span className="font-mono text-slate-800 dark:text-slate-200">{viewReceipt.reference_no}</span>
+                </div>
+              )}
+            </div>
+
+            <div className="border-t border-dashed border-slate-300 dark:border-slate-700 pt-3">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="text-slate-500 border-b border-slate-200 dark:border-slate-800">
+                    <th className="py-1 text-left font-normal">Description</th>
+                    <th className="py-1 text-right font-normal">Amount</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-800/50">
+                  <tr>
+                    <td className="py-2 text-slate-800 dark:text-slate-200 font-medium">Payment for {acc.account_no}</td>
+                    <td className="py-2 text-right font-mono font-bold text-slate-800 dark:text-slate-200">{fmt(viewReceipt.amount)}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            <div className="border-t border-slate-200 dark:border-slate-800 pt-3 flex justify-between items-end">
+              <div>
+                <div className="text-[10px] text-slate-500">Processed By</div>
+                <div className="font-semibold text-slate-800 dark:text-slate-200">{viewReceipt.received_by || acc.store_admin}</div>
+              </div>
+              <div className="text-right">
+                <div className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-0.5">Total Paid</div>
+                <div className="text-xl font-black font-mono text-emerald-600 dark:text-emerald-400">{fmt(viewReceipt.amount)}</div>
+              </div>
+            </div>
+
+            <div className="pt-2">
+              <button
+                onClick={() => window.print()}
+                className="w-full flex items-center justify-center gap-2 py-2 bg-[#176B87] hover:bg-[#176B87]/90 text-white font-bold rounded-xl transition-colors cursor-pointer"
+              >
+                <FiFileText className="w-4 h-4" />
+                Print Receipt
+              </button>
+            </div>
+          </div>
+        </Modal>
       )}
     </Modal>
   );
@@ -1026,8 +1273,8 @@ export function MakePaymentModal({ isOpen, onClose, installments, onPaymentSucce
               <div className="flex justify-between items-center mb-1">
                 <label className="block text-xs font-bold text-muted-foreground">Payment Amount</label>
                 {paymentType === 'Installment Payment' && selectedScheduleDetails && (
-                  <button 
-                    type="button" 
+                  <button
+                    type="button"
                     onClick={() => setAmount(selectedScheduleDetails.installment_balance || 0)}
                     className="text-[10px] font-bold text-blue-500 hover:text-blue-600 transition-colors cursor-pointer"
                   >
@@ -1038,8 +1285,8 @@ export function MakePaymentModal({ isOpen, onClose, installments, onPaymentSucce
                   const prod = products.find(p => p.product_id.toString() === selectedProductId);
                   const price = prod ? (prod.discount_price > 0 ? prod.discount_price : prod.unit_price) : 0;
                   return (
-                    <button 
-                      type="button" 
+                    <button
+                      type="button"
                       onClick={() => setAmount(price)}
                       className="text-[10px] font-bold text-blue-500 hover:text-blue-600 transition-colors cursor-pointer"
                     >
@@ -1061,7 +1308,7 @@ export function MakePaymentModal({ isOpen, onClose, installments, onPaymentSucce
                 />
               </div>
             </div>
-            
+
             <div>
               <label className="block text-xs font-bold text-muted-foreground mb-1">Payment Method</label>
               <div className="flex flex-wrap gap-2">

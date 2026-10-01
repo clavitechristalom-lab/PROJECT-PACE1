@@ -35,7 +35,7 @@ export default function InstallmentsPage({ branchFilter: propBranchFilter, embed
   // Filters (Immediate reactive search & status)
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState('All')
-  const [localBranchFilter, setLocalBranchFilter] = useState(isStoreAdmin ? (user?.employee?.branch || 'Main Branch') : 'All')
+  const [localBranchFilter, setLocalBranchFilter] = useState(isStoreAdmin ? (user?.employee?.branch?.name || 'Main Branch') : 'All')
   const branchFilter = propBranchFilter || localBranchFilter
   const [page, setPage] = useState(1)
   const pageSize = 10
@@ -487,7 +487,7 @@ export default function InstallmentsPage({ branchFilter: propBranchFilter, embed
           title="Customer Installment"
           subtitle={
             isStoreAdmin
-              ? `Store Branch Ledger (${user?.employee?.branch || 'Main Branch'})`
+              ? `Store Branch Ledger (${user?.employee?.branch?.name || 'Main Branch'})`
               : 'Manage customer credit contracts, payment amortization schedules, and receivables'
           }
           action={

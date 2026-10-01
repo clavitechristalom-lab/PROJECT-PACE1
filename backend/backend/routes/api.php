@@ -89,6 +89,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/payments/monitoring', [PaymentController::class, 'monitoring']);
     Route::get('/payments/{id}', [PaymentController::class, 'show']);
     Route::post('/payments', [PaymentController::class, 'store']);
+    Route::delete('/payments/{id}', [PaymentController::class, 'destroy']);
     Route::get('/payment-schedules', [PaymentController::class, 'schedules']);
 
     // ─── Employee Self-Service (Employee Role / Scoped) ─────────────────────────

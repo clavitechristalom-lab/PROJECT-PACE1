@@ -634,7 +634,7 @@ function AdminBusinessDashboard() {
 function StoreAdminBusinessDashboard() {
   const { user } = useAuth()
   const navigate = useNavigate()
-  const branchName = user?.employee?.branch || 'Main Branch'
+  const branchName = user?.employee?.branch?.name || 'Main Branch'
 
   const [stats, setStats] = useState(null)
   const [perfData, setPerfData] = useState(null)

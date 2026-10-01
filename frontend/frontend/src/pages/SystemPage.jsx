@@ -425,7 +425,7 @@ export default function SystemPage({ defaultTab = 'users' }) {
                           </td>
                           <td className="py-3 px-4">
                             <span className="text-xs font-semibold text-foreground/80">
-                              {u.employee?.branch || u.customer?.branch_name || '—'}
+                              {u.employee?.branch?.name || u.customer?.branch_name || '—'}
                             </span>
                           </td>
                           <td className="py-3 px-4">

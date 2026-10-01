@@ -347,14 +347,14 @@ class InstallmentController extends Controller
                 'customer_id' => $customerId,
                 'processed_by' => $user ? $user->user_id : 1,
                 'sale_date' => $startDate . ' ' . date('H:i:s'),
-                'payment_method' => 'Installment',
+                'payment_method' => $numInstallments === 0 ? 'Cash' : 'Installment',
                 'subtotal' => $principal,
                 'discount_amount' => 0.00,
                 'total_amount' => $totalPayable,
                 'amount_paid' => $downPayment,
                 'balance_due' => max(0, $totalPayable - $downPayment),
                 'status' => ($downPayment >= $totalPayable) ? 'completed' : 'partially_paid',
-                'notes' => "Installment financing agreement ({$numInstallments} {$frequency} terms). " . $notes,
+                'notes' => $numInstallments === 0 ? "Full Cash Payment. " . $notes : "Installment financing agreement ({$numInstallments} {$frequency} terms). " . $notes,
             ]);
 
             // 3. Attach Sale Line Item
@@ -675,7 +675,7 @@ class InstallmentController extends Controller
             }
         }
 
-        $paid = (float)$account->payments->sum('amount') + (float)$account->down_payment;
+        $paid = (float)$account->payments->sum('amount');
         $totalPayable = (float)$account->total_payable;
         $balance = max(0, round($totalPayable - $paid, 2));
 

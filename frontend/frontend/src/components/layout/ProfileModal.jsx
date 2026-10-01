@@ -341,7 +341,7 @@ export default function ProfileModal({ open, isOpen, onClose }) {
               <TabBar
                 tabs={[
                   { id: 'profile', label: 'My Profile Information', icon: <FiUser className="w-3.5 h-3.5" /> },
-                  { id: 'attendance_qr', label: 'Attendance QR', icon: <FiSmartphone className="w-3.5 h-3.5" /> },
+                  ...(isAdmin ? [] : [{ id: 'attendance_qr', label: 'Attendance QR', icon: <FiSmartphone className="w-3.5 h-3.5" /> }]),
                 ]}
                 activeTab={activeTab}
                 onChange={setActiveTab}
@@ -401,7 +401,7 @@ export default function ProfileModal({ open, isOpen, onClose }) {
                       ))}
                     </div>
                     <p className="text-xs text-muted-foreground font-medium mt-0.5">
-                      {employee.position} · {employee.department} · {branchesList.find(b => b.id == employee.branch_id)?.name || employee.branch?.name || employee.branch || '—'}
+                      {employee.position} · {employee.department} · {branchesList.find(b => b.id == employee.branch_id)?.name || employee.branch?.name || '—'}
                     </p>
                     <div className="mt-2 flex items-center gap-2 flex-wrap">
                       <span className="font-mono text-[11px] font-bold bg-muted px-2 py-0.5 rounded-lg border border-border">
@@ -543,7 +543,7 @@ export default function ProfileModal({ open, isOpen, onClose }) {
                         </div>
                         <div>
                           <div className="text-[10px] text-muted-foreground uppercase tracking-wider font-bold mb-0.5">Branch</div>
-                          <div className="font-semibold text-foreground">{branchesList.find(b => b.id == employee.branch_id)?.name || employee.branch?.name || employee.branch || '—'}</div>
+                          <div className="font-semibold text-foreground">{branchesList.find(b => b.id == employee.branch_id)?.name || employee.branch?.name || '—'}</div>
                         </div>
                         <div>
                           <div className="text-[10px] text-muted-foreground uppercase tracking-wider font-bold mb-0.5">Department</div>
@@ -674,7 +674,7 @@ export default function ProfileModal({ open, isOpen, onClose }) {
                       </div>
 
                       {/* Row 3: Payment & Time */}
-                      {!isCustomer && (
+                      {!isCustomer && !isAdmin && (
                         <div className="grid grid-cols-1 sm:grid-cols-5 gap-4">
                           <div>
                             <label className="block text-[11px] font-bold text-muted-foreground mb-1.5">Pay Type</label>
@@ -797,7 +797,7 @@ export default function ProfileModal({ open, isOpen, onClose }) {
                       </div>
 
                       {/* Row 3: Payment & Time */}
-                      {!isCustomer && (
+                      {!isCustomer && !isAdmin && (
                         <div className="grid grid-cols-1 sm:grid-cols-5 gap-4">
                           <div>
                             <div className="text-[11px] font-bold text-muted-foreground mb-1.5">Pay Type</div>

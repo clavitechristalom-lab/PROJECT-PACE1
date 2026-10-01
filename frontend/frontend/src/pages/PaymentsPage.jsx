@@ -3,7 +3,7 @@ import { useSearchParams } from 'react-router-dom'
 import {
   FiCreditCard, FiTrendingUp, FiSmartphone,
   FiEye, FiPlus, FiPrinter, FiSearch, FiCalendar,
-  FiCheckCircle, FiX, FiAlertTriangle, FiFileText, FiFilter
+  FiCheckCircle, FiX, FiAlertTriangle, FiFileText, FiFilter, FiTrash2
 } from 'react-icons/fi'
 import {
   Btn, Badge, StatusBadge, Input, Select, Textarea, Modal,
@@ -74,7 +74,7 @@ export default function PaymentsPage() {
   // Filters
   const [search, setSearch] = useState('')
   const [methodFilter, setMethodFilter] = useState('All')
-  const [branchFilter, setBranchFilter] = useState(isStoreAdmin ? (user?.employee?.branch || 'Main Branch') : 'All')
+  const [branchFilter, setBranchFilter] = useState(isStoreAdmin ? (user?.employee?.branch?.name || 'Main Branch') : 'All')
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
   const [page, setPage] = useState(1)
@@ -204,6 +204,20 @@ export default function PaymentsPage() {
     }
   }
 
+  const handleDeletePayment = async (id) => {
+    if (!window.confirm('Are you sure you want to delete this payment? This action cannot be undone.')) return
+    showLoading('Deleting payment...')
+    try {
+      await api.payments.delete(id)
+      showToast('Payment deleted successfully', 'success')
+      loadData(true)
+    } catch (err) {
+      showToast(err.message || 'Failed to delete payment', 'error')
+    } finally {
+      closeLoading()
+    }
+  }
+
   const printReceipt = () => {
     window.print()
   }
@@ -253,7 +267,7 @@ export default function PaymentsPage() {
         title="Payment Collections & Receipts"
         subtitle={
           isStoreAdmin 
-            ? `Store Branch Collections (${user?.employee?.branch || 'Main Branch'})` 
+            ? `Store Branch Collections (${user?.employee?.branch?.name || 'Main Branch'})` 
             : 'Track official payment receipts, cash vs digital collection breakdown, and installments paid'
         }
         action={
@@ -407,6 +421,13 @@ export default function PaymentsPage() {
                           <FiFileText className="w-3.5 h-3.5" />
                           <span>Receipt</span>
                         </button>
+                        <button
+                          onClick={() => handleDeletePayment(p.payment_id)}
+                          className="inline-flex items-center justify-center w-7 h-7 rounded-lg border border-border hover:bg-rose-500/10 hover:text-rose-600 font-semibold cursor-pointer transition-colors text-rose-500"
+                          title="Delete Payment"
+                        >
+                          <FiTrash2 className="w-4 h-4" />
+                        </button>
                       </td>
                     </tr>
                   ))
@@ -439,7 +460,7 @@ export default function PaymentsPage() {
                 <span className="font-mono font-semibold text-foreground">{viewReceipt.payment_date}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-muted-foreground">Installment:</span>
+                <span className="text-muted-foreground">{viewReceipt.account_no?.startsWith('REQ') ? 'Request / Order:' : 'Installment:'}</span>
                 <span className="font-mono font-bold text-primary">{viewReceipt.account_no}</span>
               </div>
               <div className="flex justify-between">

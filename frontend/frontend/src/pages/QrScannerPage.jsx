@@ -48,7 +48,7 @@ const playSound = (type) => {
 export default function QrScannerPage() {
   const { user } = useAuth()
   const isStoreAdmin = user && (user.role === 'Store Administrator' || user.role === 'Store Admin')
-  const userBranch = user?.employee?.branch || 'Main Branch'
+  const userBranch = user?.employee?.branch?.name || 'Main Branch'
 
   // Scanner state
   const [cameraActive, setCameraActive] = useState(false)

@@ -191,7 +191,7 @@ export default function PaymentSchedulePage({ branchFilter: propBranchFilter, em
                       <td className="py-3 px-4 font-mono font-bold text-primary">{s.account_no}</td>
                       <td className="py-3 px-4 font-semibold text-foreground">{s.customer_name}</td>
                       <td className="py-3 px-4 font-mono text-muted-foreground">#{s.installment_no}</td>
-                      <td className="py-3 px-4 font-mono">{s.due_date}</td>
+                      <td className="py-3 px-4 font-mono">{s.status === 'Paid' && s.paid_date ? s.paid_date : s.due_date}</td>
                       <td className="py-3 px-4 text-right font-mono font-bold text-foreground">{fmt(s.amount_due)}</td>
                       <td className="py-3 px-4 text-right font-mono text-emerald-600 font-semibold">{fmt(s.amount_paid)}</td>
                       <td className="py-3 px-4 text-right font-mono font-bold">
@@ -259,8 +259,9 @@ export default function PaymentSchedulePage({ branchFilter: propBranchFilter, em
                 while (days.length % 7 !== 0) days.push(null)
 
                 const schedulesByDate = filtered.reduce((acc, s) => {
-                  if (!acc[s.due_date]) acc[s.due_date] = [];
-                  acc[s.due_date].push(s);
+                  const targetDate = s.status === 'Paid' && s.paid_date ? s.paid_date : s.due_date;
+                  if (!acc[targetDate]) acc[targetDate] = [];
+                  acc[targetDate].push(s);
                   return acc;
                 }, {})
 
@@ -292,7 +293,7 @@ export default function PaymentSchedulePage({ branchFilter: propBranchFilter, em
                       <div className="space-y-1.5 overflow-y-auto max-h-[100px] no-scrollbar">
                         {daySchedules.map(s => {
                           let bgColor = 'bg-slate-100 dark:bg-slate-800 border-slate-200'
-                          if (s.status === 'Paid') bgColor = 'bg-emerald-50 border-emerald-200 dark:bg-emerald-900/20 text-emerald-800 dark:text-emerald-300 dark:border-emerald-800/50'
+                          if (s.status === 'Paid' || s.status === 'Fully Paid') bgColor = 'bg-emerald-50 border-emerald-200 dark:bg-emerald-900/20 text-emerald-800 dark:text-emerald-300 dark:border-emerald-800/50'
                           else if (s.status === 'Overdue') bgColor = 'bg-rose-50 border-rose-200 dark:bg-rose-900/20 text-rose-800 dark:text-rose-300 dark:border-rose-800/50'
                           else bgColor = 'bg-blue-50 border-blue-200 dark:bg-blue-900/20 text-blue-800 dark:text-blue-300 dark:border-blue-800/50'
 
@@ -301,8 +302,8 @@ export default function PaymentSchedulePage({ branchFilter: propBranchFilter, em
                               <div className="opacity-70 mb-0.5 text-[9px] uppercase tracking-wide">Acc: {s.account_no}</div>
                               <div className="font-bold truncate text-[11px] mb-1">{s.customer_name}</div>
                               <div className="flex justify-between items-center mt-1 pt-1 border-t border-black/5 dark:border-white/10">
-                                <span className="opacity-80">Inst #{s.installment_no}</span>
-                                <span className="font-mono font-bold">{fmt(s.balance_due)}</span>
+                                <span className="opacity-80">{s.notes === 'Full Payment' ? 'Full Pay' : `Inst #${s.installment_no}`}</span>
+                                <span className="font-mono font-bold">{fmt(s.status === 'Paid' || s.status === 'Fully Paid' ? s.amount_paid : s.balance_due)}</span>
                               </div>
                             </div>
                           )

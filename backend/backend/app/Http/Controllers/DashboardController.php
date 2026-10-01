@@ -107,7 +107,8 @@ class DashboardController extends Controller
             if ($inst->status === 'Pending') {
                 return $carry + (float)$inst->total_payable;
             }
-            return $carry + (float)$inst->paymentSchedules->sum('balance_due');
+            $paid = (float)$inst->payments->sum('amount');
+            return $carry + max(0, round($inst->total_payable - $paid, 2));
         }, 0);
 
         $activeInstallments = $allInsts->where('status', 'Active')->count();

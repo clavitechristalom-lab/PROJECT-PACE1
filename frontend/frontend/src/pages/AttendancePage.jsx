@@ -63,7 +63,7 @@ export default function AttendancePage() {
   const isAdmin = user?.role === 'Administrator'
   const isEmployee = user?.role === 'Employee'
   const isStoreAdmin = user?.role === 'Store Administrator' || user?.role === 'Store Admin'
-  const userBranch = user?.employee?.branch || 'Main Branch'
+  const userBranch = user?.employee?.branch?.name || 'Main Branch'
 
   const location = useLocation()
   const [searchParams] = useSearchParams()

@@ -252,6 +252,7 @@ export const api = {
         method: 'POST',
         body: data instanceof FormData ? data : JSON.stringify(data),
       }),
+    delete: (id) => request(`/payments/${id}`, { method: 'DELETE' }),
     getSchedules: (params = {}) => {
       const qs = new URLSearchParams(cleanParams(params)).toString();
       return request(`/payment-schedules${qs ? `?${qs}` : ''}`);

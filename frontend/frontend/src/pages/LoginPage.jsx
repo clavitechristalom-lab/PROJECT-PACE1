@@ -45,6 +45,9 @@ export default function LoginPage() {
     password: '',
     confirmPassword: '',
     role: 'Customer',
+    gender: 'Male',
+    date_of_birth: '',
+    marital_status: 'Single',
     branch_id: '',
     agree: false,
   })
@@ -182,6 +185,16 @@ export default function LoginPage() {
 
     if (!signUpData.email.trim()) {
       errors.email = 'Email address is required'
+    }
+
+    if (!signUpData.gender) {
+      errors.gender = 'Gender is required'
+    }
+    if (!signUpData.date_of_birth) {
+      errors.date_of_birth = 'Birthday is required'
+    }
+    if (!signUpData.marital_status) {
+      errors.marital_status = 'Status is required'
     }
 
     if (signUpData.role !== 'Customer' && !signUpData.username?.trim()) {
@@ -893,6 +906,51 @@ export default function LoginPage() {
                         className={`w-full bg-[#121c29] border rounded-xl px-4 py-2.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 transition-all ${signUpErrors.address ? 'border-rose-500/80 focus:ring-rose-500/30' : 'border-slate-800 focus:border-blue-500 focus:ring-blue-500/20'}`}
                       />
                       {signUpErrors.address && <p className="text-[11px] text-rose-400 mt-1">{signUpErrors.address}</p>}
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-300 mb-1">Gender</label>
+                        <select
+                          value={signUpData.gender}
+                          onChange={(e) => setSignUpData({ ...signUpData, gender: e.target.value })}
+                          className={`w-full bg-[#121c29] border rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:ring-2 transition-all ${signUpErrors.gender ? 'border-rose-500/80 focus:ring-rose-500/30' : 'border-slate-800 focus:border-blue-500 focus:ring-blue-500/20'}`}
+                        >
+                          <option value="Male">Male</option>
+                          <option value="Female">Female</option>
+                          <option value="Other">Other</option>
+                        </select>
+                        {signUpErrors.gender && <p className="text-[11px] text-rose-400 mt-1">{signUpErrors.gender}</p>}
+                      </div>
+                      
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-300 mb-1">Birthday</label>
+                        <input
+                          type="date"
+                          value={signUpData.date_of_birth}
+                          onChange={(e) => {
+                            setSignUpData({ ...signUpData, date_of_birth: e.target.value })
+                            if (signUpErrors.date_of_birth) setSignUpErrors({ ...signUpErrors, date_of_birth: '' })
+                          }}
+                          className={`w-full bg-[#121c29] border rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:ring-2 transition-all appearance-none [&::-webkit-calendar-picker-indicator]:opacity-0 [&::-webkit-calendar-picker-indicator]:absolute [&::-webkit-calendar-picker-indicator]:right-0 [&::-webkit-calendar-picker-indicator]:w-full [&::-webkit-calendar-picker-indicator]:h-full [&::-webkit-calendar-picker-indicator]:cursor-pointer ${signUpErrors.date_of_birth ? 'border-rose-500/80 focus:ring-rose-500/30' : 'border-slate-800 focus:border-blue-500 focus:ring-blue-500/20'}`}
+                        />
+                        {signUpErrors.date_of_birth && <p className="text-[11px] text-rose-400 mt-1">{signUpErrors.date_of_birth}</p>}
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-300 mb-1">Status</label>
+                        <select
+                          value={signUpData.marital_status}
+                          onChange={(e) => setSignUpData({ ...signUpData, marital_status: e.target.value })}
+                          className={`w-full bg-[#121c29] border rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:ring-2 transition-all ${signUpErrors.marital_status ? 'border-rose-500/80 focus:ring-rose-500/30' : 'border-slate-800 focus:border-blue-500 focus:ring-blue-500/20'}`}
+                        >
+                          <option value="Single">Single</option>
+                          <option value="Married">Married</option>
+                          <option value="Widowed">Widowed</option>
+                          <option value="Divorced">Divorced</option>
+                        </select>
+                        {signUpErrors.marital_status && <p className="text-[11px] text-rose-400 mt-1">{signUpErrors.marital_status}</p>}
+                      </div>
                     </div>
 
                     <div>

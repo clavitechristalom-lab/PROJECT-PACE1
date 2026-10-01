@@ -35,6 +35,9 @@ class AuthController extends Controller
             'password' => 'required|string|min:6|same:confirmPassword',
             'confirmPassword' => 'required|string',
             'role' => 'required|string',
+            'gender' => 'required|string',
+            'date_of_birth' => 'required|date',
+            'marital_status' => 'required|string',
         ];
 
         if ($role === 'Customer') {
@@ -57,6 +60,9 @@ class AuthController extends Controller
         $lastName = $validated['last_name'];
         $phone = $validated['phone'];
         $address = $validated['address'];
+        $gender = $validated['gender'];
+        $dateOfBirth = $validated['date_of_birth'];
+        $maritalStatus = $validated['marital_status'];
 
         if ($role === 'Customer') {
             // Customer signs up with branch_id = NULL.
@@ -71,6 +77,9 @@ class AuthController extends Controller
                 'email' => $validated['email'],
                 'phone' => $phone,
                 'address' => $address,
+                'gender' => $gender,
+                'date_of_birth' => $dateOfBirth,
+                'marital_status' => $maritalStatus,
                 'status' => 'Active',
                 'branch_id' => null,
             ]);
@@ -97,6 +106,9 @@ class AuthController extends Controller
                 'email' => $validated['email'],
                 'phone' => $phone,
                 'address' => $address,
+                'gender' => $gender,
+                'date_of_birth' => $dateOfBirth,
+                'marital_status' => $maritalStatus,
                 'position' => $role,
                 'status' => 'Active',
                 'pay_type' => 'Monthly',
