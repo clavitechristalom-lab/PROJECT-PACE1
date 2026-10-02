@@ -3,14 +3,16 @@ import { useNavigate, useLocation } from 'react-router-dom'
 import {
   FiSun, FiMoon, FiMail, FiLock, FiUser, FiEye, FiEyeOff,
   FiX, FiAlertTriangle, FiCheckCircle, FiLogIn, FiUserPlus,
-  FiShield, FiHome, FiBriefcase, FiUsers, FiEdit3, FiMenu
+  FiShield, FiHome, FiBriefcase, FiUsers, FiEdit3, FiMenu, FiArrowRight,
+  FiMapPin, FiPhone, FiGlobe, FiTool, FiCreditCard, FiPackage, FiLogOut
 } from 'react-icons/fi'
 import { showSuccess, showError, showLoading, closeLoading } from '../lib/swal'
 import { useAuth } from '../context/AuthContext'
 import { useTheme } from '../context/ThemeContext'
 import { Spinner, Pagination } from '../components/ui'
-import { api } from '../lib/api'
+import { api, STORAGE_BASE } from '../lib/api'
 import heroImg from '../assets/furniture-hero.png'
+import './LoginPage.css'
 
 
 export default function LoginPage() {
@@ -20,6 +22,8 @@ export default function LoginPage() {
 
   const [isLoginModalOpen, setIsLoginModalOpen] = useState(false)
   const [activeTab, setActiveTab] = useState('login')
+  const [isContactModalOpen, setIsContactModalOpen] = useState(false)
+  const [contactForm, setContactForm] = useState({ name: '', email: '', topic: 'General Inquiry', message: '' })
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [showPw, setShowPw] = useState(false)
@@ -90,7 +94,7 @@ export default function LoginPage() {
         setAppliances(appRes.products || [])
         const furnRes = await api.products.getPublicProducts({ category: 'Furniture' })
         setFurniture(furnRes.products || [])
-        const sRes = await api.system.getSettings()
+        const sRes = await api.system.getPublicSettings()
         if (sRes) setSysSettings(sRes)
       } catch (err) {
         console.error('Failed to load public data', err)
@@ -105,6 +109,28 @@ export default function LoginPage() {
   const [signUpErrors, setSignUpErrors] = useState({})
 
   const { isDark, toggleMode } = useTheme()
+
+  const getLogoUrl = (logo) => {
+    if (!logo) return '';
+    if (logo.startsWith('blob:') || logo.startsWith('http')) return logo;
+    const path = logo.startsWith('/') ? logo : (logo.startsWith('storage/') ? `/${logo}` : `/storage/${logo}`);
+    return `${STORAGE_BASE || 'http://localhost:8000'}${path}`;
+  }
+
+  useEffect(() => {
+    if (sysSettings) {
+      document.title = companyName ? `${companyName} Appliances and Furniture` : 'Z-LICZ Operations'
+      if (companyLogo) {
+        let link = document.querySelector("link[rel~='icon']")
+        if (!link) {
+          link = document.createElement('link')
+          link.rel = 'icon'
+          document.head.appendChild(link)
+        }
+        link.href = getLogoUrl(companyLogo)
+      }
+    }
+  }, [sysSettings, companyName, companyLogo])
 
   useEffect(() => {
     if (!checkingAuth && user) {
@@ -128,7 +154,7 @@ export default function LoginPage() {
           branches: data.branches || [],
           departments: data.departments || [],
         }))
-        .catch(() => {})
+        .catch(() => { })
     }
   }, [isLoginModalOpen, activeTab])
 
@@ -141,6 +167,28 @@ export default function LoginPage() {
     return () => window.removeEventListener('keydown', handleEscape)
   }, [roleModalOpen])
 
+
+  const handleContactSubmit = async (e) => {
+    e.preventDefault()
+    if (!contactForm.name || !contactForm.email || !contactForm.message) {
+      return showError('Validation Error', 'Please fill in all required fields.')
+    }
+    try {
+      showLoading('Sending message...')
+      const res = await api.supportMessages.createPublic(contactForm)
+      closeLoading()
+      if (res.success || !res.error) {
+        showSuccess('Message Sent!', 'We have received your message and will get back to you shortly.')
+        setIsContactModalOpen(false)
+        setContactForm({ name: '', email: '', topic: 'General Inquiry', message: '' })
+      } else {
+        showError('Failed', res.message || 'Could not send message')
+      }
+    } catch (err) {
+      closeLoading()
+      showError('Error', err.message || 'Something went wrong')
+    }
+  }
 
   const handleSubmit = async (e) => {
     e.preventDefault()
@@ -284,7 +332,7 @@ export default function LoginPage() {
 
       if (loginRes.success) {
         showSuccess('Welcome!', 'Account created and logged in successfully.')
-        
+
         const dest =
           loginRes.user?.role === 'Customer'
             ? '/customer/dashboard'
@@ -302,7 +350,7 @@ export default function LoginPage() {
     } else {
       closeLoading()
       setLoading(false)
-      
+
       setSignUpErrors(res.errors || {})
       showError('Registration Failed', res.message || 'Something went wrong during sign up.')
       setError(res.message)
@@ -338,349 +386,314 @@ export default function LoginPage() {
   }
 
   return (
-    <div
-      className={`relative min-h-screen flex flex-col font-sans selection:bg-neutral-900 selection:text-white overflow-hidden transition-colors duration-300 ${isDark
-        ? 'bg-[#090d16] text-white'
-        : 'bg-card text-neutral-900'
-        }`}
-    >
-      {isDark && (
-        <>
-          <div className="absolute -top-40 -left-40 w-96 h-96 bg-blue-600/20 rounded-full blur-3xl pointer-events-none" />
-          <div className="absolute top-1/3 -right-32 w-96 h-96 bg-amber-500/15 rounded-full blur-3xl pointer-events-none" />
-          <div className="absolute -bottom-40 left-1/3 w-[500px] h-[500px] bg-indigo-600/20 rounded-full blur-3xl pointer-events-none" />
-        </>
-      )}
+    <div className="page-shell">
+      <div id="home" className="hero">
+        <img src={heroImg} className="hero-image" alt="Interior" />
+        <div className="hero-wash" />
 
-      <header
-        className={`sticky top-0 z-40 backdrop-blur-md transition-colors border-b px-4 sm:px-8 lg:px-16 py-3.5 flex items-center justify-between ${
-          isDark
-            ? 'bg-[#090d16]/95 border-slate-800/80 shadow-md shadow-black/20'
-            : 'bg-white/95 border-gray-200/80 shadow-xs'
-        }`}
-      >
-        {/* Brand Logo & Title */}
-        <a href="#home" className="flex items-center gap-3 group text-left">
-          {companyLogo ? (
-            <img
-              src={companyLogo.startsWith('blob:') || companyLogo.startsWith('http') ? companyLogo : `http://localhost:8000${companyLogo}`}
-              alt={companyName || 'Logo'}
-              className="h-9 w-auto max-w-[120px] object-contain rounded-lg shadow-2xs"
-            />
-          ) : (
-            <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-blue-600 to-indigo-500 flex items-center justify-center text-white font-black text-base shadow-md shadow-blue-500/25 shrink-0">
-              {(companyName || 'Z').charAt(0).toUpperCase()}
-            </div>
-          )}
-          <div className="flex flex-col">
-            <span
-              className={`text-lg sm:text-xl font-extrabold tracking-tight transition-colors ${
-                isDark ? 'text-white group-hover:text-blue-400' : 'text-gray-900 group-hover:text-blue-600'
-              }`}
-            >
-              {companyName || 'Z-LICZ'}
-            </span>
-            <span className="text-[10px] uppercase font-bold tracking-wider text-muted-foreground/80 -mt-0.5">
-              Appliances & Furniture
-            </span>
-          </div>
-        </a>
-
-        {/* Desktop Navigation Links */}
-        <nav className="hidden md:flex items-center gap-8 text-xs font-bold tracking-wider">
-          <a
-            href="#home"
-            className={`transition-colors ${
-              isDark ? 'text-slate-400 hover:text-white' : 'text-gray-600 hover:text-black'
-            }`}
-          >
-            HOME
-          </a>
-          <a
-            href="#about"
-            className={`transition-colors ${
-              isDark ? 'text-slate-400 hover:text-white' : 'text-gray-600 hover:text-black'
-            }`}
-          >
-            ABOUT
-          </a>
-          <a
-            href="#appliances"
-            className={`transition-colors ${
-              isDark ? 'text-slate-400 hover:text-white' : 'text-gray-600 hover:text-black'
-            }`}
-          >
-            APPLIANCES
-          </a>
-          <a
-            href="#furniture"
-            className={`transition-colors ${
-              isDark ? 'text-slate-400 hover:text-white' : 'text-gray-600 hover:text-black'
-            }`}
-          >
-            FURNITURE
-          </a>
-          <a
-            href="#support"
-            className={`transition-colors ${
-              isDark ? 'text-slate-400 hover:text-white' : 'text-gray-600 hover:text-black'
-            }`}
-          >
-            SUPPORT
-          </a>
-        </nav>
-
-        {/* Right Action Controls */}
-        <div className="flex items-center gap-2.5 sm:gap-3">
-          <button
-            type="button"
-            onClick={toggleMode}
-            className={`flex items-center justify-center w-8 h-8 rounded-full text-sm transition-all cursor-pointer shadow-xs active:scale-95 ${
-              isDark
-                ? 'bg-slate-800/90 hover:bg-slate-700 text-amber-300 border border-slate-700'
-                : 'bg-neutral-100 hover:bg-neutral-200 text-neutral-800 border border-neutral-300'
-            }`}
-            title={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
-            aria-label="Toggle theme"
-          >
-            {isDark ? <FiSun className="w-4 h-4 text-amber-300" /> : <FiMoon className="w-4 h-4 text-slate-700" />}
-          </button>
-
-          {/* Mobile Hamburger Toggle */}
-          <button
-            type="button"
-            onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-            className={`md:hidden p-2 rounded-xl border text-sm transition-colors cursor-pointer ${
-              isDark
-                ? 'border-slate-800 bg-slate-800/60 text-slate-300 hover:text-white hover:bg-slate-800'
-                : 'border-gray-200 bg-gray-100/60 text-gray-700 hover:text-black hover:bg-gray-200'
-            }`}
-            aria-label="Toggle navigation menu"
-          >
-            {mobileMenuOpen ? <FiX className="w-5 h-5" /> : <FiMenu className="w-5 h-5" />}
-          </button>
-        </div>
-      </header>
-
-      {/* Mobile Dropdown Navbar */}
-      {mobileMenuOpen && (
-        <div
-          className={`md:hidden sticky top-[57px] z-30 border-b px-5 py-4 space-y-3 backdrop-blur-xl transition-all animate-[fadeIn_0.15s_ease] ${
-            isDark
-              ? 'bg-[#090d16]/98 border-slate-800 text-slate-200 shadow-xl'
-              : 'bg-white/98 border-gray-200 text-gray-800 shadow-lg'
-          }`}
-        >
-          <div className="flex flex-col space-y-2 text-xs font-bold tracking-wider">
-            <a
-              href="#home"
-              onClick={() => setMobileMenuOpen(false)}
-              className="py-2 px-3 rounded-lg hover:bg-primary/10 transition-colors"
-            >
-              HOME
-            </a>
-            <a
-              href="#about"
-              onClick={() => setMobileMenuOpen(false)}
-              className="py-2 px-3 rounded-lg hover:bg-primary/10 transition-colors"
-            >
-              ABOUT
-            </a>
-            <a
-              href="#appliances"
-              onClick={() => setMobileMenuOpen(false)}
-              className="py-2 px-3 rounded-lg hover:bg-primary/10 transition-colors"
-            >
-              APPLIANCES
-            </a>
-            <a
-              href="#furniture"
-              onClick={() => setMobileMenuOpen(false)}
-              className="py-2 px-3 rounded-lg hover:bg-primary/10 transition-colors"
-            >
-              FURNITURE
-            </a>
-            <a
-              href="#support"
-              onClick={() => setMobileMenuOpen(false)}
-              className="py-2 px-3 rounded-lg hover:bg-primary/10 transition-colors"
-            >
-              SUPPORT
-            </a>
-          </div>
-        </div>
-      )}
-
-      <main className="relative z-10 flex-1 w-full">
-        <section
-          id="home"
-          className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 md:py-16"
-        >
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-12 items-center">
-            {/* Left Column: Heading, Subtitle & CTAs */}
-            <div className="lg:col-span-6 text-center lg:text-left space-y-6">
-              <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full text-xs font-semibold bg-primary/10 text-primary border border-primary/20">
-                <FiShield className="w-3.5 h-3.5" />
-                <span>Z-LICZ • Official Portal</span>
+        <header className="site-header">
+          <div className="logo flex items-center gap-3">
+            {companyLogo ? (
+              <img src={getLogoUrl(companyLogo)} alt={companyName || 'Logo'} style={{ height: '36px', width: 'auto', objectFit: 'contain' }} />
+            ) : (
+              <div className="w-9 h-9 rounded-xl bg-white flex items-center justify-center text-blue-600 font-black text-xl shadow-md shrink-0">
+                Z
               </div>
+            )}
+            <div className="flex flex-col justify-center">
+              <span className="text-xl font-extrabold tracking-tight text-black dark:text-white">
+                {companyName || 'Z-LICZ'}
+              </span>
+            </div>
+          </div>
 
-              <h1
-                className={`text-3xl sm:text-5xl lg:text-5xl font-extrabold tracking-tight leading-[1.2] ${
-                  isDark ? 'text-white' : 'text-gray-900'
-                }`}
-              >
-                {companyName ? (
-                  <>
-                    Welcome to{' '}
-                    <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-500 via-indigo-400 to-purple-500">
-                      {companyName}
-                    </span>
-                  </>
-                ) : (
-                  <>
-                    Quality Living,{' '}
-                    <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-500 via-indigo-400 to-purple-500">
-                      Simplified
-                    </span>
-                  </>
-                )}
-              </h1>
+          <nav className={`nav-links flex items-center gap-6 ${mobileMenuOpen ? 'nav-links-open' : ''}`}>
+            <a href="#home" onClick={() => setMobileMenuOpen(false)}>Home</a>
+            <a href="#appliances" onClick={() => setMobileMenuOpen(false)}>Appliances</a>
+            <a href="#furniture" onClick={() => setMobileMenuOpen(false)}>Furniture</a>
+            <a href="#about" onClick={() => setMobileMenuOpen(false)}>About</a>
+            <a href="#support" onClick={() => setMobileMenuOpen(false)}>Support</a>
+            <button
+              onClick={toggleMode}
+              className="p-2 rounded-full hover:bg-black/5 dark:hover:bg-white/10 transition-colors text-black dark:text-white"
+              title="Toggle Theme"
+            >
+              {isDark ? <FiSun className="w-5 h-5" /> : <FiMoon className="w-5 h-5" />}
+            </button>
+          </nav>
 
-              <p
-                className={`text-sm sm:text-base leading-relaxed max-w-xl mx-auto lg:mx-0 ${
-                  isDark ? 'text-slate-300' : 'text-gray-600'
-                }`}
-              >
-                Discover premium appliances and handcrafted furniture designed for modern Filipino homes. Flexible installment plans, swift delivery, and trusted service.
+          <button className="menu-button" onClick={() => setMobileMenuOpen(o => !o)} aria-label="Toggle mobile menu">
+            <span /><span /><span />
+          </button>
+          <div style={{ justifySelf: 'end' }} className="hidden md:block"></div>
+        </header>
+
+        <div className="hero-content">
+          <h1>
+            Elevate Every<br />
+            Corner of <strong>Home</strong>
+          </h1>
+
+          <p>
+            Discover thoughtfully selected appliances and furniture that bring comfort, function, and lasting style to your home.
+          </p>
+
+          <div className="hero-actions">
+            <button
+              onClick={() => {
+                setError('')
+                setActiveTab('login')
+                setIsLoginModalOpen(true)
+              }}
+              className="primary-cta"
+            >
+              Log In <FiArrowRight />
+            </button>
+
+            <button
+              onClick={() => {
+                setError('')
+                setSignUpSuccess('')
+                setActiveTab('signup')
+                setIsLoginModalOpen(true)
+              }}
+              className="video-cta"
+            >
+              <div className="play-icon">
+                <FiUser />
+              </div>
+              Sign In
+            </button>
+          </div>
+
+          <div className="stats-panel">
+            <div className="stat">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg>
+              <div>
+                <strong>{sysSettings?.total_products ? `${sysSettings.total_products}+` : '500+'}</strong>
+                <span>Curated Products</span>
+              </div>
+            </div>
+            <div className="stat">
+              <FiHome />
+              <div>
+                <strong>{sysSettings?.total_branches ? `${sysSettings.total_branches}+` : '10+'}</strong>
+                <span>Branches</span>
+              </div>
+            </div>
+            <div className="stat">
+              <FiShield />
+              <div>
+                <strong>1 Year</strong>
+                <span>Product Warranty</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="services-bar">
+          <a href="#appliances" className="service hover:bg-white/5 transition-colors cursor-pointer">
+            <div className="service-icon">
+              <svg viewBox="0 0 24 24" fill="none"><rect x="4" y="4" width="16" height="16" rx="2" ry="2"></rect><circle cx="12" cy="12" r="3"></circle><line x1="12" y1="18" x2="12" y2="18"></line></svg>
+            </div>
+            <div>
+              <h2>Home Appliances</h2>
+              <p>Smart essentials that make everyday living effortless.</p>
+              {sysSettings?.total_appliances > 0 && <span className="text-[10px] font-bold text-[#58B947] mt-1.5 block uppercase tracking-wider">{sysSettings.total_appliances} Products Available</span>}
+            </div>
+          </a>
+          <a href="#furniture" className="service hover:bg-white/5 transition-colors cursor-pointer">
+            <div className="service-icon">
+              <svg viewBox="0 0 24 24" fill="none"><path d="M20 9V7a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v2"></path><path d="M22 13v6a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-6a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2z"></path></svg>
+            </div>
+            <div>
+              <h2>Living Room</h2>
+              <p>Comfortable furniture designed for gathering and relaxing.</p>
+              {sysSettings?.total_furniture > 0 && <span className="text-[10px] font-bold text-[#58B947] mt-1.5 block uppercase tracking-wider">{sysSettings.total_furniture} Products Available</span>}
+            </div>
+          </a>
+          <a href="#furniture" className="service hover:bg-white/5 transition-colors cursor-pointer">
+            <div className="service-icon">
+              <svg viewBox="0 0 24 24" fill="none"><path d="M2 4v16"></path><path d="M2 8h18a2 2 0 0 1 2 2v10"></path><path d="M2 17h20"></path><path d="M6 8v9"></path></svg>
+            </div>
+            <div>
+              <h2>Bedroom</h2>
+              <p>Restful pieces created for calm, beautifully layered spaces.</p>
+              {sysSettings?.total_furniture > 0 && <span className="text-[10px] font-bold text-[#58B947] mt-1.5 block uppercase tracking-wider">{sysSettings.total_furniture} Products Available</span>}
+            </div>
+          </a>
+          <a href="#furniture" className="service hover:bg-white/5 transition-colors cursor-pointer">
+            <div className="service-icon">
+              <svg viewBox="0 0 24 24" fill="none"><rect x="3" y="10" width="18" height="4" rx="1"></rect><line x1="7" y1="14" x2="7" y2="21"></line><line x1="17" y1="14" x2="17" y2="21"></line><line x1="12" y1="3" x2="12" y2="10"></line></svg>
+            </div>
+            <div>
+              <h2>Dining & Decor</h2>
+              <p>Finishing touches that bring warmth and character home.</p>
+              {sysSettings?.total_furniture > 0 && <span className="text-[10px] font-bold text-[#58B947] mt-1.5 block uppercase tracking-wider">{sysSettings.total_furniture} Products Available</span>}
+            </div>
+          </a>
+        </div>
+      </div>
+
+      <main className="relative z-10 w-full bg-[#f5f3ed]">
+        <section id="about" className="px-4 md:px-16 py-20 bg-white border-t border-gray-200">
+          <div className="max-w-6xl mx-auto">
+            <div className="text-center mb-14">
+              <span className="text-xs font-bold uppercase tracking-widest text-[#58B947] mb-3 block">Who We Are</span>
+              <h2 className="text-3xl md:text-4xl font-extrabold text-gray-900 mb-4">About {companyName || 'Z-LICZ'}</h2>
+              <p className="text-base md:text-lg max-w-3xl mx-auto leading-relaxed text-gray-500">
+                {companyName || 'Z-LICZ'} is your one-stop shop for premium quality home essentials — offering elegant furniture and state-of-the-art appliances that transform your house into a home you love.
               </p>
-
-              <div className="flex flex-wrap items-center justify-center lg:justify-start gap-3.5 pt-1">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setError('')
-                    setActiveTab('login')
-                    setIsLoginModalOpen(true)
-                  }}
-                  className="px-6 py-3 rounded-xl font-bold text-sm bg-primary text-primary-foreground hover:bg-primary/90 transition shadow-lg shadow-primary/25 cursor-pointer active:scale-95 flex items-center gap-2"
-                >
-                  <FiLogIn className="w-4 h-4" />
-                  <span>Sign In</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => {
-                    setError('')
-                    setSignUpSuccess('')
-                    setActiveTab('signup')
-                    setIsLoginModalOpen(true)
-                  }}
-                  className={`px-6 py-3 rounded-xl font-bold text-sm border transition cursor-pointer active:scale-95 flex items-center gap-2 ${
-                    isDark
-                      ? 'border-slate-700 bg-slate-800/80 hover:bg-slate-700 text-white'
-                      : 'border-gray-300 bg-white hover:bg-gray-100 text-gray-800 shadow-xs'
-                  }`}
-                >
-                  <FiUserPlus className="w-4 h-4" />
-                  <span>Sign Up</span>
-                </button>
-              </div>
-
-              {/* Trust Features */}
-              <div className="pt-4 grid grid-cols-3 gap-3 border-t border-border/70 max-w-lg mx-auto lg:mx-0 text-center lg:text-left">
-                <div>
-                  <p className="text-base sm:text-lg font-bold text-foreground">100%</p>
-                  <p className="text-[11px] text-muted-foreground font-medium">Original Brands</p>
-                </div>
-                <div>
-                  <p className="text-base sm:text-lg font-bold text-foreground">Flexible</p>
-                  <p className="text-[11px] text-muted-foreground font-medium">Payment Terms</p>
-                </div>
-                <div>
-                  <p className="text-base sm:text-lg font-bold text-foreground">Verified</p>
-                  <p className="text-[11px] text-muted-foreground font-medium">Customer Support</p>
-                </div>
-              </div>
             </div>
-
-            {/* Right Column: Hero Image - Plastar, Sharp, Visible without covering overlays */}
-            <div className="lg:col-span-6">
-              <div className="relative mx-auto max-w-lg lg:max-w-none">
-                <div
-                  className={`relative rounded-3xl overflow-hidden shadow-2xl border transition-all duration-300 ${
-                    isDark
-                      ? 'border-slate-800/90 bg-slate-900 shadow-blue-500/5'
-                      : 'border-slate-200/90 bg-white shadow-xl'
-                  }`}
-                >
-                  <img
-                    src={heroImg}
-                    alt="Premium Living and Furniture"
-                    className="w-full h-[300px] sm:h-[380px] md:h-[440px] object-cover"
-                  />
-                  <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-black/10 to-transparent pointer-events-none" />
-                  <div className="absolute bottom-4 left-4 right-4 p-3.5 sm:p-4 rounded-2xl bg-black/70 backdrop-blur-md border border-white/10 text-white flex items-center justify-between">
-                    <div>
-                      <p className="text-xs font-semibold uppercase tracking-wider text-blue-300">
-                        {companyName || 'Featured Collection'}
-                      </p>
-                      <p className="text-sm font-bold text-white">Modern Home Furniture & Living</p>
-                    </div>
-                    <span className="text-xs px-2.5 py-1 rounded-full bg-blue-500/25 text-blue-200 border border-blue-400/30 font-medium">
-                      Available In-Store
-                    </span>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              {companyAddress && (
+                <div className="rounded-2xl border border-gray-100 bg-gray-50 p-7 flex flex-col gap-4 shadow-sm hover:shadow-md transition-shadow">
+                  <div className="w-12 h-12 rounded-xl bg-[#58B947]/10 flex items-center justify-center">
+                    <FiMapPin className="w-6 h-6 text-[#58B947]" />
                   </div>
+                  <h3 className="font-bold text-gray-900 text-base">Our Location</h3>
+                  <p className="text-gray-500 text-sm leading-relaxed">{companyAddress}</p>
                 </div>
-              </div>
+              )}
+              {companyPhone && (
+                <div className="rounded-2xl border border-gray-100 bg-gray-50 p-7 flex flex-col gap-4 shadow-sm hover:shadow-md transition-shadow">
+                  <div className="w-12 h-12 rounded-xl bg-[#58B947]/10 flex items-center justify-center">
+                    <FiPhone className="w-6 h-6 text-[#58B947]" />
+                  </div>
+                  <h3 className="font-bold text-gray-900 text-base">Call Us</h3>
+                  <a href={`tel:${companyPhone}`} className="text-[#58B947] font-semibold text-sm hover:underline">{companyPhone}</a>
+                </div>
+              )}
+              {companyEmail && (
+                <button 
+                  onClick={() => setIsContactModalOpen(true)}
+                  className="rounded-2xl border border-gray-100 bg-gray-50 p-7 flex flex-col gap-4 shadow-sm hover:shadow-md transition-shadow text-left"
+                >
+                  <div className="w-12 h-12 rounded-xl bg-[#58B947]/10 flex items-center justify-center">
+                    <FiMail className="w-6 h-6 text-[#58B947]" />
+                  </div>
+                  <h3 className="font-bold text-gray-900 text-base">Email Us</h3>
+                  <span className="text-[#58B947] font-semibold text-sm hover:underline">{companyEmail}</span>
+                </button>
+              )}
+              {!companyAddress && !companyPhone && !companyEmail && (
+                <div className="md:col-span-3 rounded-2xl border border-dashed border-gray-200 bg-gray-50 p-10 text-center text-gray-400 text-sm">
+                  Contact details will appear here once configured in system settings.
+                </div>
+              )}
             </div>
           </div>
         </section>
 
-        <section id="about" className={`px-4 md:px-16 py-16 ${isDark ? 'bg-slate-900' : 'bg-gray-50'}`}>
-          <div className="max-w-6xl mx-auto text-center">
-            <h2 className={`text-3xl font-bold mb-6 ${isDark ? 'text-white' : 'text-gray-900'}`}>About {companyName}</h2>
-            <p className={`text-lg max-w-3xl mx-auto leading-relaxed ${isDark ? 'text-gray-300' : 'text-gray-600'}`}>
-              {companyName} is your one-stop shop for premium quality home essentials. We provide top-of-the-line products ranging from elegant furniture pieces to state-of-the-art appliances, ensuring that your life journey starts with comfort and style. Our commitment is to offer simple, easy, and ready-for-you solutions that transform your house into a home.{companyAddress && <><br /><span className="block mt-2 text-sm">📍 {companyAddress}</span></>}{companyPhone && <><br /><span className="block text-sm">📞 {companyPhone}</span></>}{companyEmail && <><br /><span className="block text-sm">✉️ {companyEmail}</span></>}
-            </p>
+        <section id="support" className="px-4 md:px-16 py-20 bg-[#f5f3ed]">
+          <div className="max-w-6xl mx-auto">
+            <div className="text-center mb-14">
+              <span className="text-xs font-bold uppercase tracking-widest text-[#58B947] mb-3 block">We're Here For You</span>
+              <h2 className="text-3xl md:text-4xl font-extrabold text-gray-900 mb-4">Support & Service</h2>
+              <p className="text-base md:text-lg max-w-3xl mx-auto leading-relaxed text-gray-500">
+                From product inquiries to after-sales service, our dedicated team ensures your complete satisfaction — whether it's installments, warranty claims, or product maintenance.
+              </p>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+              <div className="rounded-2xl bg-white border border-gray-100 p-7 shadow-sm hover:shadow-md transition-shadow flex flex-col gap-4">
+                <div className="w-12 h-12 rounded-xl bg-blue-50 flex items-center justify-center">
+                  <FiShield className="w-6 h-6 text-blue-500" />
+                </div>
+                <h3 className="font-bold text-gray-900">Warranty Support</h3>
+                <p className="text-gray-500 text-sm">All products come with a standard warranty. Contact us for claims and assistance.</p>
+              </div>
+              <div className="rounded-2xl bg-white border border-gray-100 p-7 shadow-sm hover:shadow-md transition-shadow flex flex-col gap-4">
+                <div className="w-12 h-12 rounded-xl bg-purple-50 flex items-center justify-center">
+                  <FiCreditCard className="w-6 h-6 text-purple-500" />
+                </div>
+                <h3 className="font-bold text-gray-900">Installment Plans</h3>
+                <p className="text-gray-500 text-sm">Flexible payment options available. Manage your installments easily through our system.</p>
+              </div>
+              <div className="rounded-2xl bg-white border border-gray-100 p-7 shadow-sm hover:shadow-md transition-shadow flex flex-col gap-4">
+                <div className="w-12 h-12 rounded-xl bg-orange-50 flex items-center justify-center">
+                  <FiTool className="w-6 h-6 text-orange-500" />
+                </div>
+                <h3 className="font-bold text-gray-900">Maintenance</h3>
+                <p className="text-gray-500 text-sm">Need servicing? We'll connect you with our expert technicians for fast repairs.</p>
+              </div>
+            </div>
+            <div className="text-center flex flex-wrap gap-4 justify-center">
+              <button
+                onClick={() => { setError(''); setActiveTab('signup'); setIsLoginModalOpen(true); }}
+                className="inline-flex items-center gap-2 px-6 py-3 rounded-xl bg-[#58B947] text-white text-sm font-bold hover:bg-[#4da83d] transition-colors shadow-md shadow-green-500/20"
+              >
+                <FiUserPlus className="w-4 h-4" /> Create Account
+              </button>
+              {companyEmail && (
+                <button 
+                  onClick={() => setIsContactModalOpen(true)}
+                  className="inline-flex items-center gap-2 px-6 py-3 rounded-xl bg-white border border-gray-200 text-gray-700 text-sm font-bold hover:bg-gray-50 transition-colors shadow-sm"
+                >
+                  <FiMail className="w-4 h-4" /> Email Support
+                </button>
+              )}
+              {companyWebLinks && (
+                <a href={companyWebLinks} target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 px-6 py-3 rounded-xl bg-white border border-gray-200 text-blue-600 text-sm font-bold hover:bg-gray-50 transition-colors shadow-sm">
+                  <FiGlobe className="w-4 h-4" /> Visit Website
+                </a>
+              )}
+            </div>
           </div>
         </section>
 
-        <section id="support" className={`px-4 md:px-16 py-16 ${isDark ? 'bg-[#090d16]' : 'bg-white'}`}>
-          <div className="max-w-6xl mx-auto text-center">
-            <h2 className={`text-3xl font-bold mb-6 ${isDark ? 'text-white' : 'text-gray-900'}`}>Support & Service</h2>
-            <p className={`text-lg max-w-3xl mx-auto leading-relaxed ${isDark ? 'text-gray-300' : 'text-gray-600'}`}>
-              We are here to help you every step of the way. From product inquiries to after-sales service, our dedicated support team ensures your complete satisfaction. Whether you need assistance with an installment plan, warranty claims, or product maintenance, {companyName} provides reliable and fast customer support.{companyWebLinks && <><br /><a href={companyWebLinks} target="_blank" rel="noreferrer" className="mt-2 inline-block text-sm text-blue-400 hover:underline">🌐 {companyWebLinks}</a></>}
-            </p>
-          </div>
-        </section>
-
-        <section id="appliances" className={`px-4 md:px-16 py-16 ${isDark ? 'bg-slate-900' : 'bg-gray-50'}`}>
+        <section id="appliances" className="px-4 md:px-16 py-16 bg-white">
           <div className="max-w-6xl mx-auto">
             <div className="flex items-center justify-between mb-8">
               <div>
-                <h2 className={`text-2xl md:text-3xl font-bold ${isDark ? 'text-white' : 'text-gray-900'}`}>Appliances</h2>
-                <p className="text-xs sm:text-sm text-muted-foreground mt-1">Energy-efficient and dependable appliances for your everyday home</p>
+                <h2 className="text-2xl md:text-3xl font-bold text-gray-900">Appliances</h2>
+                <p className="text-xs sm:text-sm text-gray-500 mt-1">Energy-efficient and dependable appliances for your everyday home</p>
               </div>
             </div>
-            
+
             {loadingProducts ? (
-              <div className="flex justify-center py-12"><Spinner className={`w-8 h-8 ${isDark ? 'text-white' : 'text-gray-900'}`} /></div>
+              <div className="flex justify-center py-12"><Spinner className="w-8 h-8 text-gray-900" /></div>
             ) : appliances.length > 0 ? (
               <>
                 <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
                   {paginatedAppliances.map(product => (
-                    <div key={product.id} className={`rounded-xl overflow-hidden border transition-transform hover:-translate-y-1 ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-gray-200 shadow-sm'}`}>
-                      <div className="h-48 bg-gray-200 overflow-hidden relative">
+                    <div key={product.product_id || product.id} className="rounded-2xl overflow-hidden border bg-white border-gray-200 shadow-sm transition-all hover:-translate-y-1 hover:shadow-lg group cursor-pointer">
+                      <div className="h-48 bg-gray-100 overflow-hidden relative">
                         {product.image_url ? (
-                          <img src={product.image_url} alt={product.product_name} className="w-full h-full object-cover" />
-                        ) : (
-                          <div className="w-full h-full flex items-center justify-center text-gray-400 bg-gray-100 dark:bg-slate-700">No Image</div>
+                          <img
+                            src={product.image_url.startsWith('http') ? product.image_url : `${STORAGE_BASE || 'http://localhost:8000'}${product.image_url.startsWith('/') ? '' : '/storage/'}${product.image_url}`}
+                            alt={product.product_name}
+                            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                            onError={e => { e.target.style.display = 'none'; e.target.nextSibling.style.display = 'flex'; }}
+                          />
+                        ) : null}
+                        <div className={`w-full h-full flex items-center justify-center text-gray-300 font-medium bg-gradient-to-br from-gray-50 to-gray-100 ${product.image_url ? 'hidden' : 'flex'}`}>
+                          <svg viewBox="0 0 24 24" fill="none" className="w-12 h-12 opacity-30" stroke="currentColor"><rect x="4" y="4" width="16" height="16" rx="2"></rect><circle cx="12" cy="12" r="3"></circle></svg>
+                        </div>
+                        {product.discount_price && Number(product.discount_price) < Number(product.unit_price) && (
+                          <span className="absolute top-2 left-2 bg-red-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full">SALE</span>
                         )}
                       </div>
-                      <div className="p-4">
-                        <h3 className={`font-semibold mb-1 truncate ${isDark ? 'text-white' : 'text-gray-900'}`}>{product.product_name}</h3>
-                        <p className="text-emerald-500 font-bold">₱{Number(product.unit_price).toLocaleString()}</p>
+                      <div className="p-5">
+                        {product.brand && <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400 mb-1">{product.brand}</p>}
+                        <h3 className="font-bold mb-1 text-gray-900 leading-tight" title={product.product_name}>{product.product_name}</h3>
+                        {product.description && <p className="text-xs text-gray-400 mb-2 line-clamp-2">{product.description}</p>}
+                        <div className="flex items-center justify-between mt-2">
+                          <div>
+                            {product.discount_price && Number(product.discount_price) < Number(product.unit_price) ? (
+                              <>
+                                <p className="text-[#58B947] font-bold text-base">₱{Number(product.discount_price).toLocaleString()}</p>
+                                <p className="text-gray-400 text-xs line-through">₱{Number(product.unit_price).toLocaleString()}</p>
+                              </>
+                            ) : (
+                              <p className="text-[#58B947] font-bold text-base">₱{Number(product.unit_price).toLocaleString()}</p>
+                            )}
+                          </div>
+                          {product.stock_quantity !== undefined && (
+                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${product.stock_quantity > 0 ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-500'}`}>
+                              {product.stock_quantity > 0 ? `${product.stock_quantity} in stock` : 'Out of stock'}
+                            </span>
+                          )}
+                        </div>
                       </div>
                     </div>
                   ))}
@@ -698,37 +711,64 @@ export default function LoginPage() {
                 )}
               </>
             ) : (
-              <p className={`text-center py-10 ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>No appliances available at the moment.</p>
+              <p className="text-center py-10 text-gray-500">No appliances available at the moment.</p>
             )}
           </div>
         </section>
 
-        <section id="furniture" className={`px-4 md:px-16 py-16 ${isDark ? 'bg-[#090d16]' : 'bg-white'}`}>
+        <section id="furniture" className="px-4 md:px-16 py-16 bg-[#f5f3ed]">
           <div className="max-w-6xl mx-auto">
             <div className="flex items-center justify-between mb-8">
               <div>
-                <h2 className={`text-2xl md:text-3xl font-bold ${isDark ? 'text-white' : 'text-gray-900'}`}>Furniture</h2>
-                <p className="text-xs sm:text-sm text-muted-foreground mt-1">Comfortable, elegant, and stylish furniture crafted to elevate your home</p>
+                <h2 className="text-2xl md:text-3xl font-bold text-gray-900">Furniture</h2>
+                <p className="text-xs sm:text-sm text-gray-500 mt-1">Comfortable, elegant, and stylish furniture crafted to elevate your home</p>
               </div>
             </div>
-            
+
             {loadingProducts ? (
-              <div className="flex justify-center py-12"><Spinner className={`w-8 h-8 ${isDark ? 'text-white' : 'text-gray-900'}`} /></div>
+              <div className="flex justify-center py-12"><Spinner className="w-8 h-8 text-gray-900" /></div>
             ) : furniture.length > 0 ? (
               <>
                 <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
                   {paginatedFurniture.map(product => (
-                    <div key={product.id} className={`rounded-xl overflow-hidden border transition-transform hover:-translate-y-1 ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-gray-200 shadow-sm'}`}>
-                      <div className="h-48 bg-gray-200 overflow-hidden relative">
+                    <div key={product.product_id || product.id} className="rounded-2xl overflow-hidden border bg-white border-gray-200 shadow-sm transition-all hover:-translate-y-1 hover:shadow-lg group cursor-pointer">
+                      <div className="h-48 bg-gray-100 overflow-hidden relative">
                         {product.image_url ? (
-                          <img src={product.image_url} alt={product.product_name} className="w-full h-full object-cover" />
-                        ) : (
-                          <div className="w-full h-full flex items-center justify-center text-gray-400 bg-gray-100 dark:bg-slate-700">No Image</div>
+                          <img
+                            src={product.image_url.startsWith('http') ? product.image_url : `${STORAGE_BASE || 'http://localhost:8000'}${product.image_url.startsWith('/') ? '' : '/storage/'}${product.image_url}`}
+                            alt={product.product_name}
+                            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                            onError={e => { e.target.style.display = 'none'; e.target.nextSibling.style.display = 'flex'; }}
+                          />
+                        ) : null}
+                        <div className={`w-full h-full flex items-center justify-center text-gray-300 font-medium bg-gradient-to-br from-gray-50 to-gray-100 ${product.image_url ? 'hidden' : 'flex'}`}>
+                          <svg viewBox="0 0 24 24" fill="none" className="w-12 h-12 opacity-30" stroke="currentColor"><path d="M20 9V7a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v2"></path><path d="M22 13v6a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-6a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2z"></path></svg>
+                        </div>
+                        {product.discount_price && Number(product.discount_price) < Number(product.unit_price) && (
+                          <span className="absolute top-2 left-2 bg-red-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full">SALE</span>
                         )}
                       </div>
-                      <div className="p-4">
-                        <h3 className={`font-semibold mb-1 truncate ${isDark ? 'text-white' : 'text-gray-900'}`}>{product.product_name}</h3>
-                        <p className="text-emerald-500 font-bold">₱{Number(product.unit_price).toLocaleString()}</p>
+                      <div className="p-5">
+                        {product.brand && <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400 mb-1">{product.brand}</p>}
+                        <h3 className="font-bold mb-1 text-gray-900 leading-tight" title={product.product_name}>{product.product_name}</h3>
+                        {product.description && <p className="text-xs text-gray-400 mb-2 line-clamp-2">{product.description}</p>}
+                        <div className="flex items-center justify-between mt-2">
+                          <div>
+                            {product.discount_price && Number(product.discount_price) < Number(product.unit_price) ? (
+                              <>
+                                <p className="text-[#58B947] font-bold text-base">₱{Number(product.discount_price).toLocaleString()}</p>
+                                <p className="text-gray-400 text-xs line-through">₱{Number(product.unit_price).toLocaleString()}</p>
+                              </>
+                            ) : (
+                              <p className="text-[#58B947] font-bold text-base">₱{Number(product.unit_price).toLocaleString()}</p>
+                            )}
+                          </div>
+                          {product.stock_quantity !== undefined && (
+                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${product.stock_quantity > 0 ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-500'}`}>
+                              {product.stock_quantity > 0 ? `${product.stock_quantity} in stock` : 'Out of stock'}
+                            </span>
+                          )}
+                        </div>
                       </div>
                     </div>
                   ))}
@@ -746,10 +786,67 @@ export default function LoginPage() {
                 )}
               </>
             ) : (
-              <p className={`text-center py-10 ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>No furniture available at the moment.</p>
+              <p className="text-center py-10 text-gray-500">No furniture available at the moment.</p>
             )}
           </div>
         </section>
+
+        {/* Footer */}
+        <footer className="bg-[#0f1f3d] text-white px-4 md:px-16 py-12">
+          <div className="max-w-6xl mx-auto">
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-10 mb-10">
+              <div className="md:col-span-2">
+                <div className="flex items-center gap-3 mb-4">
+                  {companyLogo ? (
+                    <img src={getLogoUrl(companyLogo)} alt={companyName} style={{ height: '36px', width: 'auto', objectFit: 'contain' }} />
+                  ) : (
+                    <div className="w-9 h-9 rounded-xl bg-white flex items-center justify-center text-blue-600 font-black text-xl shadow-md shrink-0">Z</div>
+                  )}
+                  <span className="text-xl font-extrabold tracking-tight">{companyName || 'Z-LICZ'}</span>
+                </div>
+                <p className="text-sm text-white/50 leading-relaxed max-w-sm">
+                  Your trusted destination for premium home appliances and furniture. Elevate every corner of your home.
+                </p>
+                {companyAddress && (
+                  <p className="text-xs text-white/40 mt-4 flex items-center gap-1.5">
+                    <FiMapPin className="w-3 h-3 flex-shrink-0" /> {companyAddress}
+                  </p>
+                )}
+              </div>
+              <div>
+                <h4 className="font-bold text-sm mb-4 text-white/80 uppercase tracking-widest">Quick Links</h4>
+                <ul className="space-y-2 text-sm text-white/50">
+                  <li><a href="#home" className="hover:text-white transition-colors flex items-center gap-2"><FiHome className="w-3 h-3" /> Home</a></li>
+                  <li><a href="#appliances" className="hover:text-white transition-colors flex items-center gap-2"><FiPackage className="w-3 h-3" /> Appliances</a></li>
+                  <li><a href="#furniture" className="hover:text-white transition-colors flex items-center gap-2"><FiUsers className="w-3 h-3" /> Furniture</a></li>
+                  <li><a href="#about" className="hover:text-white transition-colors flex items-center gap-2"><FiUsers className="w-3 h-3" /> About Us</a></li>
+                  <li><a href="#support" className="hover:text-white transition-colors flex items-center gap-2"><FiShield className="w-3 h-3" /> Support</a></li>
+                </ul>
+              </div>
+              <div>
+                <h4 className="font-bold text-sm mb-4 text-white/80 uppercase tracking-widest">Contact</h4>
+                <ul className="space-y-2 text-sm text-white/50">
+                  {companyPhone && <li><a href={`tel:${companyPhone}`} className="hover:text-white transition-colors flex items-center gap-2"><FiPhone className="w-3 h-3" /> {companyPhone}</a></li>}
+                  {companyEmail && <li><a href={`mailto:${companyEmail}`} className="hover:text-white transition-colors flex items-center gap-2"><FiMail className="w-3 h-3" /> {companyEmail}</a></li>}
+                  {companyWebLinks && <li><a href={companyWebLinks} target="_blank" rel="noreferrer" className="hover:text-white transition-colors flex items-center gap-2"><FiGlobe className="w-3 h-3" /> Website</a></li>}
+                  {!companyPhone && !companyEmail && !companyWebLinks && <li className="text-white/30 text-xs italic">Contact details not configured</li>}
+                </ul>
+                <div className="mt-6">
+                  <button
+                    onClick={() => { setError(''); setActiveTab('login'); setIsLoginModalOpen(true); }}
+                    className="text-xs font-bold bg-blue-600 hover:bg-blue-500 px-4 py-2 rounded-lg transition-colors flex items-center gap-2"
+                  >
+                    <FiLogIn className="w-3.5 h-3.5" /> Sign In to Dashboard
+                  </button>
+                </div>
+              </div>
+            </div>
+            <div className="border-t border-white/10 pt-6 flex flex-col sm:flex-row justify-between items-center gap-3 text-xs text-white/30">
+              <span>© {new Date().getFullYear()} {companyName || 'Z-LICZ'}. All rights reserved.</span>
+              <span>Powered by Z-LICZ Management System</span>
+            </div>
+          </div>
+        </footer>
       </main>
 
       {isLoginModalOpen && (
@@ -788,10 +885,10 @@ export default function LoginPage() {
               <img
                 src={heroImg}
                 alt="Atmospheric interior"
-                className="absolute inset-0 w-full h-full object-cover object-center pointer-events-none opacity-40"
+                className="absolute inset-0 w-full h-full object-cover object-center pointer-events-none opacity-100"
               />
 
-              <div className="absolute inset-0 bg-gradient-to-t from-[#0b131e] via-[#0b131e]/80 to-[#0b131e]/30 pointer-events-none" />
+              <div className="absolute inset-0 bg-gradient-to-t from-[#0b131e]/80 via-[#0b131e]/40 to-transparent pointer-events-none" />
 
               <div className="relative z-10 flex items-center gap-2">
                 <span className="text-xs font-bold text-white/90 tracking-wider uppercase bg-black/60 backdrop-blur-md border border-white/10 px-3 py-1.5 rounded-lg shadow-sm">
@@ -948,7 +1045,7 @@ export default function LoginPage() {
                               'Please contact system administrator.'
                             )
                           }}
-                          className="text-xs text-black hover:text-gray-300 transition-colors cursor-pointer"
+                          className="text-xs text-slate-400 hover:text-slate-200 transition-colors cursor-pointer"
                         >
                           Forgot password?
                         </button>
@@ -1140,7 +1237,7 @@ export default function LoginPage() {
                         </select>
                         {signUpErrors.gender && <p className="text-[11px] text-rose-400 mt-1">{signUpErrors.gender}</p>}
                       </div>
-                      
+
                       <div>
                         <label className="block text-xs font-semibold text-slate-300 mb-1">Birthday</label>
                         <input
@@ -1542,6 +1639,78 @@ export default function LoginPage() {
                 CLOSE
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Contact Us Modal */}
+      {isContactModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-[fadeIn_0.15s_ease]">
+          <div className="absolute inset-0 cursor-pointer" onClick={() => setIsContactModalOpen(false)} />
+          <div className="relative w-full max-w-md bg-white rounded-3xl overflow-hidden shadow-2xl z-10 p-8 animate-[slideUp_0.2s_ease]">
+            <button
+              onClick={() => setIsContactModalOpen(false)}
+              className="absolute top-5 right-5 text-gray-400 hover:text-gray-900 transition-colors"
+            >
+              <FiX className="w-6 h-6" />
+            </button>
+            <h2 className="text-2xl font-bold text-gray-900 mb-2">Contact Support</h2>
+            <p className="text-sm text-gray-500 mb-6">Send us a message and we'll get back to you soon.</p>
+            
+            <form onSubmit={handleContactSubmit} className="space-y-4">
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-1">Your Name</label>
+                <input
+                  type="text"
+                  required
+                  value={contactForm.name}
+                  onChange={e => setContactForm({ ...contactForm, name: e.target.value })}
+                  className="w-full bg-gray-50 border border-gray-200 text-gray-900 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-[#58B947] transition-all"
+                  placeholder="John Doe"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-1">Email Address</label>
+                <input
+                  type="email"
+                  required
+                  value={contactForm.email}
+                  onChange={e => setContactForm({ ...contactForm, email: e.target.value })}
+                  className="w-full bg-gray-50 border border-gray-200 text-gray-900 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-[#58B947] transition-all"
+                  placeholder="john@example.com"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-1">Topic</label>
+                <select
+                  value={contactForm.topic}
+                  onChange={e => setContactForm({ ...contactForm, topic: e.target.value })}
+                  className="w-full bg-gray-50 border border-gray-200 text-gray-900 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-[#58B947] transition-all"
+                >
+                  <option value="General Inquiry">General Inquiry</option>
+                  <option value="Sales / Quotation">Sales / Quotation</option>
+                  <option value="Warranty Claim">Warranty Claim</option>
+                  <option value="Technical Support">Technical Support</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-1">Message</label>
+                <textarea
+                  required
+                  rows={4}
+                  value={contactForm.message}
+                  onChange={e => setContactForm({ ...contactForm, message: e.target.value })}
+                  className="w-full bg-gray-50 border border-gray-200 text-gray-900 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-[#58B947] transition-all resize-none"
+                  placeholder="How can we help you?"
+                />
+              </div>
+              <button
+                type="submit"
+                className="w-full bg-[#58B947] hover:bg-[#4da83d] text-white font-bold py-3 rounded-xl transition-all flex items-center justify-center gap-2 mt-2"
+              >
+                <FiMail className="w-5 h-5" /> Send Message
+              </button>
+            </form>
           </div>
         </div>
       )}

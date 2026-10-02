@@ -77,23 +77,22 @@ export default function BranchesPage() {
     setEditItem(b)
   }
 
-  const handleDelete = (id) => {
-    confirmAction({
-      title: 'Delete Branch',
-      message: 'Are you sure you want to delete this branch? This action cannot be undone.',
-      confirmText: 'Delete',
-      type: 'danger',
-      onConfirm: async () => {
-        try {
-          await api.branches.delete(id)
-          showToast('Branch deleted successfully', 'success')
-          loadData(true)
-          triggerDataSync('branches')
-        } catch (err) {
-          showToast(err.message || 'Failed to delete branch', 'error')
-        }
-      }
-    })
+  const handleDelete = async (id, name) => {
+    const confirmed = await confirmAction(
+      'Delete Branch',
+      `Are you sure you want to delete "${name || 'this branch'}"? This action cannot be undone.`,
+      'Yes, Delete'
+    )
+    if (!confirmed) return
+
+    try {
+      await api.branches.delete(id)
+      showToast('Branch deleted successfully', 'success')
+      loadData(true)
+      triggerDataSync('branches')
+    } catch (err) {
+      showToast(err.message || 'Failed to delete branch', 'error')
+    }
   }
 
   const handleEditSubmit = async (e) => {
@@ -231,7 +230,7 @@ export default function BranchesPage() {
                     <TD className="text-right">
                       <div className="flex items-center justify-end gap-2">
                         <Btn size="sm" variant="outline" icon={<FiEdit />} onClick={() => openEdit(b)}>Edit</Btn>
-                        <Btn size="sm" variant="danger-outline" icon={<FiTrash2 />} onClick={() => handleDelete(b.id)} />
+                        <Btn size="sm" variant="danger-outline" icon={<FiTrash2 />} onClick={() => handleDelete(b.id, b.name)} />
                       </div>
                     </TD>
                   </TR>

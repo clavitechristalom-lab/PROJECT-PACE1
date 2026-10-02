@@ -23,6 +23,39 @@ class SupportMessageController extends Controller
         return response()->json(['messages' => $messages]);
     }
 
+    public function storePublic(Request $request)
+    {
+        $validated = $request->validate([
+            'name' => 'required|string|max:255',
+            'email' => 'required|email|max:255',
+            'topic' => 'required|string|max:255',
+            'message' => 'required|string',
+        ]);
+
+        $formattedMessage = "From: {$validated['name']} ({$validated['email']})\n\n{$validated['message']}";
+
+        $msg = SupportMessage::create([
+            'customer_id' => \App\Models\Customer::first()->customer_id ?? null,
+            'topic' => $validated['topic'],
+            'message' => $formattedMessage,
+            'status' => 'Pending',
+        ]);
+
+        $notificationData = [
+            'type' => 'support_message',
+            'title' => 'New Public Support Message',
+            'message' => "{$validated['name']} sent a support message regarding '{$msg->topic}'.",
+            'module' => 'Support',
+            'action_url' => '/support',
+            'priority' => 'normal',
+        ];
+
+        NotificationService::sendToAdmins($notificationData);
+        NotificationService::sendToStoreAdmins($notificationData);
+
+        return response()->json(['success' => true, 'message' => 'Message sent successfully.']);
+    }
+
     public function store(Request $request)
     {
         $validated = $request->validate([

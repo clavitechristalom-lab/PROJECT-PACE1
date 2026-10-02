@@ -835,6 +835,11 @@ class EmployeeController extends Controller
                     'lunch_out' => $todayAttendance->lunch_out,
                     'lunch_in' => $todayAttendance->lunch_in,
                 ] : null,
+                'profile_image' => $user->profile_image
+                    ? (str_starts_with($user->profile_image, 'http')
+                        ? $user->profile_image
+                        : url('storage/' . $user->profile_image))
+                    : null,
             ],
         ]);
     }

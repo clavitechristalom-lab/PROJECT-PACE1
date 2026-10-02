@@ -30,6 +30,8 @@ Route::post('/login', [AuthController::class, 'login']);
 Route::post('/register', [AuthController::class, 'register']);
 Route::get('/registration-options', [AuthController::class, 'registrationOptions']);
 Route::get('/public/products', [ProductController::class, 'indexPublic']);
+Route::get('/public/settings', [SystemController::class, 'settings']);
+Route::post('/public/support-messages', [\App\Http\Controllers\SupportMessageController::class, 'storePublic']);
 
 // ─── Protected Routes (Sanctum Authenticated) ─────────────────────────────────
 Route::middleware('auth:sanctum')->group(function () {

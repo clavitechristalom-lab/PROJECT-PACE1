@@ -418,10 +418,12 @@ export default function ProfileModal({ open, isOpen, onClose }) {
                 <div className="flex items-center gap-4 p-4 bg-muted/20 rounded-2xl border border-border">
                   <div className="relative group shrink-0">
                     <div className="w-16 h-16 rounded-2xl bg-primary/10 border border-primary/20 flex items-center justify-center text-primary text-2xl shadow-2xs overflow-hidden relative">
-                      {user?.profile_image ? (
-                        <img src={user.profile_image} alt="Profile" className="w-full h-full object-cover" />
+                      {(employee?.profile_image || user?.profile_image) ? (
+                        <img src={employee?.profile_image || user?.profile_image} alt="Profile" className="w-full h-full object-cover" />
                       ) : (
-                        <FiUser className="w-8 h-8" />
+                        <span className="text-lg font-bold">
+                          {employee?.first_name?.[0]}{employee?.last_name?.[0]}
+                        </span>
                       )}
 
                       {/* Upload Overlay */}

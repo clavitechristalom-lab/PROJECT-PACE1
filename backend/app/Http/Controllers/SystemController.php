@@ -629,6 +629,11 @@ class SystemController extends Controller
             'tax_id'       => '',
             'web_links'    => '',
             'logo'         => '',
+            'total_products' => \App\Models\Product::count(),
+            'total_customers' => \App\Models\Customer::count(),
+            'total_branches' => \App\Models\BranchProfile::count(),
+            'total_appliances' => \App\Models\Product::where('category', 'Appliances')->count(),
+            'total_furniture' => \App\Models\Product::where('category', 'Furniture')->count(),
         ], $settings->toArray()));
     }
 

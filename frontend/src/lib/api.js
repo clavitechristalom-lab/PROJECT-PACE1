@@ -536,6 +536,7 @@ export const api = {
       return request(`/notifications${qs ? `?${qs}` : ''}`);
     },
     getSettings: () => request('/settings'),
+    getPublicSettings: () => request('/public/settings'),
     saveSettings: (data) => {
       const isFormData = data instanceof FormData;
       return request('/settings', {
@@ -615,6 +616,7 @@ export const api = {
   supportMessages: {
     getAll: () => request('/support-messages'),
     create: (data) => request('/support-messages', { method: 'POST', body: JSON.stringify(data) }),
+    createPublic: (data) => request('/public/support-messages', { method: 'POST', body: JSON.stringify(data) }),
     update: (id, data) => request(`/support-messages/${id}`, { method: 'PUT', body: JSON.stringify(typeof data === 'string' ? { status: data } : data) }),
     delete: (id) => request(`/support-messages/${id}`, { method: 'DELETE' }),
   },

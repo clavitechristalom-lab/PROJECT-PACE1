@@ -967,8 +967,12 @@ export default function AttendancePage() {
                 <span className="text-[10px] uppercase tracking-widest text-amber-300 font-bold">PERMANENT ATTENDANCE BADGE</span>
                 <h4 className="text-xs text-slate-400 font-medium mt-0.5">Official Company ID</h4>
 
-                <div className="w-16 h-16 rounded-2xl bg-slate-800 border-2 border-primary/40 flex items-center justify-center text-primary font-bold text-2xl my-3 shadow-inner">
-                  {myProfile.first_name?.[0]}{myProfile.last_name?.[0]}
+                <div className="w-20 h-20 rounded-2xl bg-slate-800 border-2 border-primary/40 flex items-center justify-center text-primary font-bold text-2xl my-3 shadow-inner overflow-hidden">
+                  {myProfile.profile_image ? (
+                    <img src={myProfile.profile_image} alt={`${myProfile.first_name} ${myProfile.last_name}`} className="w-full h-full object-cover" />
+                  ) : (
+                    <span>{myProfile.first_name?.[0]}{myProfile.last_name?.[0]}</span>
+                  )}
                 </div>
 
                 <h3 className="font-bold text-lg text-white leading-tight">
