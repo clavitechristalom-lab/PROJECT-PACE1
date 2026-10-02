@@ -1,2 +1,0 @@
-<?php
-// Placeholder comment - wait, ProfileModal is JSX!
