@@ -9,9 +9,18 @@ use App\Models\Employee;
 use App\Models\SystemLog;
 use Illuminate\Support\Facades\Hash;
 use App\Services\NotificationService;
+use App\Services\AttendanceSchedule;
 
 class AttendanceController extends Controller
 {
+    /**
+     * Official work schedule (Time In / Cut Off / Lunch Out / Lunch In / Time Out).
+     */
+    public function schedule()
+    {
+        return response()->json(['schedule' => AttendanceSchedule::toArray()]);
+    }
+
     /**
      * List attendance records with role-based scoping and filters.
      */
@@ -120,7 +129,7 @@ class AttendanceController extends Controller
             $scanner = $a->scannedBy;
             $verifiedBy = $a->verified_by_name ?: ($scanner ? "Store Administrator ({$scanner->username})" : 'Store Administrator');
 
-            return [
+            return array_merge([
                 'attendance_id' => $a->attendance_id,
                 'employee_id' => $a->employee_id,
                 'employee_name' => $emp ? "{$emp->first_name} {$emp->last_name}" : 'Employee',
@@ -129,10 +138,6 @@ class AttendanceController extends Controller
                 'position' => $emp ? $emp->position : '',
                 'branch' => $emp && $emp->branch ? $emp->branch->name : '',
                 'attendance_date' => $a->attendance_date,
-                'time_in' => $a->time_in ? date('h:i A', strtotime($a->time_in)) : '',
-                'time_out' => $a->time_out ? date('h:i A', strtotime($a->time_out)) : '',
-                'time_in_raw' => $a->time_in ? date('H:i', strtotime($a->time_in)) : '',
-                'time_out_raw' => $a->time_out ? date('H:i', strtotime($a->time_out)) : '',
                 'regular_hours' => round($regularHours, 2),
                 'total_hours' => (float)$a->total_hours,
                 'overtime_hours' => (float)$a->overtime_hours,
@@ -140,12 +145,13 @@ class AttendanceController extends Controller
                 'verification_method' => $a->verification_method ?? 'QR + PIN',
                 'verified_by' => $verifiedBy,
                 'remarks' => $a->remarks ?? '',
-            ];
+            ], AttendanceSchedule::present($a));
         });
 
         return response()->json([
             'attendance' => $records,
             'total' => $records->count(),
+            'schedule' => AttendanceSchedule::toArray(),
         ]);
     }
 
@@ -170,20 +176,18 @@ class AttendanceController extends Controller
             ->orderByDesc('attendance_date')
             ->get()
             ->map(function ($a) {
-                $regular = max(0, (float)$a->total_hours - (float)$a->overtime_hours);
-                return [
+                $p = AttendanceSchedule::present($a);
+                foreach (['time_in', 'lunch_out', 'lunch_in', 'time_out'] as $k) {
+                    if ($p[$k] === '') $p[$k] = '—';
+                }
+                return array_merge([
                     'attendance_id' => $a->attendance_id,
                     'attendance_date' => $a->attendance_date,
-                    'time_in' => $a->time_in ? date('h:i A', strtotime($a->time_in)) : '—',
-                    'time_out' => $a->time_out ? date('h:i A', strtotime($a->time_out)) : '—',
-                    'regular_hours' => round($regular, 2),
-                    'overtime_hours' => (float)$a->overtime_hours,
-                    'total_hours' => (float)$a->total_hours,
                     'status' => $a->status,
                     'verification_method' => $a->verification_method ?? 'QR + PIN',
                     'verified_by' => $a->verified_by_name ?? 'Store Administrator',
                     'remarks' => $a->remarks ?? '',
-                ];
+                ], $p);
             });
 
         $presentCount = $history->whereIn('status', ['Present', 'Late', 'COMPLETE'])->count();
@@ -192,17 +196,14 @@ class AttendanceController extends Controller
         $totalOT = (float)$history->sum('overtime_hours');
 
         return response()->json([
-            'today' => $todayRecord ? [
+            'schedule' => AttendanceSchedule::toArray(),
+            'today' => $todayRecord ? array_merge([
                 'attendance_id' => $todayRecord->attendance_id,
                 'attendance_date' => $todayRecord->attendance_date,
-                'time_in' => $todayRecord->time_in ? date('h:i A', strtotime($todayRecord->time_in)) : '—',
-                'time_out' => $todayRecord->time_out ? date('h:i A', strtotime($todayRecord->time_out)) : '—',
-                'regular_hours' => round(max(0, (float)$todayRecord->total_hours - (float)$todayRecord->overtime_hours), 2),
-                'overtime_hours' => (float)$todayRecord->overtime_hours,
-                'total_hours' => (float)$todayRecord->total_hours,
                 'status' => $todayRecord->status,
                 'verification_method' => $todayRecord->verification_method ?? 'QR + PIN',
-            ] : null,
+                'next_action' => AttendanceSchedule::nextAction($todayRecord, now()),
+            ], AttendanceSchedule::present($todayRecord)) : null,
             'attendance' => $history,
             'total' => $history->count(),
             'stats' => [
@@ -473,17 +474,8 @@ class AttendanceController extends Controller
             ->where('attendance_date', $today)
             ->first();
 
-        // Auto-determine next action for Employee
-        if (!$record) {
-            $action = 'TIME_IN';
-        } elseif ($record->time_out) {
-            $action = 'COMPLETED';
-        } elseif ($record->lunch_out && !$record->lunch_in) {
-            $action = 'LUNCH_IN';
-        } else {
-            if (!$record->lunch_out) $action = 'LUNCH_OUT';
-            else $action = 'TIME_OUT';
-        }
+        // Auto-determine next action for Employee based on schedule
+        $action = AttendanceSchedule::nextAction($record, now());
 
         return response()->json([
             'success' => true,
@@ -601,73 +593,29 @@ class AttendanceController extends Controller
             ->where('attendance_date', $today)
             ->first();
 
-        // Auto-determine next action for Employee
-        if (!$record) {
-            $action = 'TIME_IN';
-        } elseif ($record->time_out) {
+        // Auto-determine next action for Employee based on schedule
+        $action = AttendanceSchedule::nextAction($record, $scanTime);
+        if ($action === 'COMPLETED') {
             $log->update(['status' => 'FAILED', 'failure_reason' => 'Attendance already completed today.']);
-            return response()->json(['success' => false, 'message' => 'TIME IN ALREADY RECORDED. Attendance already completed for today.'], 400);
-        } elseif ($record->lunch_out && !$record->lunch_in) {
-            $action = 'LUNCH_IN';
-        } else {
-            if (!$record->lunch_out) $action = 'LUNCH_OUT';
-            else $action = 'TIME_OUT';
+            return response()->json(['success' => false, 'message' => 'Attendance already completed for today (Time Out recorded).'], 400);
         }
         
         \Illuminate\Support\Facades\DB::beginTransaction();
         try {
-            // Apply Action
             if ($action === 'TIME_IN') {
                 $record = new \App\Models\Attendance();
                 $record->employee_id = $employee->employee_id;
                 $record->scanned_by = $user->user_id;
-                $record->attendance_date = $today;
-                $record->time_in = $now;
                 $record->qr_scan_in = 'QR_PIN_VERIFIED';
                 $record->verification_method = 'QR + PIN';
                 $record->verified_by_name = "Store Administrator";
                 $record->device_info = $deviceInfo;
                 $record->ip_address = $request->ip();
-                $record->total_hours = 0;
-                $record->overtime_hours = 0;
-                
-                $hour = (int)$scanTime->format('H');
-                $min = (int)$scanTime->format('i');
-                if ($hour > 8 || ($hour === 8 && $min > 15)) {
-                    $record->status = 'Late';
-                } else {
-                    $record->status = 'Present';
-                }
-                
-                $record->save();
-            } else if ($action === 'LUNCH_OUT') {
-                $record->lunch_out = $now;
-                $record->save();
-            } else if ($action === 'LUNCH_IN') {
-                $record->lunch_in = $now;
-                $record->save();
-            } else if ($action === 'TIME_OUT') {
-                $record->time_out = $now;
+            } elseif ($action === 'TIME_OUT') {
                 $record->qr_scan_out = 'QR_PIN_VERIFIED';
                 $record->verified_by_name = "Store Administrator";
-                
-                // Calc hours
-                $inDateTime = strtotime($record->attendance_date . ' ' . $record->time_in);
-                $outDateTime = strtotime($today . ' ' . $now);
-                $totalSeconds = max(0, $outDateTime - $inDateTime);
-                
-                $lunchSeconds = 0;
-                if ($record->lunch_out && $record->lunch_in) {
-                    $lunchSeconds = max(0, strtotime($record->attendance_date.' '.$record->lunch_in) - strtotime($record->attendance_date.' '.$record->lunch_out));
-                }
-                
-                $workedSeconds = $totalSeconds - $lunchSeconds;
-                $diffHours = round(max(0, $workedSeconds / 3600), 2);
-                $record->total_hours = $diffHours;
-                $record->overtime_hours = max(0, round($diffHours - 8, 2));
-                $record->status = 'COMPLETE';
-                $record->save();
             }
+            AttendanceSchedule::applyAction($record, $action, $scanTime);
 
             // Update Log
             $log->update([
@@ -687,6 +635,8 @@ class AttendanceController extends Controller
                     'employee_code' => $employee->employee_code
                 ],
                 'branch' => $storeAdminBranch,
+                'status' => $record->status,
+                'late_minutes' => AttendanceSchedule::lateMinutes($today, $record->time_in),
                 'total_hours' => $record->total_hours ?? 0,
                 'overtime_hours' => $record->overtime_hours ?? 0,
                 'message' => "Attendance recorded. Action: " . str_replace('_', ' ', $action),
@@ -710,7 +660,7 @@ class AttendanceController extends Controller
 
         if ($user && in_array($user->role, ['Store Administrator', 'Store Admin'])) {
             $branch = $user->employee ? $user->employee->branch_id : null;
-            $query->where('branch_id', $branch);
+            $query->where('branch', $branch);
         }
 
         if ($request->filled('date')) {
@@ -734,7 +684,7 @@ class AttendanceController extends Controller
                        ->orWhere('employee_code', 'like', "%{$s}%");
                 })->orWhere('qr_token_scanned', 'like', "%{$s}%")
                   ->orWhere('failure_reason', 'like', "%{$s}%")
-                  ->orwhere('branch_id', 'like', "%{$s}%");
+                  ->orWhere('branch', 'like', "%{$s}%");
             });
         }
 
@@ -870,72 +820,27 @@ class AttendanceController extends Controller
             ->where('attendance_date', $today)
             ->first();
 
-        // Auto-determine next action for Employee
-        if (!$record) {
-            $action = 'TIME_IN';
-        } elseif ($record->time_out) {
+        // Auto-determine next action for Employee based on schedule
+        $action = AttendanceSchedule::nextAction($record, $scanTime);
+        if ($action === 'COMPLETED') {
             $log->update(['status' => 'FAILED', 'failure_reason' => 'Attendance already completed today.']);
             return response()->json(['success' => false, 'message' => 'Attendance already completed for today.'], 400);
-        } elseif ($record->lunch_out && !$record->lunch_in) {
-            $action = 'LUNCH_IN';
-        } else {
-            // Default to TIME_OUT or next logical break
-            if (!$record->lunch_out) $action = 'LUNCH_OUT';
-            else $action = 'TIME_OUT';
         }
 
-        // Apply Action
         if ($action === 'TIME_IN') {
             $record = new \App\Models\Attendance();
             $record->employee_id = $employee->employee_id;
             $record->scanned_by = $log->scanned_by;
-            $record->attendance_date = $today;
-            $record->time_in = $now;
             $record->qr_scan_in = 'QR_PIN_VERIFIED';
             $record->verification_method = 'QR + PIN (Authorized by Employee)';
             $record->verified_by_name = "{$employee->first_name} {$employee->last_name}";
             $record->device_info = $log->device_info;
             $record->ip_address = $log->ip_address;
-            $record->total_hours = 0;
-            $record->overtime_hours = 0;
-            
-            $hour = (int)$scanTime->format('H');
-            $min = (int)$scanTime->format('i');
-            if ($hour > 8 || ($hour === 8 && $min > 15)) {
-                $record->status = 'Late';
-            } else {
-                $record->status = 'Present';
-            }
-            
-            $record->save();
-        } else if ($action === 'LUNCH_OUT') {
-            $record->lunch_out = $now;
-            $record->save();
-        } else if ($action === 'LUNCH_IN') {
-            $record->lunch_in = $now;
-            $record->save();
-        } else if ($action === 'TIME_OUT') {
-            $record->time_out = $now;
+        } elseif ($action === 'TIME_OUT') {
             $record->qr_scan_out = 'QR_PIN_VERIFIED';
             $record->verified_by_name = "{$employee->first_name} {$employee->last_name}";
-            
-            // Calc hours
-            $inDateTime = strtotime($record->attendance_date . ' ' . $record->time_in);
-            $outDateTime = strtotime($today . ' ' . $now);
-            $totalSeconds = max(0, $outDateTime - $inDateTime);
-            
-            $lunchSeconds = 0;
-            if ($record->lunch_out && $record->lunch_in) {
-                $lunchSeconds = max(0, strtotime($record->attendance_date.' '.$record->lunch_in) - strtotime($record->attendance_date.' '.$record->lunch_out));
-            }
-            
-            $workedSeconds = $totalSeconds - $lunchSeconds;
-            $diffHours = round(max(0, $workedSeconds / 3600), 2);
-            $record->total_hours = $diffHours;
-            $record->overtime_hours = max(0, round($diffHours - 8, 2));
-            $record->status = 'COMPLETE';
-            $record->save();
         }
+        AttendanceSchedule::applyAction($record, $action, $scanTime);
 
         // Update Log
         $log->update([

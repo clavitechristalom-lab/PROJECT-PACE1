@@ -68,17 +68,21 @@ async function request(endpoint, options = {}) {
 }
 
 export const api = {
-  // ─── Branches ───
   branches: {
     getAll: () => request('/branches'),
+    getById: (id) => request(`/branches/${id}`),
     create: (data) => request('/branches', {
       method: 'POST',
       body: JSON.stringify(data),
     }),
-    update: (id, data) => request(`/branches/${id}`, {
-      method: 'PUT',
-      body: JSON.stringify(data),
-    }),
+    update: (id, data) => {
+      const isForm = data instanceof FormData;
+      if (isForm && !data.has('_method')) data.append('_method', 'PUT');
+      return request(`/branches/${id}`, {
+        method: isForm ? 'POST' : 'PUT',
+        body: isForm ? data : JSON.stringify(data),
+      });
+    },
     uploadImage: (id, formData) => request(`/branches/${id}/image`, {
       method: 'POST',
       body: formData,
@@ -377,10 +381,12 @@ export const api = {
         records: attData?.attendance || attData?.records || [],
         attendance: attData?.attendance || attData?.records || [],
         total: attData?.total || 0,
+        schedule: attData?.schedule || null,
         summary: summaryData?.summary || summaryData || null,
         stats: summaryData || null,
       };
     },
+    getSchedule: () => request('/attendance/schedule'),
     getSummary: (params = {}) => {
       const qs = new URLSearchParams(cleanParams(params)).toString();
       return request(`/attendance/summary${qs ? `?${qs}` : ''}`);
@@ -516,6 +522,7 @@ export const api = {
       request(`/users/${id}/revoke-verification`, {
         method: 'POST',
       }),
+    getSystemStats: () => request('/system-stats'),
     getLogs: (params = {}) => {
       const qs = new URLSearchParams(cleanParams(params)).toString();
       return request(`/system-logs${qs ? `?${qs}` : ''}`);
@@ -536,6 +543,7 @@ export const api = {
       return request(`/notifications${qs ? `?${qs}` : ''}`);
     },
     getSettings: () => request('/settings'),
+    getStorage: () => request('/system/storage'),
     getPublicSettings: () => request('/public/settings'),
     saveSettings: (data) => {
       const isFormData = data instanceof FormData;

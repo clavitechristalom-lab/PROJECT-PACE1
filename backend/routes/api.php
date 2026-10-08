@@ -42,6 +42,7 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // Branches
     Route::get('/branches', [BranchController::class, 'index']);
+    Route::get('/branches/{id}', [BranchController::class, 'show']);
     Route::post('/branches', [BranchController::class, 'store']);
     Route::put('/branches/{id}', [BranchController::class, 'update']);
     Route::delete('/branches/{id}', [BranchController::class, 'destroy']);
@@ -125,6 +126,7 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // ─── Attendance Records & Summary (Scoped by Role) ───────────────────────────
     Route::get('/attendance', [AttendanceController::class, 'index']);
+    Route::get('/attendance/schedule', [AttendanceController::class, 'schedule']);
     Route::get('/attendance/summary', [AttendanceController::class, 'summary']);
     Route::get('/attendance/scan-logs', [AttendanceController::class, 'scanLogs']);
 
@@ -206,6 +208,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/admin/users/{id}/verify', [SystemController::class, 'verifyUser']);
         Route::post('/admin/users/{id}/revoke-verification', [SystemController::class, 'revokeUserVerification']);
         Route::get('/system-logs', [SystemController::class, 'logs']);
+        Route::get('/system-stats', [SystemController::class, 'systemStats']);
         Route::get('/backups', [SystemController::class, 'backups']);
         Route::post('/backups/create', [SystemController::class, 'createBackup']);
         Route::post('/backups/{id}/restore', [SystemController::class, 'restoreBackup']);
@@ -214,6 +217,7 @@ Route::middleware('auth:sanctum')->group(function () {
     
     // ─── Settings ──────────────────────────────────────────────────────────
     Route::get('/settings', [SystemController::class, 'settings']);
+    Route::get('/system/storage', [SystemController::class, 'storage']);
 
     // ─── Notifications ──────────────────────────────────────────────────────────
     Route::get('/notifications', [NotificationController::class, 'index']);

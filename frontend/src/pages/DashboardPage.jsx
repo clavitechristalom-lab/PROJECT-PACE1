@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
+  BarChart, Bar, ComposedChart, Area, Line, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, PieChart, Pie, Cell, Legend,
 } from 'recharts'
 import {
@@ -540,22 +540,65 @@ function AdminBusinessDashboard() {
       {/* ─── SECTION 4: CHARTS SECTION ─── */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         {/* Sales & Collections Trend Chart */}
-        <Card className="lg:col-span-2">
-          <CardHeader title="Revenue & Collections Trend" />
-          <div className="h-64 w-full pt-4">
+        {/* Sales & Collections Trend Chart */}
+        <div className="lg:col-span-2 rounded-[24px] bg-card border border-border overflow-hidden p-6 relative">
+          <div className="mb-8 relative z-10">
+            <h4 className="text-[10px] font-bold text-primary tracking-widest uppercase mb-1">Performance</h4>
+            <h3 className="text-xl font-bold text-foreground mb-1">Revenue overview</h3>
+            <p className="text-xs text-muted-foreground">Sales and collections across selected timeframe</p>
+          </div>
+          
+          <div className="h-64 w-full relative z-10">
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={charts?.sales_trend || []}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#88888820" />
-                <XAxis dataKey="month" tick={{ fontSize: 11 }} />
-                <YAxis tick={{ fontSize: 11 }} tickFormatter={v => `₱${(v / 1000).toFixed(0)}k`} />
-                <Tooltip formatter={v => fmt(v)} />
-                <Legend />
-                <Bar dataKey="sales" fill="#10b981" name="Sales (PHP)" radius={[4, 4, 0, 0]} />
-                <Bar dataKey="collections" fill="#2563eb" name="Collections (PHP)" radius={[4, 4, 0, 0]} />
-              </BarChart>
+              <ComposedChart data={charts?.sales_trend || []} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                <defs>
+                  <linearGradient id="colorSales" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#4F8AFF" stopOpacity={0.3}/>
+                    <stop offset="95%" stopColor="#4F8AFF" stopOpacity={0}/>
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="0" vertical={false} stroke="#64748b30" />
+                <XAxis 
+                  dataKey="month" 
+                  tick={{ fill: '#64748b', fontSize: 11 }} 
+                  axisLine={false} 
+                  tickLine={false} 
+                  dy={10}
+                />
+                <YAxis 
+                  tick={{ fill: '#64748b', fontSize: 11 }} 
+                  tickFormatter={v => `₱${(v / 1000).toFixed(0)}k`} 
+                  axisLine={false} 
+                  tickLine={false} 
+                  dx={-10}
+                />
+                <Tooltip 
+                  contentStyle={{ backgroundColor: '#0f172a', borderColor: '#1e293b', borderRadius: '12px', color: '#f8fafc' }}
+                  itemStyle={{ color: '#e2e8f0' }}
+                  formatter={v => `₱${v.toLocaleString()}`} 
+                />
+                <Area 
+                  type="monotone" 
+                  dataKey="sales" 
+                  stroke="#4F8AFF" 
+                  strokeWidth={3}
+                  fillOpacity={1} 
+                  fill="url(#colorSales)" 
+                  name="Sales"
+                />
+                <Line 
+                  type="monotone" 
+                  dataKey="collections" 
+                  stroke="#2dd4bf" 
+                  strokeWidth={3}
+                  strokeDasharray="5 5" 
+                  dot={false}
+                  name="Collections"
+                />
+              </ComposedChart>
             </ResponsiveContainer>
           </div>
-        </Card>
+        </div>
 
         {/* Installment Status Distribution */}
         <Card>

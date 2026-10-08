@@ -74,13 +74,13 @@ export default function BranchCarousel({ branches, selectedBranch, onSelect }) {
               >
                 {/* Background Image */}
                 <div 
-                  className="absolute inset-0 bg-cover bg-center transition-transform duration-700 group-hover:scale-110 opacity-60"
+                  className="absolute inset-0 bg-cover bg-center transition-transform duration-700 group-hover:scale-110 opacity-100"
                   style={{ backgroundImage: `url(${b.image || 'https://picsum.photos/400/300'})` }}
                 />
                 
                 {/* Gradient Overlay */}
                 <div className={`absolute inset-0 transition-opacity duration-300
-                  ${isSelected ? 'bg-blue-900/40' : 'bg-slate-900/60 group-hover:bg-slate-900/40'}
+                  ${isSelected ? 'bg-blue-500/10' : 'bg-black/0 group-hover:bg-black/10'}
                 `} />
 
                 {/* Badge if selected */}

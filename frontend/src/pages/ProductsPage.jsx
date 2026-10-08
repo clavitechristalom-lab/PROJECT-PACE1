@@ -200,15 +200,18 @@ export default function ProductsPage({ branchFilter, embedded }) {
     }
   }
 
-  const handleDelete = async () => {
-    if (!deleteItem) return
-    const confirmed = await confirmAction('Delete Product?', `Are you sure you want to delete ${deleteItem.product_name}? This cannot be undone.`, 'Yes, Delete')
+  const handleDelete = async (product) => {
+    const target = product || deleteItem
+    if (!target) return
+    
+    // Trigger SweetAlert directly, this connects straight to the backend logic below!
+    const confirmed = await confirmAction('Delete Product?', `Are you sure you want to delete ${target.product_name}? This cannot be undone.`, 'DELETE')
     if (!confirmed) return
 
     setSaving(true)
     try {
-      await api.products.delete(deleteItem.product_id)
-      setProducts(prev => prev.filter(p => p.product_id !== deleteItem.product_id))
+      await api.products.delete(target.product_id)
+      setProducts(prev => prev.filter(p => p.product_id !== target.product_id))
       triggerDataSync('products')
       showToast('Product deleted successfully', 'success')
       setDeleteItem(null)
@@ -538,7 +541,7 @@ export default function ProductsPage({ branchFilter, embedded }) {
                               <FiTag className="w-3.5 h-3.5" />
                             </button>
                             <button
-                              onClick={() => setDeleteItem(p)}
+                              onClick={() => handleDelete(p)}
                               title="Delete product"
                               className="p-1.5 rounded-lg border border-border hover:bg-rose-50 hover:text-rose-600 dark:hover:bg-rose-950/40 text-muted-foreground transition-colors cursor-pointer"
                             >
@@ -926,18 +929,6 @@ export default function ProductsPage({ branchFilter, embedded }) {
             </div>
           </div>
         </Modal>
-      )}
-
-      {/* Delete confirmation */}
-      {deleteItem && (
-        <ConfirmDialog
-          title="Delete Product"
-          message={`Are you sure you want to delete "${deleteItem.product_name}" (${deleteItem.product_code})? This action cannot be undone.`}
-          confirmLabel={saving ? "Deleting..." : "Delete Product"}
-          danger
-          onConfirm={handleDelete}
-          onCancel={() => setDeleteItem(null)}
-        />
       )}
     </div>
   )

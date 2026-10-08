@@ -1,26 +1,52 @@
 import Swal from 'sweetalert2'
 
-// Base styling configuration to match the app's aesthetic
 const baseConfig = {
   customClass: {
-    popup: 'bg-card border border-border rounded-2xl shadow-xl p-3 sm:p-4',
-    title: 'text-foreground font-extrabold text-xl sm:text-2xl',
-    htmlContainer: 'text-muted-foreground text-sm sm:text-base mt-2',
-    actions: 'flex gap-3 mt-6',
-    confirmButton: 'inline-flex items-center justify-center gap-1.5 font-medium rounded-xl cursor-pointer transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 shadow-2xs px-5 py-2.5 text-sm bg-primary text-primary-foreground hover:bg-primary/90',
-    cancelButton: 'inline-flex items-center justify-center gap-1.5 font-medium rounded-xl cursor-pointer transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 px-5 py-2.5 text-sm bg-muted text-muted-foreground hover:bg-muted/80',
+    popup: '!bg-[#f5eff7]/95 dark:!bg-[#1c1825]/95 !backdrop-blur-xl border border-white/40 dark:border-white/10 !rounded-2xl shadow-xl p-6 sm:p-8',
+    title: 'hidden',
+    htmlContainer: '!m-0 !p-0',
+    actions: 'flex gap-4 mt-8 justify-center w-full',
+    confirmButton: 'inline-flex items-center justify-center font-bold !rounded-full cursor-pointer transition-transform hover:scale-105 active:scale-95 px-8 py-2.5 text-[15px] bg-[#007aff] text-white shadow-sm border-none uppercase',
+    cancelButton: 'inline-flex items-center justify-center font-bold !rounded-full cursor-pointer transition-transform hover:scale-105 active:scale-95 px-8 py-2.5 text-[15px] bg-[#dce0e5] hover:bg-[#cfd4db] dark:bg-[#2f2b3b] dark:hover:bg-[#3a3547] text-slate-900 dark:text-white shadow-sm border-none',
   },
   buttonsStyling: false,
-  background: 'hsl(var(--card))',
-  color: 'hsl(var(--foreground))',
+  background: 'transparent',
+  color: 'inherit',
+  showClass: {
+    popup: 'animate-[fadeIn_0.2s_ease-out]'
+  },
+  hideClass: {
+    popup: 'animate-[fadeOut_0.2s_ease-in]'
+  }
+}
+
+const buildHtml = (title, text, type = 'success') => {
+  const isSuccess = type === 'success';
+  const iconSvg = isSuccess 
+    ? `<svg class="w-12 h-12 mx-auto text-[#007aff]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>`
+    : `<svg class="w-12 h-12 mx-auto text-black dark:text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>`;
+
+  return `
+    <div class="flex flex-col items-center pt-2">
+      <div class="mb-4">
+        ${iconSvg}
+      </div>
+      <div class="text-center font-bold text-[19px] text-slate-900 dark:text-white mb-3">
+        ${title}
+      </div>
+      <div class="flex items-start gap-3 text-left w-full max-w-[300px] mx-auto justify-center">
+        <div class="text-slate-800 dark:text-slate-200 text-[15px] font-medium leading-relaxed text-center">
+          ${text}
+        </div>
+      </div>
+    </div>
+  `;
 }
 
 export const showSuccess = (title, text = '') => {
   return Swal.fire({
     ...baseConfig,
-    icon: 'success',
-    title,
-    text,
+    html: buildHtml(title, text, 'success'),
     timer: 2000,
     showConfirmButton: false,
   })
@@ -29,50 +55,45 @@ export const showSuccess = (title, text = '') => {
 export const showError = (title, text = '') => {
   return Swal.fire({
     ...baseConfig,
-    icon: 'error',
-    title,
-    text,
-    confirmButtonText: 'Okay',
+    html: buildHtml(title, text, 'error'),
+    confirmButtonText: 'YES',
   })
 }
 
 export const showWarning = (title, text = '') => {
   return Swal.fire({
     ...baseConfig,
-    icon: 'warning',
-    title,
-    text,
-    confirmButtonText: 'Understood',
+    html: buildHtml(title, text, 'error'),
+    confirmButtonText: 'YES',
   })
 }
 
-export const confirmAction = async (title, text = 'Are you sure you want to proceed?', confirmButtonText = 'Yes, Proceed') => {
+export const confirmAction = async (title, text = 'Are you sure you want to proceed?', confirmButtonText = 'YES') => {
+  const isDelete = confirmButtonText.toLowerCase().includes('delete') || text.toLowerCase().includes('delete');
+  
   const result = await Swal.fire({
     ...baseConfig,
-    icon: 'question',
-    title,
-    text,
+    html: buildHtml(title, text, isDelete ? 'error' : 'success'),
     showCancelButton: true,
-    confirmButtonText,
+    confirmButtonText, 
     cancelButtonText: 'Cancel',
-    reverseButtons: true,
+    reverseButtons: true, 
   })
   return result.isConfirmed
 }
 
 export const confirmDelete = async (itemName = 'this item') => {
   return await confirmAction(
-    'Are you sure?',
-    `You are about to delete ${itemName}. This action cannot be undone.`,
-    'Yes, Delete'
+    'Delete Product?',
+    `Are you sure you want to delete ${itemName}? This cannot be undone.`,
+    'DELETE'
   )
 }
 
 export const showLoading = (title = 'Processing...') => {
   Swal.fire({
     ...baseConfig,
-    title,
-    text: 'Please wait...',
+    html: buildHtml(title, 'Please wait...', 'success'),
     allowOutsideClick: false,
     allowEscapeKey: false,
     showConfirmButton: false,
@@ -90,40 +111,30 @@ export const closeLoading = () => {
 
 export const showToast = (message, icon = 'success') => {
   const isSuccess = icon === 'success' || icon === 'info'
-  const color = isSuccess ? '#2dd4bf' : '#fb7185' // teal-400 / rose-400 to match screenshot vibe
+  const color = isSuccess ? '#2dd4bf' : '#fb7185'
   const titleText = isSuccess ? 'Success' : 'Ooops!'
   
   const html = `
     <div class="relative mt-8 mx-4 mb-6 font-sans select-none" style="width: 300px;">
-      
-      <!-- Floating Title -->
       <div class="absolute -top-7 left-0 text-2xl font-bold tracking-wider z-20" style="color: ${color};">
         ${titleText}
       </div>
-
-      <!-- The Colored Backdrop (Bottom Left Shadow) -->
       <div class="absolute w-full h-full rounded-sm -z-10" style="background-color: ${color}; transform: translate(-8px, 8px);"></div>
-
-      <!-- The Main Card -->
       <div class="bg-white dark:bg-card px-4 py-3 flex items-center relative z-10 shadow-sm" style="min-height: 60px;">
-        <!-- Icon -->
         <div class="mr-3 flex-shrink-0" style="color: ${color}">
           ${isSuccess 
-            ? `<svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>`
-            : `<svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>`
+            ? '<svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>'
+            : '<svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>'
           }
         </div>
-        <!-- Message -->
         <div class="text-sm font-medium text-gray-600 dark:text-gray-300 text-left leading-snug w-full">
           ${message}
         </div>
       </div>
-
-      <!-- The Floating Button (Close/Refresh) -->
       <button onclick="Swal.close()" class="absolute -top-3 -right-3 w-8 h-8 rounded-full text-white flex items-center justify-center shadow-lg hover:scale-105 transition-transform z-20" style="background-color: ${color}; cursor: pointer;">
         ${isSuccess
-          ? `<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M6 18L18 6M6 6l12 12"></path></svg>`
-          : `<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>`
+          ? '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M6 18L18 6M6 6l12 12"></path></svg>'
+          : '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>'
         }
       </button>
     </div>

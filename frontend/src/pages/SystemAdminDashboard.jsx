@@ -57,7 +57,7 @@ export default function SystemAdminDashboard() {
     setError('')
     try {
       if (tab === 'metrics') {
-        const data = await api.dashboard.getStats()
+        const data = await api.system.getSystemStats()
         setMetrics(data)
       } else if (tab === 'users') {
         const data = await api.system.getUsers()
@@ -185,6 +185,35 @@ export default function SystemAdminDashboard() {
     })
   }, [users, userSearch, userRoleFilter, userStatusFilter])
 
+  const filteredLogs = useMemo(() => {
+    return logs.filter(log => {
+      const searchStr = logSearch.toLowerCase()
+      const matchesSearch = !logSearch || 
+        (log.user || '').toLowerCase().includes(searchStr) ||
+        (log.action || '').toLowerCase().includes(searchStr) ||
+        (log.module || '').toLowerCase().includes(searchStr) ||
+        (log.description || '').toLowerCase().includes(searchStr)
+        
+      let matchesDate = true
+      if (logDateRange.start || logDateRange.end) {
+        const logDate = new Date(log.created_at)
+        logDate.setHours(0, 0, 0, 0)
+        
+        if (logDateRange.start) {
+          const start = new Date(logDateRange.start)
+          start.setHours(0, 0, 0, 0)
+          if (logDate < start) matchesDate = false
+        }
+        if (logDateRange.end) {
+          const end = new Date(logDateRange.end)
+          end.setHours(0, 0, 0, 0)
+          if (logDate > end) matchesDate = false
+        }
+      }
+      return matchesSearch && matchesDate
+    })
+  }, [logs, logSearch, logDateRange])
+
   const [userPage, setUserPage] = useState(1)
   const userPageSize = 10
 
@@ -216,10 +245,10 @@ export default function SystemAdminDashboard() {
     return (
       <div className="space-y-6">
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          <StatCard title="Total Users" value={metrics?.customers_count || 142} icon={<FiUsers className="text-blue-500" />} />
-          <StatCard title="Active Sessions" value={24} icon={<FiMonitor className="text-emerald-500" />} />
-          <StatCard title="System Uptime" value="99.9%" icon={<FiActivity className="text-purple-500" />} />
-          <StatCard title="Database Size" value="1.2 GB" icon={<FiDatabase className="text-amber-500" />} />
+          <StatCard title="Total Users" value={metrics?.total_users || 0} icon={<FiUsers className="text-blue-500" />} />
+          <StatCard title="Active Sessions" value={metrics?.active_sessions || 0} icon={<FiMonitor className="text-emerald-500" />} />
+          <StatCard title="System Uptime" value={metrics?.uptime || '99.9%'} icon={<FiActivity className="text-purple-500" />} />
+          <StatCard title="Database Size" value={metrics?.database_size || '0 MB'} icon={<FiDatabase className="text-amber-500" />} />
         </div>
         <Card className="p-6 flex flex-col items-center justify-center text-center text-muted-foreground min-h-[300px]">
           <FiBarChart2 className="w-16 h-16 opacity-20 mb-4" />

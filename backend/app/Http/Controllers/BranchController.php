@@ -30,6 +30,27 @@ class BranchController extends Controller
     }
 
     /**
+     * Display the specified resource.
+     */
+    public function show($id)
+    {
+        $branch = BranchProfile::findOrFail($id);
+        
+        // Find the Store Administrator assigned to this branch
+        $manager = \App\Models\User::where('role', 'Store Administrator')
+            ->whereHas('employee', function ($q) use ($branch) {
+                $q->where('branch_id', $branch->id);
+            })->first();
+        
+        // Append the manager name dynamically
+        $branch->manager = $manager ? $manager->username : null;
+
+        return response()->json([
+            'branch' => $branch
+        ]);
+    }
+
+    /**
      * Store a newly created resource in storage.
      */
     public function store(Request $request)
@@ -94,6 +115,15 @@ class BranchController extends Controller
         ]);
 
         $branch->update($validated);
+
+        if ($request->hasFile('image')) {
+            $request->validate([
+                'image' => 'image|mimes:jpeg,png,jpg,gif,webp|max:5120',
+            ]);
+            $path = $request->file('image')->store('branches', 'public');
+            $branch->image_url = url('storage/' . $path);
+            $branch->save();
+        }
 
         return response()->json([
             'message' => 'Branch updated successfully',

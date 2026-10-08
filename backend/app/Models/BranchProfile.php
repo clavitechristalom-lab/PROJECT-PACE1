@@ -35,4 +35,14 @@ class BranchProfile extends Model
     {
         return $this->hasMany(SaleTransaction::class, 'branch_id', 'id');
     }
+
+    public function products()
+    {
+        return $this->hasMany(Product::class, 'branch_id', 'id');
+    }
+
+    public function reports()
+    {
+        return $this->hasMany(Report::class, 'branch_id', 'id');
+    }
 }

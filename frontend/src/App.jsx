@@ -27,6 +27,7 @@ import { UsersPage, SystemLogsPage, BackupsPage, SettingsPage } from './pages/Sy
 import SystemAdminDashboard from './pages/SystemAdminDashboard'
 import BranchesPage from './pages/BranchesPage'
 import CarouselPage from './pages/CarouselPage'
+import StoreSettingsPage from './pages/StoreSettingsPage'
 
 // Synchronize initial URL hash with browser pathname or saved route if needed
 if (typeof window !== 'undefined') {
@@ -216,6 +217,7 @@ function AppRoutes() {
 
           {/* Store Administrator QR Attendance Terminal */}
           <Route path="/store-admin/attendance/scanner" element={<RequireAuth roles={['Store Administrator', 'Store Admin']}><QrScannerPage /></RequireAuth>} />
+          <Route path="/store-settings" element={<RequireAuth roles={['Store Administrator', 'Store Admin']}><StoreSettingsPage /></RequireAuth>} />
 
           {/* Administrator only routes */}
           <Route path="/branches" element={<RequireAuth roles={['Administrator']}><BranchesPage /></RequireAuth>} />

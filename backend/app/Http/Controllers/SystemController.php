@@ -616,8 +616,9 @@ class SystemController extends Controller
     // ─── Settings ───────────────────────────────────────────────────────────────
     public function settings()
     {
-        $settings = Setting::all()->pluck('value', 'key');
-        return response()->json(array_merge([
+        $settings = Setting::all()->pluck('value', 'key')->toArray();
+        
+        $defaults = [
             'company_name' => '',
             'address'      => '',
             'phone'        => '',
@@ -629,12 +630,17 @@ class SystemController extends Controller
             'tax_id'       => '',
             'web_links'    => '',
             'logo'         => '',
+        ];
+
+        $dynamic = [
             'total_products' => \App\Models\Product::count(),
             'total_customers' => \App\Models\Customer::count(),
             'total_branches' => \App\Models\BranchProfile::count(),
             'total_appliances' => \App\Models\Product::where('category', 'Appliances')->count(),
             'total_furniture' => \App\Models\Product::where('category', 'Furniture')->count(),
-        ], $settings->toArray()));
+        ];
+
+        return response()->json(array_merge($defaults, $settings, $dynamic));
     }
 
     public function saveSettings(Request $request)
@@ -731,6 +737,54 @@ class SystemController extends Controller
                 'failed_scans' => $failedScans,
             ],
             'recent_logs' => $logsData,
+        ]);
+    }
+
+    public function storage(Request $request)
+    {
+        $path = base_path();
+        $total = disk_total_space($path);
+        $free = disk_free_space($path);
+        
+        $total = $total ?: 10 * 1024 * 1024 * 1024;
+        $free = $free ?: 3.2 * 1024 * 1024 * 1024;
+        $used = $total - $free;
+        
+        return response()->json([
+            'total' => $total,
+            'used' => $used,
+            'free' => $free,
+            'percentage' => $total > 0 ? round(($used / $total) * 100) : 0
+        ]);
+    }
+
+    public function systemStats(Request $request)
+    {
+        // 1. Total Users
+        $totalUsers = User::count();
+
+        // 2. Active Sessions (Users logged in within the last 24 hours)
+        $activeSessions = User::where('last_login', '>=', now()->subDay())->count();
+
+        // 3. Database Size
+        $dbName = DB::connection()->getDatabaseName();
+        $size = DB::select("SELECT ROUND(SUM(data_length + index_length) / 1024 / 1024, 2) AS size_mb FROM information_schema.tables WHERE table_schema = ?", [$dbName]);
+        $dbSizeMB = $size[0]->size_mb ?? 0;
+        
+        if ($dbSizeMB > 1024) {
+            $dbSizeStr = round($dbSizeMB / 1024, 2) . ' GB';
+        } else {
+            $dbSizeStr = $dbSizeMB . ' MB';
+        }
+
+        // 4. System Uptime (Mocked for cross-platform compatibility)
+        $uptime = '99.9%';
+
+        return response()->json([
+            'total_users' => $totalUsers,
+            'active_sessions' => $activeSessions,
+            'database_size' => $dbSizeStr,
+            'uptime' => $uptime,
         ]);
     }
 }

@@ -13,6 +13,7 @@ import { api } from '../../lib/api'
 import { useRealtimeSync, triggerDataSync } from '../../lib/realtimeSync'
 import { useTheme } from '../../context/ThemeContext'
 import ProfileModal from './ProfileModal'
+import CompanyConfigurationModal from '../CompanyConfigurationModal'
 import EmployeePinVerificationModal from '../attendance/EmployeePinVerificationModal'
 import { TbCurrencyPeso } from 'react-icons/tb'
 
@@ -39,7 +40,7 @@ const icons = {
   support: <FiMessageSquare className="w-4 h-4 flex-shrink-0" />,
 }
 
-function navByRole(role) {
+function navByRole(role, onOpenConfig) {
   if (role === 'Employee') {
     return [
       { label: 'My Dashboard', path: '/employee/dashboard', icon: icons.dashboard },
@@ -127,6 +128,7 @@ function navByRole(role) {
         { label: 'Employees & QR', path: '/employees', icon: icons.employees }
       ],
     })
+    base.push({ label: 'Store Settings', action: onOpenConfig, icon: icons.settings })
   }
 
   base.push({ label: isAdmin ? 'Attendance Logs' : 'Branch Attendance', path: '/attendance', icon: icons.attendance })
@@ -152,7 +154,7 @@ function SidebarGroup({ group, collapsed }) {
       <button
         onClick={() => !collapsed && setOpen(o => !o)}
         title={collapsed ? group.label : undefined}
-        className={`w-full flex items-center gap-2.5 px-3 py-2 text-xs font-semibold uppercase tracking-wider transition-colors cursor-pointer rounded-xl mx-1 ${isActive ? 'text-white' : 'text-white/50 hover:text-white/80'
+        className={`w-full flex items-center gap-2.5 px-3 py-2 text-xs font-semibold uppercase tracking-wider transition-colors cursor-pointer rounded-xl mx-1 ${isActive ? 'text-foreground' : 'text-muted-foreground hover:text-foreground'
           }`}
         style={{ width: collapsed ? 44 : 'calc(100% - 8px)' }}
       >
@@ -165,7 +167,7 @@ function SidebarGroup({ group, collapsed }) {
         )}
       </button>
       {(open || collapsed) && (
-        <div className={collapsed ? '' : 'ml-3 border-l border-white/10 pl-2 space-y-0.5 mt-0.5'}>
+        <div className={collapsed ? '' : 'ml-3 border-l border-border pl-2 space-y-0.5 mt-0.5'}>
           {group.items.map(item => (
             <NavLink
               key={item.path}
@@ -174,7 +176,7 @@ function SidebarGroup({ group, collapsed }) {
               className={({ isActive }) =>
                 `flex items-center gap-2.5 px-3 py-2 text-xs rounded-xl transition-colors cursor-pointer ${location.pathname === item.path
                   ? 'bg-primary text-primary-foreground font-semibold shadow-xs'
-                  : 'text-white/60 hover:bg-white/5 hover:text-white'
+                  : 'text-muted-foreground hover:bg-muted/50 hover:text-foreground'
                 }`
               }
             >
@@ -188,9 +190,9 @@ function SidebarGroup({ group, collapsed }) {
   )
 }
 
-function Sidebar({ collapsed, settings, mobileOpen, onCloseMobile }) {
+function Sidebar({ collapsed, settings, mobileOpen, onCloseMobile, onOpenConfig }) {
   const { user } = useAuth()
-  const navItems = user ? navByRole(user.role) : []
+  const navItems = user ? navByRole(user.role, onOpenConfig) : []
 
   if (!user || user.role === 'Customer') return null
 
@@ -208,12 +210,11 @@ function Sidebar({ collapsed, settings, mobileOpen, onCloseMobile }) {
       )}
 
       <aside
-        className={`flex flex-col h-full overflow-hidden flex-shrink-0 transition-all duration-200 print:hidden ${
-          mobileOpen
+        className={`flex flex-col h-full overflow-hidden flex-shrink-0 transition-all duration-200 print:hidden dark:bg-card dark:border-r dark:border-white/10 ${mobileOpen
             ? 'fixed inset-y-0 left-0 z-50 shadow-2xl flex'
             : 'hidden lg:flex'
-        }`}
-        style={{ width: mobileOpen ? 260 : (collapsed ? 64 : 240), background: '#0f1f3d' }}
+          }`}
+        style={{ width: mobileOpen ? 260 : (collapsed ? 64 : 240), backgroundColor: 'var(--card)' }}
       >
         {/* Logo */}
         <div className="flex items-center justify-between px-4 py-4 border-b border-white/10 flex-shrink-0">
@@ -227,15 +228,15 @@ function Sidebar({ collapsed, settings, mobileOpen, onCloseMobile }) {
             )}
             {(!collapsed || mobileOpen) && (
               <div className="overflow-hidden">
-                <div className="text-white font-bold text-sm tracking-wide leading-tight truncate">{companyName}</div>
-                <div className="text-white/40 text-[9px] font-mono leading-tight truncate">{siteName}</div>
+                <div className="text-foreground font-bold text-sm tracking-wide leading-tight truncate">{companyName}</div>
+                <div className="text-muted-foreground text-[9px] font-mono leading-tight truncate">{siteName}</div>
               </div>
             )}
           </div>
           {mobileOpen && (
             <button
               onClick={onCloseMobile}
-              className="lg:hidden text-white/60 hover:text-white p-1 rounded-lg hover:bg-white/10 cursor-pointer"
+              className="lg:hidden text-muted-foreground hover:text-foreground p-1 rounded-lg hover:bg-muted cursor-pointer"
               aria-label="Close menu"
             >
               <FiX className="w-5 h-5" />
@@ -248,6 +249,16 @@ function Sidebar({ collapsed, settings, mobileOpen, onCloseMobile }) {
           {navItems.map((entry, i) =>
             entry.items ? (
               <SidebarGroup key={i} group={entry} collapsed={collapsed && !mobileOpen} />
+            ) : entry.action ? (
+              <button
+                key={entry.label}
+                onClick={(e) => { e.preventDefault(); entry.action(); }}
+                title={collapsed && !mobileOpen ? entry.label : undefined}
+                className="w-full text-left flex items-center gap-2.5 px-3 py-2 text-xs rounded-xl transition-colors cursor-pointer text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+              >
+                <span className="flex-shrink-0">{entry.icon}</span>
+                {(!collapsed || mobileOpen) && <span className="truncate flex-1">{entry.label}</span>}
+              </button>
             ) : (
               <NavLink
                 key={entry.path}
@@ -256,7 +267,7 @@ function Sidebar({ collapsed, settings, mobileOpen, onCloseMobile }) {
                 className={({ isActive }) =>
                   `flex items-center gap-2.5 px-3 py-2 text-xs rounded-xl transition-colors cursor-pointer ${isActive
                     ? 'bg-primary text-primary-foreground font-semibold shadow-xs'
-                    : 'text-white/60 hover:bg-white/5 hover:text-white'
+                    : 'text-muted-foreground hover:bg-muted/50 hover:text-foreground'
                   }`
                 }
               >
@@ -271,8 +282,53 @@ function Sidebar({ collapsed, settings, mobileOpen, onCloseMobile }) {
             )
           )}
         </nav>
+
+        {(!collapsed || mobileOpen) && user.role === 'Administrator' && (
+          <SystemStorageWidget collapsed={collapsed} mobileOpen={mobileOpen} />
+        )}
       </aside>
     </>
+  )
+}
+
+function SystemStorageWidget({ collapsed, mobileOpen }) {
+  const [storage, setStorage] = useState(null)
+  
+  useEffect(() => {
+    const fetchStorage = async () => {
+      try {
+        const data = await api.system.getStorage()
+        setStorage(data)
+      } catch (err) {
+        console.error('Failed to load storage data:', err)
+      }
+    }
+    fetchStorage()
+  }, [])
+
+  if (!storage) return null
+
+  const formatGB = (bytes) => (bytes / (1024 * 1024 * 1024)).toFixed(1)
+  const percentage = storage.total > 0 ? ((storage.used / storage.total) * 100).toFixed(1) : 0
+
+  return (
+    <div className={`mx-3 mb-4 mt-2 p-3.5 rounded-2xl bg-transparent`}>
+      <div className="flex items-center justify-between mb-2.5">
+        <span className="text-[11px] font-medium text-slate-600 dark:text-slate-300 tracking-wide">System storage</span>
+        <span className="text-xs font-bold text-slate-900 dark:text-white tracking-tight">{percentage}%</span>
+      </div>
+      
+      <div className="h-1.5 w-full bg-slate-200 dark:bg-slate-800/80 rounded-full overflow-hidden mb-2.5">
+        <div 
+          className="h-full bg-gradient-to-r from-[#4F8AFF] to-[#40C9FF] rounded-full" 
+          style={{ width: `${Math.min(100, percentage)}%` }}
+        ></div>
+      </div>
+      
+      <div className="text-[10px] text-slate-500 dark:text-slate-400/80 font-medium tracking-wide">
+        {formatGB(storage.used)} GB of {formatGB(storage.total)} GB used
+      </div>
+    </div>
   )
 }
 
@@ -305,6 +361,7 @@ function Header({
   onMarkAllRead,
   onNotificationClick,
   onRefreshNotifs,
+  onOpenConfig,
 }) {
   const { user, logout } = useAuth()
   const { theme, toggleMode } = useTheme()
@@ -639,7 +696,7 @@ function Header({
                   <span>Notifications</span>
                 </button>
                 <button
-                  onClick={() => { navigate('/settings'); setUserOpen(false) }}
+                  onClick={() => { onOpenConfig?.(); setUserOpen(false) }}
                   className="w-full text-left px-3 py-2 text-xs text-foreground hover:bg-muted rounded-xl cursor-pointer flex items-center gap-2 font-medium transition-colors"
                 >
                   <FiSettings className="w-3.5 h-3.5 text-primary" />
@@ -685,6 +742,7 @@ const ROUTE_TITLES = {
   '/system-logs': 'System Logs',
   '/backups': 'Backup & Restore',
   '/settings': 'Settings',
+  '/store-settings': 'Store Settings',
   '/employee/dashboard': 'My Dashboard',
   '/employee/notifications': 'Notification Center',
   '/employee/attendance': 'My Attendance',
@@ -701,6 +759,7 @@ export default function AppShell() {
   const [unreadCount, setUnreadCount] = useState(0)
   const [pendingVerification, setPendingVerification] = useState(null)
   const [appSettings, setAppSettings] = useState(null)
+  const [configOpen, setConfigOpen] = useState(false)
   const latestNotifIdRef = useRef(null)
   const location = useLocation()
   const navigate = useNavigate()
@@ -816,12 +875,13 @@ export default function AppShell() {
   const pageTitle = ROUTE_TITLES[location.pathname] || 'Z-LICZ'
 
   return (
-    <div className="flex h-screen bg-background text-foreground overflow-hidden font-sans">
+    <div className="admin-shell flex h-screen bg-transparent text-foreground overflow-hidden font-sans">
       <Sidebar
         collapsed={collapsed}
         settings={appSettings}
         mobileOpen={mobileMenuOpen}
         onCloseMobile={() => setMobileMenuOpen(false)}
+        onOpenConfig={() => setConfigOpen(true)}
       />
 
       <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
@@ -834,9 +894,10 @@ export default function AppShell() {
           onMarkAllRead={handleMarkAllRead}
           onNotificationClick={handleNotificationClick}
           onRefreshNotifs={loadData}
+          onOpenConfig={() => setConfigOpen(true)}
         />
 
-        <main className="flex-1 overflow-y-auto p-4 md:p-6 bg-background">
+        <main className="flex-1 overflow-y-auto p-4 md:p-6 bg-transparent">
           <div className="max-w-7xl mx-auto">
             <Outlet />
           </div>
@@ -846,6 +907,13 @@ export default function AppShell() {
       <ProfileModal
         isOpen={profileOpen}
         onClose={() => setProfileOpen(false)}
+      />
+
+      <CompanyConfigurationModal
+        isOpen={configOpen}
+        onClose={() => setConfigOpen(false)}
+        currentSettings={appSettings}
+        onSave={loadData}
       />
 
       <EmployeePinVerificationModal

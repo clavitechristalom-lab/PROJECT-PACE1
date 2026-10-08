@@ -12,7 +12,6 @@ import { useTheme } from '../context/ThemeContext'
 import { Spinner, Pagination } from '../components/ui'
 import { api, STORAGE_BASE } from '../lib/api'
 import heroImg from '../assets/furniture-hero.png'
-import './LoginPage.css'
 
 
 export default function LoginPage() {
@@ -71,6 +70,12 @@ export default function LoginPage() {
   const companyLogo = sysSettings?.logo || ''
 
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
+
+  const formatStat = (num, defaultStr) => {
+    if (num === undefined || num === null) return defaultStr
+    if (num < 10) return num.toString()
+    return `${num}+`
+  }
 
   // Products pagination
   const [appliancePage, setAppliancePage] = useState(1)
@@ -401,7 +406,7 @@ export default function LoginPage() {
               </div>
             )}
             <div className="flex flex-col justify-center">
-              <span className="text-xl font-extrabold tracking-tight text-black dark:text-white">
+              <span className="text-xl font-extrabold tracking-tight text-black ">
                 {companyName || 'Z-LICZ'}
               </span>
             </div>
@@ -415,7 +420,7 @@ export default function LoginPage() {
             <a href="#support" onClick={() => setMobileMenuOpen(false)}>Support</a>
             <button
               onClick={toggleMode}
-              className="p-2 rounded-full hover:bg-black/5 dark:hover:bg-white/10 transition-colors text-black dark:text-white"
+              className="p-2 rounded-full hover:bg-black/5 :bg-white/10 transition-colors text-black "
               title="Toggle Theme"
             >
               {isDark ? <FiSun className="w-5 h-5" /> : <FiMoon className="w-5 h-5" />}
@@ -470,14 +475,14 @@ export default function LoginPage() {
             <div className="stat">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg>
               <div>
-                <strong>{sysSettings?.total_products ? `${sysSettings.total_products}+` : '500+'}</strong>
+                <strong>{formatStat(sysSettings?.total_products, '0')}</strong>
                 <span>Curated Products</span>
               </div>
             </div>
             <div className="stat">
               <FiHome />
               <div>
-                <strong>{sysSettings?.total_branches ? `${sysSettings.total_branches}+` : '10+'}</strong>
+                <strong>{formatStat(sysSettings?.total_branches, '0')}</strong>
                 <span>Branches</span>
               </div>
             </div>
@@ -565,7 +570,7 @@ export default function LoginPage() {
                 </div>
               )}
               {companyEmail && (
-                <button 
+                <button
                   onClick={() => setIsContactModalOpen(true)}
                   className="rounded-2xl border border-gray-100 bg-gray-50 p-7 flex flex-col gap-4 shadow-sm hover:shadow-md transition-shadow text-left"
                 >
@@ -625,7 +630,7 @@ export default function LoginPage() {
                 <FiUserPlus className="w-4 h-4" /> Create Account
               </button>
               {companyEmail && (
-                <button 
+                <button
                   onClick={() => setIsContactModalOpen(true)}
                   className="inline-flex items-center gap-2 px-6 py-3 rounded-xl bg-white border border-gray-200 text-gray-700 text-sm font-bold hover:bg-gray-50 transition-colors shadow-sm"
                 >
@@ -836,7 +841,7 @@ export default function LoginPage() {
                     onClick={() => { setError(''); setActiveTab('login'); setIsLoginModalOpen(true); }}
                     className="text-xs font-bold bg-blue-600 hover:bg-blue-500 px-4 py-2 rounded-lg transition-colors flex items-center gap-2"
                   >
-                    <FiLogIn className="w-3.5 h-3.5" /> Sign In to Dashboard
+                    <FiLogIn className="w-3.5 h-3.5" /> Sign In
                   </button>
                 </div>
               </div>
@@ -850,7 +855,7 @@ export default function LoginPage() {
       </main>
 
       {isLoginModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 md:p-6 bg-black/60 backdrop-blur-sm animate-[fadeIn_0.15s_ease]">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 md:p-6 bg-black/30 backdrop-blur-md animate-[fadeIn_0.15s_ease]">
           <div
             className="absolute inset-0 cursor-pointer"
             onClick={() =>
@@ -858,7 +863,7 @@ export default function LoginPage() {
             }
           />
 
-          <div className="relative w-full max-w-4xl bg-[#0b131e] rounded-3xl overflow-hidden shadow-2xl border border-slate-800 z-10 grid grid-cols-1 md:grid-cols-12 animate-[slideUp_0.2s_ease]">
+          <div className="relative w-full max-w-4xl bg-[#121c29]/95 backdrop-blur-2xl rounded-3xl overflow-hidden shadow-2xl border border-white/10 z-10 grid grid-cols-1 md:grid-cols-12 animate-[slideUp_0.2s_ease]">
             <button
               type="button"
               onClick={() =>
@@ -870,16 +875,7 @@ export default function LoginPage() {
               <FiX className="w-5 h-5" />
             </button>
 
-            {activeTab === 'signup' && (
-              <button
-                type="button"
-                onClick={() => setRoleModalOpen(true)}
-                className="absolute top-5 right-14 w-8 h-8 rounded-full border-2 border-slate-400 text-slate-300 hover:text-white hover:border-white transition-colors flex items-center justify-center z-20 font-bold text-sm bg-transparent shadow-lg"
-                title="Select Account Role"
-              >
-                {signUpData.role === 'Administrator' ? 'A' : signUpData.role === 'Store Admin' ? 'S' : signUpData.role === 'Employee' ? 'E' : 'C'}
-              </button>
-            )}
+
 
             <div className="hidden md:flex md:col-span-6 relative flex-col justify-between p-8 sm:p-10 overflow-hidden select-none">
               <img
@@ -911,7 +907,7 @@ export default function LoginPage() {
               </div>
             </div>
 
-            <div className="md:col-span-6 bg-[#0c1420] p-6 sm:p-10 flex flex-col justify-between border-t md:border-t-0 md:border-l border-slate-800 max-h-[90vh] overflow-y-auto">
+            <div className="md:col-span-6 bg-transparent p-6 sm:p-10 flex flex-col justify-between border-t md:border-t-0 md:border-l border-white/10 max-h-[90vh] overflow-y-auto">
               <div>
                 <div className="mb-6">
                   <h3 className="text-2xl sm:text-3xl font-bold text-white tracking-tight">
@@ -1016,7 +1012,7 @@ export default function LoginPage() {
                             }
                           }}
                           placeholder="Email"
-                          className={`w-full bg-[#121c29] border rounded-xl pl-10 pr-4 py-3 text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 transition-all ${fieldErrors.username
+                          className={`w-full bg-white/5 border rounded-xl pl-10 pr-4 py-3 text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 transition-all ${fieldErrors.username
                             ? 'border-rose-500/80 focus:ring-rose-500/30'
                             : 'border-slate-800 focus:border-blue-500 focus:ring-blue-500/20'
                             }`}
@@ -1074,7 +1070,7 @@ export default function LoginPage() {
                             }
                           }}
                           placeholder="••••••••"
-                          className={`w-full bg-[#121c29] border rounded-xl pl-10 pr-10 py-3 text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 transition-all ${fieldErrors.password
+                          className={`w-full bg-white/5 border rounded-xl pl-10 pr-10 py-3 text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 transition-all ${fieldErrors.password
                             ? 'border-rose-500/80 focus:ring-rose-500/30'
                             : 'border-slate-800 focus:border-blue-500 focus:ring-blue-500/20'
                             }`}
@@ -1118,7 +1114,7 @@ export default function LoginPage() {
                               e.target.checked
                             )
                           }
-                          className="w-4 h-4 rounded border-slate-700 bg-[#121c29] text-blue-600 accent-blue-600 focus:ring-0 cursor-pointer"
+                          className="w-4 h-4 rounded border-slate-700 bg-white/5 text-blue-600 accent-blue-600 focus:ring-0 cursor-pointer"
                         />
 
                         <span className="text-xs text-slate-400">
@@ -1162,7 +1158,7 @@ export default function LoginPage() {
                             if (signUpErrors.first_name) setSignUpErrors({ ...signUpErrors, first_name: '' })
                           }}
                           placeholder="First Name"
-                          className={`w-full bg-[#121c29] border rounded-xl px-4 py-2.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 transition-all ${signUpErrors.first_name ? 'border-rose-500/80 focus:ring-rose-500/30' : 'border-slate-800 focus:border-blue-500 focus:ring-blue-500/20'}`}
+                          className={`w-full bg-white/5 border rounded-xl px-4 py-2.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 transition-all ${signUpErrors.first_name ? 'border-rose-500/80 focus:ring-rose-500/30' : 'border-slate-800 focus:border-blue-500 focus:ring-blue-500/20'}`}
                         />
                         {signUpErrors.first_name && <p className="text-[11px] text-rose-400 mt-1">{signUpErrors.first_name}</p>}
                       </div>
@@ -1176,7 +1172,7 @@ export default function LoginPage() {
                             if (signUpErrors.last_name) setSignUpErrors({ ...signUpErrors, last_name: '' })
                           }}
                           placeholder="Last Name"
-                          className={`w-full bg-[#121c29] border rounded-xl px-4 py-2.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 transition-all ${signUpErrors.last_name ? 'border-rose-500/80 focus:ring-rose-500/30' : 'border-slate-800 focus:border-blue-500 focus:ring-blue-500/20'}`}
+                          className={`w-full bg-white/5 border rounded-xl px-4 py-2.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 transition-all ${signUpErrors.last_name ? 'border-rose-500/80 focus:ring-rose-500/30' : 'border-slate-800 focus:border-blue-500 focus:ring-blue-500/20'}`}
                         />
                         {signUpErrors.last_name && <p className="text-[11px] text-rose-400 mt-1">{signUpErrors.last_name}</p>}
                       </div>
@@ -1189,7 +1185,7 @@ export default function LoginPage() {
                         value={signUpData.middle_name}
                         onChange={(e) => setSignUpData({ ...signUpData, middle_name: e.target.value })}
                         placeholder="Middle Name"
-                        className="w-full bg-[#121c29] border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 transition-all"
+                        className="w-full bg-white/5 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 transition-all"
                       />
                     </div>
 
@@ -1203,7 +1199,7 @@ export default function LoginPage() {
                           if (signUpErrors.phone) setSignUpErrors({ ...signUpErrors, phone: '' })
                         }}
                         placeholder="e.g. 09123456789"
-                        className={`w-full bg-[#121c29] border rounded-xl px-4 py-2.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 transition-all ${signUpErrors.phone ? 'border-rose-500/80 focus:ring-rose-500/30' : 'border-slate-800 focus:border-blue-500 focus:ring-blue-500/20'}`}
+                        className={`w-full bg-white/5 border rounded-xl px-4 py-2.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 transition-all ${signUpErrors.phone ? 'border-rose-500/80 focus:ring-rose-500/30' : 'border-slate-800 focus:border-blue-500 focus:ring-blue-500/20'}`}
                       />
                       {signUpErrors.phone && <p className="text-[11px] text-rose-400 mt-1">{signUpErrors.phone}</p>}
                     </div>
@@ -1218,7 +1214,7 @@ export default function LoginPage() {
                           if (signUpErrors.address) setSignUpErrors({ ...signUpErrors, address: '' })
                         }}
                         placeholder="Street, Barangay, City, Province"
-                        className={`w-full bg-[#121c29] border rounded-xl px-4 py-2.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 transition-all ${signUpErrors.address ? 'border-rose-500/80 focus:ring-rose-500/30' : 'border-slate-800 focus:border-blue-500 focus:ring-blue-500/20'}`}
+                        className={`w-full bg-white/5 border rounded-xl px-4 py-2.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 transition-all ${signUpErrors.address ? 'border-rose-500/80 focus:ring-rose-500/30' : 'border-slate-800 focus:border-blue-500 focus:ring-blue-500/20'}`}
                       />
                       {signUpErrors.address && <p className="text-[11px] text-rose-400 mt-1">{signUpErrors.address}</p>}
                     </div>
@@ -1229,7 +1225,7 @@ export default function LoginPage() {
                         <select
                           value={signUpData.gender}
                           onChange={(e) => setSignUpData({ ...signUpData, gender: e.target.value })}
-                          className={`w-full bg-[#121c29] border rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:ring-2 transition-all ${signUpErrors.gender ? 'border-rose-500/80 focus:ring-rose-500/30' : 'border-slate-800 focus:border-blue-500 focus:ring-blue-500/20'}`}
+                          className={`w-full bg-white/5 border rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:ring-2 transition-all ${signUpErrors.gender ? 'border-rose-500/80 focus:ring-rose-500/30' : 'border-slate-800 focus:border-blue-500 focus:ring-blue-500/20'}`}
                         >
                           <option value="Male">Male</option>
                           <option value="Female">Female</option>
@@ -1247,7 +1243,7 @@ export default function LoginPage() {
                             setSignUpData({ ...signUpData, date_of_birth: e.target.value })
                             if (signUpErrors.date_of_birth) setSignUpErrors({ ...signUpErrors, date_of_birth: '' })
                           }}
-                          className={`w-full bg-[#121c29] border rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:ring-2 transition-all appearance-none [&::-webkit-calendar-picker-indicator]:opacity-0 [&::-webkit-calendar-picker-indicator]:absolute [&::-webkit-calendar-picker-indicator]:right-0 [&::-webkit-calendar-picker-indicator]:w-full [&::-webkit-calendar-picker-indicator]:h-full [&::-webkit-calendar-picker-indicator]:cursor-pointer ${signUpErrors.date_of_birth ? 'border-rose-500/80 focus:ring-rose-500/30' : 'border-slate-800 focus:border-blue-500 focus:ring-blue-500/20'}`}
+                          className={`w-full bg-white/5 border rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:ring-2 transition-all appearance-none [&::-webkit-calendar-picker-indicator]:opacity-0 [&::-webkit-calendar-picker-indicator]:absolute [&::-webkit-calendar-picker-indicator]:right-0 [&::-webkit-calendar-picker-indicator]:w-full [&::-webkit-calendar-picker-indicator]:h-full [&::-webkit-calendar-picker-indicator]:cursor-pointer ${signUpErrors.date_of_birth ? 'border-rose-500/80 focus:ring-rose-500/30' : 'border-slate-800 focus:border-blue-500 focus:ring-blue-500/20'}`}
                         />
                         {signUpErrors.date_of_birth && <p className="text-[11px] text-rose-400 mt-1">{signUpErrors.date_of_birth}</p>}
                       </div>
@@ -1257,7 +1253,7 @@ export default function LoginPage() {
                         <select
                           value={signUpData.marital_status}
                           onChange={(e) => setSignUpData({ ...signUpData, marital_status: e.target.value })}
-                          className={`w-full bg-[#121c29] border rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:ring-2 transition-all ${signUpErrors.marital_status ? 'border-rose-500/80 focus:ring-rose-500/30' : 'border-slate-800 focus:border-blue-500 focus:ring-blue-500/20'}`}
+                          className={`w-full bg-white/5 border rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:ring-2 transition-all ${signUpErrors.marital_status ? 'border-rose-500/80 focus:ring-rose-500/30' : 'border-slate-800 focus:border-blue-500 focus:ring-blue-500/20'}`}
                         >
                           <option value="Single">Single</option>
                           <option value="Married">Married</option>
@@ -1295,7 +1291,7 @@ export default function LoginPage() {
                             }
                           }}
                           placeholder="Email Address"
-                          className={`w-full bg-[#121c29] border rounded-xl pl-10 pr-4 py-2.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 transition-all ${signUpErrors.email
+                          className={`w-full bg-white/5 border rounded-xl pl-10 pr-4 py-2.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 transition-all ${signUpErrors.email
                             ? 'border-rose-500/80 focus:ring-rose-500/30'
                             : 'border-slate-800 focus:border-blue-500 focus:ring-blue-500/20'
                             }`}
@@ -1322,7 +1318,7 @@ export default function LoginPage() {
                               value={signUpData.username}
                               onChange={(e) => setSignUpData({ ...signUpData, username: e.target.value })}
                               placeholder="Username"
-                              className={`w-full bg-[#121c29] border rounded-xl pl-10 pr-4 py-2.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 transition-all ${signUpErrors.username ? 'border-rose-500/80 focus:ring-rose-500/30' : 'border-slate-800 focus:border-blue-500 focus:ring-blue-500/20'}`}
+                              className={`w-full bg-white/5 border rounded-xl pl-10 pr-4 py-2.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 transition-all ${signUpErrors.username ? 'border-rose-500/80 focus:ring-rose-500/30' : 'border-slate-800 focus:border-blue-500 focus:ring-blue-500/20'}`}
                               autoComplete="username"
                             />
                           </div>
@@ -1336,7 +1332,7 @@ export default function LoginPage() {
                             <select
                               value={signUpData.branch_id}
                               onChange={(e) => setSignUpData({ ...signUpData, branch_id: e.target.value })}
-                              className={`w-full bg-[#121c29] border rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:ring-2 transition-all cursor-pointer ${signUpErrors.branch_id ? 'border-rose-500/80' : 'border-slate-800 focus:border-blue-500'}`}
+                              className={`w-full bg-white/5 border rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:ring-2 transition-all cursor-pointer ${signUpErrors.branch_id ? 'border-rose-500/80' : 'border-slate-800 focus:border-blue-500'}`}
                             >
                               <option value="">Select a branch</option>
                               {registrationOptions.branches.map((branch) => <option key={branch.id} value={branch.id}>{branch.name}</option>)}
@@ -1374,7 +1370,7 @@ export default function LoginPage() {
                             }
                           }}
                           placeholder="••••••••"
-                          className={`w-full bg-[#121c29] border rounded-xl px-3.5 py-2.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 transition-all ${signUpErrors.password
+                          className={`w-full bg-white/5 border rounded-xl px-3.5 py-2.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 transition-all ${signUpErrors.password
                             ? 'border-rose-500/80 focus:ring-rose-500/30'
                             : 'border-slate-800 focus:border-blue-500 focus:ring-blue-500/20'
                             }`}
@@ -1414,7 +1410,7 @@ export default function LoginPage() {
                             }
                           }}
                           placeholder="••••••••"
-                          className={`w-full bg-[#121c29] border rounded-xl px-3.5 py-2.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 transition-all ${signUpErrors.confirmPassword
+                          className={`w-full bg-white/5 border rounded-xl px-3.5 py-2.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 transition-all ${signUpErrors.confirmPassword
                             ? 'border-rose-500/80 focus:ring-rose-500/30'
                             : 'border-slate-800 focus:border-blue-500 focus:ring-blue-500/20'
                             }`}
@@ -1456,7 +1452,7 @@ export default function LoginPage() {
                               }
                             }}
                             placeholder="••••"
-                            className={`w-full bg-[#121c29] border rounded-xl px-3.5 py-2.5 text-sm font-mono tracking-widest text-center text-white placeholder-slate-500 focus:outline-none focus:ring-2 transition-all ${signUpErrors.attendance_pin
+                            className={`w-full bg-white/5 border rounded-xl px-3.5 py-2.5 text-sm font-mono tracking-widest text-center text-white placeholder-slate-500 focus:outline-none focus:ring-2 transition-all ${signUpErrors.attendance_pin
                               ? 'border-rose-500/80 focus:ring-rose-500/30'
                               : 'border-slate-800 focus:border-blue-500 focus:ring-blue-500/20'
                               }`}
@@ -1493,7 +1489,7 @@ export default function LoginPage() {
                               }
                             }}
                             placeholder="••••"
-                            className={`w-full bg-[#121c29] border rounded-xl px-3.5 py-2.5 text-sm font-mono tracking-widest text-center text-white placeholder-slate-500 focus:outline-none focus:ring-2 transition-all ${signUpErrors.confirm_attendance_pin
+                            className={`w-full bg-white/5 border rounded-xl px-3.5 py-2.5 text-sm font-mono tracking-widest text-center text-white placeholder-slate-500 focus:outline-none focus:ring-2 transition-all ${signUpErrors.confirm_attendance_pin
                               ? 'border-rose-500/80 focus:ring-rose-500/30'
                               : 'border-slate-800 focus:border-blue-500 focus:ring-blue-500/20'
                               }`}
@@ -1519,7 +1515,7 @@ export default function LoginPage() {
                               agree: e.target.checked,
                             })
                           }
-                          className="w-4 h-4 rounded border-slate-700 bg-[#121c29] text-blue-600 accent-blue-600 focus:ring-0 cursor-pointer"
+                          className="w-4 h-4 rounded border-slate-700 bg-white/5 text-blue-600 accent-blue-600 focus:ring-0 cursor-pointer"
                         />
 
                         <span className="text-xs text-slate-400">
@@ -1584,68 +1580,11 @@ export default function LoginPage() {
         </div>
       )}
 
-      {roleModalOpen && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
-          <div className="absolute inset-0" onClick={() => setRoleModalOpen(false)} />
-          <div className="relative z-10 w-full max-w-sm rounded-2xl border border-slate-700 bg-[#171923] p-5 shadow-2xl">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-bold text-white">SELECT ACCOUNT ROLE</h3>
-              <button
-                type="button"
-                onClick={() => setRoleModalOpen(false)}
-                className="rounded-full p-1.5 text-slate-400 hover:bg-white/10 hover:text-white"
-                aria-label="Close role selection"
-              >
-                <FiX className="w-5 h-5" />
-              </button>
-            </div>
 
-            <div className="space-y-2">
-              {[
-                { value: 'Administrator', label: 'Administrator', icon: FiShield, description: 'Full system access and user management' },
-                { value: 'Store Admin', label: 'Store Admin', icon: FiHome, description: 'Store settings, reports and staff' },
-                { value: 'Employee', label: 'Employee', icon: FiBriefcase, description: 'Point of sale and inventory' },
-              ].map(({ value, label, icon: Icon, description }) => (
-                <button
-                  key={value}
-                  type="button"
-                  onClick={() => {
-                    setSignUpData((current) => ({ ...current, role: value, branch_id: '', department: '' }))
-                    setSignUpErrors({})
-                    setRoleModalOpen(false)
-                  }}
-                  className="w-full flex items-center gap-3 rounded-xl border border-slate-700 bg-[#121c29] p-3 text-left text-white hover:border-blue-500 hover:bg-blue-500/10 transition-colors"
-                >
-                  <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-500/10 text-blue-300">
-                    <Icon className="w-5 h-5" />
-                  </span>
-                  <span>
-                    <span className="block text-sm font-bold">{label}</span>
-                    <span className="block text-xs text-slate-400">{description}</span>
-                  </span>
-                </button>
-              ))}
-            </div>
-
-            <div className="mt-4">
-              <button
-                type="button"
-                onClick={() => {
-                  setRoleModalOpen(false)
-                  setActiveTab('login')
-                }}
-                className="w-full rounded-xl border border-slate-700 px-4 py-2.5 text-sm font-semibold text-slate-300 hover:bg-white/5 transition-colors"
-              >
-                CLOSE
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Contact Us Modal */}
       {isContactModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-[fadeIn_0.15s_ease]">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/30 backdrop-blur-md animate-[fadeIn_0.15s_ease]">
           <div className="absolute inset-0 cursor-pointer" onClick={() => setIsContactModalOpen(false)} />
           <div className="relative w-full max-w-md bg-white rounded-3xl overflow-hidden shadow-2xl z-10 p-8 animate-[slideUp_0.2s_ease]">
             <button
@@ -1656,7 +1595,7 @@ export default function LoginPage() {
             </button>
             <h2 className="text-2xl font-bold text-gray-900 mb-2">Contact Support</h2>
             <p className="text-sm text-gray-500 mb-6">Send us a message and we'll get back to you soon.</p>
-            
+
             <form onSubmit={handleContactSubmit} className="space-y-4">
               <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-1">Your Name</label>

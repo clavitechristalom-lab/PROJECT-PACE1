@@ -839,7 +839,7 @@ export default function EmployeesPage({ branchFilter, embedded }) {
                               <FiEdit className="w-3.5 h-3.5" />
                             </button>
                             <button
-                              onClick={() => setDeleteItem(emp)}
+                              onClick={() => handleDelete(emp)}
                               title="Delete employee"
                               className="p-1.5 rounded-lg border border-border hover:bg-rose-50 hover:text-rose-600 dark:hover:bg-rose-950/40 text-muted-foreground transition-colors cursor-pointer"
                             >

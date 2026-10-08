@@ -570,15 +570,14 @@ class DashboardController extends Controller
             $mNum = $idx + 1;
             $s = $salesTrend->firstWhere('month_num', $mNum);
             $c = $collectionsTrend->firstWhere('month_num', $mNum);
-            if ($s || $c) {
-                $combinedTrend[] = [
-                    'month' => $m,
-                    'sales' => $s ? (float)$s->sales : 0,
-                    'collections' => $c ? (float)$c->collections : 0,
-                    'transactions' => $s ? (int)$s->transactions : 0,
-                    'units_sold' => $s ? (int)$s->units_sold : 0,
-                ];
-            }
+            
+            $combinedTrend[] = [
+                'month' => $m,
+                'sales' => $s ? (float)$s->sales : 0,
+                'collections' => $c ? (float)$c->collections : 0,
+                'transactions' => $s ? (int)$s->transactions : 0,
+                'units_sold' => $s ? (int)$s->units_sold : 0,
+            ];
         }
 
         // Installment Status Distribution

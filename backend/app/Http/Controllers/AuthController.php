@@ -31,12 +31,13 @@ class AuthController extends Controller
             'phone' => 'required|string|max:50',
             'address' => 'required|string',
             'email' => 'required|string|email|max:255',
-            'username' => 'required|string|max:255|unique:users,username',
+            'username' => 'required_unless:role,Customer|string|max:255|unique:users,username',
             'password' => 'required|string|min:6|same:confirmPassword',
             'confirmPassword' => 'required|string',
             'role' => 'required|string',
             'gender' => 'required|string',
             'date_of_birth' => 'required|date',
+            'marital_status' => 'required|string',
         ];
 
         if (!$request->input('from_admin')) {
@@ -45,7 +46,7 @@ class AuthController extends Controller
         }
 
         if ($role === 'Customer') {
-            $rules['username'] = 'required|string|max:255';
+            unset($rules['username']);
         } else {
             $rules['branch_id'] = 'required_if:role,Store Admin,Store Administrator,Employee|exists:branch_profiles,id';
         }

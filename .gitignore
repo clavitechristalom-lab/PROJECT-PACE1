@@ -1,0 +1,23 @@
+﻿# Ignore editor and OS files
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Dependencies and generated output
+backend/vendor/
+frontend/node_modules/
+frontend/dist/
+
+# Environment files
+.env
+.env.*
+backend/.env
+backend/.env.*
+frontend/.env
+frontend/.env.*
+
+# Cache and logs
+*.log
+*.sqlite
+.phpunit.result.cache
+coverage/

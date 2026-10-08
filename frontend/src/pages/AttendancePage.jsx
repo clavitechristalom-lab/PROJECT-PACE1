@@ -77,6 +77,9 @@ export default function AttendancePage() {
   const [summary, setSummary] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [schedule, setSchedule] = useState({
+    labels: { time_in: '08:00 AM', cutoff: '08:05 AM', lunch_out: '12:00 PM', lunch_in: '01:00 PM', time_out: '05:00 PM' },
+  })
 
   // Logs & Filters
   const [search, setSearch] = useState('')
@@ -145,6 +148,7 @@ export default function AttendancePage() {
       })
       setRecords(data.records || data.attendance || [])
       setSummary(data.summary || data.stats || null)
+      if (data.schedule?.labels) setSchedule(data.schedule)
     } catch (err) {
       console.error('Failed to load attendance:', err)
       if (!silent) setError(err.message || 'Failed to fetch attendance records')
@@ -1188,6 +1192,27 @@ export default function AttendancePage() {
       {/* TAB: ATTENDANCE DAILY LOGS */}
       {activeTab === 'log' && (
         <div className="space-y-4">
+          <Card noPad className="border border-border overflow-hidden">
+            <div className="px-4 py-2.5 border-b border-border bg-muted/40 flex items-center gap-2">
+              <FiClock className="w-4 h-4 text-primary" />
+              <span className="text-xs font-bold uppercase tracking-wider text-foreground">Official Work Schedule</span>
+            </div>
+            <div className="grid grid-cols-5 divide-x divide-border text-center">
+              {[
+                { key: 'time_in', label: 'Time In', color: 'text-emerald-600' },
+                { key: 'cutoff', label: 'Cut Off', color: 'text-rose-600' },
+                { key: 'lunch_out', label: 'Lunch Out', color: 'text-amber-600' },
+                { key: 'lunch_in', label: 'Lunch In', color: 'text-amber-600' },
+                { key: 'time_out', label: 'Time Out', color: 'text-indigo-600' },
+              ].map(s => (
+                <div key={s.key} className="py-3 px-2">
+                  <div className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">{s.label}</div>
+                  <div className={`font-mono font-bold text-sm mt-0.5 ${s.color}`}>{schedule.labels?.[s.key]}</div>
+                </div>
+              ))}
+            </div>
+          </Card>
+
           <Card noPad className="p-3.5 border border-border">
             <div className="flex flex-col sm:flex-row gap-3">
               <div className="flex-1 relative">
@@ -1247,7 +1272,7 @@ export default function AttendancePage() {
             ) : (
               <>
                 <div className="overflow-x-auto">
-                  <table className="w-full text-xs min-w-[950px]">
+                  <table className="w-full text-xs min-w-[1150px]">
                     <thead>
                       <tr className="border-b border-border bg-muted/50 text-muted-foreground uppercase font-semibold text-[11px]">
                         <th className="py-3 px-4 text-left">Date</th>
@@ -1256,9 +1281,11 @@ export default function AttendancePage() {
                         <th className="py-3 px-4 text-left">Branch</th>
                         <th className="py-3 px-4 text-left">Department</th>
                         <th className="py-3 px-4 text-left">Time In</th>
-                        <th className="py-3 px-4 text-left">Lunch (Out-In)</th>
+                        <th className="py-3 px-4 text-left">Lunch Out</th>
+                        <th className="py-3 px-4 text-left">Lunch In</th>
                         <th className="py-3 px-4 text-left">Time Out</th>
-                        <th className="py-3 px-4 text-right">Actual Hrs</th>
+                        <th className="py-3 px-4 text-right">Regular</th>
+                        <th className="py-3 px-4 text-right">OT</th>
                         <th className="py-3 px-4 text-center">Verification</th>
                         <th className="py-3 px-4 text-left">Verified By</th>
                         <th className="py-3 px-4 text-center">Status</th>
@@ -1270,17 +1297,20 @@ export default function AttendancePage() {
                           <td className="py-3 px-4 font-mono text-muted-foreground">{a.attendance_date}</td>
                           <td className="py-3 px-4 font-mono font-bold text-foreground">{a.employee_code}</td>
                           <td className="py-3 px-4 font-semibold text-foreground">{a.employee_name}</td>
-                          <td className="py-3 px-4 font-medium text-foreground">{a.branch?.name || (typeof a.branch === 'string' ? a.branch : 'Main Branch')}</td>
+                          <td className="py-3 px-4 font-medium text-foreground">{a.branch?.name || (typeof a.branch === 'string' && a.branch ? a.branch : '—')}</td>
                           <td className="py-3 px-4"><Badge text={a.department || 'General'} variant="neutral" /></td>
-                          <td className="py-3 px-4">
-                            <div className="font-mono">{a.time_in ? a.time_in.substring(0,5) : '—'}</div>
-                            {a.status === 'Late' && <div className="text-[10px] text-rose-500 font-bold uppercase tracking-wider mt-0.5">Late Arrival</div>}
+                          <td className="py-3 px-4 whitespace-nowrap">
+                            <div className={`font-mono ${a.late_minutes > 0 ? 'text-rose-600 font-bold' : ''}`}>{a.time_in || '—'}</div>
+                            {a.late_minutes > 0 && <div className="text-[10px] text-rose-500 font-bold uppercase tracking-wider mt-0.5">Late {a.late_minutes} min</div>}
                           </td>
-                          <td className="py-3 px-4 font-mono text-xs">
-                            {a.lunch_out ? `${a.lunch_out.substring(0,5)} - ${a.lunch_in ? a.lunch_in.substring(0,5) : '?'}` : '—'}
+                          <td className="py-3 px-4 font-mono whitespace-nowrap">{a.lunch_out || '—'}</td>
+                          <td className="py-3 px-4 font-mono whitespace-nowrap">{a.lunch_in || (a.lunch_out ? <span className="text-amber-600 text-[10px] font-bold uppercase">On Lunch</span> : '—')}</td>
+                          <td className="py-3 px-4 whitespace-nowrap">
+                            <div className="font-mono">{a.time_out || (a.time_in ? <span className="text-emerald-600 text-[10px] font-bold uppercase">On Duty</span> : '—')}</div>
+                            {a.undertime_minutes > 0 && <div className="text-[10px] text-amber-600 font-bold uppercase tracking-wider mt-0.5">Undertime {a.undertime_minutes} min</div>}
                           </td>
-                          <td className="py-3 px-4 font-mono text-muted-foreground">{a.time_out ? a.time_out.substring(0,5) : '—'}</td>
-                          <td className="py-3 px-4 text-right font-mono font-bold">{a.total_hours > 0 ? `${a.total_hours}h` : '—'}</td>
+                          <td className="py-3 px-4 text-right font-mono font-bold">{a.time_out ? `${Number(a.regular_hours || 0).toFixed(2)}h` : '—'}</td>
+                          <td className="py-3 px-4 text-right font-mono font-bold text-amber-600">{Number(a.overtime_hours) > 0 ? `${Number(a.overtime_hours).toFixed(2)}h` : '—'}</td>
                           <td className="py-3 px-4 text-center">
                             <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200">
                               {a.verification_method || 'QR + PIN'}
