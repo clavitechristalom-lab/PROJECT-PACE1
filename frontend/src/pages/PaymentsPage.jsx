@@ -81,11 +81,14 @@ export default function PaymentsPage() {
   const [page, setPage] = useState(1)
   const pageSize = 10
 
-  // Modals
+  // Modals & Printing
   const [newPayModal, setNewPayModal] = useState(false)
   const [viewReceipt, setViewReceipt] = useState(null)
   const [viewPayment, setViewPayment] = useState(null)
   const [saving, setSaving] = useState(false)
+  const [printMode, setPrintMode] = useState('summary') // 'summary' | 'receipt'
+  const [printReceiptData, setPrintReceiptData] = useState(null)
+  const [settings, setSettings] = useState(null)
 
   // New Payment Form State
   const [selectedInstId, setSelectedInstId] = useState('')
@@ -99,7 +102,7 @@ export default function PaymentsPage() {
     if (!silent) setLoading(true)
     if (!silent) setError('')
     try {
-      const [paymentsRes, instRes, monRes, branchRes] = await Promise.all([
+      const [paymentsRes, instRes, monRes, branchRes, settingsRes] = await Promise.all([
         api.payments.getAll({
           search: search || undefined,
           payment_method: methodFilter !== 'All' ? methodFilter : undefined,
@@ -110,12 +113,14 @@ export default function PaymentsPage() {
         api.installments.getAll({ status: 'Active', branch: branchFilter !== 'All' ? branchFilter : undefined }),
         api.payments.getMonitoring({ branch: branchFilter !== 'All' ? branchFilter : undefined }).catch(() => null),
         api.branches.getAll().catch(() => []),
+        api.system.getSettings().catch(() => null),
       ])
 
       setPayments(paymentsRes.payments || [])
       setInstallments(instRes.installments || [])
       setMonitoring(monRes)
       setBranches(Array.isArray(branchRes) ? branchRes : (branchRes.branches || []))
+      if (settingsRes) setSettings(settingsRes)
     } catch (err) {
       console.error('Failed to load payments:', err)
       if (!silent) setError(err.message || 'Failed to fetch payment collections')
@@ -233,8 +238,52 @@ export default function PaymentsPage() {
     }
   }
 
+  const handlePrintSummary = async () => {
+    setPrintMode('summary')
+    setPrintReceiptData(null)
+    try {
+      await api.payments.logPrint()
+    } catch (e) {
+      console.warn('Could not log print event:', e)
+    }
+    setTimeout(() => {
+      window.print()
+    }, 120)
+  }
+
+  const handlePrintReceipt = async (p) => {
+    if (!p) return
+    showLoading('Preparing receipt...')
+    try {
+      const res = await api.payments.getById(p.payment_id)
+      const data = res?.payment || p
+      setPrintReceiptData(data)
+      setPrintMode('receipt')
+      try {
+        await api.payments.logPrint(p.payment_id)
+      } catch (e) {
+        console.warn('Could not log print event:', e)
+      }
+      closeLoading()
+      setTimeout(() => {
+        window.print()
+      }, 150)
+    } catch (err) {
+      closeLoading()
+      setPrintReceiptData(p)
+      setPrintMode('receipt')
+      setTimeout(() => {
+        window.print()
+      }, 150)
+    }
+  }
+
   const printReceipt = () => {
-    window.print()
+    if (viewReceipt) {
+      handlePrintReceipt(viewReceipt)
+    } else {
+      handlePrintSummary()
+    }
   }
 
   const filteredPayments = useMemo(() => {
@@ -277,7 +326,8 @@ export default function PaymentsPage() {
   }
 
   return (
-    <div className="space-y-6">
+    <>
+    <div className="space-y-6 print:hidden">
       <PageHeader
         title="Payment Collections & Receipts"
         subtitle={
@@ -286,7 +336,15 @@ export default function PaymentsPage() {
             : 'Track official payment receipts, cash vs digital collection breakdown, and installments paid'
         }
         action={
-          <div className="flex gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
+            <button
+              onClick={handlePrintSummary}
+              className="flex items-center gap-2 px-3.5 py-2 rounded-xl border border-border bg-card hover:bg-muted font-semibold text-xs text-foreground cursor-pointer shadow-2xs transition-colors"
+              title="Print / PDF Collections Summary"
+            >
+              <FiPrinter className="w-4 h-4 text-primary" />
+              <span>Print / PDF</span>
+            </button>
             <button
               onClick={handleExportCSV}
               disabled={exporting}
@@ -425,16 +483,25 @@ export default function PaymentsPage() {
                         <button
                           onClick={() => setViewPayment(p)}
                           className="inline-flex items-center justify-center w-7 h-7 rounded-lg border border-border hover:bg-muted font-semibold cursor-pointer transition-colors"
-                          title="View Payment"
+                          title="View Payment Details"
                         >
                           <FiEye className="w-4 h-4 text-blue-500" />
                         </button>
                         <button
                           onClick={() => setViewReceipt(p)}
                           className="inline-flex items-center gap-1 px-2.5 py-1 text-xs rounded-lg border border-border hover:bg-muted font-semibold cursor-pointer transition-colors"
+                          title="View Official Receipt"
                         >
-                          <FiFileText className="w-3.5 h-3.5" />
+                          <FiFileText className="w-3.5 h-3.5 text-amber-500" />
                           <span>Receipt</span>
+                        </button>
+                        <button
+                          onClick={() => handlePrintReceipt(p)}
+                          className="inline-flex items-center gap-1 px-2.5 py-1 text-xs rounded-lg border border-border bg-card hover:bg-muted font-semibold cursor-pointer transition-colors text-foreground shadow-2xs"
+                          title="Print / PDF Official Receipt"
+                        >
+                          <FiPrinter className="w-3.5 h-3.5 text-primary" />
+                          <span>Print / PDF</span>
                         </button>
                         <button
                           onClick={() => handleDeletePayment(p.payment_id)}
@@ -512,11 +579,11 @@ export default function PaymentsPage() {
             <div className="flex justify-between items-center pt-2 border-t border-border">
               <button
                 type="button"
-                onClick={printReceipt}
-                className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl border border-border hover:bg-muted font-semibold cursor-pointer"
+                onClick={() => handlePrintReceipt(viewReceipt)}
+                className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl border border-border bg-primary text-primary-foreground hover:bg-primary/90 font-semibold cursor-pointer shadow-xs"
               >
                 <FiPrinter className="w-3.5 h-3.5" />
-                <span>Print Receipt</span>
+                <span>Print / PDF</span>
               </button>
               <button
                 type="button"
@@ -705,9 +772,249 @@ export default function PaymentsPage() {
                 <strong>Remarks:</strong> {viewPayment.notes}
               </div>
             )}
+
+            <div className="flex justify-between items-center pt-3 border-t border-border mt-3">
+              <button
+                type="button"
+                onClick={() => handlePrintReceipt(viewPayment)}
+                className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl border border-border bg-primary text-primary-foreground hover:bg-primary/90 font-semibold cursor-pointer shadow-xs"
+              >
+                <FiPrinter className="w-3.5 h-3.5" />
+                <span>Print / PDF</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setViewPayment(null)}
+                className="flex items-center gap-1 px-4 py-1.5 rounded-xl border border-border hover:bg-muted font-semibold cursor-pointer"
+              >
+                <FiX className="w-3.5 h-3.5" />
+                <span>Close</span>
+              </button>
+            </div>
           </div>
         </Modal>
       )}
     </div>
+
+    {/* Dedicated Printable Area (Active only during browser Print / PDF export) */}
+    <div className="hidden print:block bg-white text-black min-h-screen w-full font-sans print:m-0 print:p-6">
+      {printMode === 'receipt' && (printReceiptData || viewReceipt || viewPayment) ? (
+        (() => {
+          const receipt = printReceiptData || viewReceipt || viewPayment
+          const companyTitle = receipt.company_settings?.company_name || settings?.company_name || 'PROJECT: PACE Z-LICZ'
+          const branchTitle = receipt.branch || user?.employee?.branch?.name || receipt.company_settings?.branch_name || settings?.branch_name || 'C-LICZ CDO'
+          const branchAddress = receipt.branch_location || receipt.branch_address || receipt.company_settings?.address || settings?.address || 'Cagayan de Oro City'
+          const branchContact = receipt.branch_phone || receipt.company_settings?.phone || settings?.phone || '+63 88 856 1234'
+          const taxId = receipt.company_settings?.tax_id || settings?.tax_id || '000-000-000'
+
+          return (
+            <div className="max-w-xl mx-auto border-2 border-black p-6 rounded-lg space-y-5 bg-white">
+              {/* Header */}
+              <div className="text-center pb-3 border-b-2 border-black space-y-0.5">
+                <h1 className="text-2xl font-black tracking-wider uppercase">{companyTitle}</h1>
+                <p className="text-sm font-bold uppercase">{branchTitle}</p>
+                <p className="text-xs text-gray-700">{branchAddress} • Tel: {branchContact}</p>
+                <p className="text-[11px] text-gray-600 font-mono">TIN: {taxId}</p>
+                <div className="mt-2 inline-block px-3 py-1 border border-black font-bold uppercase tracking-widest text-xs bg-gray-100">
+                  OFFICIAL PAYMENT RECEIPT
+                </div>
+              </div>
+
+              {/* Receipt Info Header */}
+              <div className="flex justify-between items-center text-xs font-mono border-b border-gray-300 pb-2.5">
+                <div>
+                  <span className="font-bold text-gray-600">RECEIPT NO: </span>
+                  <span className="font-bold text-sm text-black">{receipt.receipt_no}</span>
+                </div>
+                <div>
+                  <span className="font-bold text-gray-600">DATE: </span>
+                  <span className="font-bold">{receipt.payment_date}</span>
+                </div>
+              </div>
+
+              {/* Transaction Breakdown */}
+              <table className="w-full text-xs border-collapse">
+                <tbody>
+                  <tr className="border-b border-gray-200">
+                    <td className="py-2 text-gray-600 font-medium w-1/3">Received From:</td>
+                    <td className="py-2 font-bold uppercase text-black">{receipt.customer_name}</td>
+                  </tr>
+                  {receipt.customer_phone && (
+                    <tr className="border-b border-gray-200">
+                      <td className="py-2 text-gray-600 font-medium">Contact Number:</td>
+                      <td className="py-2 font-mono">{receipt.customer_phone}</td>
+                    </tr>
+                  )}
+                  {receipt.customer_address && (
+                    <tr className="border-b border-gray-200">
+                      <td className="py-2 text-gray-600 font-medium">Customer Address:</td>
+                      <td className="py-2">{receipt.customer_address}</td>
+                    </tr>
+                  )}
+                  <tr className="border-b border-gray-200">
+                    <td className="py-2 text-gray-600 font-medium">Account Reference:</td>
+                    <td className="py-2 font-mono font-bold">{receipt.account_no}</td>
+                  </tr>
+                  <tr className="border-b border-gray-200">
+                    <td className="py-2 text-gray-600 font-medium">Payment Method:</td>
+                    <td className="py-2 font-semibold uppercase">{receipt.payment_method}</td>
+                  </tr>
+                  {receipt.reference_no && (
+                    <tr className="border-b border-gray-200">
+                      <td className="py-2 text-gray-600 font-medium">Reference / Trace #:</td>
+                      <td className="py-2 font-mono">{receipt.reference_no}</td>
+                    </tr>
+                  )}
+                  {receipt.notes && (
+                    <tr className="border-b border-gray-200">
+                      <td className="py-2 text-gray-600 font-medium">Remarks:</td>
+                      <td className="py-2 italic text-gray-700">{receipt.notes}</td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+
+              {/* Amount Paid Box */}
+              <div className="border-2 border-black p-3.5 bg-gray-50 flex justify-between items-center rounded">
+                <div>
+                  <span className="text-[10px] uppercase font-bold text-gray-600 block">TOTAL AMOUNT RECEIVED</span>
+                  <span className="text-2xl font-black font-mono">
+                    ₱{Number(receipt.amount || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </span>
+                </div>
+                {receipt.remaining_balance !== undefined && (
+                  <div className="text-right">
+                    <span className="text-[10px] uppercase font-bold text-gray-600 block">Remaining Account Balance</span>
+                    <span className="text-sm font-bold font-mono text-gray-800">
+                      ₱{Number(receipt.remaining_balance || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </span>
+                  </div>
+                )}
+              </div>
+
+              {/* Signatures */}
+              <div className="pt-6 grid grid-cols-2 gap-6 text-xs text-center">
+                <div>
+                  <div className="border-b border-black w-40 mx-auto pb-1 font-semibold uppercase">
+                    {receipt.customer_name}
+                  </div>
+                  <p className="mt-1 text-gray-600">Customer Signature</p>
+                </div>
+                <div>
+                  <div className="border-b border-black w-40 mx-auto pb-1 font-semibold uppercase">
+                    {receipt.received_by || 'Authorized Cashier'}
+                  </div>
+                  <p className="mt-1 text-gray-600">Authorized Collector / Cashier</p>
+                </div>
+              </div>
+
+              {/* Footer Note */}
+              <div className="text-center pt-3 border-t border-gray-300 text-[10px] text-gray-500">
+                <p>This is a system-generated official receipt acknowledged by {companyTitle}.</p>
+                <p>Timestamp: {new Date().toLocaleString()}</p>
+              </div>
+            </div>
+          )
+        })()
+      ) : (
+        <div>
+          {/* Summary Report Header */}
+          <div className="border-b-2 border-black pb-3 mb-6">
+            <div className="flex justify-between items-start">
+              <div>
+                <h1 className="text-2xl font-black uppercase tracking-wider">{settings?.company_name || 'PROJECT: PACE Z-LICZ'}</h1>
+                <p className="text-sm font-semibold uppercase text-gray-800">{user?.employee?.branch?.name || settings?.branch_name || 'Main Branch'}</p>
+                <h2 className="text-lg font-bold text-gray-700 mt-2">PAYMENT COLLECTIONS & RECEIPTS REPORT</h2>
+              </div>
+              <div className="text-right text-xs">
+                <p><span className="font-semibold text-gray-600">Generated Date:</span> {new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}</p>
+                <p><span className="font-semibold text-gray-600">Generated By:</span> {user?.username || 'Staff'}</p>
+                <p><span className="font-semibold text-gray-600">Branch Filter:</span> {branchFilter}</p>
+                <p><span className="font-semibold text-gray-600">Method Filter:</span> {methodFilter}</p>
+              </div>
+            </div>
+          </div>
+
+          {/* Metrics Box */}
+          <div className="grid grid-cols-4 gap-3 mb-6 text-xs border border-gray-300 p-3 bg-gray-50">
+            <div>
+              <span className="text-gray-500 block uppercase text-[10px] font-bold">Today's Collections</span>
+              <span className="font-mono font-bold text-base">{fmt(monitoring?.today?.collected || 0)}</span>
+              <span className="text-[10px] text-gray-500 block">{monitoring?.today?.count || 0} payments</span>
+            </div>
+            <div>
+              <span className="text-gray-500 block uppercase text-[10px] font-bold">Monthly Collections</span>
+              <span className="font-mono font-bold text-base">{fmt(monitoring?.month?.collected || 0)}</span>
+              <span className="text-[10px] text-gray-500 block">{monitoring?.month?.count || 0} payments</span>
+            </div>
+            <div>
+              <span className="text-gray-500 block uppercase text-[10px] font-bold">Total Cash Collected</span>
+              <span className="font-mono font-bold text-base">{fmt(monitoring?.total?.cash || 0)}</span>
+              <span className="text-[10px] text-gray-500 block">Cash in register</span>
+            </div>
+            <div>
+              <span className="text-gray-500 block uppercase text-[10px] font-bold">Digital Collections</span>
+              <span className="font-mono font-bold text-base">{fmt(monitoring?.total?.digital || 0)}</span>
+              <span className="text-[10px] text-gray-500 block">GCash / Maya / Bank</span>
+            </div>
+          </div>
+
+          {/* Payments List Table */}
+          <table className="w-full text-[11px] border-collapse mb-6">
+            <thead>
+              <tr className="border-y-2 border-black bg-gray-100">
+                <th className="py-2 px-2 text-left font-bold uppercase">Receipt #</th>
+                <th className="py-2 px-2 text-left font-bold uppercase">Date</th>
+                <th className="py-2 px-2 text-left font-bold uppercase">Account #</th>
+                <th className="py-2 px-2 text-left font-bold uppercase">Customer</th>
+                <th className="py-2 px-2 text-left font-bold uppercase">Branch</th>
+                <th className="py-2 px-2 text-left font-bold uppercase">Method</th>
+                <th className="py-2 px-2 text-left font-bold uppercase">Received By</th>
+                <th className="py-2 px-2 text-right font-bold uppercase">Amount</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-200">
+              {filteredPayments.map((p, idx) => (
+                <tr key={p.payment_id || idx}>
+                  <td className="py-1.5 px-2 font-mono font-bold">{p.receipt_no}</td>
+                  <td className="py-1.5 px-2 font-mono">{p.payment_date}</td>
+                  <td className="py-1.5 px-2 font-mono font-semibold">{p.account_no}</td>
+                  <td className="py-1.5 px-2 font-medium">{p.customer_name}</td>
+                  <td className="py-1.5 px-2 text-gray-700">{p.branch}</td>
+                  <td className="py-1.5 px-2 font-medium">{p.payment_method}</td>
+                  <td className="py-1.5 px-2 text-gray-700">{p.received_by}</td>
+                  <td className="py-1.5 px-2 text-right font-mono font-bold">{fmt(p.amount)}</td>
+                </tr>
+              ))}
+            </tbody>
+            <tfoot>
+              <tr className="border-t-2 border-black font-bold">
+                <td colSpan={7} className="py-2 px-2 text-right uppercase">Total Amount ({filteredPayments.length} transactions):</td>
+                <td className="py-2 px-2 text-right font-mono text-base">
+                  {fmt(filteredPayments.reduce((sum, p) => sum + Number(p.amount || 0), 0))}
+                </td>
+              </tr>
+            </tfoot>
+          </table>
+
+          {/* Signatures */}
+          <div className="grid grid-cols-3 gap-6 pt-6 text-xs text-center border-t border-gray-300">
+            <div>
+              <div className="border-b border-black pb-1 font-semibold uppercase">{user?.username || 'Staff'}</div>
+              <p className="mt-1 text-gray-600">Prepared By</p>
+            </div>
+            <div>
+              <div className="border-b border-black pb-1 font-semibold uppercase">Branch Accountant</div>
+              <p className="mt-1 text-gray-600">Reviewed & Verified By</p>
+            </div>
+            <div>
+              <div className="border-b border-black pb-1 font-semibold uppercase">Store Manager</div>
+              <p className="mt-1 text-gray-600">Approved By</p>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+    </>
   )
 }

@@ -11,10 +11,10 @@ export default function DashboardCard({ title, value, icon, subtitle, colorClass
     >
       <div className="flex justify-between items-start relative z-10">
         <div className="flex-1">
-          <p className="text-sm text-slate-500 dark:text-slate-400 font-semibold uppercase tracking-wider mb-2">{title}</p>
+          <p className="text-sm text-muted-foreground font-semibold uppercase tracking-wider mb-2">{title}</p>
           <h3 className="text-3xl font-black tracking-tight">{value}</h3>
           {(subtitle || trend) && (
-            <p className="text-xs text-slate-500 dark:text-slate-400 mt-3 flex items-center gap-1.5 font-medium">
+            <p className="text-xs text-muted-foreground mt-3 flex items-center gap-1.5 font-medium">
               {trend && (
                 <span className={`px-1.5 py-0.5 rounded-md ${trend > 0 ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400' : 'bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-400'}`}>
                   {trend > 0 ? '↑' : '↓'} {Math.abs(trend)}%

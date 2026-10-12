@@ -292,7 +292,7 @@ export default function PaymentSchedulePage({ branchFilter: propBranchFilter, em
                       
                       <div className="space-y-1.5 overflow-y-auto max-h-[100px] no-scrollbar">
                         {daySchedules.map(s => {
-                          let bgColor = 'bg-slate-100 dark:bg-slate-800 border-slate-200'
+                          let bgColor = 'bg-muted border-slate-200'
                           if (s.status === 'Paid' || s.status === 'Fully Paid') bgColor = 'bg-emerald-50 border-emerald-200 dark:bg-emerald-900/20 text-emerald-800 dark:text-emerald-300 dark:border-emerald-800/50'
                           else if (s.status === 'Overdue') bgColor = 'bg-rose-50 border-rose-200 dark:bg-rose-900/20 text-rose-800 dark:text-rose-300 dark:border-rose-800/50'
                           else bgColor = 'bg-blue-50 border-blue-200 dark:bg-blue-900/20 text-blue-800 dark:text-blue-300 dark:border-blue-800/50'

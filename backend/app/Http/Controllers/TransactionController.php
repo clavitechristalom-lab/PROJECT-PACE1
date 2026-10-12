@@ -73,11 +73,23 @@ class TransactionController extends Controller
         $dateFrom = $request->query('date_from');
         $dateTo = $request->query('date_to');
 
+        $user = $request->user();
+        $customerId = $user && $user->role === 'Customer'
+            ? ($user->customer_id ?? $user->customer?->customer_id)
+            : null;
+        if ($user && $user->role === 'Customer' && !$customerId) {
+            $customerId = \App\Models\Customer::where('email', $user->username)->value('customer_id');
+        }
+
         $transactions = collect();
 
         // 1. Fetch Sales Transactions
         if ($type === 'All' || $type === 'Sale') {
             $salesQuery = SaleTransaction::with(['customer', 'processedBy.employee', 'items.product']);
+
+            if ($user && $user->role === 'Customer') {
+                $salesQuery->where('customer_id', $customerId ?? -1);
+            }
 
             if ($search) {
                 $salesQuery->where(function ($q) use ($search) {
@@ -154,6 +166,12 @@ class TransactionController extends Controller
         // 2. Fetch Installment Payments
         if ($type === 'All' || $type === 'Payment') {
             $paymentsQuery = Payment::with(['installmentAccount.customer', 'receivedBy.employee']);
+
+            if ($user && $user->role === 'Customer') {
+                $paymentsQuery->whereHas('installmentAccount', function ($query) use ($customerId) {
+                    $query->where('customer_id', $customerId ?? -1);
+                });
+            }
 
             if ($search) {
                 $paymentsQuery->where(function ($q) use ($search) {
@@ -261,6 +279,77 @@ class TransactionController extends Controller
                 'installment_count' => $installmentTx->count(),
                 'average_transaction' => $totalCount > 0 ? (float)($totalVolume / $totalCount) : 0.0,
             ],
+        ]);
+    }
+
+    public function exportTransactionsCsv(Request $request)
+    {
+        $response = $this->index($request);
+        $data = $response->getData(true);
+        $transactions = $data['transactions'] ?? [];
+
+        $headers = [
+            'Reference Code',
+            'Transaction Type',
+            'Channel',
+            'Payment Provider / Method',
+            'Digital Reference / Trace No',
+            'Date',
+            'Customer Code',
+            'Customer Name',
+            'Amount (PHP)',
+            'Amount Paid (PHP)',
+            'Balance Due (PHP)',
+            'Status',
+            'Handled By',
+            'Notes',
+        ];
+
+        $callback = function () use ($transactions, $headers) {
+            $handle = fopen('php://output', 'w');
+            fprintf($handle, chr(0xEF) . chr(0xBB) . chr(0xBF));
+            fputcsv($handle, $headers);
+
+            if (empty($transactions)) {
+                fputcsv($handle, ['NO_DATA', 'N/A', 'N/A', 'N/A', 'N/A', date('Y-m-d'), 'N/A', 'No transactions found for the selected filter', '0.00', '0.00', '0.00', 'Empty', 'System', '']);
+            } else {
+                foreach ($transactions as $tx) {
+                    $channelLabel = match ($tx['channel'] ?? '') {
+                        'ewallet' => 'E-Wallet',
+                        'online_bank' => 'Online Banking',
+                        'installment' => 'Installment',
+                        default => 'Cash',
+                    };
+
+                    fputcsv($handle, [
+                        $tx['reference_code'] ?? '',
+                        $tx['type'] ?? '',
+                        $channelLabel,
+                        $tx['provider'] ?? ($tx['payment_method'] ?? ''),
+                        $tx['reference_no'] ?? '',
+                        $tx['date'] ?? '',
+                        ($tx['customer_code'] ?? '—') !== '—' ? $tx['customer_code'] : '',
+                        $tx['customer_name'] ?? '',
+                        number_format((float)($tx['amount'] ?? 0), 2, '.', ''),
+                        number_format((float)($tx['amount_paid'] ?? 0), 2, '.', ''),
+                        number_format((float)($tx['balance_due'] ?? 0), 2, '.', ''),
+                        $tx['status'] ?? 'Completed',
+                        $tx['processed_by'] ?? '',
+                        $tx['notes'] ?? '',
+                    ]);
+                }
+            }
+            fclose($handle);
+        };
+
+        $filename = 'transactions_export_' . date('Y-m-d_His') . '.csv';
+
+        return response()->stream($callback, 200, [
+            'Content-Type' => 'text/csv; charset=utf-8',
+            'Content-Disposition' => "attachment; filename=\"{$filename}\"",
+            'Pragma' => 'no-cache',
+            'Cache-Control' => 'must-revalidate, post-check=0, pre-check=0',
+            'Expires' => '0',
         ]);
     }
 }

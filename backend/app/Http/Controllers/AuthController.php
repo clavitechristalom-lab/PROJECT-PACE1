@@ -243,19 +243,70 @@ class AuthController extends Controller
             'password' => 'required|string',
         ]);
 
+        $loginInput = trim($credentials['username']);
+        $passwordInput = $credentials['password'];
+        $cleanPassword = trim($passwordInput);
+        $lowerInput = strtolower($loginInput);
+        $noSpacesInput = str_replace(' ', '', $lowerInput);
+        $cleanPhone = str_replace([' ', '-', '+'], '', $loginInput);
+
         $user = User::with(['employee.branch', 'customer.branch'])
-            ->where(function($query) use ($credentials) {
-                $query->where('username', $credentials['username'])
-                      ->orWhereHas('employee', function($q) use ($credentials) {
-                          $q->where('email', $credentials['username']);
-                      })
-                      ->orWhereHas('customer', function($q) use ($credentials) {
-                          $q->where('email', $credentials['username']);
-                      });
+            ->where(function($query) use ($loginInput, $lowerInput, $noSpacesInput, $cleanPhone) {
+                // Match username directly or case-insensitive or without spaces
+                $query->where('username', $loginInput)
+                      ->orWhereRaw('LOWER(username) = ?', [$lowerInput])
+                      ->orWhereRaw('REPLACE(LOWER(username), " ", "") = ?', [$noSpacesInput]);
+
+                // Match admin variations (admin, admin@..., administrator)
+                if (preg_match('/^admin(@.*)?$/i', $loginInput) || strcasecmp($loginInput, 'administrator') === 0) {
+                    $query->orWhere('username', 'admin');
+                }
+
+                // Match linked employee email, code, phone, or name
+                $query->orWhereHas('employee', function($q) use ($loginInput, $lowerInput, $noSpacesInput, $cleanPhone) {
+                    $q->whereRaw('LOWER(email) = ?', [$lowerInput])
+                      ->orWhere('employee_code', $loginInput)
+                      ->orWhereRaw('LOWER(employee_code) = ?', [$lowerInput])
+                      ->orWhere('phone', $loginInput)
+                      ->orWhereRaw('REPLACE(phone, " ", "") = ?', [$cleanPhone])
+                      ->orWhereRaw('LOWER(first_name) = ?', [$lowerInput])
+                      ->orWhereRaw('LOWER(last_name) = ?', [$lowerInput])
+                      ->orWhereRaw('LOWER(CONCAT(first_name, " ", last_name)) = ?', [$lowerInput])
+                      ->orWhereRaw('REPLACE(LOWER(CONCAT(first_name, last_name)), " ", "") = ?', [$noSpacesInput]);
+                });
+
+                // Match linked customer email, code, phone, or name
+                $query->orWhereHas('customer', function($q) use ($loginInput, $lowerInput, $noSpacesInput, $cleanPhone) {
+                    $q->whereRaw('LOWER(email) = ?', [$lowerInput])
+                      ->orWhere('customer_code', $loginInput)
+                      ->orWhereRaw('LOWER(customer_code) = ?', [$lowerInput])
+                      ->orWhere('phone', $loginInput)
+                      ->orWhereRaw('REPLACE(phone, " ", "") = ?', [$cleanPhone])
+                      ->orWhereRaw('LOWER(first_name) = ?', [$lowerInput])
+                      ->orWhereRaw('LOWER(last_name) = ?', [$lowerInput])
+                      ->orWhereRaw('LOWER(CONCAT(first_name, " ", last_name)) = ?', [$lowerInput])
+                      ->orWhereRaw('REPLACE(LOWER(CONCAT(first_name, last_name)), " ", "") = ?', [$noSpacesInput]);
+                });
             })
             ->first();
 
-        if ($user && Hash::check($credentials['password'], $user->password_hash)) {
+        $passwordMatched = false;
+        if ($user) {
+            if (Hash::check($passwordInput, $user->password_hash) ||
+                Hash::check($cleanPassword, $user->password_hash) ||
+                $user->password_hash === $passwordInput ||
+                $user->password_hash === $cleanPassword) {
+                $passwordMatched = true;
+
+                // Re-hash if stored as plaintext
+                if ($user->password_hash === $passwordInput || $user->password_hash === $cleanPassword) {
+                    $user->password_hash = Hash::make($cleanPassword);
+                    $user->save();
+                }
+            }
+        }
+
+        if ($user && $passwordMatched) {
             $user->last_login = now();
             $user->is_active = true;
             $user->save();
@@ -278,7 +329,7 @@ class AuthController extends Controller
         }
 
         return response()->json([
-            'message' => 'Invalid username or password'
+            'message' => 'Incorrect email or password. Please try again.'
         ], 401);
     }
 
@@ -304,22 +355,37 @@ class AuthController extends Controller
 
     public function logout(Request $request)
     {
-        $user = $request->user();
+        $user = $request->user('sanctum') ?? $request->user();
+        if (!$user && $request->filled('user_id')) {
+            $user = User::find($request->input('user_id'));
+        }
+
         if ($user) {
+            $user->is_active = false;
+            $user->save();
+
             SystemLog::create([
                 'user_id'    => $user->user_id,
                 'action'     => 'LOGOUT',
                 'module'     => 'Auth',
-                'description' => "User {$user->username} logged out",
+                'description' => "User {$user->username} ({$user->role}) logged out",
                 'ip_address' => $request->ip(),
                 'user_agent' => $request->userAgent(),
             ]);
-            $user->is_active = false;
-            $user->save();
-            $user->currentAccessToken()->delete();
+
+            try {
+                if ($user->currentAccessToken()) {
+                    $user->currentAccessToken()->delete();
+                }
+            } catch (\Throwable $e) {
+                // Token already deleted or stateless
+            }
         }
 
-        return response()->json(['message' => 'Logged out successfully']);
+        return response()->json([
+            'success' => true,
+            'message' => 'Logged out successfully'
+        ]);
     }
 
     public function uploadProfileImage(Request $request)

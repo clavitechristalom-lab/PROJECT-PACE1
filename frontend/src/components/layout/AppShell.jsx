@@ -128,7 +128,6 @@ function navByRole(role, onOpenConfig) {
         { label: 'Employees & QR', path: '/employees', icon: icons.employees }
       ],
     })
-    base.push({ label: 'Store Settings', action: onOpenConfig, icon: icons.settings })
   }
 
   base.push({ label: isAdmin ? 'Attendance Logs' : 'Branch Attendance', path: '/attendance', icon: icons.attendance })
@@ -138,6 +137,7 @@ function navByRole(role, onOpenConfig) {
   base.push({ label: 'Customer Support', path: '/support', icon: icons.support })
 
   if (isAdmin) {
+    base.push({ label: 'Company Configuration', action: onOpenConfig, icon: icons.settings })
     base.push(system)
   }
 
@@ -314,8 +314,8 @@ function SystemStorageWidget({ collapsed, mobileOpen }) {
   return (
     <div className={`mx-3 mb-4 mt-2 p-3.5 rounded-2xl bg-transparent`}>
       <div className="flex items-center justify-between mb-2.5">
-        <span className="text-[11px] font-medium text-slate-600 dark:text-slate-300 tracking-wide">System storage</span>
-        <span className="text-xs font-bold text-slate-900 dark:text-white tracking-tight">{percentage}%</span>
+        <span className="text-[11px] font-medium text-muted-foreground tracking-wide">System storage</span>
+        <span className="text-xs font-bold text-foreground tracking-tight">{percentage}%</span>
       </div>
       
       <div className="h-1.5 w-full bg-slate-200 dark:bg-slate-800/80 rounded-full overflow-hidden mb-2.5">
@@ -325,7 +325,7 @@ function SystemStorageWidget({ collapsed, mobileOpen }) {
         ></div>
       </div>
       
-      <div className="text-[10px] text-slate-500 dark:text-slate-400/80 font-medium tracking-wide">
+      <div className="text-[10px] text-muted-foreground/80 font-medium tracking-wide">
         {formatGB(storage.used)} GB of {formatGB(storage.total)} GB used
       </div>
     </div>
@@ -364,11 +364,10 @@ function Header({
   onOpenConfig,
 }) {
   const { user, logout } = useAuth()
-  const { theme, toggleMode } = useTheme()
+  const { isDark, toggleMode } = useTheme()
   const [userOpen, setUserOpen] = useState(false)
   const userRef = useRef(null)
   const navigate = useNavigate()
-  const isDark = theme === 'dark'
 
   // Global Search State
   const [searchQuery, setSearchQuery] = useState('')
@@ -542,8 +541,8 @@ function Header({
 
         {/* Global Search Dropdown Modal */}
         {searchOpen && (
-          <div className="absolute top-11 left-0 right-0 bg-card rounded-2xl border border-border shadow-2xl z-50 overflow-hidden max-h-[420px] flex flex-col animate-[slideUp_0.15s_ease]">
-            <div className="p-2.5 border-b border-border bg-muted/30 flex items-center justify-between text-[11px] text-muted-foreground">
+          <div className="absolute top-11 left-0 right-0 !bg-white dark:!bg-[#0f172a] rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xl z-50 overflow-hidden max-h-[420px] flex flex-col animate-[slideUp_0.15s_ease]">
+            <div className="p-2.5 border-b border-slate-200 dark:border-slate-800 !bg-slate-50 dark:!bg-[#1e293b] flex items-center justify-between text-[11px] text-muted-foreground">
               <span>
                 {searchQuery.trim().length < 2
                   ? 'Type at least 2 characters to search MySQL database...'
@@ -552,7 +551,7 @@ function Header({
               {isSearching && <span className="text-primary font-medium animate-pulse">Searching database...</span>}
             </div>
 
-            <div className="overflow-y-auto flex-1 p-1 divide-y divide-border/50" ref={listRef}>
+            <div className="overflow-y-auto flex-1 p-1 divide-y divide-border/50 !bg-white dark:!bg-[#0f172a]" ref={listRef}>
               {searchQuery.trim().length >= 2 && searchResults.length === 0 && !isSearching && (
                 <div className="py-8 text-center text-xs text-muted-foreground">
                   <FiSearch className="w-8 h-8 mx-auto text-muted-foreground/30 mb-1" />
@@ -643,7 +642,7 @@ function Header({
           title={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
           className="w-9 h-9 flex items-center justify-center rounded-xl border border-border bg-muted/40 hover:bg-muted text-foreground transition-colors cursor-pointer text-base shadow-2xs"
         >
-          {isDark ? <FiSun className="w-4 h-4 text-amber-500" /> : <FiMoon className="w-4 h-4 text-slate-700 dark:text-slate-300" />}
+          {isDark ? <FiSun className="w-4 h-4 text-amber-500" /> : <FiMoon className="w-4 h-4 text-foreground" />}
         </button>
 
         {/* Real Notification Bell with Live DB Count & Dropdown */}
@@ -675,36 +674,38 @@ function Header({
             </div>
           </button>
           {userOpen && (
-            <div className="absolute right-0 top-12 w-56 bg-card rounded-2xl border border-border shadow-2xl z-40 overflow-hidden animate-[slideUp_0.15s_ease]">
-              <div className="px-4 py-3 border-b border-border bg-muted/40">
+            <div className="absolute right-0 top-12 w-56 !bg-white dark:!bg-[#0f172a] rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xl z-40 overflow-hidden animate-[slideUp_0.15s_ease]">
+              <div className="px-4 py-3 border-b border-slate-200 dark:border-slate-800 !bg-slate-50 dark:!bg-[#1e293b]">
                 <div className="text-xs font-bold text-foreground truncate">{user.name}</div>
                 <div className="text-[11px] text-muted-foreground font-mono truncate">{user.username}</div>
               </div>
-              <div className="p-1 space-y-0.5">
+              <div className="p-1 space-y-0.5 !bg-white dark:!bg-[#0f172a]">
                 <button
                   onClick={() => { onOpenProfile?.(); setUserOpen(false) }}
-                  className="w-full text-left px-3 py-2 text-xs text-foreground hover:bg-muted rounded-xl cursor-pointer flex items-center gap-2 font-medium transition-colors"
+                  className="w-full text-left px-3 py-2 text-xs text-foreground hover:bg-slate-100 dark:hover:bg-slate-800/80 rounded-xl cursor-pointer flex items-center gap-2 font-medium transition-colors"
                 >
                   <FiUser className="w-3.5 h-3.5 text-primary" />
                   <span>Profile Information</span>
                 </button>
                 <button
                   onClick={() => { navigate('/notifications'); setUserOpen(false) }}
-                  className="w-full text-left px-3 py-2 text-xs text-foreground hover:bg-muted rounded-xl cursor-pointer flex items-center gap-2 font-medium transition-colors"
+                  className="w-full text-left px-3 py-2 text-xs text-foreground hover:bg-slate-100 dark:hover:bg-slate-800/80 rounded-xl cursor-pointer flex items-center gap-2 font-medium transition-colors"
                 >
                   <FiBell className="w-3.5 h-3.5 text-primary" />
                   <span>Notifications</span>
                 </button>
+                {(user?.role === 'Administrator' || user?.role === 'Store Administrator' || user?.role === 'Store Admin') && (
+                  <button
+                    onClick={() => { onOpenConfig?.(); setUserOpen(false) }}
+                    className="w-full text-left px-3 py-2 text-xs text-foreground hover:bg-slate-100 dark:hover:bg-slate-800/80 rounded-xl cursor-pointer flex items-center gap-2 font-medium transition-colors"
+                  >
+                    <FiSettings className="w-3.5 h-3.5 text-primary" />
+                    <span>{(user?.role === 'Store Administrator' || user?.role === 'Store Admin') ? 'Branch Configuration' : 'Company Configuration'}</span>
+                  </button>
+                )}
                 <button
-                  onClick={() => { onOpenConfig?.(); setUserOpen(false) }}
-                  className="w-full text-left px-3 py-2 text-xs text-foreground hover:bg-muted rounded-xl cursor-pointer flex items-center gap-2 font-medium transition-colors"
-                >
-                  <FiSettings className="w-3.5 h-3.5 text-primary" />
-                  <span>Settings</span>
-                </button>
-                <button
-                  onClick={() => { logout(); navigate('/login') }}
-                  className="w-full text-left px-3 py-2 text-xs text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-xl cursor-pointer flex items-center gap-2 font-bold transition-colors border-t border-border mt-1"
+                  onClick={async () => { await logout(); navigate('/login') }}
+                  className="w-full text-left px-3 py-2 text-xs text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-xl cursor-pointer flex items-center gap-2 font-bold transition-colors border-t border-slate-200 dark:border-slate-800 mt-1"
                 >
                   <FiLogOut className="w-3.5 h-3.5" />
                   <span>Logout</span>

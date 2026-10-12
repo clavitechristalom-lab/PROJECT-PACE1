@@ -6,7 +6,8 @@ import {
   FiShield, FiHome, FiBriefcase, FiUsers, FiEdit3, FiMenu, FiArrowRight,
   FiMapPin, FiPhone, FiGlobe, FiTool, FiCreditCard, FiPackage, FiLogOut
 } from 'react-icons/fi'
-import { showSuccess, showError, showLoading, closeLoading } from '../lib/swal'
+import { showSuccess, showError, showLoading, closeLoading, showToast } from '../lib/swal'
+import Swal from 'sweetalert2'
 import { useAuth } from '../context/AuthContext'
 import { useTheme } from '../context/ThemeContext'
 import { Spinner, Pagination } from '../components/ui'
@@ -142,9 +143,10 @@ export default function LoginPage() {
       const from = location.state?.from?.pathname
       let dest = from
       if (!dest || dest === '/' || dest === '/login') {
-        dest = user.role === 'Customer'
+        const role = (user.role || '').trim().toLowerCase()
+        dest = role === 'customer'
           ? '/customer/dashboard'
-          : user.role === 'Employee'
+          : role === 'employee'
             ? '/employee/dashboard'
             : '/dashboard'
       }
@@ -232,21 +234,31 @@ export default function LoginPage() {
     setLoading(false)
 
     if (res.success) {
-      showSuccess('Login Successful', 'Welcome back to Z-LICZ!')
+      setIsLoginModalOpen(false)
+
+      const role = (res.user?.role || '').trim().toLowerCase()
       const dest =
-        res.user?.role === 'Customer'
+        role === 'customer'
           ? '/customer/dashboard'
-          : res.user?.role === 'Employee'
+          : role === 'employee'
             ? '/employee/dashboard'
             : '/dashboard'
 
+      showToast('Welcome back to Z-LICZ!', 'success', 'center')
       navigate(dest, { replace: true })
     } else {
-      showError('Login Failed', res.message || 'Invalid username or password. Please try again.')
-      setError(
-        res.message ||
-        'Invalid username or password. Please try again.'
-      )
+      await showError('Login Failed', res.message || 'Incorrect email or password. Please try again.')
+      if (Swal.isVisible()) {
+        Swal.close()
+      }
+      setError('')
+      setIsLoginModalOpen(true)
+      setActiveTab('login')
+      setPassword('')
+      setTimeout(() => {
+        const pwInput = document.querySelector('input[type="password"]')
+        if (pwInput) pwInput.focus()
+      }, 100)
     }
   }
 
@@ -336,15 +348,19 @@ export default function LoginPage() {
       setLoading(false)
 
       if (loginRes.success) {
-        showSuccess('Welcome!', 'Account created and logged in successfully.')
+        closeLoading()
+        if (Swal.isVisible()) Swal.close()
+        setIsLoginModalOpen(false)
 
+        const role = (loginRes.user?.role || '').trim().toLowerCase()
         const dest =
-          loginRes.user?.role === 'Customer'
+          role === 'customer'
             ? '/customer/dashboard'
-            : loginRes.user?.role === 'Employee'
+            : role === 'employee'
               ? '/employee/dashboard'
               : '/dashboard'
 
+        showToast('Account created and logged in successfully!', 'success')
         navigate(dest, { replace: true })
       } else {
         showSuccess('Account Created', 'Your account has been created successfully! You can now log in.')

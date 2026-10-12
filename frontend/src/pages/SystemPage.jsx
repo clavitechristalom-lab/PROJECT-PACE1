@@ -54,6 +54,7 @@ export default function SystemPage({ defaultTab = 'users' }) {
   const [logs, setLogs] = useState([])
   const [logModule, setLogModule] = useState('All')
   const [logSearch, setLogSearch] = useState('')
+  const [clearingLogs, setClearingLogs] = useState(false)
 
   // Backups State
   const [backups, setBackups] = useState([])
@@ -281,6 +282,25 @@ export default function SystemPage({ defaultTab = 'users' }) {
     }
   }
 
+  // System Logs Actions
+  const handleClearLogs = async () => {
+    if (clearingLogs || logs.length === 0) return
+    setClearingLogs(true)
+    showLoading('Cleaning system logs...')
+    try {
+      const res = await api.system.clearLogs()
+      setLogs([])
+      showToast(res?.message || 'All system audit logs cleared successfully', 'success')
+      triggerDataSync('system')
+    } catch (err) {
+      console.error('Failed to clear logs:', err)
+      showToast(err.message || 'Failed to clear system audit logs', 'error')
+    } finally {
+      setClearingLogs(false)
+      closeLoading()
+    }
+  }
+
   // Backup Actions
   const handleCreateBackup = async () => {
     setBackingUp(true)
@@ -493,7 +513,7 @@ export default function SystemPage({ defaultTab = 'users' }) {
                           </td>
                           <td className="py-3 px-4">
                             <span className="text-xs font-semibold text-foreground/80">
-                              {u.employee?.branch?.name || u.customer?.branch_name || '—'}
+                              {getUserBranchName(u, registrationOptions)}
                             </span>
                           </td>
                           <td className="py-3 px-4">
@@ -591,7 +611,7 @@ export default function SystemPage({ defaultTab = 'users' }) {
                 </button>
               )}
             </div>
-            <div className="flex gap-2 w-full sm:w-auto">
+            <div className="flex items-center gap-2 w-full sm:w-auto">
               <select
                 value={logModule}
                 onChange={e => setLogModule(e.target.value)}
@@ -599,6 +619,19 @@ export default function SystemPage({ defaultTab = 'users' }) {
               >
                 {MODULES.map(m => <option key={m} value={m}>{m === 'All' ? 'All Modules' : m}</option>)}
               </select>
+              {isAdmin && (
+                <button
+                  type="button"
+                  id="btn-clean-logs"
+                  onClick={handleClearLogs}
+                  disabled={clearingLogs || logs.length === 0}
+                  className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold rounded-xl border border-rose-200 dark:border-rose-900/50 bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/40 dark:hover:bg-rose-900/60 text-rose-600 dark:text-rose-400 cursor-pointer transition-all disabled:opacity-50 disabled:cursor-not-allowed shrink-0 shadow-xs"
+                  title={logs.length === 0 ? "No logs to clean" : "Clean all system audit logs"}
+                >
+                  <FiTrash2 className="w-3.5 h-3.5" />
+                  <span>{clearingLogs ? 'Cleaning...' : 'Clean Logs'}</span>
+                </button>
+              )}
             </div>
           </Card>
 
@@ -986,7 +1019,7 @@ export default function SystemPage({ defaultTab = 'users' }) {
                     </div>
                     <div>
                       <span className="text-[10px] uppercase font-bold text-muted-foreground block">Branch</span>
-                      <p className="font-semibold text-foreground">{selectedUserDetail.employee.branch?.name || '—'}</p>
+                      <p className="font-semibold text-foreground">{getUserBranchName(selectedUserDetail, registrationOptions)}</p>
                     </div>
                     <div>
                       <span className="text-[10px] uppercase font-bold text-muted-foreground block">Phone</span>
@@ -1095,7 +1128,7 @@ export default function SystemPage({ defaultTab = 'users' }) {
                       </div>
                       <div>
                         <span className="text-[10px] uppercase font-bold text-muted-foreground block">Branch</span>
-                        <p className="font-semibold text-foreground">{selectedUserDetail.customer.branch?.name || 'Unassigned'}</p>
+                        <p className="font-semibold text-foreground">{getUserBranchName(selectedUserDetail, registrationOptions)}</p>
                       </div>
                       <div>
                         <span className="text-[10px] uppercase font-bold text-muted-foreground block">Status</span>
@@ -1497,6 +1530,24 @@ export default function SystemPage({ defaultTab = 'users' }) {
 function trimName(emp) {
   if (!emp) return 'System Account'
   return trim(`${emp.first_name || ''} ${emp.middle_name ? `${emp.middle_name} ` : ''}${emp.last_name || ''}`)
+}
+
+function getUserBranchName(u, registrationOptions = { branches: [] }) {
+  if (!u) return '—'
+  if (u.employee?.branch?.name) return u.employee.branch.name
+  if (typeof u.employee?.branch === 'string' && u.employee.branch) return u.employee.branch
+  if (u.employee?.branch_name) return u.employee.branch_name
+  if (u.customer?.branch?.name) return u.customer.branch.name
+  if (typeof u.customer?.branch === 'string' && u.customer.branch) return u.customer.branch
+  if (u.customer?.branch_name) return u.customer.branch_name
+  if (u.branch_name) return u.branch_name
+  if (u.branch?.name) return u.branch.name
+  const branchId = u.employee?.branch_id || u.customer?.branch_id || u.branch_id
+  if (branchId && registrationOptions?.branches?.length) {
+    const b = registrationOptions.branches.find(x => String(x.id) === String(branchId))
+    if (b) return b.name
+  }
+  return '—'
 }
 
 function trim(str) {

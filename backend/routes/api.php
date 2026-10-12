@@ -33,11 +33,12 @@ Route::get('/public/products', [ProductController::class, 'indexPublic']);
 Route::get('/public/settings', [SystemController::class, 'settings']);
 Route::post('/public/support-messages', [\App\Http\Controllers\SupportMessageController::class, 'storePublic']);
 
+Route::post('/logout', [AuthController::class, 'logout']);
+
 // ─── Protected Routes (Sanctum Authenticated) ─────────────────────────────────
 Route::middleware('auth:sanctum')->group(function () {
     Route::get('/me', [AuthController::class, 'me']);
     Route::get('/sync/status', [SyncController::class, 'status']);
-    Route::post('/logout', [AuthController::class, 'logout']);
     Route::post('/user/profile-image', [AuthController::class, 'uploadProfileImage']);
 
     // Branches
@@ -52,6 +53,7 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // ─── Transactions (Unified History) ─────────────────────────────────────────
     Route::get('/transactions', [TransactionController::class, 'index']);
+    Route::get('/transactions/export', [TransactionController::class, 'exportTransactionsCsv']);
 
     // ─── Dashboard ──────────────────────────────────────────────────────────────
     Route::get('/dashboard/stats', [DashboardController::class, 'stats']);
@@ -93,7 +95,9 @@ Route::middleware('auth:sanctum')->group(function () {
     // ─── Payments & Schedules ───────────────────────────────────────────────────
     Route::get('/payments', [PaymentController::class, 'index']);
     Route::get('/payments/monitoring', [PaymentController::class, 'monitoring']);
+    Route::post('/payments/log-print', [PaymentController::class, 'logPrint']);
     Route::get('/payments/{id}', [PaymentController::class, 'show']);
+    Route::post('/payments/{id}/log-print', [PaymentController::class, 'logPrint']);
     Route::post('/payments', [PaymentController::class, 'store']);
     Route::delete('/payments/{id}', [PaymentController::class, 'destroy']);
     Route::get('/payment-schedules', [PaymentController::class, 'schedules']);
@@ -126,6 +130,7 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // ─── Attendance Records & Summary (Scoped by Role) ───────────────────────────
     Route::get('/attendance', [AttendanceController::class, 'index']);
+    Route::get('/attendance/daily', [AttendanceController::class, 'index']);
     Route::get('/attendance/schedule', [AttendanceController::class, 'schedule']);
     Route::get('/attendance/summary', [AttendanceController::class, 'summary']);
     Route::get('/attendance/scan-logs', [AttendanceController::class, 'scanLogs']);
@@ -208,6 +213,8 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/admin/users/{id}/verify', [SystemController::class, 'verifyUser']);
         Route::post('/admin/users/{id}/revoke-verification', [SystemController::class, 'revokeUserVerification']);
         Route::get('/system-logs', [SystemController::class, 'logs']);
+        Route::delete('/system-logs/clear', [SystemController::class, 'clearLogs']);
+        Route::post('/system-logs/clear', [SystemController::class, 'clearLogs']);
         Route::get('/system-stats', [SystemController::class, 'systemStats']);
         Route::get('/backups', [SystemController::class, 'backups']);
         Route::post('/backups/create', [SystemController::class, 'createBackup']);

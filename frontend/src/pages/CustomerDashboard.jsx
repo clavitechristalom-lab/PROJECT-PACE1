@@ -102,7 +102,7 @@ export default function CustomerDashboard() {
       <div className="flex items-center justify-center min-h-[50vh]">
         <div className="text-center">
           <Spinner className="w-12 h-12 text-[#176B87] mx-auto mb-4" />
-          <p className="text-slate-500 dark:text-slate-400 font-medium animate-pulse">Loading your dashboard...</p>
+          <p className="text-muted-foreground font-medium animate-pulse">Loading your dashboard...</p>
         </div>
       </div>
     );
@@ -119,7 +119,7 @@ export default function CustomerDashboard() {
             <h2 className="text-3xl font-extrabold text-[#176B87] dark:text-[#64ccc5] tracking-tight flex items-center gap-2">
               <FiUser className="w-8 h-8" /> My Account
             </h2>
-            <p className="text-slate-500 dark:text-slate-400 mt-1">
+            <p className="text-muted-foreground mt-1">
               Welcome back, <span className="font-semibold text-foreground">{user?.name || 'Customer'}</span>!
             </p>
             <div className="flex items-center gap-1.5 mt-1 text-xs text-muted-foreground">

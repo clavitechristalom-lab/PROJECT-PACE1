@@ -126,7 +126,7 @@ export function ProductListModal({ isOpen, onClose, category, availableCategorie
                 <button
                   onClick={handlePrev}
                   disabled={currentIndex === 0}
-                  className="p-2 shrink-0 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-30 disabled:cursor-not-allowed text-[#176B87]"
+                  className="p-2 shrink-0 rounded-full hover:bg-muted disabled:opacity-30 disabled:cursor-not-allowed text-[#176B87]"
                 >
                   <FiChevronLeft className="w-6 h-6" />
                 </button>
@@ -180,7 +180,7 @@ export function ProductListModal({ isOpen, onClose, category, availableCategorie
                 <button
                   onClick={handleNext}
                   disabled={currentIndex + itemsPerPage >= products.length}
-                  className="p-2 shrink-0 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-30 disabled:cursor-not-allowed text-[#176B87]"
+                  className="p-2 shrink-0 rounded-full hover:bg-muted disabled:opacity-30 disabled:cursor-not-allowed text-[#176B87]"
                 >
                   <FiChevronRight className="w-6 h-6" />
                 </button>
@@ -240,7 +240,7 @@ function ProductDetailModal({ product, onClose }) {
       <div className="bg-background rounded-2xl shadow-2xl w-full max-w-3xl overflow-hidden relative flex flex-col md:flex-row">
 
         {/* Left: Image Gallery */}
-        <div className="w-full md:w-1/2 bg-slate-100 dark:bg-slate-800 relative flex flex-col">
+        <div className="w-full md:w-1/2 bg-muted relative flex flex-col">
           {/* Close button for mobile */}
           <button onClick={onClose} className="md:hidden absolute top-3 right-3 z-10 bg-black/30 hover:bg-black/50 text-white rounded-full p-1.5 transition-colors">
             <FiX className="w-5 h-5" />
@@ -536,23 +536,23 @@ export function FullyPaidProductDetailsModal({ isOpen, onClose, accountData }) {
             </div>
 
             {item && item.description && (
-              <p className="text-sm text-slate-500 dark:text-slate-400 mb-3 line-clamp-2">
+              <p className="text-sm text-muted-foreground mb-3 line-clamp-2">
                 {item.description}
               </p>
             )}
 
             <div className="grid grid-cols-2 gap-y-2 text-sm mt-auto">
-              <div className="text-slate-500">Account No: <span className="font-mono font-bold text-slate-700 dark:text-slate-300">{acc.account_no}</span></div>
-              <div className="text-slate-500">Purchase Date: <span className="font-medium text-slate-700 dark:text-slate-300">{acc.start_date || acc.sale_date}</span></div>
-              <div className="text-slate-500">Branch: <span className="font-medium text-slate-700 dark:text-slate-300">{acc.branch?.name || (typeof acc.branch === 'string' ? acc.branch : 'Main Branch')}</span></div>
-              <div className="text-slate-500">Processed By: <span className="font-medium text-slate-700 dark:text-slate-300">{acc.store_admin || 'System/Admin'}</span></div>
+              <div className="text-slate-500">Account No: <span className="font-mono font-bold text-foreground">{acc.account_no}</span></div>
+              <div className="text-slate-500">Purchase Date: <span className="font-medium text-foreground">{acc.start_date || acc.sale_date}</span></div>
+              <div className="text-slate-500">Branch: <span className="font-medium text-foreground">{acc.branch?.name || (typeof acc.branch === 'string' ? acc.branch : 'Main Branch')}</span></div>
+              <div className="text-slate-500">Processed By: <span className="font-medium text-foreground">{acc.store_admin || 'System/Admin'}</span></div>
             </div>
           </div>
         </div>
 
         {/* Financials & Payment Info */}
         <div>
-          <h4 className="text-sm font-bold text-slate-800 dark:text-slate-200 mb-3">Full Payment Details</h4>
+          <h4 className="text-sm font-bold text-foreground mb-3">Full Payment Details</h4>
           <div className="overflow-y-auto border border-slate-200 dark:border-slate-800 rounded-xl shadow-sm bg-[var(--card)]">
             <table className="w-full text-xs">
               <thead className="bg-slate-50 dark:bg-slate-800/80 text-slate-500">
@@ -568,15 +568,15 @@ export function FullyPaidProductDetailsModal({ isOpen, onClose, accountData }) {
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800/50">
                 <tr className="hover:bg-slate-50 dark:hover:bg-slate-800/30">
                   <td className="py-3 px-4 font-semibold text-slate-700 dark:text-slate-200 truncate max-w-[150px]">{item ? item.product_name : 'Product'}</td>
-                  <td className="py-3 px-4 text-slate-600 dark:text-slate-300">{acc.start_date || acc.sale_date}</td>
-                  <td className="py-3 px-4 text-slate-600 dark:text-slate-300">{payments.length > 0 ? payments[0].payment_method : 'Cash'}</td>
+                  <td className="py-3 px-4 text-muted-foreground">{acc.start_date || acc.sale_date}</td>
+                  <td className="py-3 px-4 text-muted-foreground">{payments.length > 0 ? payments[0].payment_method : 'Cash'}</td>
                   <td className="py-3 px-4"><StatusBadge status="Fully Paid" /></td>
                   <td className="py-3 px-4 text-right font-mono font-bold text-emerald-600 dark:text-emerald-400">{fmt(acc.total_payable)}</td>
                   <td className="py-3 px-4 text-center">
                     {payments.length > 0 && (
                       <button
                         onClick={() => setViewReceipt(payments[0])}
-                        className="inline-flex items-center gap-1 px-2 py-1 text-[10px] rounded border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 font-semibold cursor-pointer transition-colors text-slate-600 dark:text-slate-300"
+                        className="inline-flex items-center gap-1 px-2 py-1 text-[10px] rounded border border-border hover:bg-muted font-semibold cursor-pointer transition-colors text-muted-foreground"
                       >
                         <FiFileText className="w-3 h-3" />
                         <span>Receipt</span>
@@ -607,7 +607,7 @@ export function FullyPaidProductDetailsModal({ isOpen, onClose, accountData }) {
             <div className="space-y-3 text-sm">
               <div className="flex justify-between">
                 <span className="text-slate-500">Payment Date:</span>
-                <span className="font-mono font-semibold text-slate-800 dark:text-slate-200">{viewReceipt.payment_date}</span>
+                <span className="font-mono font-semibold text-foreground">{viewReceipt.payment_date}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-slate-500">Request / Order:</span>
@@ -615,12 +615,12 @@ export function FullyPaidProductDetailsModal({ isOpen, onClose, accountData }) {
               </div>
               <div className="flex justify-between">
                 <span className="text-slate-500">Payment Method:</span>
-                <span className="font-semibold text-slate-800 dark:text-slate-200">{viewReceipt.payment_method}</span>
+                <span className="font-semibold text-foreground">{viewReceipt.payment_method}</span>
               </div>
               {viewReceipt.reference_no && (
                 <div className="flex justify-between">
                   <span className="text-slate-500">Reference No:</span>
-                  <span className="font-mono font-semibold text-slate-800 dark:text-slate-200">{viewReceipt.reference_no}</span>
+                  <span className="font-mono font-semibold text-foreground">{viewReceipt.reference_no}</span>
                 </div>
               )}
               <div className="pt-3 mt-3 border-t border-border/50 flex justify-between items-center">
@@ -632,7 +632,7 @@ export function FullyPaidProductDetailsModal({ isOpen, onClose, accountData }) {
             <div className="pt-4 mt-4 border-t border-border/50">
               <button
                 onClick={() => window.print()}
-                className="w-full py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 font-bold rounded-xl transition-colors flex items-center justify-center gap-2"
+                className="w-full py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-foreground font-bold rounded-xl transition-colors flex items-center justify-center gap-2"
               >
                 <FiFileText /> Print / Save PDF
               </button>
@@ -692,11 +692,11 @@ export function InstallmentAccountDetailsModal({ isOpen, onClose, installmentId 
             <img
               src={(item.image_url || item.image)?.startsWith('http') ? (item.image_url || item.image) : `http://127.0.0.1:8000${item.image_url || item.image}`}
               alt={item.product_name}
-              className="w-32 h-32 object-cover rounded-xl border border-slate-200 dark:border-slate-700 bg-white shrink-0 shadow-sm"
+              className="w-32 h-32 object-cover rounded-xl border border-border bg-white shrink-0 shadow-sm"
               onError={(e) => { e.target.src = 'https://via.placeholder.com/150?text=No+Image'; }}
             />
           ) : (
-            <div className="w-32 h-32 bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl flex items-center justify-center shrink-0 shadow-sm">
+            <div className="w-32 h-32 bg-muted border border-border rounded-xl flex items-center justify-center shrink-0 shadow-sm">
               <FiPackage className="w-10 h-10 text-slate-400" />
             </div>
           )}
@@ -709,16 +709,16 @@ export function InstallmentAccountDetailsModal({ isOpen, onClose, installmentId 
             </div>
 
             {item && item.description && (
-              <p className="text-sm text-slate-500 dark:text-slate-400 mb-3 line-clamp-2">
+              <p className="text-sm text-muted-foreground mb-3 line-clamp-2">
                 {item.description}
               </p>
             )}
 
             <div className="grid grid-cols-2 gap-y-2 text-sm mt-auto">
-              <div className="text-slate-500">Account No: <span className="font-mono font-bold text-slate-700 dark:text-slate-300">{acc.account_no}</span></div>
-              <div className="text-slate-500">Purchase Date: <span className="font-medium text-slate-700 dark:text-slate-300">{acc.start_date || acc.sale_date}</span></div>
-              <div className="text-slate-500">Branch: <span className="font-medium text-slate-700 dark:text-slate-300">{acc.branch?.name || (typeof acc.branch === 'string' ? acc.branch : 'Main Branch')}</span></div>
-              <div className="text-slate-500">Processed By: <span className="font-medium text-slate-700 dark:text-slate-300">{acc.store_admin || 'System/Admin'}</span></div>
+              <div className="text-slate-500">Account No: <span className="font-mono font-bold text-foreground">{acc.account_no}</span></div>
+              <div className="text-slate-500">Purchase Date: <span className="font-medium text-foreground">{acc.start_date || acc.sale_date}</span></div>
+              <div className="text-slate-500">Branch: <span className="font-medium text-foreground">{acc.branch?.name || (typeof acc.branch === 'string' ? acc.branch : 'Main Branch')}</span></div>
+              <div className="text-slate-500">Processed By: <span className="font-medium text-foreground">{acc.store_admin || 'System/Admin'}</span></div>
             </div>
           </div>
         </div>
@@ -747,7 +747,7 @@ export function InstallmentAccountDetailsModal({ isOpen, onClose, installmentId 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-4">
           {/* Payment History */}
           <div>
-            <h4 className="text-sm font-bold text-slate-800 dark:text-slate-200 mb-3">Payments Made (History)</h4>
+            <h4 className="text-sm font-bold text-foreground mb-3">Payments Made (History)</h4>
             <div className="overflow-y-auto border border-slate-200 dark:border-slate-800 rounded-xl max-h-[250px] shadow-sm">
               <table className="w-full text-xs">
                 <thead className="bg-slate-50 dark:bg-slate-800/80 text-slate-500 sticky top-0">
@@ -767,14 +767,14 @@ export function InstallmentAccountDetailsModal({ isOpen, onClose, installmentId 
                   ) : (
                     payments.map(p => (
                       <tr key={p.payment_id} className="hover:bg-slate-50 dark:hover:bg-slate-800/30">
-                        <td className="py-2.5 px-3 text-slate-600 dark:text-slate-300">{p.payment_date}</td>
+                        <td className="py-2.5 px-3 text-muted-foreground">{p.payment_date}</td>
                         <td className="py-2.5 px-3 font-mono text-slate-500">{p.receipt_no}</td>
-                        <td className="py-2.5 px-3 text-slate-600 dark:text-slate-300">{p.payment_method}</td>
+                        <td className="py-2.5 px-3 text-muted-foreground">{p.payment_method}</td>
                         <td className="py-2.5 px-3 text-right font-mono font-bold text-emerald-600 dark:text-emerald-400">{fmt(p.amount)}</td>
                         <td className="py-2.5 px-3 text-center">
                           <button
                             onClick={() => setViewReceipt(p)}
-                            className="inline-flex items-center gap-1 px-2 py-1 text-[10px] rounded border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 font-semibold cursor-pointer transition-colors text-slate-600 dark:text-slate-300"
+                            className="inline-flex items-center gap-1 px-2 py-1 text-[10px] rounded border border-border hover:bg-muted font-semibold cursor-pointer transition-colors text-muted-foreground"
                           >
                             <FiFileText className="w-3 h-3" />
                             <span>Receipt</span>
@@ -790,7 +790,7 @@ export function InstallmentAccountDetailsModal({ isOpen, onClose, installmentId 
 
           {/* Payment Schedule */}
           <div>
-            <h4 className="text-sm font-bold text-slate-800 dark:text-slate-200 mb-3">
+            <h4 className="text-sm font-bold text-foreground mb-3">
               Payment Schedule & Due Dates
             </h4>
             <div className="overflow-y-auto border border-slate-200 dark:border-slate-800 rounded-xl max-h-[250px] shadow-sm">
@@ -812,7 +812,7 @@ export function InstallmentAccountDetailsModal({ isOpen, onClose, installmentId 
                     schedules.map(s => (
                       <tr key={s.schedule_id} className="hover:bg-slate-50 dark:hover:bg-slate-800/30">
                         <td className="py-2.5 px-3 font-mono text-slate-500">{s.installment_no}</td>
-                        <td className="py-2.5 px-3 text-slate-600 dark:text-slate-300">{s.status === 'Paid' && s.paid_date ? s.paid_date : s.due_date}</td>
+                        <td className="py-2.5 px-3 text-muted-foreground">{s.status === 'Paid' && s.paid_date ? s.paid_date : s.due_date}</td>
                         <td className="py-2.5 px-3"><StatusBadge status={s.status} /></td>
                         <td className="py-2.5 px-3 text-right font-mono font-bold text-slate-700 dark:text-slate-200">{fmt(s.amount_due)}</td>
                       </tr>
@@ -836,14 +836,14 @@ export function InstallmentAccountDetailsModal({ isOpen, onClose, installmentId 
           <div className="space-y-4 text-xs">
             <div className="text-center pb-3 border-b border-slate-200 dark:border-slate-800 space-y-0.5">
               <div className="text-base font-black tracking-wider text-slate-800 dark:text-slate-100">Z-LICZ APPLIANCES & FURNITURE</div>
-              <div className="text-[11px] text-slate-500 dark:text-slate-400">{acc.branch?.name || (typeof acc.branch === 'string' ? acc.branch : 'Main Branch')} · Official Collection Receipt</div>
+              <div className="text-[11px] text-muted-foreground">{acc.branch?.name || (typeof acc.branch === 'string' ? acc.branch : 'Main Branch')} · Official Collection Receipt</div>
               <div className="text-xs font-mono font-bold text-[#176B87] dark:text-[#64ccc5] pt-1">Receipt #{viewReceipt.receipt_no}</div>
             </div>
 
             <div className="space-y-2 p-3 bg-slate-50 dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800">
               <div className="flex justify-between">
                 <span className="text-slate-500">{"Payment Date:"}</span>
-                <span className="font-mono font-semibold text-slate-800 dark:text-slate-200">{viewReceipt.payment_date}</span>
+                <span className="font-mono font-semibold text-foreground">{viewReceipt.payment_date}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-slate-500">{isFullPayment ? 'Request / Order:' : 'Installment:'}</span>
@@ -851,21 +851,21 @@ export function InstallmentAccountDetailsModal({ isOpen, onClose, installmentId 
               </div>
               <div className="flex justify-between">
                 <span className="text-slate-500">Received From (Customer):</span>
-                <span className="font-semibold text-slate-800 dark:text-slate-200">{acc.customer_name}</span>
+                <span className="font-semibold text-foreground">{acc.customer_name}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-slate-500">Payment Method:</span>
-                <span className="font-semibold text-slate-800 dark:text-slate-200">{viewReceipt.payment_method}</span>
+                <span className="font-semibold text-foreground">{viewReceipt.payment_method}</span>
               </div>
               {viewReceipt.reference_no && (
                 <div className="flex justify-between">
                   <span className="text-slate-500">Ref / Trace No:</span>
-                  <span className="font-mono text-slate-800 dark:text-slate-200">{viewReceipt.reference_no}</span>
+                  <span className="font-mono text-foreground">{viewReceipt.reference_no}</span>
                 </div>
               )}
             </div>
 
-            <div className="border-t border-dashed border-slate-300 dark:border-slate-700 pt-3">
+            <div className="border-t border-dashed border-border pt-3">
               <table className="w-full text-xs">
                 <thead>
                   <tr className="text-slate-500 border-b border-slate-200 dark:border-slate-800">
@@ -875,8 +875,8 @@ export function InstallmentAccountDetailsModal({ isOpen, onClose, installmentId 
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-800/50">
                   <tr>
-                    <td className="py-2 text-slate-800 dark:text-slate-200 font-medium">Payment for {acc.account_no}</td>
-                    <td className="py-2 text-right font-mono font-bold text-slate-800 dark:text-slate-200">{fmt(viewReceipt.amount)}</td>
+                    <td className="py-2 text-foreground font-medium">Payment for {acc.account_no}</td>
+                    <td className="py-2 text-right font-mono font-bold text-foreground">{fmt(viewReceipt.amount)}</td>
                   </tr>
                 </tbody>
               </table>
@@ -885,7 +885,7 @@ export function InstallmentAccountDetailsModal({ isOpen, onClose, installmentId 
             <div className="border-t border-slate-200 dark:border-slate-800 pt-3 flex justify-between items-end">
               <div>
                 <div className="text-[10px] text-slate-500">Processed By</div>
-                <div className="font-semibold text-slate-800 dark:text-slate-200">{viewReceipt.received_by || acc.store_admin}</div>
+                <div className="font-semibold text-foreground">{viewReceipt.received_by || acc.store_admin}</div>
               </div>
               <div className="text-right">
                 <div className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-0.5">Total Paid</div>
@@ -910,26 +910,24 @@ export function InstallmentAccountDetailsModal({ isOpen, onClose, installmentId 
 }
 
 export function StatementModal({ isOpen, onClose }) {
-  const { user } = useAuth();
   const [statements, setStatements] = useState([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (isOpen && user?.customer_id) {
+    if (isOpen) {
       setLoading(true);
-      // We will combine sales and payments to form a "statement" history
       Promise.all([
-        api.transactions.getAll({ customer_id: user.customer_id, type: 'Sale' }),
-        api.payments.getAll({ customer_id: user.customer_id })
+        api.transactions.getAll({ type: 'Sale' }),
+        api.payments.getAll()
       ])
         .then(([salesRes, paymentsRes]) => {
           const sales = (salesRes.transactions || []).map(s => ({
-            date: s.sale_date,
-            reference: s.invoice_no,
+            date: s.date,
+            reference: s.reference_code,
             type: 'Purchase',
-            amount: parseFloat(s.total_amount),
+            amount: Number(s.amount || 0),
             status: s.status,
-            rawDate: new Date(s.sale_date)
+            rawDate: new Date(s.date)
           }));
 
           const payments = (paymentsRes.payments || []).map(p => ({
@@ -947,7 +945,7 @@ export function StatementModal({ isOpen, onClose }) {
         .catch(err => console.error(err))
         .finally(() => setLoading(false));
     }
-  }, [isOpen, user]);
+  }, [isOpen]);
 
   if (!isOpen) return null;
 
@@ -1757,7 +1755,7 @@ export function SupportModal({ isOpen, onClose }) {
                         type="text"
                         name="reply"
                         placeholder="Type your reply to the admin..."
-                        className="flex-1 px-3 py-1.5 rounded-lg border border-emerald-200 dark:border-emerald-800 bg-white dark:bg-card text-xs focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                        className="flex-1 px-3 py-1.5 rounded-lg border border-emerald-200 dark:border-emerald-800 bg-card text-xs focus:outline-none focus:ring-1 focus:ring-emerald-500"
                         required
                       />
                       <button

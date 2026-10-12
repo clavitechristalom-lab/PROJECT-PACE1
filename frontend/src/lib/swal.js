@@ -2,82 +2,142 @@ import Swal from 'sweetalert2'
 
 const baseConfig = {
   customClass: {
-    popup: '!bg-[#f5eff7]/95 dark:!bg-[#1c1825]/95 !backdrop-blur-xl border border-white/40 dark:border-white/10 !rounded-2xl shadow-xl p-6 sm:p-8',
+    popup: '!bg-[#0b1220] !backdrop-blur-xl border border-white/10 !rounded-[32px] shadow-2xl p-8 sm:p-10 max-w-[440px]',
     title: 'hidden',
     htmlContainer: '!m-0 !p-0',
-    actions: 'flex gap-4 mt-8 justify-center w-full',
-    confirmButton: 'inline-flex items-center justify-center font-bold !rounded-full cursor-pointer transition-transform hover:scale-105 active:scale-95 px-8 py-2.5 text-[15px] bg-[#007aff] text-white shadow-sm border-none uppercase',
-    cancelButton: 'inline-flex items-center justify-center font-bold !rounded-full cursor-pointer transition-transform hover:scale-105 active:scale-95 px-8 py-2.5 text-[15px] bg-[#dce0e5] hover:bg-[#cfd4db] dark:bg-[#2f2b3b] dark:hover:bg-[#3a3547] text-slate-900 dark:text-white shadow-sm border-none',
+    actions: 'flex gap-4 mt-6 justify-center w-full',
+    confirmButton: 'inline-flex items-center justify-center font-bold !rounded-full cursor-pointer transition-all hover:bg-[#2e476d] active:scale-95 px-12 py-2.5 text-[16px] bg-[#253c5e] text-white border border-white/10 shadow-lg tracking-wide',
+    cancelButton: 'inline-flex items-center justify-center font-bold !rounded-full cursor-pointer transition-transform hover:scale-105 active:scale-95 px-8 py-2.5 text-[15px] bg-[#2f2b3b] hover:bg-[#3a3547] text-foreground shadow-sm border-none',
   },
   buttonsStyling: false,
   background: 'transparent',
   color: 'inherit',
   showClass: {
-    popup: 'animate-[fadeIn_0.2s_ease-out]'
+    popup: 'animate-[fadeIn_0.15s_ease-out]'
   },
   hideClass: {
-    popup: 'animate-[fadeOut_0.2s_ease-in]'
+    popup: '',
+    backdrop: ''
   }
 }
 
 const buildHtml = (title, text, type = 'success') => {
   const isSuccess = type === 'success';
-  const iconSvg = isSuccess 
-    ? `<svg class="w-12 h-12 mx-auto text-[#007aff]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>`
-    : `<svg class="w-12 h-12 mx-auto text-black dark:text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>`;
+  const iconSvg = isSuccess
+    ? `<div class="w-12 h-12 rounded-2xl bg-[#063326] text-[#00c982] border border-[#00c982]/30 flex items-center justify-center shadow-sm mx-auto mb-3">
+        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 13l4 4L19 7"></path></svg>
+       </div>`
+    : `<div class="swal-close-icon flex items-center justify-center mx-auto mb-3.5 cursor-pointer hover:opacity-80 transition-opacity" title="Close">
+        <svg class="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="18" y1="6" x2="6" y2="18"></line>
+          <line x1="6" y1="6" x2="18" y2="18"></line>
+        </svg>
+       </div>`;
 
   return `
-    <div class="flex flex-col items-center pt-2">
-      <div class="mb-4">
-        ${iconSvg}
-      </div>
-      <div class="text-center font-bold text-[19px] text-slate-900 dark:text-white mb-3">
+    <div class="flex flex-col items-center pt-1 pb-1">
+      ${iconSvg}
+      <div class="text-center font-bold text-2xl text-white mb-2 tracking-tight">
         ${title}
       </div>
-      <div class="flex items-start gap-3 text-left w-full max-w-[300px] mx-auto justify-center">
-        <div class="text-slate-800 dark:text-slate-200 text-[15px] font-medium leading-relaxed text-center">
+      ${text ? `
+      <div class="flex items-start text-center w-full max-w-[340px] mx-auto justify-center">
+        <div class="text-slate-200 text-base font-normal leading-relaxed text-center">
           ${text}
         </div>
-      </div>
+      </div>` : ''}
     </div>
   `;
 }
 
-export const showSuccess = (title, text = '') => {
+export const showSuccess = (title, text = '', timer = 1500) => {
   return Swal.fire({
     ...baseConfig,
     html: buildHtml(title, text, 'success'),
-    timer: 2000,
+    timer,
+    timerProgressBar: true,
     showConfirmButton: false,
+    customClass: {
+      ...baseConfig.customClass,
+      timerProgressBar: '!bg-[#00c982]',
+    }
   })
 }
 
-export const showError = (title, text = '') => {
-  return Swal.fire({
+export const showError = async (title, text = '', confirmButtonText = 'OK') => {
+  const result = await Swal.fire({
     ...baseConfig,
     html: buildHtml(title, text, 'error'),
-    confirmButtonText: 'YES',
+    showConfirmButton: true,
+    confirmButtonText: typeof confirmButtonText === 'string' ? confirmButtonText : 'OK',
+    showCancelButton: false,
+    allowOutsideClick: true,
+    allowEscapeKey: true,
+    allowEnterKey: true,
+    focusConfirm: true,
+    didRender: (popup) => {
+      const okBtn = popup.querySelector('.swal2-confirm')
+      if (okBtn) {
+        okBtn.onclick = () => {
+          Swal.close()
+        }
+      }
+      const closeIcon = popup.querySelector('.swal-close-icon')
+      if (closeIcon) {
+        closeIcon.onclick = () => {
+          Swal.close()
+        }
+      }
+    }
   })
+  if (Swal.isVisible()) {
+    Swal.close()
+  }
+  return result
 }
 
-export const showWarning = (title, text = '') => {
-  return Swal.fire({
+export const showWarning = async (title, text = '', confirmButtonText = 'OK') => {
+  const result = await Swal.fire({
     ...baseConfig,
     html: buildHtml(title, text, 'error'),
-    confirmButtonText: 'YES',
+    showConfirmButton: true,
+    confirmButtonText: typeof confirmButtonText === 'string' ? confirmButtonText : 'OK',
+    showCancelButton: false,
+    allowOutsideClick: true,
+    allowEscapeKey: true,
+    allowEnterKey: true,
+    focusConfirm: true,
+    didRender: (popup) => {
+      const okBtn = popup.querySelector('.swal2-confirm')
+      if (okBtn) {
+        okBtn.onclick = () => {
+          Swal.close()
+        }
+      }
+      const closeIcon = popup.querySelector('.swal-close-icon')
+      if (closeIcon) {
+        closeIcon.onclick = () => {
+          Swal.close()
+        }
+      }
+    }
   })
+  if (Swal.isVisible()) {
+    Swal.close()
+  }
+  return result
 }
 
 export const confirmAction = async (title, text = 'Are you sure you want to proceed?', confirmButtonText = 'YES') => {
   const isDelete = confirmButtonText.toLowerCase().includes('delete') || text.toLowerCase().includes('delete');
-  
+
   const result = await Swal.fire({
     ...baseConfig,
     html: buildHtml(title, text, isDelete ? 'error' : 'success'),
     showCancelButton: true,
-    confirmButtonText, 
+    confirmButtonText,
     cancelButtonText: 'Cancel',
-    reverseButtons: true, 
+    reverseButtons: true,
   })
   return result.isConfirmed
 }
@@ -109,46 +169,76 @@ export const closeLoading = () => {
   }
 }
 
-export const showToast = (message, icon = 'success') => {
-  const isSuccess = icon === 'success' || icon === 'info'
-  const color = isSuccess ? '#2dd4bf' : '#fb7185'
-  const titleText = isSuccess ? 'Success' : 'Ooops!'
-  
+export const showToast = (message, icon = 'success', position = 'center') => {
+  const isSuccess = icon === 'success'
+  const isInfo = icon === 'info'
+  const isWarning = icon === 'warning'
+  const isError = icon === 'error'
+
+  const defaultTitle = isSuccess ? 'SUCCESS' : (isInfo ? 'NOTICE' : (isWarning ? 'WARNING' : 'FAILED'))
+  let titleText = defaultTitle
+  let bodyText = message
+
+  // If message contains a colon-separated header
+  if (typeof message === 'string') {
+    const colonIdx = message.indexOf(': ')
+    if (colonIdx > 0 && colonIdx <= 35) {
+      titleText = message.slice(0, colonIdx).trim().toUpperCase()
+      bodyText = message.slice(colonIdx + 2).trim()
+    }
+  }
+
+  let bgBadge = 'bg-[#063326] text-[#00c982] border-[#00c982]/30'
+  let titleColor = 'text-[#00c982]'
+  let progressBarColor = '!bg-[#00c982]'
+  let iconSvg = `<svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 13l4 4L19 7"></path></svg>`
+
+  if (isInfo) {
+    bgBadge = 'bg-blue-950/70 text-blue-400 border-blue-500/30'
+    titleColor = 'text-blue-400'
+    progressBarColor = '!bg-blue-400'
+    iconSvg = `<svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>`
+  } else if (isWarning) {
+    bgBadge = 'bg-amber-950/70 text-amber-400 border-amber-500/30'
+    titleColor = 'text-amber-400'
+    progressBarColor = '!bg-amber-400'
+    iconSvg = `<svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>`
+  } else if (isError) {
+    bgBadge = 'bg-rose-950/70 text-rose-400 border-rose-500/30'
+    titleColor = 'text-rose-400'
+    progressBarColor = '!bg-rose-400'
+    iconSvg = `<svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>`
+  }
+
   const html = `
-    <div class="relative mt-8 mx-4 mb-6 font-sans select-none" style="width: 300px;">
-      <div class="absolute -top-7 left-0 text-2xl font-bold tracking-wider z-20" style="color: ${color};">
-        ${titleText}
+    <div class="flex items-center gap-3.5 w-full py-1 text-left">
+      <div class="flex-shrink-0 w-11 h-11 rounded-2xl border flex items-center justify-center ${bgBadge}">
+        ${iconSvg}
       </div>
-      <div class="absolute w-full h-full rounded-sm -z-10" style="background-color: ${color}; transform: translate(-8px, 8px);"></div>
-      <div class="bg-white dark:bg-card px-4 py-3 flex items-center relative z-10 shadow-sm" style="min-height: 60px;">
-        <div class="mr-3 flex-shrink-0" style="color: ${color}">
-          ${isSuccess 
-            ? '<svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>'
-            : '<svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>'
-          }
+      <div class="flex-1 min-w-0 pr-1">
+        <div class="text-[11px] font-extrabold uppercase tracking-wider ${titleColor} mb-0.5">
+          ${titleText}
         </div>
-        <div class="text-sm font-medium text-gray-600 dark:text-gray-300 text-left leading-snug w-full">
-          ${message}
+        <div class="text-[16px] font-bold text-white leading-snug break-words">
+          ${bodyText}
         </div>
       </div>
-      <button onclick="Swal.close()" class="absolute -top-3 -right-3 w-8 h-8 rounded-full text-white flex items-center justify-center shadow-lg hover:scale-105 transition-transform z-20" style="background-color: ${color}; cursor: pointer;">
-        ${isSuccess
-          ? '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M6 18L18 6M6 6l12 12"></path></svg>'
-          : '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>'
-        }
-      </button>
     </div>
   `
 
   Swal.fire({
     toast: true,
-    position: 'center',
+    position,
     html,
     showConfirmButton: false,
-    timer: 3000,
+    showCloseButton: true,
+    timer: 3500,
+    timerProgressBar: true,
     background: 'transparent',
     customClass: {
-      popup: '!bg-transparent !p-0 !shadow-none !border-none',
+      popup: '!bg-[#0c1322] !backdrop-blur-md !border !border-white/10 !rounded-2xl !shadow-2xl !p-3.5 !min-w-[300px] !max-w-[440px]',
+      closeButton: '!text-slate-400 hover:!text-white !text-sm focus:!shadow-none',
+      timerProgressBar: progressBarColor,
     }
   })
 }

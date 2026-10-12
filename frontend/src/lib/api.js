@@ -201,6 +201,20 @@ export const api = {
       const qs = new URLSearchParams(cleanParams(params)).toString();
       return request(`/transactions${qs ? `?${qs}` : ''}`);
     },
+    exportCsv: async (params = {}) => {
+      const qs = new URLSearchParams(cleanParams(params)).toString();
+      const token = localStorage.getItem('token');
+      const res = await fetch(`${API_BASE}/transactions/export${qs ? `?${qs}` : ''}`, {
+        headers: {
+          Authorization: token ? `Bearer ${token}` : '',
+          Accept: 'text/csv, application/json',
+        },
+      });
+      if (!res.ok) {
+        throw new Error(`Export failed: ${res.statusText}`);
+      }
+      return res.blob();
+    },
   },
 
   // ─── Sales ───
@@ -258,6 +272,7 @@ export const api = {
         body: data instanceof FormData ? data : JSON.stringify(data),
       }),
     delete: (id) => request(`/payments/${id}`, { method: 'DELETE' }),
+    logPrint: (id) => request(id ? `/payments/${id}/log-print` : '/payments/log-print', { method: 'POST' }),
     getSchedules: (params = {}) => {
       const qs = new URLSearchParams(cleanParams(params)).toString();
       return request(`/payment-schedules${qs ? `?${qs}` : ''}`);
@@ -527,6 +542,7 @@ export const api = {
       const qs = new URLSearchParams(cleanParams(params)).toString();
       return request(`/system-logs${qs ? `?${qs}` : ''}`);
     },
+    clearLogs: () => request('/system-logs/clear', { method: 'DELETE' }),
     getBackups: () => request('/backups'),
     createBackup: (userId) =>
       request('/backups/create', {

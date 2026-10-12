@@ -17,8 +17,9 @@ export default function ProfileModal({ open, isOpen, onClose }) {
   const isVisible = open || isOpen
   const { user, verifySession } = useAuth()
   const fileInputRef = useRef(null)
-  const isAdmin = user?.role === 'Administrator'
   const [employee, setEmployee] = useState(null)
+  const isAdmin = user?.role === 'Administrator' || user?.role === 'Admin' || user?.role === 'System Administrator' || employee?.position === 'System Administrator' || employee?.position === 'Administrator'
+  const isCustomer = user?.role === 'Customer'
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [isEditing, setIsEditing] = useState(false)
@@ -305,7 +306,6 @@ export default function ProfileModal({ open, isOpen, onClose }) {
     }
   }
 
-  const isCustomer = user?.role === 'Customer'
 
   const isVerified = Boolean(
     employee?.account_verified ||
@@ -601,50 +601,71 @@ export default function ProfileModal({ open, isOpen, onClose }) {
                         <FiActivity className="w-3.5 h-3.5 text-primary" />
                         <span>Employment Information</span>
                       </h4>
-                      <div className="grid grid-cols-2 gap-4">
-                        <div>
-                          <div className="text-[10px] text-muted-foreground uppercase tracking-wider font-bold mb-0.5">Employee ID</div>
-                          <div className="font-bold text-foreground font-mono">{employee.employee_code}</div>
+                      {isAdmin ? (
+                        <div className="grid grid-cols-2 gap-4">
+                          <div>
+                            <div className="text-[10px] text-muted-foreground uppercase tracking-wider font-bold mb-0.5">Employee ID</div>
+                            <div className="font-bold text-foreground font-mono">{employee.employee_code || '—'}</div>
+                          </div>
+                          <div>
+                            <div className="text-[10px] text-muted-foreground uppercase tracking-wider font-bold mb-0.5">Department</div>
+                            <div className="font-semibold text-foreground">{employee.department || 'Administration'}</div>
+                          </div>
+                          <div>
+                            <div className="text-[10px] text-muted-foreground uppercase tracking-wider font-bold mb-0.5">Position</div>
+                            <div className="font-semibold text-foreground">{employee.position || 'System Administrator'}</div>
+                          </div>
+                          <div>
+                            <div className="text-[10px] text-muted-foreground uppercase tracking-wider font-bold mb-0.5">Working Hours</div>
+                            <div className="font-semibold text-foreground">{employee.working_hours || '8 AM to 5 PM'}</div>
+                          </div>
                         </div>
-                        <div>
-                          <div className="text-[10px] text-muted-foreground uppercase tracking-wider font-bold mb-0.5">Branch</div>
-                          <div className="font-semibold text-foreground">{branchesList.find(b => b.id == employee.branch_id)?.name || employee.branch?.name || '—'}</div>
+                      ) : (
+                        <div className="grid grid-cols-2 gap-4">
+                          <div>
+                            <div className="text-[10px] text-muted-foreground uppercase tracking-wider font-bold mb-0.5">Employee ID</div>
+                            <div className="font-bold text-foreground font-mono">{employee.employee_code || '—'}</div>
+                          </div>
+                          <div>
+                            <div className="text-[10px] text-muted-foreground uppercase tracking-wider font-bold mb-0.5">Branch</div>
+                            <div className="font-semibold text-foreground">{branchesList.find(b => b.id == employee.branch_id)?.name || employee.branch?.name || '—'}</div>
+                          </div>
+                          <div>
+                            <div className="text-[10px] text-muted-foreground uppercase tracking-wider font-bold mb-0.5">Department</div>
+                            <div className="font-semibold text-foreground">{employee.department || '—'}</div>
+                          </div>
+                          <div>
+                            <div className="text-[10px] text-muted-foreground uppercase tracking-wider font-bold mb-0.5">Working Hours</div>
+                            <div className="font-semibold text-foreground">{employee.working_hours || '—'}</div>
+                          </div>
+                          <div>
+                            <div className="text-[10px] text-muted-foreground uppercase tracking-wider font-bold mb-0.5">Position</div>
+                            <div className="font-semibold text-foreground">{employee.position || '—'}</div>
+                          </div>
+                          <div>
+                            <div className="text-[10px] text-muted-foreground uppercase tracking-wider font-bold mb-0.5">Salary</div>
+                            {isEditing ? (
+                              <div className="relative">
+                                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">₱</span>
+                                <input
+                                  type="number"
+                                  min="0"
+                                  step="0.01"
+                                  value={editForm.basic_salary || ''}
+                                  onChange={e => setEditForm(p => ({ ...p, basic_salary: e.target.value }))}
+                                  className="w-full pl-7 pr-3 py-2 rounded-xl border border-border bg-black/5 text-foreground text-sm font-medium focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition-all"
+                                />
+                              </div>
+                            ) : (
+                              <div className="font-semibold text-foreground">{employee.basic_salary ? fmt(employee.basic_salary) : '—'}</div>
+                            )}
+                          </div>
+                          <div className="col-span-2">
+                            <div className="text-[10px] text-muted-foreground uppercase tracking-wider font-bold mb-0.5">Pay Type</div>
+                            <div className="font-semibold text-foreground">{employee.pay_type || '—'}</div>
+                          </div>
                         </div>
-                        <div>
-                          <div className="text-[10px] text-muted-foreground uppercase tracking-wider font-bold mb-0.5">Department</div>
-                          <div className="font-semibold text-foreground">{employee.department || '—'}</div>
-                        </div>
-                        <div>
-                          <div className="text-[10px] text-muted-foreground uppercase tracking-wider font-bold mb-0.5">Working Hours</div>
-                          <div className="font-semibold text-foreground">{employee.working_hours || '—'}</div>
-                        </div>
-                        <div>
-                          <div className="text-[10px] text-muted-foreground uppercase tracking-wider font-bold mb-0.5">Position</div>
-                          <div className="font-semibold text-foreground">{employee.position || '—'}</div>
-                        </div>
-                        <div>
-                          <div className="text-[10px] text-muted-foreground uppercase tracking-wider font-bold mb-0.5">Salary</div>
-                          {isEditing ? (
-                            <div className="relative">
-                              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">₱</span>
-                              <input
-                                type="number"
-                                min="0"
-                                step="0.01"
-                                value={editForm.basic_salary || ''}
-                                onChange={e => setEditForm(p => ({ ...p, basic_salary: e.target.value }))}
-                                className="w-full pl-7 pr-3 py-2 rounded-xl border border-border bg-black/5 text-foreground text-sm font-medium focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition-all"
-                              />
-                            </div>
-                          ) : (
-                            <div className="font-semibold text-foreground">{employee.basic_salary ? <span className="flex items-center gap-0.5"><TbCurrencyPeso className="w-3.5 h-3.5" /> {fmt(employee.basic_salary)}</span> : '—'}</div>
-                          )}
-                        </div>
-                        <div className="col-span-2">
-                          <div className="text-[10px] text-muted-foreground uppercase tracking-wider font-bold mb-0.5">Pay Type</div>
-                          <div className="font-semibold text-foreground">{employee.pay_type || '—'}</div>
-                        </div>
-                      </div>
+                      )}
                     </div>
                   )}
                 </div>
@@ -738,9 +759,9 @@ export default function ProfileModal({ open, isOpen, onClose }) {
                         )}
                       </div>
 
-                      {/* Row 3: Payment & Time */}
+                      {/* Row 3: Payment & Branch */}
                       {!isCustomer && !isAdmin && (
-                        <div className="grid grid-cols-1 sm:grid-cols-5 gap-4">
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                           <div>
                             <label className="block text-[11px] font-bold text-muted-foreground mb-1.5">Pay Type</label>
                             <div className="relative">
@@ -780,30 +801,6 @@ export default function ProfileModal({ open, isOpen, onClose }) {
                                 N/A
                               </div>
                             )}
-                          </div>
-                          <div>
-                            <label className="block text-[11px] font-bold text-muted-foreground mb-1.5">Time In</label>
-                            <div className="relative">
-                              <input
-                                type="time"
-                                value={editForm.time_in || ''}
-                                onChange={e => setEditForm(p => ({ ...p, time_in: e.target.value }))}
-                                className="w-full px-3 py-2.5 rounded-xl border border-border bg-black/5 text-foreground text-sm font-medium focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition-all appearance-none [&::-webkit-calendar-picker-indicator]:opacity-0 [&::-webkit-calendar-picker-indicator]:absolute [&::-webkit-calendar-picker-indicator]:right-0 [&::-webkit-calendar-picker-indicator]:w-full [&::-webkit-calendar-picker-indicator]:h-full [&::-webkit-calendar-picker-indicator]:cursor-pointer"
-                              />
-                              <FiClock className="w-3.5 h-3.5 text-muted-foreground absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
-                            </div>
-                          </div>
-                          <div>
-                            <label className="block text-[11px] font-bold text-muted-foreground mb-1.5">Time Out</label>
-                            <div className="relative">
-                              <input
-                                type="time"
-                                value={editForm.time_out || ''}
-                                onChange={e => setEditForm(p => ({ ...p, time_out: e.target.value }))}
-                                className="w-full px-3 py-2.5 rounded-xl border border-border bg-black/5 text-foreground text-sm font-medium focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition-all appearance-none [&::-webkit-calendar-picker-indicator]:opacity-0 [&::-webkit-calendar-picker-indicator]:absolute [&::-webkit-calendar-picker-indicator]:right-0 [&::-webkit-calendar-picker-indicator]:w-full [&::-webkit-calendar-picker-indicator]:h-full [&::-webkit-calendar-picker-indicator]:cursor-pointer"
-                              />
-                              <FiClock className="w-3.5 h-3.5 text-muted-foreground absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
-                            </div>
                           </div>
                           <div>
                             <label className="block text-[11px] font-bold text-muted-foreground mb-1.5">Branch</label>
@@ -861,9 +858,9 @@ export default function ProfileModal({ open, isOpen, onClose }) {
                         )}
                       </div>
 
-                      {/* Row 3: Payment & Time */}
+                      {/* Row 3: Payment & Branch */}
                       {!isCustomer && !isAdmin && (
-                        <div className="grid grid-cols-1 sm:grid-cols-5 gap-4">
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                           <div>
                             <div className="text-[11px] font-bold text-muted-foreground mb-1.5">Pay Type</div>
                             <div className="w-full px-3 py-2.5 rounded-xl border border-border bg-black/5  text-foreground text-sm font-medium flex justify-between items-center">
@@ -880,27 +877,12 @@ export default function ProfileModal({ open, isOpen, onClose }) {
                             </div>
                           </div>
                           <div>
-                            <div className="text-[11px] font-bold text-muted-foreground mb-1.5">Time In</div>
-                            <div className="w-full px-3 py-2.5 rounded-xl border border-border bg-black/5  text-foreground text-sm font-medium flex justify-between items-center">
-                              <span>{employee.today_attendance?.time_in ? new Date(`2000-01-01T${employee.today_attendance.time_in}`).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }) : '—'}</span>
-                              <FiClock className="w-3.5 h-3.5 text-muted-foreground" />
-                            </div>
-                          </div>
-                          <div>
-                            <div className="text-[11px] font-bold text-muted-foreground mb-1.5">Time Out</div>
-                            <div className="w-full px-3 py-2.5 rounded-xl border border-border bg-black/5  text-foreground text-sm font-medium flex justify-between items-center">
-                              <span>{employee.today_attendance?.time_out ? new Date(`2000-01-01T${employee.today_attendance.time_out}`).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }) : '—'}</span>
-                              <FiClock className="w-3.5 h-3.5 text-muted-foreground" />
-                            </div>
-                          </div>
-                          <div>
                             <div className="text-[11px] font-bold text-muted-foreground mb-1.5">Branch</div>
                             <div className="w-full px-3 py-2.5 rounded-xl border border-border bg-black/5  text-foreground text-sm font-medium flex justify-between items-center overflow-hidden">
-                              <span className="truncate pr-2">{employee.branch?.name || '—'}</span>
+                              <span className="truncate pr-2">{branchesList.find(b => b.id == employee.branch_id)?.name || employee.branch?.name || '—'}</span>
                               <FiChevronDown className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
                             </div>
                           </div>
-
                         </div>
                       )}
                     </div>

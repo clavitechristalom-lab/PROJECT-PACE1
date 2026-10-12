@@ -300,11 +300,11 @@ class NotificationController extends Controller
         if ($user->role === 'Administrator') {
             $unverifiedCount = \App\Models\User::where('account_verified', false)->count();
             if ($unverifiedCount > 0) {
-                $exists = Notification::where('user_id', $user->user_id)
+                $existing = Notification::where('user_id', $user->user_id)
                     ->where('type', 'unverified_accounts_alert')
-                    ->where('is_read', false)
-                    ->exists();
-                if (!$exists) {
+                    ->latest()
+                    ->first();
+                if (!$existing) {
                     Notification::create([
                         'user_id' => $user->user_id,
                         'type' => 'unverified_accounts_alert',
@@ -315,7 +315,17 @@ class NotificationController extends Controller
                         'priority' => 'high',
                         'is_read' => false,
                     ]);
+                } else if (!$existing->is_read) {
+                    $msg = "{$unverifiedCount} user account(s) are awaiting Administrator verification.";
+                    if ($existing->message !== $msg) {
+                        $existing->update(['message' => $msg]);
+                    }
                 }
+            } else {
+                Notification::where('user_id', $user->user_id)
+                    ->where('type', 'unverified_accounts_alert')
+                    ->where('is_read', false)
+                    ->update(['is_read' => true, 'read_at' => now()]);
             }
         }
 

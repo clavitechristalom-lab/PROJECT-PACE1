@@ -79,7 +79,7 @@ export default function ProductsPage({ branchFilter, embedded }) {
     status: 'Active', description: ''
   }
   const [form, setForm] = useState(emptyForm)
-  
+
   // Image Upload State
   const [imageFiles, setImageFiles] = useState([null, null, null, null])
   const [existingImages, setExistingImages] = useState([null, null, null, null])
@@ -146,7 +146,7 @@ export default function ProductsPage({ branchFilter, embedded }) {
       const payload = new FormData();
       Object.entries(form).forEach(([key, value]) => {
         if (value !== null && value !== undefined && value !== '') {
-           payload.append(key, value);
+          payload.append(key, value);
         }
       });
       payload.set('unit_price', parseFloat(form.unit_price) || 0);
@@ -203,7 +203,7 @@ export default function ProductsPage({ branchFilter, embedded }) {
   const handleDelete = async (product) => {
     const target = product || deleteItem
     if (!target) return
-    
+
     // Trigger SweetAlert directly, this connects straight to the backend logic below!
     const confirmed = await confirmAction('Delete Product?', `Are you sure you want to delete ${target.product_name}? This cannot be undone.`, 'DELETE')
     if (!confirmed) return
@@ -239,7 +239,7 @@ export default function ProductsPage({ branchFilter, embedded }) {
       description: p.description || '',
       branch_id: p.branch_id?.toString() || '',
     })
-    
+
     // Set images for preview
     setExistingImages([
       p.image_url || null,
@@ -249,7 +249,7 @@ export default function ProductsPage({ branchFilter, embedded }) {
     ])
     setImageFiles([null, null, null, null])
     setRemoveImages([false, false, false, false])
-    
+
     setAddModal(true)
   }
 
@@ -272,7 +272,7 @@ export default function ProductsPage({ branchFilter, embedded }) {
       payload.append('status', discountModal.status);
       payload.append('unit_price', discountModal.unit_price);
       payload.append('stock_quantity', discountModal.stock_quantity);
-      
+
       if (discountForm.discount_price) {
         payload.append('discount_price', parseFloat(discountForm.discount_price));
       } else {
@@ -301,7 +301,7 @@ export default function ProductsPage({ branchFilter, embedded }) {
       const newFiles = [...imageFiles];
       newFiles[index] = file;
       setImageFiles(newFiles);
-      
+
       const newRemoves = [...removeImages];
       newRemoves[index] = false;
       setRemoveImages(newRemoves);
@@ -607,7 +607,7 @@ export default function ProductsPage({ branchFilter, embedded }) {
                   className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground font-semibold"
                 />
               </div>
-              
+
               {isAdmin ? (
                 <div>
                   <label className="block font-bold text-muted-foreground mb-1">Assigned Branch *</label>
@@ -769,9 +769,9 @@ export default function ProductsPage({ branchFilter, embedded }) {
             <div className="flex justify-end gap-2 pt-2 border-t border-border">
               <button
                 type="button"
-                onClick={() => { 
-                  setAddModal(false); 
-                  setEditItem(null); 
+                onClick={() => {
+                  setAddModal(false);
+                  setEditItem(null);
                   setForm(emptyForm);
                   setImageFiles([null, null, null, null]);
                   setExistingImages([null, null, null, null]);

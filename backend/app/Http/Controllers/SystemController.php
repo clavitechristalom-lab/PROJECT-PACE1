@@ -19,11 +19,39 @@ class SystemController extends Controller
     // ─── Users ──────────────────────────────────────────────────────────────────
     public function users(Request $request)
     {
-        $users = User::with(['employee', 'customer.branch', 'verifiedBy'])->orderBy('user_id')->get()->map(function ($u) {
+        $users = User::with(['employee.branch', 'customer.branch', 'verifiedBy'])->orderBy('user_id')->get()->map(function ($u) {
             $emp = $u->employee;
             $cust = $u->customer;
             $verifiedBy = $u->verifiedBy;
             $verifiedByName = $verifiedBy ? ($verifiedBy->employee ? trim("{$verifiedBy->employee->first_name} {$verifiedBy->employee->last_name}") : $verifiedBy->username) : ($u->account_verified ? 'Administrator' : null);
+
+            $branchObj = null;
+            $branchName = null;
+            $branchId = null;
+
+            if ($emp && $emp->branch) {
+                $branchId = $emp->branch->id;
+                $branchName = $emp->branch->name;
+                $branchObj = ['id' => $emp->branch->id, 'name' => $emp->branch->name];
+            } elseif ($emp && $emp->branch_id) {
+                $branchId = $emp->branch_id;
+                $bp = \App\Models\BranchProfile::find($emp->branch_id);
+                $branchName = $bp ? $bp->name : null;
+                if ($branchName) {
+                    $branchObj = ['id' => $branchId, 'name' => $branchName];
+                }
+            } elseif ($cust && $cust->branch) {
+                $branchId = $cust->branch->id;
+                $branchName = $cust->branch->name;
+                $branchObj = ['id' => $cust->branch->id, 'name' => $cust->branch->name];
+            } elseif ($cust && $cust->branch_id) {
+                $branchId = $cust->branch_id;
+                $bp = \App\Models\BranchProfile::find($cust->branch_id);
+                $branchName = $bp ? $bp->name : null;
+                if ($branchName) {
+                    $branchObj = ['id' => $branchId, 'name' => $branchName];
+                }
+            }
 
             return [
                 'user_id' => $u->user_id,
@@ -38,6 +66,9 @@ class SystemController extends Controller
                 'verified_by_name' => $verifiedByName,
                 'last_login' => $u->last_login ? date('Y-m-d H:i', strtotime($u->last_login)) : '—',
                 'created_date' => $u->created_at ? date('Y-m-d', strtotime($u->created_at)) : '—',
+                'branch_id' => $branchId,
+                'branch_name' => $branchName,
+                'branch' => $branchObj,
                 'employee' => $emp ? [
                     'employee_id' => $emp->employee_id,
                     'employee_code' => $emp->employee_code,
@@ -49,7 +80,9 @@ class SystemController extends Controller
                     'marital_status' => $emp->marital_status,
                     'position' => $emp->position,
                     'department' => $emp->department,
-                    'branch' => $emp->branch ? $emp->branch->name : null,
+                    'branch_id' => $emp->branch_id,
+                    'branch' => $branchObj,
+                    'branch_name' => $branchName,
                     'pay_type' => $emp->pay_type,
                     'phone' => $emp->phone,
                     'email' => $emp->email,
@@ -66,7 +99,8 @@ class SystemController extends Controller
                     'address' => $cust->address,
                     'status' => $cust->status,
                     'branch_id' => $cust->branch_id,
-                    'branch_name' => $cust->branch ? $cust->branch->name : null,
+                    'branch' => $branchObj,
+                    'branch_name' => $branchName,
                 ] : null,
             ];
         });
@@ -79,11 +113,39 @@ class SystemController extends Controller
 
     public function showUser(Request $request, $id)
     {
-        $u = User::with(['employee', 'customer.branch', 'verifiedBy'])->findOrFail($id);
+        $u = User::with(['employee.branch', 'customer.branch', 'verifiedBy'])->findOrFail($id);
         $emp = $u->employee;
         $cust = $u->customer;
         $verifiedBy = $u->verifiedBy;
         $verifiedByName = $verifiedBy ? ($verifiedBy->employee ? trim("{$verifiedBy->employee->first_name} {$verifiedBy->employee->last_name}") : $verifiedBy->username) : ($u->account_verified ? 'Administrator' : null);
+
+        $branchObj = null;
+        $branchName = null;
+        $branchId = null;
+
+        if ($emp && $emp->branch) {
+            $branchId = $emp->branch->id;
+            $branchName = $emp->branch->name;
+            $branchObj = ['id' => $emp->branch->id, 'name' => $emp->branch->name];
+        } elseif ($emp && $emp->branch_id) {
+            $branchId = $emp->branch_id;
+            $bp = \App\Models\BranchProfile::find($emp->branch_id);
+            $branchName = $bp ? $bp->name : null;
+            if ($branchName) {
+                $branchObj = ['id' => $branchId, 'name' => $branchName];
+            }
+        } elseif ($cust && $cust->branch) {
+            $branchId = $cust->branch->id;
+            $branchName = $cust->branch->name;
+            $branchObj = ['id' => $cust->branch->id, 'name' => $cust->branch->name];
+        } elseif ($cust && $cust->branch_id) {
+            $branchId = $cust->branch_id;
+            $bp = \App\Models\BranchProfile::find($cust->branch_id);
+            $branchName = $bp ? $bp->name : null;
+            if ($branchName) {
+                $branchObj = ['id' => $branchId, 'name' => $branchName];
+            }
+        }
 
         return response()->json([
             'user' => [
@@ -99,6 +161,9 @@ class SystemController extends Controller
                 'verified_by_name' => $verifiedByName,
                 'last_login' => $u->last_login ? date('Y-m-d H:i', strtotime($u->last_login)) : '—',
                 'created_date' => $u->created_at ? date('Y-m-d', strtotime($u->created_at)) : '—',
+                'branch_id' => $branchId,
+                'branch_name' => $branchName,
+                'branch' => $branchObj,
                 'employee' => $emp ? [
                     'employee_id' => $emp->employee_id,
                     'employee_code' => $emp->employee_code,
@@ -110,7 +175,9 @@ class SystemController extends Controller
                     'marital_status' => $emp->marital_status,
                     'position' => $emp->position,
                     'department' => $emp->department,
-                    'branch' => $emp->branch ? $emp->branch->name : null,
+                    'branch_id' => $emp->branch_id,
+                    'branch' => $branchObj,
+                    'branch_name' => $branchName,
                     'pay_type' => $emp->pay_type,
                     'phone' => $emp->phone,
                     'email' => $emp->email,
@@ -127,7 +194,8 @@ class SystemController extends Controller
                     'address' => $cust->address,
                     'status' => $cust->status,
                     'branch_id' => $cust->branch_id,
-                    'branch_name' => $cust->branch ? $cust->branch->name : null,
+                    'branch' => $branchObj,
+                    'branch_name' => $branchName,
                 ] : null,
             ]
         ]);
@@ -143,12 +211,12 @@ class SystemController extends Controller
             ], 403);
         }
 
-        $user = User::with('employee')->findOrFail($id);
+        $user = User::with(['employee', 'customer'])->findOrFail($id);
 
-        if (!$user->employee_id || !$user->employee) {
+        if (!$user->employee_id && !$user->customer_id) {
             return response()->json([
                 'success' => false,
-                'message' => 'This user account is not linked to a valid employee record. Please link an employee profile first.',
+                'message' => 'This user account is not linked to an employee or customer record.',
             ], 422);
         }
 
@@ -166,14 +234,21 @@ class SystemController extends Controller
             $user->employee->save();
         }
 
-        $empName = $user->employee ? trim("{$user->employee->first_name} {$user->employee->last_name}") : $user->username;
-        $empCode = $user->employee ? $user->employee->employee_code : 'N/A';
+        if ($user->customer) {
+            $user->customer->status = 'Active';
+            $user->customer->save();
+        }
+
+        $personName = $user->employee
+            ? trim("{$user->employee->first_name} {$user->employee->last_name}")
+            : ($user->customer ? trim("{$user->customer->first_name} {$user->customer->last_name}") : $user->username);
+        $empCode = $user->employee ? $user->employee->employee_code : ($user->customer ? $user->customer->customer_code : 'N/A');
 
         SystemLog::create([
             'user_id' => $admin->user_id,
             'action' => 'VERIFY_ACCOUNT',
             'module' => 'Users',
-            'description' => "Administrator {$admin->username} verified account for {$user->username} ({$user->role}) - Employee: {$empName} ({$empCode})",
+            'description' => "Administrator {$admin->username} verified account for {$user->username} ({$user->role}) - Profile: {$personName} ({$empCode})",
             'ip_address' => $request->ip(),
             'user_agent' => $request->userAgent(),
         ]);
@@ -456,6 +531,24 @@ class SystemController extends Controller
         return response()->json([
             'logs' => $logs,
             'total' => $logs->count(),
+        ]);
+    }
+
+    public function clearLogs(Request $request)
+    {
+        $user = $request->user();
+        if ($user && $user->role !== 'Administrator') {
+            return response()->json([
+                'success' => false,
+                'message' => 'Unauthorized: Only Administrator can clear audit logs.'
+            ], 403);
+        }
+
+        SystemLog::query()->delete();
+
+        return response()->json([
+            'success' => true,
+            'message' => 'All system audit logs have been successfully cleared.'
         ]);
     }
 

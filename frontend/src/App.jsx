@@ -54,29 +54,31 @@ if (typeof window !== 'undefined') {
 }
 
 function getDefaultDashboard(role) {
-  if (role === 'Customer') return '/customer/dashboard'
-  if (role === 'Employee') return '/employee/dashboard'
+  const r = (role || '').trim().toLowerCase()
+  if (r === 'customer') return '/customer/dashboard'
+  if (r === 'employee') return '/employee/dashboard'
   return '/dashboard'
 }
 
 function canUserAccessPath(role, path) {
   if (!path || path === '/' || path === '/login') return false
   const cleanPath = path.split('?')[0]
+  const r = (role || '').trim().toLowerCase()
 
-  if (role === 'Customer') {
+  if (r === 'customer') {
     return cleanPath.startsWith('/customer') || cleanPath === '/notifications'
   }
-  if (role === 'Employee') {
+  if (r === 'employee') {
     return cleanPath.startsWith('/employee') || cleanPath === '/employees' || cleanPath === '/notifications'
   }
-  if (role === 'Store Administrator' || role === 'Store Admin') {
+  if (r === 'store administrator' || r === 'store admin') {
     const adminOnly = [
       '/branches', '/admin-dashboard', '/qr-monitoring', '/admin/qr-monitoring',
       '/admin/qr-requests', '/users', '/system-logs', '/backups', '/settings', '/payroll'
     ]
     return !adminOnly.includes(cleanPath)
   }
-  if (role === 'Administrator') {
+  if (r === 'administrator' || r === 'admin') {
     return true
   }
   return false
@@ -133,8 +135,9 @@ function RequireAuth({ children, roles }) {
   }
 
   if (roles) {
-    const userRole = user.role ? user.role.trim() : ''
-    if (!roles.includes(userRole)) {
+    const userRole = (user.role || '').trim().toLowerCase()
+    const allowed = roles.map(r => r.trim().toLowerCase())
+    if (!allowed.includes(userRole)) {
       return <Navigate to={getDefaultDashboard(userRole)} replace />
     }
   }

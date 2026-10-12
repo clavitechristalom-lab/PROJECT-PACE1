@@ -29,7 +29,7 @@ export default function MySalesChart({ sales }) {
 
 
   return (
-    <Card noPad className="p-6 border border-border mb-6 bg-white dark:bg-card">
+    <Card noPad className="p-6 border border-border mb-6 bg-card">
       <h3 className="text-xl font-bold text-foreground text-center mb-6">My sales</h3>
       <div className="h-[300px] w-full">
         <ResponsiveContainer width="100%" height="100%">

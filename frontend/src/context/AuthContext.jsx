@@ -107,7 +107,7 @@ export function AuthProvider({ children }) {
       return { success: false, message: data?.message || 'Login failed' }
     } catch (error) {
       console.error('Login error:', error)
-      return { success: false, message: error.message || 'Invalid username or password' }
+      return { success: false, message: error.message || 'Incorrect email or password. Please try again.' }
     }
   }
 

@@ -857,13 +857,6 @@ class EmployeeController extends Controller
             ], 401);
         }
 
-        if ($user->role === 'Administrator') {
-            return response()->json([
-                'success' => false,
-                'message' => 'Administrators are not allowed to use the self-service profile edit. Please use the Admin panel to edit employee records.',
-            ], 403);
-        }
-
         $employee = ($user->employee_id ? Employee::find($user->employee_id) : null) ?: ($user->employee ?: Employee::where('email', $user->username)->first());
         if (!$employee) {
             return response()->json([
@@ -889,11 +882,15 @@ class EmployeeController extends Controller
             'basic_salary' => 'nullable|numeric|min:0',
         ]);
 
-        $user = auth()->user();
-        if ($user && $user->role === 'Store Administrator') {
+        if (in_array($user->role, ['Administrator', 'Admin', 'System Administrator'])) {
+            unset($validated['basic_salary'], $validated['branch_id'], $validated['pay_type']);
+        } elseif (in_array($user->role, ['Store Administrator', 'Store Admin'])) {
+            unset($validated['basic_salary']);
             if ($user->employee && $user->employee->branch_id) {
                 $validated['branch_id'] = $user->employee->branch_id;
             }
+        } elseif ($user->role === 'Employee') {
+            unset($validated['basic_salary']);
         }
 
         if (!empty($validated['pay_type'])) {
@@ -901,12 +898,21 @@ class EmployeeController extends Controller
             if ($pt === 'ewallet') $validated['pay_type'] = 'Ewallet';
             elseif ($pt === 'bank') $validated['pay_type'] = 'Bank';
             elseif ($pt === 'cash') $validated['pay_type'] = 'Cash';
+            elseif ($pt === 'gcash') {
+                $validated['pay_type'] = 'GCash';
+                $validated['ewallet_provider'] = 'Gcash';
+            } elseif ($pt === 'paymaya' || $pt === 'maya') {
+                $validated['pay_type'] = 'PayMaya';
+                $validated['ewallet_provider'] = 'Maya';
+            } elseif ($pt === 'bank transfer') {
+                $validated['pay_type'] = 'Bank Transfer';
+            }
         }
 
         if (!empty($validated['ewallet_provider'])) {
             $ep = strtolower($validated['ewallet_provider']);
             if ($ep === 'gcash') $validated['ewallet_provider'] = 'Gcash';
-            elseif ($ep === 'maya') $validated['ewallet_provider'] = 'Maya';
+            elseif ($ep === 'maya' || $ep === 'paymaya') $validated['ewallet_provider'] = 'Maya';
         }
 
         if (isset($validated['basic_salary'])) {
@@ -921,7 +927,7 @@ class EmployeeController extends Controller
             'user_id' => $user->user_id,
             'action' => 'UPDATE',
             'module' => 'Employees',
-            'description' => "Employee {$employee->first_name} {$employee->last_name} ({$employee->employee_code}) updated contact profile details",
+            'description' => "User ({$user->username}) updated self profile details for {$employee->first_name} {$employee->last_name} ({$employee->employee_code})",
             'ip_address' => $request->ip(),
             'user_agent' => $request->userAgent(),
         ]);
@@ -929,7 +935,7 @@ class EmployeeController extends Controller
         return response()->json([
             'success' => true,
             'message' => 'Profile details updated successfully.',
-            'employee' => $employee->fresh(),
+            'employee' => $employee->fresh()->load('branch'),
         ]);
     }
 

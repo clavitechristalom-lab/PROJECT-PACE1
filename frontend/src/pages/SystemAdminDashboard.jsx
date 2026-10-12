@@ -39,6 +39,7 @@ export default function SystemAdminDashboard() {
   const [logs, setLogs] = useState([])
   const [logSearch, setLogSearch] = useState('')
   const [logDateRange, setLogDateRange] = useState({ start: '', end: '' })
+  const [clearingLogs, setClearingLogs] = useState(false)
 
   // Settings State
   const [settings, setSettings] = useState({
@@ -155,6 +156,22 @@ export default function SystemAdminDashboard() {
       showToast(err.message || 'Failed to update user status', 'error')
     } finally {
       setTogglingUser(null)
+    }
+  }
+
+  const handleClearLogs = async () => {
+    if (clearingLogs || logs.length === 0) return
+    setClearingLogs(true)
+    try {
+      const res = await api.system.clearLogs()
+      setLogs([])
+      showToast(res?.message || 'All system audit logs cleared successfully', 'success')
+      triggerDataSync('system')
+    } catch (err) {
+      console.error(err)
+      showToast(err.message || 'Failed to clear system audit logs', 'error')
+    } finally {
+      setClearingLogs(false)
     }
   }
 
@@ -374,6 +391,16 @@ export default function SystemAdminDashboard() {
             onChange={(e) => setLogDateRange({ ...logDateRange, end: e.target.value })} 
             className="bg-card border border-border rounded-xl px-4 py-2 text-sm"
           />
+          <button
+            type="button"
+            onClick={handleClearLogs}
+            disabled={clearingLogs || logs.length === 0}
+            className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold rounded-xl border border-rose-200 dark:border-rose-900/50 bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/40 dark:hover:bg-rose-900/60 text-rose-600 dark:text-rose-400 cursor-pointer transition-all disabled:opacity-50 disabled:cursor-not-allowed shrink-0 shadow-xs"
+            title={logs.length === 0 ? "No logs to clean" : "Clean all system audit logs"}
+          >
+            <FiTrash2 className="w-3.5 h-3.5" />
+            <span>{clearingLogs ? 'Cleaning...' : 'Clean Logs'}</span>
+          </button>
         </div>
       </Card>
       

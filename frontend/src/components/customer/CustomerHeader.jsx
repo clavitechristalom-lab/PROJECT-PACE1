@@ -82,7 +82,7 @@ export default function CustomerHeader({ toggleTheme, isDark }) {
           </div>
           
           {/* Dropdown menu */}
-          <div className="absolute right-0 top-full mt-2 w-48 bg-white dark:bg-[#1a2332] rounded-lg shadow-xl py-2 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-50 text-slate-800 dark:text-slate-200 transform origin-top-right scale-95 group-hover:scale-100">
+          <div className="absolute right-0 top-full mt-2 w-48 bg-white dark:bg-[#1a2332] rounded-lg shadow-xl py-2 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-50 text-foreground transform origin-top-right scale-95 group-hover:scale-100">
             <div className="px-4 py-2 border-b dark:border-slate-700 sm:hidden">
               <p className="font-semibold truncate">{user?.name}</p>
             </div>

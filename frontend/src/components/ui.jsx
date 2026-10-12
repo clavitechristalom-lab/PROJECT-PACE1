@@ -160,7 +160,9 @@ export function StatusBadge({ status }) {
 
   let icon = null
   const s = String(status).toLowerCase()
-  if (s.includes('active') || s.includes('completed') || s.includes('paid') || s.includes('present')) {
+  if (s === 'inactive' || s.includes('inactive')) {
+    icon = <FiAlertCircle className="w-3 h-3" />
+  } else if (s.includes('active') || s.includes('completed') || s.includes('paid') || s.includes('present')) {
     icon = <FiCheckCircle className="w-3 h-3" />
   } else if (s.includes('overdue') || s.includes('absent') || s.includes('cancelled')) {
     icon = <FiAlertCircle className="w-3 h-3" />
@@ -460,7 +462,7 @@ export function ProgressBar({ value = 0, pct, color }) {
 export function Pagination({ page = 1, current, currentPage, total = 0, perPage = 10, pageSize, onChange, onPageChange }) {
   const curr = Number(current || currentPage || page || 1)
   const size = Number(pageSize || perPage || 10)
-  const changeFn = onPageChange || onChange || (() => {})
+  const changeFn = onPageChange || onChange || (() => { })
   const pages = Math.max(1, Math.ceil(total / size))
   const start = total === 0 ? 0 : (curr - 1) * size + 1
   const end = Math.min(curr * size, total)
@@ -509,11 +511,10 @@ export function Pagination({ page = 1, current, currentPage, total = 0, perPage 
             <button
               type="button"
               key={p}
-              className={`w-7 h-7 rounded-lg border text-xs font-semibold cursor-pointer transition-colors ${
-                p === curr
+              className={`w-7 h-7 rounded-lg border text-xs font-semibold cursor-pointer transition-colors ${p === curr
                   ? 'bg-primary text-primary-foreground border-primary font-bold shadow-xs'
                   : 'border-border bg-card text-muted-foreground hover:bg-muted'
-              }`}
+                }`}
               onClick={() => changeFn(p)}
             >
               {p}
@@ -650,11 +651,10 @@ export function TabBar({ tabs = [], activeTab, active, onChange }) {
           <button
             key={id}
             onClick={() => onChange(id)}
-            className={`flex items-center gap-2 px-4 py-2.5 text-xs font-bold cursor-pointer transition-colors border-b-2 -mb-px whitespace-nowrap ${
-              isActive
+            className={`flex items-center gap-2 px-4 py-2.5 text-xs font-bold cursor-pointer transition-colors border-b-2 -mb-px whitespace-nowrap ${isActive
                 ? 'border-primary text-primary'
                 : 'border-transparent text-muted-foreground hover:text-foreground'
-            }`}
+              }`}
           >
             {icon && <span className="shrink-0">{icon}</span>}
             <span>{label}</span>
@@ -671,10 +671,10 @@ export function TabBar({ tabs = [], activeTab, active, onChange }) {
 }
 
 // ─── Notification Dropdown ────────────────────────────────────────────────────
-export function NotificationBell({ 
-  notifications = [], 
-  unreadCount = 0, 
-  onMarkAllRead, 
+export function NotificationBell({
+  notifications = [],
+  unreadCount = 0,
+  onMarkAllRead,
   onNotificationClick,
   onViewAll,
   onRefresh,
@@ -734,8 +734,8 @@ export function NotificationBell({
       </button>
 
       {open && (
-        <div className="absolute right-0 mt-2 w-88 sm:w-[420px] bg-card rounded-2xl shadow-2xl border border-border z-50 animate-[slideUp_0.15s_ease] overflow-hidden flex flex-col max-h-[500px]">
-          <div className="flex items-center justify-between px-4 py-3 border-b border-border bg-muted/40 shrink-0">
+        <div className="absolute right-0 mt-2 w-88 sm:w-[420px] !bg-white dark:!bg-[#0f172a] rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-800 z-50 animate-[slideUp_0.15s_ease] overflow-hidden flex flex-col max-h-[500px]">
+          <div className="flex items-center justify-between px-4 py-3 border-b border-slate-200 dark:border-slate-800 !bg-slate-50 dark:!bg-[#1e293b] shrink-0">
             <div className="flex items-center gap-2">
               <span className="text-xs font-bold uppercase tracking-wider text-foreground">Notification Bar</span>
               {unreadCount > 0 && (
@@ -758,8 +758,8 @@ export function NotificationBell({
                   <span>Mark all read</span>
                 </button>
               )}
-              <button 
-                type="button" 
+              <button
+                type="button"
                 onClick={(e) => {
                   e.stopPropagation()
                   setOpen(false)
@@ -772,9 +772,9 @@ export function NotificationBell({
             </div>
           </div>
 
-          <div className="overflow-y-auto divide-y divide-border/60 flex-1">
+          <div className="overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800 flex-1 !bg-white dark:!bg-[#0f172a]">
             {notifications.length === 0 ? (
-              <div className="px-4 py-12 text-center text-xs text-muted-foreground space-y-2">
+              <div className="px-4 py-12 text-center text-xs text-muted-foreground space-y-2 !bg-white dark:!bg-[#0f172a]">
                 <FiBell className="w-9 h-9 text-muted-foreground/30 mx-auto" />
                 <p className="font-bold text-foreground text-sm">No new notifications</p>
                 <p className="text-[11px] text-muted-foreground">All operational and account updates are up to date.</p>
@@ -790,9 +790,8 @@ export function NotificationBell({
                       if (onNotificationClick) onNotificationClick(n)
                       setOpen(false)
                     }}
-                    className={`p-3.5 hover:bg-muted/60 transition-colors flex gap-3 cursor-pointer relative group ${
-                      isUnread ? 'bg-primary/5 dark:bg-primary/10' : ''
-                    }`}
+                    className={`p-3.5 hover:!bg-slate-50 dark:hover:!bg-[#1e293b]/70 transition-colors flex gap-3 cursor-pointer relative group ${isUnread ? '!bg-blue-50/70 dark:!bg-[#162032]' : '!bg-white dark:!bg-[#0f172a]'
+                      }`}
                   >
                     <span className="w-9 h-9 rounded-xl bg-muted/80 border border-border flex items-center justify-center text-sm shrink-0 mt-0.5 shadow-2xs">
                       {getModuleIcon(n.module)}
@@ -846,7 +845,7 @@ export function NotificationBell({
             )}
           </div>
 
-          <div className="p-2.5 border-t border-border bg-muted/20 text-center shrink-0">
+          <div className="p-2.5 border-t border-slate-200 dark:border-slate-800 !bg-slate-50 dark:!bg-[#1e293b] text-center shrink-0">
             <button
               type="button"
               onClick={() => {

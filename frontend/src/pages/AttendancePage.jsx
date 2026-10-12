@@ -614,7 +614,7 @@ export default function AttendancePage() {
   const handleExportCSV = async () => {
     setExporting(true)
     try {
-      await downloadCsv('/attendance/daily', {
+      await downloadCsv('/attendance', {
         date: selectedDate || undefined,
         department: deptFilter !== 'All' ? deptFilter : undefined,
         status: statusFilter !== 'All' ? statusFilter : undefined,

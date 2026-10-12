@@ -22,7 +22,15 @@ class PaymentController extends Controller
         $query = Payment::with(['installmentAccount.customer', 'installmentAccount.sale.processedBy.employee.branch', 'receivedBy.employee.branch']);
 
         // Scoping
-        if ($user && in_array($user->role, ['Store Administrator', 'Store Admin'])) {
+        if ($user && $user->role === 'Customer') {
+            $customerId = $user->customer_id ?? $user->customer?->customer_id;
+            if (!$customerId) {
+                $customerId = \App\Models\Customer::where('email', $user->username)->value('customer_id');
+            }
+            $query->whereHas('installmentAccount', function ($installmentQuery) use ($customerId) {
+                $installmentQuery->where('customer_id', $customerId ?? -1);
+            });
+        } elseif ($user && in_array($user->role, ['Store Administrator', 'Store Admin'])) {
             $userBranch = $user->employee ? $user->employee->branch_id : null;
             if ($userBranch) {
                 $query->where(function ($q) use ($userBranch) {
@@ -238,17 +246,37 @@ class PaymentController extends Controller
      */
     public function show($id)
     {
-        $p = Payment::with(['installmentAccount.customer', 'installmentAccount.sale.processedBy.employee', 'receivedBy.employee'])->findOrFail($id);
+        $p = Payment::with([
+            'installmentAccount.customer',
+            'installmentAccount.sale.processedBy.employee.branch',
+            'installmentAccount.sale.branch',
+            'receivedBy.employee.branch'
+        ])->findOrFail($id);
+
         $inst = $p->installmentAccount;
         $cust = $inst ? $inst->customer : null;
-        $custName = $cust ? "{$cust->first_name} {$cust->last_name}" : 'Customer';
+        $custName = $cust ? trim("{$cust->first_name} {$cust->last_name}") : 'Customer';
         $accNo = $inst ? $inst->account_no : 'N/A';
-        $receivedBy = $p->receivedBy ? ($p->receivedBy->employee ? "{$p->receivedBy->employee->first_name} {$p->receivedBy->employee->last_name}" : $p->receivedBy->username) : 'Staff';
+        $receivedBy = $p->receivedBy ? ($p->receivedBy->employee ? trim("{$p->receivedBy->employee->first_name} {$p->receivedBy->employee->last_name}") : $p->receivedBy->username) : 'Staff';
 
-        $branch = 'Main Branch';
-        if ($inst && $inst->sale && $inst->sale->processedBy && $inst->sale->processedBy->employee) {
-            $branch = $inst->sale->processedBy->employee->branch_id ?: null;
+        $branchName = 'Main Branch';
+        $branchLocation = '';
+        $branchPhone = '';
+        if ($inst && $inst->sale && $inst->sale->branch) {
+            $branchName = $inst->sale->branch->name;
+            $branchLocation = $inst->sale->branch->location;
+            $branchPhone = $inst->sale->branch->contact_number;
+        } elseif ($inst && $inst->sale && $inst->sale->processedBy && $inst->sale->processedBy->employee && $inst->sale->processedBy->employee->branch) {
+            $branchName = $inst->sale->processedBy->employee->branch->name;
+            $branchLocation = $inst->sale->processedBy->employee->branch->location;
+            $branchPhone = $inst->sale->processedBy->employee->branch->contact_number;
+        } elseif ($p->receivedBy && $p->receivedBy->employee && $p->receivedBy->employee->branch) {
+            $branchName = $p->receivedBy->employee->branch->name;
+            $branchLocation = $p->receivedBy->employee->branch->location;
+            $branchPhone = $p->receivedBy->employee->branch->contact_number;
         }
+
+        $settings = \App\Models\Setting::all()->pluck('value', 'key')->toArray();
 
         return response()->json([
             'payment' => [
@@ -263,13 +291,54 @@ class PaymentController extends Controller
                 'received_by' => $receivedBy,
                 'customer_name' => $custName,
                 'customer_phone' => $cust ? $cust->phone : '',
+                'customer_address' => $cust ? $cust->address : '',
                 'account_no' => $accNo,
-                'branch' => $branch,
+                'branch' => $branchName,
+                'branch_location' => $branchLocation,
+                'branch_phone' => $branchPhone,
+                'remaining_balance' => $inst ? (float)$inst->balance : 0,
+                'total_paid' => $inst ? (float)$inst->total_paid : (float)$p->amount,
+                'total_amount' => $inst ? (float)$inst->total_amount : (float)$p->amount,
                 'status' => 'Completed',
                 'notes' => $p->notes,
                 'proof_of_payment' => $p->proof_of_payment ? asset('storage/' . $p->proof_of_payment) : null,
+                'company_settings' => [
+                    'company_name' => $settings['company_name'] ?? 'PROJECT: PACE Z-LICZ',
+                    'branch_name' => $settings['branch_name'] ?? $branchName,
+                    'address' => $settings['address'] ?? 'Cagayan de Oro City',
+                    'phone' => $settings['phone'] ?? '+63 88 856 1234',
+                    'tax_id' => $settings['tax_id'] ?? '000-000-000',
+                    'logo' => $settings['logo'] ?? null,
+                ]
             ]
         ]);
+    }
+
+    /**
+     * Log receipt printing / PDF export event in audit trail.
+     */
+    public function logPrint(Request $request, $id = null)
+    {
+        $user = $request->user();
+        $desc = "Printed / PDF exported ";
+        if ($id) {
+            $p = Payment::find($id);
+            $receiptNo = $p ? $p->receipt_no : "ID {$id}";
+            $desc .= "official receipt {$receiptNo}";
+        } else {
+            $desc .= "payments collection & receipts report";
+        }
+
+        SystemLog::create([
+            'user_id' => $user ? $user->user_id : null,
+            'action' => 'PRINT',
+            'module' => 'Payments',
+            'description' => $desc,
+            'ip_address' => $request->ip(),
+            'user_agent' => $request->userAgent(),
+        ]);
+
+        return response()->json(['message' => 'Print event logged successfully']);
     }
 
     /**
