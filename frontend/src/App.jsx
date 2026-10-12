@@ -69,7 +69,7 @@ function canUserAccessPath(role, path) {
     return cleanPath.startsWith('/customer') || cleanPath === '/notifications'
   }
   if (r === 'employee') {
-    return cleanPath.startsWith('/employee') || cleanPath === '/employees' || cleanPath === '/notifications'
+    return cleanPath.startsWith('/employee') || cleanPath === '/notifications'
   }
   if (r === 'store administrator' || r === 'store admin') {
     const adminOnly = [
@@ -204,7 +204,7 @@ function AppRoutes() {
           <Route path="/installments" element={<RequireAuth roles={['Administrator', 'Store Administrator', 'Store Admin']}><InstallmentsPage /></RequireAuth>} />
           <Route path="/payment-schedule" element={<RequireAuth roles={['Administrator', 'Store Administrator', 'Store Admin']}><PaymentSchedulePage /></RequireAuth>} />
           <Route path="/payments" element={<RequireAuth roles={['Administrator', 'Store Administrator', 'Store Admin']}><PaymentsPage /></RequireAuth>} />
-          <Route path="/employees" element={<RequireAuth roles={['Administrator', 'Store Administrator', 'Store Admin', 'Employee']}><EmployeesPage /></RequireAuth>} />
+          <Route path="/employees" element={<RequireAuth roles={['Administrator', 'Store Administrator', 'Store Admin']}><EmployeesPage /></RequireAuth>} />
           <Route path="/admin/qr-requests" element={<RequireAuth roles={['Administrator']}><QrRequestsPage /></RequireAuth>} />
           <Route path="/attendance" element={<RequireAuth roles={['Administrator', 'Store Administrator', 'Store Admin']}><AttendancePage /></RequireAuth>} />
           <Route path="/attendance/qr" element={<RequireAuth roles={['Administrator', 'Store Administrator', 'Store Admin']}><AttendancePage /></RequireAuth>} />

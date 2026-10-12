@@ -112,6 +112,7 @@ class AuthController extends Controller
                 'phone' => $phone,
                 'address' => $address,
                 'gender' => $gender,
+                'birth_date' => $dateOfBirth,
                 'date_of_birth' => $dateOfBirth,
                 'marital_status' => $maritalStatus,
                 'position' => $role,

@@ -1241,11 +1241,11 @@ export default function LoginPage() {
                         <select
                           value={signUpData.gender}
                           onChange={(e) => setSignUpData({ ...signUpData, gender: e.target.value })}
-                          className={`w-full bg-white/5 border rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:ring-2 transition-all ${signUpErrors.gender ? 'border-rose-500/80 focus:ring-rose-500/30' : 'border-slate-800 focus:border-blue-500 focus:ring-blue-500/20'}`}
+                          className={`w-full bg-[#1e293b]/90 border rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:ring-2 transition-all cursor-pointer dark-select [color-scheme:dark] [&>option]:bg-[#0f172a] [&>option]:text-white ${signUpErrors.gender ? 'border-rose-500/80 focus:ring-rose-500/30' : 'border-slate-800 focus:border-blue-500 focus:ring-blue-500/20'}`}
                         >
-                          <option value="Male">Male</option>
-                          <option value="Female">Female</option>
-                          <option value="Other">Other</option>
+                          <option value="Male" className="bg-[#0f172a] text-white">Male</option>
+                          <option value="Female" className="bg-[#0f172a] text-white">Female</option>
+                          <option value="Other" className="bg-[#0f172a] text-white">Other</option>
                         </select>
                         {signUpErrors.gender && <p className="text-[11px] text-rose-400 mt-1">{signUpErrors.gender}</p>}
                       </div>
@@ -1254,12 +1254,16 @@ export default function LoginPage() {
                         <label className="block text-xs font-semibold text-slate-300 mb-1">Birthday</label>
                         <input
                           type="date"
+                          max={new Date().toISOString().split('T')[0]}
                           value={signUpData.date_of_birth}
+                          onClick={(e) => {
+                            try { e.target.showPicker() } catch (_) {}
+                          }}
                           onChange={(e) => {
                             setSignUpData({ ...signUpData, date_of_birth: e.target.value })
                             if (signUpErrors.date_of_birth) setSignUpErrors({ ...signUpErrors, date_of_birth: '' })
                           }}
-                          className={`w-full bg-white/5 border rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:ring-2 transition-all appearance-none [&::-webkit-calendar-picker-indicator]:opacity-0 [&::-webkit-calendar-picker-indicator]:absolute [&::-webkit-calendar-picker-indicator]:right-0 [&::-webkit-calendar-picker-indicator]:w-full [&::-webkit-calendar-picker-indicator]:h-full [&::-webkit-calendar-picker-indicator]:cursor-pointer ${signUpErrors.date_of_birth ? 'border-rose-500/80 focus:ring-rose-500/30' : 'border-slate-800 focus:border-blue-500 focus:ring-blue-500/20'}`}
+                          className={`w-full bg-[#1e293b]/90 border rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:ring-2 transition-all cursor-pointer [color-scheme:dark] ${signUpErrors.date_of_birth ? 'border-rose-500/80 focus:ring-rose-500/30' : 'border-slate-800 focus:border-blue-500 focus:ring-blue-500/20'}`}
                         />
                         {signUpErrors.date_of_birth && <p className="text-[11px] text-rose-400 mt-1">{signUpErrors.date_of_birth}</p>}
                       </div>
@@ -1269,12 +1273,12 @@ export default function LoginPage() {
                         <select
                           value={signUpData.marital_status}
                           onChange={(e) => setSignUpData({ ...signUpData, marital_status: e.target.value })}
-                          className={`w-full bg-white/5 border rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:ring-2 transition-all ${signUpErrors.marital_status ? 'border-rose-500/80 focus:ring-rose-500/30' : 'border-slate-800 focus:border-blue-500 focus:ring-blue-500/20'}`}
+                          className={`w-full bg-[#1e293b]/90 border rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:ring-2 transition-all cursor-pointer dark-select [color-scheme:dark] [&>option]:bg-[#0f172a] [&>option]:text-white ${signUpErrors.marital_status ? 'border-rose-500/80 focus:ring-rose-500/30' : 'border-slate-800 focus:border-blue-500 focus:ring-blue-500/20'}`}
                         >
-                          <option value="Single">Single</option>
-                          <option value="Married">Married</option>
-                          <option value="Widowed">Widowed</option>
-                          <option value="Divorced">Divorced</option>
+                          <option value="Single" className="bg-[#0f172a] text-white">Single</option>
+                          <option value="Married" className="bg-[#0f172a] text-white">Married</option>
+                          <option value="Widowed" className="bg-[#0f172a] text-white">Widowed</option>
+                          <option value="Divorced" className="bg-[#0f172a] text-white">Divorced</option>
                         </select>
                         {signUpErrors.marital_status && <p className="text-[11px] text-rose-400 mt-1">{signUpErrors.marital_status}</p>}
                       </div>
@@ -1348,10 +1352,10 @@ export default function LoginPage() {
                             <select
                               value={signUpData.branch_id}
                               onChange={(e) => setSignUpData({ ...signUpData, branch_id: e.target.value })}
-                              className={`w-full bg-white/5 border rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:ring-2 transition-all cursor-pointer ${signUpErrors.branch_id ? 'border-rose-500/80' : 'border-slate-800 focus:border-blue-500'}`}
+                              className={`w-full bg-[#1e293b]/90 border rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:ring-2 transition-all cursor-pointer dark-select [color-scheme:dark] [&>option]:bg-[#0f172a] [&>option]:text-white ${signUpErrors.branch_id ? 'border-rose-500/80 focus:ring-rose-500/30' : 'border-slate-800 focus:border-blue-500 focus:ring-blue-500/20'}`}
                             >
-                              <option value="">Select a branch</option>
-                              {registrationOptions.branches.map((branch) => <option key={branch.id} value={branch.id}>{branch.name}</option>)}
+                              <option value="" className="bg-[#0f172a] text-white">Select a branch</option>
+                              {registrationOptions.branches.map((branch) => <option key={branch.id} value={branch.id} className="bg-[#0f172a] text-white">{branch.name}</option>)}
                             </select>
                             {signUpErrors.branch_id && <p className="text-[11px] text-rose-400 mt-1">{signUpErrors.branch_id}</p>}
                           </div>

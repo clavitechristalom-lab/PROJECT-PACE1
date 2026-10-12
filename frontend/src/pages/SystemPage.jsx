@@ -35,12 +35,14 @@ export default function SystemPage({ defaultTab = 'users' }) {
   const [editUser, setEditUser] = useState(null)
   const [deleteUser, setDeleteUser] = useState(null)
   const [userForm, setUserForm] = useState({
-    username: '', password: '', confirmPassword: '', role: 'Employee', is_active: true, employee_id: '',
-    first_name: '', last_name: '', middle_name: '', phone: '', address: '', gender: 'Male', date_of_birth: '', marital_status: 'Single', email: '',
-    branch_id: '', attendance_pin: '', confirm_attendance_pin: ''
+    username: '', password: '', confirmPassword: '', role: 'Employee', is_active: true, employee_id: '', customer_id: '',
+    employee_code: '', first_name: '', last_name: '', middle_name: '', phone: '', address: '', gender: 'Male', date_of_birth: '', marital_status: 'Single', email: '',
+    branch_id: '', department: '', position: '', working_hours: '8 AM to 5 PM', basic_salary: '', pay_type: 'Cash',
+    attendance_pin: '', confirm_attendance_pin: ''
   })
   const [userSearch, setUserSearch] = useState('')
   const [employeesList, setEmployeesList] = useState([])
+  const [customersList, setCustomersList] = useState([])
   const [registrationOptions, setRegistrationOptions] = useState({ branches: [] })
 
   // User Details & Verification Modals State
@@ -87,13 +89,15 @@ export default function SystemPage({ defaultTab = 'users' }) {
     if (!silent) setError('')
     try {
       if (tab === 'users') {
-        const [userData, empData, regOptions] = await Promise.all([
+        const [userData, empData, custList, regOptions] = await Promise.all([
           api.system.getUsers(),
           api.employees.getAll().catch(() => ({ employees: [] })),
+          api.customers.getAll().catch(() => ({ customers: [] })),
           api.auth.registrationOptions().catch(() => ({ branches: [] })),
         ])
         setUsers(userData.users || [])
         setEmployeesList(empData.employees || [])
+        setCustomersList(custList.customers || [])
         if (regOptions && regOptions.branches) setRegistrationOptions(regOptions)
       } else if (tab === 'logs') {
         const data = await api.system.getLogs({
@@ -156,7 +160,8 @@ export default function SystemPage({ defaultTab = 'users' }) {
       if (editUser) {
         const payload = {
           ...userForm,
-          employee_id: userForm.employee_id || null,
+          employee_id: userForm.role === 'Customer' ? null : (userForm.employee_id || null),
+          customer_id: userForm.role === 'Customer' ? (userForm.customer_id || null) : null,
           auth_user_id: user?.user_id || 1,
         }
         const res = await api.system.updateUser(editUser.user_id, payload)
@@ -175,9 +180,10 @@ export default function SystemPage({ defaultTab = 'users' }) {
       setUserFormStep(1)
       setEditUser(null)
       setUserForm({
-        username: '', password: '', confirmPassword: '', role: 'Employee', is_active: true, employee_id: '',
-        first_name: '', last_name: '', middle_name: '', phone: '', address: '', gender: 'Male', date_of_birth: '', marital_status: 'Single', email: '',
-        branch_id: '', attendance_pin: '', confirm_attendance_pin: ''
+        username: '', password: '', confirmPassword: '', role: 'Employee', is_active: true, employee_id: '', customer_id: '',
+        employee_code: '', first_name: '', last_name: '', middle_name: '', phone: '', address: '', gender: 'Male', date_of_birth: '', marital_status: 'Single', email: '',
+        branch_id: '', department: '', position: '', working_hours: '8 AM to 5 PM', basic_salary: '', pay_type: 'Cash',
+        attendance_pin: '', confirm_attendance_pin: ''
       })
     } catch (err) {
       showToast(err.message || 'Failed to save user', 'error')
@@ -205,15 +211,35 @@ export default function SystemPage({ defaultTab = 'users' }) {
 
   const openEditUser = (u) => {
     setEditUser(u)
+    const emp = u.employee || employeesList.find(e => String(e.employee_id) === String(u.employee_id)) || {}
+    const cust = u.customer || customersList.find(c => String(c.customer_id) === String(u.customer_id)) || {}
+
     setUserForm({
       username: u.username,
       password: '',
       confirmPassword: '',
       role: u.role === 'Store Administrator' ? 'Store Admin' : u.role,
-      is_active: u.is_active,
-      employee_id: u.employee_id || '',
-      first_name: '', last_name: '', middle_name: '', phone: '', address: '', gender: 'Male', date_of_birth: '', marital_status: 'Single', email: '',
-      branch_id: '', attendance_pin: '', confirm_attendance_pin: ''
+      is_active: u.is_active !== undefined ? Boolean(u.is_active) : true,
+      employee_id: u.employee_id || emp.employee_id || '',
+      customer_id: u.customer_id || cust.customer_id || '',
+      employee_code: emp.employee_code || '',
+      first_name: emp.first_name || cust.first_name || '',
+      middle_name: emp.middle_name || cust.middle_name || '',
+      last_name: emp.last_name || cust.last_name || '',
+      phone: emp.phone || cust.phone || '',
+      address: emp.address || cust.address || '',
+      gender: emp.gender || cust.gender || 'Male',
+      date_of_birth: (emp.date_of_birth || emp.birth_date || cust.date_of_birth || cust.birth_date) ? new Date(emp.date_of_birth || emp.birth_date || cust.date_of_birth || cust.birth_date).toISOString().split('T')[0] : '',
+      marital_status: emp.marital_status || cust.marital_status || 'Single',
+      email: emp.email || cust.email || '',
+      branch_id: emp.branch_id || cust.branch_id || (u.branch ? u.branch.id : '') || '',
+      department: emp.department || '',
+      position: emp.position || (u.role === 'Administrator' ? 'System Administrator' : u.role === 'Store Administrator' ? 'Store Administrator' : ''),
+      working_hours: emp.working_hours || '8 AM to 5 PM',
+      basic_salary: emp.basic_salary !== undefined ? emp.basic_salary : '',
+      pay_type: emp.pay_type || 'Cash',
+      attendance_pin: '',
+      confirm_attendance_pin: ''
     })
     setUserFormStep(1)
     setUserModal(true)
@@ -1260,10 +1286,445 @@ export default function SystemPage({ defaultTab = 'users' }) {
           isOpen={true}
           title={editUser ? `Edit User: ${editUser.username}` : 'Add User Account'}
           onClose={() => { setUserModal(false); setEditUser(null); setUserFormStep(1) }}
-          size="md"
+          size={editUser ? 'lg' : 'md'}
         >
-          <form onSubmit={handleSaveUser} className="space-y-3.5 text-xs">
-            {userFormStep === 1 ? (
+          <form onSubmit={handleSaveUser} className="space-y-4 text-xs">
+            {editUser ? (
+              <div className="space-y-4 max-h-[75vh] overflow-y-auto px-1 scrollbar-hide">
+                {/* Account Details */}
+                <div className="p-4 bg-muted/20 rounded-2xl border border-border space-y-3">
+                  <div className="flex items-center gap-2 border-b border-border pb-2">
+                    <FiShield className="w-3.5 h-3.5 text-primary" />
+                    <span className="font-bold uppercase tracking-wider text-muted-foreground text-[11px]">
+                      Account Credentials & Role
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div>
+                      <label className="text-[10px] text-muted-foreground uppercase tracking-wider font-bold mb-1 block">
+                        Username *
+                      </label>
+                      <input
+                        type="text"
+                        value={userForm.username}
+                        onChange={e => setUserForm(f => ({ ...f, username: e.target.value }))}
+                        placeholder="e.g. j.delacruz"
+                        required
+                        className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground text-xs font-semibold"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] text-muted-foreground uppercase tracking-wider font-bold mb-1 block">
+                        Account Role
+                      </label>
+                      <select
+                        value={userForm.role === 'Store Administrator' ? 'Store Admin' : userForm.role}
+                        onChange={e => setUserForm(f => ({ ...f, role: e.target.value }))}
+                        className="w-full border border-border rounded-xl px-3 py-2 text-xs font-semibold bg-card text-foreground cursor-pointer"
+                      >
+                        <option value="Administrator">Administrator</option>
+                        <option value="Store Admin">Store Admin</option>
+                        <option value="Employee">Employee</option>
+                        <option value="Customer">Customer</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="text-[10px] text-muted-foreground uppercase tracking-wider font-bold mb-1 block">
+                        Account Status
+                      </label>
+                      <select
+                        value={userForm.is_active ? 'Active' : 'Inactive'}
+                        onChange={e => setUserForm(f => ({ ...f, is_active: e.target.value === 'Active' }))}
+                        className="w-full border border-border rounded-xl px-3 py-2 text-xs font-semibold bg-card text-foreground cursor-pointer"
+                      >
+                        <option value="Active">Active</option>
+                        <option value="Inactive">Inactive</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                    <div>
+                      <label className="text-[10px] text-muted-foreground uppercase tracking-wider font-bold mb-1 block">
+                        New Password (Leave blank to keep existing)
+                      </label>
+                      <input
+                        type="password"
+                        value={userForm.password}
+                        onChange={e => setUserForm(f => ({ ...f, password: e.target.value }))}
+                        placeholder="••••••••"
+                        className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground font-mono text-xs"
+                      />
+                    </div>
+                    <div>
+                      {userForm.role !== 'Customer' ? (
+                        <>
+                          <label className="text-[10px] text-muted-foreground uppercase tracking-wider font-bold mb-1 block">
+                            Linked Employee Profile
+                          </label>
+                          <select
+                            value={userForm.employee_id}
+                            onChange={e => {
+                              const empId = e.target.value
+                              const emp = employeesList.find(x => String(x.employee_id) === String(empId))
+                              if (emp) {
+                                setUserForm(f => ({
+                                  ...f,
+                                  employee_id: emp.employee_id,
+                                  employee_code: emp.employee_code || '',
+                                  first_name: emp.first_name || f.first_name,
+                                  last_name: emp.last_name || f.last_name,
+                                  gender: emp.gender || f.gender,
+                                  date_of_birth: (emp.date_of_birth || emp.birth_date) ? new Date(emp.date_of_birth || emp.birth_date).toISOString().split('T')[0] : f.date_of_birth,
+                                  marital_status: emp.marital_status || f.marital_status,
+                                  position: emp.position || f.position,
+                                  department: emp.department || f.department,
+                                  branch_id: emp.branch_id || f.branch_id,
+                                  working_hours: emp.working_hours || f.working_hours,
+                                  basic_salary: emp.basic_salary !== undefined ? emp.basic_salary : f.basic_salary,
+                                  pay_type: emp.pay_type || f.pay_type,
+                                  phone: emp.phone || f.phone,
+                                  email: emp.email || f.email,
+                                  address: emp.address || f.address,
+                                }))
+                              } else {
+                                setUserForm(f => ({ ...f, employee_id: '' }))
+                              }
+                            }}
+                            className="w-full border border-border rounded-xl px-3 py-2 text-xs bg-card text-foreground cursor-pointer font-medium"
+                          >
+                            <option value="">-- Unlinked / Standalone Account --</option>
+                            {employeesList.map(e => (
+                              <option key={e.employee_id} value={e.employee_id}>
+                                {e.employee_code} - {e.first_name} {e.last_name} ({e.position})
+                              </option>
+                            ))}
+                          </select>
+                        </>
+                      ) : (
+                        <>
+                          <label className="text-[10px] text-muted-foreground uppercase tracking-wider font-bold mb-1 block">
+                            Linked Customer Profile
+                          </label>
+                          <select
+                            value={userForm.customer_id}
+                            onChange={e => {
+                              const custId = e.target.value
+                              const cust = customersList.find(x => String(x.customer_id) === String(custId))
+                              if (cust) {
+                                setUserForm(f => ({
+                                  ...f,
+                                  customer_id: cust.customer_id,
+                                  first_name: cust.first_name || f.first_name,
+                                  last_name: cust.last_name || f.last_name,
+                                  phone: cust.phone || f.phone,
+                                  email: cust.email || f.email,
+                                  address: cust.address || f.address,
+                                  branch_id: cust.branch_id || f.branch_id,
+                                }))
+                              } else {
+                                setUserForm(f => ({ ...f, customer_id: '' }))
+                              }
+                            }}
+                            className="w-full border border-border rounded-xl px-3 py-2 text-xs bg-card text-foreground cursor-pointer font-medium"
+                          >
+                            <option value="">-- Unlinked Customer Account --</option>
+                            {customersList.map(c => (
+                              <option key={c.customer_id} value={c.customer_id}>
+                                {c.customer_code} - {c.first_name} {c.last_name}
+                              </option>
+                            ))}
+                          </select>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Form & Profile Sections - Matching Image 2 */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {/* Card 1: PERSONAL INFORMATION */}
+                  <div className="p-4 bg-card rounded-2xl border border-border space-y-3">
+                    <h4 className="font-bold uppercase tracking-wider text-muted-foreground text-[11px] flex items-center gap-1.5 border-b border-border pb-2">
+                      <FiUser className="w-3.5 h-3.5 text-primary" />
+                      <span>Personal Information</span>
+                    </h4>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="text-[10px] text-muted-foreground uppercase tracking-wider font-bold mb-1 block">
+                          Gender
+                        </label>
+                        <select
+                          value={userForm.gender || 'Male'}
+                          onChange={e => setUserForm(f => ({ ...f, gender: e.target.value }))}
+                          className="w-full border border-border rounded-xl px-3 py-2 bg-card text-foreground text-xs font-medium cursor-pointer [color-scheme:dark] [&>option]:bg-[#0f172a] [&>option]:text-white"
+                        >
+                          <option value="Male" className="bg-[#0f172a] text-white">Male</option>
+                          <option value="Female" className="bg-[#0f172a] text-white">Female</option>
+                          <option value="Other" className="bg-[#0f172a] text-white">Other</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="text-[10px] text-muted-foreground uppercase tracking-wider font-bold mb-1 block">
+                          Birthdate
+                        </label>
+                        <input
+                          type="date"
+                          max={new Date().toISOString().split('T')[0]}
+                          value={userForm.date_of_birth ? new Date(userForm.date_of_birth).toISOString().split('T')[0] : ''}
+                          onClick={(e) => { try { e.target.showPicker() } catch (_) {} }}
+                          onChange={e => setUserForm(f => ({ ...f, date_of_birth: e.target.value }))}
+                          className="w-full border border-border rounded-xl px-3 py-2 bg-card text-foreground text-xs font-medium cursor-pointer [color-scheme:dark]"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] text-muted-foreground uppercase tracking-wider font-bold mb-1 block">
+                          Marital Status
+                        </label>
+                        <select
+                          value={userForm.marital_status || 'Single'}
+                          onChange={e => setUserForm(f => ({ ...f, marital_status: e.target.value }))}
+                          className="w-full border border-border rounded-xl px-3 py-2 bg-card text-foreground text-xs font-medium cursor-pointer [color-scheme:dark] [&>option]:bg-[#0f172a] [&>option]:text-white"
+                        >
+                          <option value="Single" className="bg-[#0f172a] text-white">Single</option>
+                          <option value="Married" className="bg-[#0f172a] text-white">Married</option>
+                          <option value="Divorced" className="bg-[#0f172a] text-white">Divorced</option>
+                          <option value="Widowed" className="bg-[#0f172a] text-white">Widowed</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="text-[10px] text-muted-foreground uppercase tracking-wider font-bold mb-1 block">
+                          Position
+                        </label>
+                        <input
+                          type="text"
+                          value={userForm.position || ''}
+                          onChange={e => setUserForm(f => ({ ...f, position: e.target.value }))}
+                          placeholder="Position"
+                          className="w-full border border-border rounded-xl px-3 py-2 bg-card text-foreground text-xs font-medium"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Card 2: EMPLOYMENT INFORMATION */}
+                  <div className="p-4 bg-card rounded-2xl border border-border space-y-3">
+                    <h4 className="font-bold uppercase tracking-wider text-muted-foreground text-[11px] flex items-center gap-1.5 border-b border-border pb-2">
+                      <FiActivity className="w-3.5 h-3.5 text-primary" />
+                      <span>{userForm.role === 'Customer' ? 'Customer Profile' : 'Employment Information'}</span>
+                    </h4>
+
+                    {userForm.role === 'Administrator' ? (
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <label className="text-[10px] text-muted-foreground uppercase tracking-wider font-bold mb-1 block">
+                            Employee ID
+                          </label>
+                          <div className="font-bold text-foreground font-mono text-xs py-2 px-3 bg-muted rounded-xl border border-border">
+                            {userForm.employee_code || (userForm.employee_id ? `EMP-${String(userForm.employee_id).padStart(3, '0')}` : 'EMP-001')}
+                          </div>
+                        </div>
+                        <div>
+                          <label className="text-[10px] text-muted-foreground uppercase tracking-wider font-bold mb-1 block">
+                            Department
+                          </label>
+                          <input
+                            type="text"
+                            value={userForm.department || 'Administration'}
+                            onChange={e => setUserForm(f => ({ ...f, department: e.target.value }))}
+                            className="w-full border border-border rounded-xl px-3 py-2 bg-card text-foreground text-xs font-medium"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[10px] text-muted-foreground uppercase tracking-wider font-bold mb-1 block">
+                            Position
+                          </label>
+                          <input
+                            type="text"
+                            value={userForm.position || 'System Administrator'}
+                            onChange={e => setUserForm(f => ({ ...f, position: e.target.value }))}
+                            className="w-full border border-border rounded-xl px-3 py-2 bg-card text-foreground text-xs font-medium"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[10px] text-muted-foreground uppercase tracking-wider font-bold mb-1 block">
+                            Working Hours
+                          </label>
+                          <input
+                            type="text"
+                            value={userForm.working_hours || '8 AM to 5 PM'}
+                            onChange={e => setUserForm(f => ({ ...f, working_hours: e.target.value }))}
+                            className="w-full border border-border rounded-xl px-3 py-2 bg-card text-foreground text-xs font-medium"
+                          />
+                        </div>
+                      </div>
+                    ) : userForm.role === 'Customer' ? (
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <label className="text-[10px] text-muted-foreground uppercase tracking-wider font-bold mb-1 block">
+                            Customer Code
+                          </label>
+                          <div className="font-bold text-foreground font-mono text-xs py-2 px-3 bg-muted rounded-xl border border-border">
+                            {customersList.find(c => String(c.customer_id) === String(userForm.customer_id))?.customer_code || 'CUST-001'}
+                          </div>
+                        </div>
+                        <div>
+                          <label className="text-[10px] text-muted-foreground uppercase tracking-wider font-bold mb-1 block">
+                            Branch
+                          </label>
+                          <select
+                            value={userForm.branch_id || ''}
+                            onChange={e => setUserForm(f => ({ ...f, branch_id: e.target.value }))}
+                            className="w-full border border-border rounded-xl px-3 py-2 bg-card text-foreground text-xs font-medium"
+                          >
+                            <option value="">Select Branch</option>
+                            {registrationOptions.branches.map(b => (
+                              <option key={b.id} value={b.id}>{b.name}</option>
+                            ))}
+                          </select>
+                        </div>
+                        <div>
+                          <label className="text-[10px] text-muted-foreground uppercase tracking-wider font-bold mb-1 block">
+                            Contact Phone
+                          </label>
+                          <input
+                            type="text"
+                            value={userForm.phone || ''}
+                            onChange={e => setUserForm(f => ({ ...f, phone: e.target.value }))}
+                            placeholder="Phone number"
+                            className="w-full border border-border rounded-xl px-3 py-2 bg-card text-foreground text-xs font-medium"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[10px] text-muted-foreground uppercase tracking-wider font-bold mb-1 block">
+                            Email
+                          </label>
+                          <input
+                            type="email"
+                            value={userForm.email || ''}
+                            onChange={e => setUserForm(f => ({ ...f, email: e.target.value }))}
+                            placeholder="Email address"
+                            className="w-full border border-border rounded-xl px-3 py-2 bg-card text-foreground text-xs font-medium"
+                          />
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <label className="text-[10px] text-muted-foreground uppercase tracking-wider font-bold mb-1 block">
+                            Employee ID
+                          </label>
+                          <div className="font-bold text-foreground font-mono text-xs py-2 px-3 bg-muted rounded-xl border border-border truncate">
+                            {userForm.employee_code || (userForm.employee_id ? `EMP-${String(userForm.employee_id).padStart(3, '0')}` : 'EMP-001')}
+                          </div>
+                        </div>
+                        <div>
+                          <label className="text-[10px] text-muted-foreground uppercase tracking-wider font-bold mb-1 block">
+                            Branch
+                          </label>
+                          <select
+                            value={userForm.branch_id || ''}
+                            onChange={e => setUserForm(f => ({ ...f, branch_id: e.target.value }))}
+                            className="w-full border border-border rounded-xl px-3 py-2 bg-card text-foreground text-xs font-medium"
+                          >
+                            <option value="">Select Branch</option>
+                            {registrationOptions.branches.map(b => (
+                              <option key={b.id} value={b.id}>{b.name}</option>
+                            ))}
+                          </select>
+                        </div>
+                        <div>
+                          <label className="text-[10px] text-muted-foreground uppercase tracking-wider font-bold mb-1 block">
+                            Department
+                          </label>
+                          <input
+                            type="text"
+                            value={userForm.department || ''}
+                            onChange={e => setUserForm(f => ({ ...f, department: e.target.value }))}
+                            placeholder="—"
+                            className="w-full border border-border rounded-xl px-3 py-2 bg-card text-foreground text-xs font-medium"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[10px] text-muted-foreground uppercase tracking-wider font-bold mb-1 block">
+                            Working Hours
+                          </label>
+                          <input
+                            type="text"
+                            value={userForm.working_hours || '8 AM to 5 PM'}
+                            onChange={e => setUserForm(f => ({ ...f, working_hours: e.target.value }))}
+                            placeholder="8 AM to 5 PM"
+                            className="w-full border border-border rounded-xl px-3 py-2 bg-card text-foreground text-xs font-medium"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[10px] text-muted-foreground uppercase tracking-wider font-bold mb-1 block">
+                            Position
+                          </label>
+                          <input
+                            type="text"
+                            value={userForm.position || ''}
+                            onChange={e => setUserForm(f => ({ ...f, position: e.target.value }))}
+                            placeholder="Position"
+                            className="w-full border border-border rounded-xl px-3 py-2 bg-card text-foreground text-xs font-medium"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[10px] text-muted-foreground uppercase tracking-wider font-bold mb-1 block">
+                            Salary
+                          </label>
+                          <div className="relative">
+                            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground font-semibold text-xs">₱</span>
+                            <input
+                              type="number"
+                              min="0"
+                              step="0.01"
+                              value={userForm.basic_salary || ''}
+                              onChange={e => setUserForm(f => ({ ...f, basic_salary: e.target.value }))}
+                              placeholder="0.00"
+                              className="w-full pl-7 pr-3 py-2 border border-border rounded-xl bg-card text-foreground text-xs font-medium"
+                            />
+                          </div>
+                        </div>
+                        <div className="col-span-2">
+                          <label className="text-[10px] text-muted-foreground uppercase tracking-wider font-bold mb-1 block">
+                            Pay Type
+                          </label>
+                          <select
+                            value={userForm.pay_type || 'Cash'}
+                            onChange={e => setUserForm(f => ({ ...f, pay_type: e.target.value }))}
+                            className="w-full border border-border rounded-xl px-3 py-2 bg-card text-foreground text-xs font-medium"
+                          >
+                            <option value="Cash">Cash</option>
+                            <option value="Bank">Bank</option>
+                            <option value="Cheque">Cheque</option>
+                            <option value="E-Wallet">E-Wallet</option>
+                          </select>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Footer Buttons */}
+                <div className="flex justify-end gap-2 pt-4 mt-2 border-t border-border">
+                  <button
+                    type="button"
+                    onClick={() => { setUserModal(false); setEditUser(null); setUserFormStep(1) }}
+                    className="px-4 py-2 rounded-xl border border-border hover:bg-muted font-semibold cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="flex items-center gap-1.5 px-4 py-2 bg-primary hover:bg-primary/90 text-primary-foreground font-bold rounded-xl cursor-pointer"
+                  >
+                    <FiCheckCircle className="w-3.5 h-3.5" />
+                    <span>Update User</span>
+                  </button>
+                </div>
+              </div>
+            ) : userFormStep === 1 ? (
               <>
                 <div>
                   <label className="block font-bold text-muted-foreground mb-3 text-center text-sm">Select Account Role *</label>
@@ -1272,6 +1733,7 @@ export default function SystemPage({ defaultTab = 'users' }) {
                       { value: 'Administrator', label: 'Administrator', icon: FiShield, description: 'Full system access and user management' },
                       { value: 'Store Admin', label: 'Store Admin', icon: FiHome, description: 'Store settings, reports and staff' },
                       { value: 'Employee', label: 'Employee', icon: FiBriefcase, description: 'Point of sale and inventory' },
+                      { value: 'Customer', label: 'Customer', icon: FiUser, description: 'Customer access and self-service portal' },
                     ].map(({ value, label, icon: Icon, description }) => (
                       <button
                         key={value}
@@ -1318,7 +1780,7 @@ export default function SystemPage({ defaultTab = 'users' }) {
                   </button>
                 </div>
               </>
-            ) : !editUser ? (
+            ) : (
               <div className="space-y-4 max-h-[70vh] overflow-y-auto px-1 scrollbar-hide">
                 <div className="grid grid-cols-2 gap-3">
                   <div>
@@ -1349,23 +1811,23 @@ export default function SystemPage({ defaultTab = 'users' }) {
                 <div className="grid grid-cols-3 gap-3">
                   <div>
                     <label className="block font-bold text-muted-foreground mb-1">Gender *</label>
-                    <select value={userForm.gender} onChange={e => setUserForm(f => ({ ...f, gender: e.target.value }))} className="w-full border border-border rounded-xl px-3 py-2 bg-card text-foreground">
-                      <option value="Male">Male</option>
-                      <option value="Female">Female</option>
-                      <option value="Other">Other</option>
+                    <select value={userForm.gender} onChange={e => setUserForm(f => ({ ...f, gender: e.target.value }))} className="w-full border border-border rounded-xl px-3 py-2 bg-card text-foreground cursor-pointer [color-scheme:dark] [&>option]:bg-[#0f172a] [&>option]:text-white">
+                      <option value="Male" className="bg-[#0f172a] text-white">Male</option>
+                      <option value="Female" className="bg-[#0f172a] text-white">Female</option>
+                      <option value="Other" className="bg-[#0f172a] text-white">Other</option>
                     </select>
                   </div>
                   <div>
                     <label className="block font-bold text-muted-foreground mb-1">Birthday *</label>
-                    <input type="date" value={userForm.date_of_birth} onChange={e => setUserForm(f => ({ ...f, date_of_birth: e.target.value }))} required className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground" />
+                    <input type="date" max={new Date().toISOString().split('T')[0]} value={userForm.date_of_birth} onClick={(e) => { try { e.target.showPicker() } catch (_) {} }} onChange={e => setUserForm(f => ({ ...f, date_of_birth: e.target.value }))} required className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground cursor-pointer [color-scheme:dark]" />
                   </div>
                   <div>
                     <label className="block font-bold text-muted-foreground mb-1">Status *</label>
-                    <select value={userForm.marital_status} onChange={e => setUserForm(f => ({ ...f, marital_status: e.target.value }))} className="w-full border border-border rounded-xl px-3 py-2 bg-card text-foreground">
-                      <option value="Single">Single</option>
-                      <option value="Married">Married</option>
-                      <option value="Widowed">Widowed</option>
-                      <option value="Divorced">Divorced</option>
+                    <select value={userForm.marital_status} onChange={e => setUserForm(f => ({ ...f, marital_status: e.target.value }))} className="w-full border border-border rounded-xl px-3 py-2 bg-card text-foreground cursor-pointer [color-scheme:dark] [&>option]:bg-[#0f172a] [&>option]:text-white">
+                      <option value="Single" className="bg-[#0f172a] text-white">Single</option>
+                      <option value="Married" className="bg-[#0f172a] text-white">Married</option>
+                      <option value="Widowed" className="bg-[#0f172a] text-white">Widowed</option>
+                      <option value="Divorced" className="bg-[#0f172a] text-white">Divorced</option>
                     </select>
                   </div>
                 </div>
@@ -1416,45 +1878,6 @@ export default function SystemPage({ defaultTab = 'users' }) {
                   </div>
                 </div>
               </div>
-            ) : (
-              <>
-                <div>
-                  <label className="block font-bold text-muted-foreground mb-1">Username *</label>
-                  <input type="text" value={userForm.username} onChange={e => setUserForm(f => ({ ...f, username: e.target.value }))} placeholder="e.g. j.delacruz" required className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground" />
-                </div>
-                <div>
-                  <label className="block font-bold text-muted-foreground mb-1">New Password (Leave blank to keep existing)</label>
-                  <input type="password" value={userForm.password} onChange={e => setUserForm(f => ({ ...f, password: e.target.value }))} placeholder="••••••••" className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground font-mono" />
-                </div>
-                <div>
-                  <label className="block font-bold text-muted-foreground mb-1">Linked Employee Profile</label>
-                  <select value={userForm.employee_id} onChange={e => setUserForm(f => ({ ...f, employee_id: e.target.value }))} className="w-full border border-border rounded-xl px-3 py-2 text-xs bg-card text-foreground cursor-pointer font-medium">
-                    <option value="">-- Unlinked / Standalone Account --</option>
-                    {employeesList.map(e => <option key={e.employee_id} value={e.employee_id}>{e.employee_code} - {e.first_name} {e.last_name} ({e.position})</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label className="block font-bold text-muted-foreground mb-1">Account Status</label>
-                  <select value={userForm.is_active ? 'Active' : 'Inactive'} onChange={e => setUserForm(f => ({ ...f, is_active: e.target.value === 'Active' }))} className="w-full border border-border rounded-xl px-3 py-2 text-xs font-semibold bg-card text-foreground cursor-pointer">
-                    <option value="Active">Active</option>
-                    <option value="Inactive">Inactive</option>
-                  </select>
-                </div>
-                <div className="flex justify-between gap-2 pt-4 mt-2 border-t border-border">
-                  <button type="button" onClick={() => setUserFormStep(1)} className="px-4 py-2 rounded-xl border border-border hover:bg-muted font-semibold cursor-pointer text-muted-foreground">
-                    ← Back
-                  </button>
-                  <div className="flex gap-2">
-                    <button type="button" onClick={() => { setUserModal(false); setEditUser(null); setUserFormStep(1) }} className="px-4 py-2 rounded-xl border border-border hover:bg-muted font-semibold cursor-pointer">
-                      Cancel
-                    </button>
-                    <button type="submit" className="flex items-center gap-1.5 px-4 py-2 bg-primary hover:bg-primary/90 text-primary-foreground font-bold rounded-xl cursor-pointer">
-                      <FiCheckCircle className="w-3.5 h-3.5" />
-                      <span>Update User</span>
-                    </button>
-                  </div>
-                </div>
-              </>
             )}
           </form>
         </Modal>

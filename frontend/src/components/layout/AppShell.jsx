@@ -47,13 +47,6 @@ function navByRole(role, onOpenConfig) {
       { label: 'My Attendance QR', path: '/employee/attendance', icon: icons.attendance },
       { label: 'My Payroll', path: '/employee/payroll', icon: icons.payroll },
       { label: 'My Payslips', path: '/employee/payslips', icon: icons.payslip },
-      {
-        label: 'My Details',
-        icon: icons.employees,
-        items: [
-          { label: 'Employees & QR', path: '/employees', icon: icons.employees }
-        ],
-      }
     ]
   }
 

@@ -99,6 +99,9 @@ export default function ProfileModal({ open, isOpen, onClose }) {
             first_name: custData.first_name || '',
             middle_name: custData.middle_name || '',
             last_name: custData.last_name || '',
+            gender: custData.gender || 'Male',
+            date_of_birth: custData.date_of_birth || '',
+            marital_status: custData.marital_status || 'Single',
             status: custData.status || 'Active',
             notes: custData.notes || '',
             branch_id: custData.branch_id || custData.branch || '',
@@ -117,6 +120,10 @@ export default function ProfileModal({ open, isOpen, onClose }) {
             phone: res.employee.phone || '',
             email: res.employee.email || '',
             address: res.employee.address || '',
+            gender: res.employee.gender || 'Male',
+            birth_date: res.employee.birth_date || res.employee.date_of_birth || '',
+            date_of_birth: res.employee.date_of_birth || res.employee.birth_date || '',
+            marital_status: res.employee.marital_status || 'Single',
             pay_type: res.employee.pay_type || 'Cash',
             ewallet_provider: res.employee.ewallet_provider || 'Gcash',
             ewallet_account_no: res.employee.ewallet_account_no || res.employee.phone || '',
@@ -349,6 +356,10 @@ export default function ProfileModal({ open, isOpen, onClose }) {
                           phone: employee.phone || '',
                           email: employee.email || '',
                           address: employee.address || '',
+                          gender: employee.gender || 'Male',
+                          birth_date: employee.birth_date || employee.date_of_birth || '',
+                          date_of_birth: employee.date_of_birth || employee.birth_date || '',
+                          marital_status: employee.marital_status || 'Single',
                           pay_type: employee.pay_type || 'Cash',
                           ewallet_provider: employee.ewallet_provider || 'Gcash',
                           ewallet_account_no: employee.ewallet_account_no || employee.phone || '',
@@ -454,16 +465,16 @@ export default function ProfileModal({ open, isOpen, onClose }) {
                       </h3>
                       {!isCustomer && !isAdmin && (
                         isVerified ? (
-                        <span className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-700 dark:text-emerald-300 bg-emerald-100 dark:bg-emerald-950/50 border border-emerald-300 dark:border-emerald-800 px-2.5 py-0.5 rounded-full shadow-2xs">
-                          <FiCheckCircle className="w-3 h-3" />
-                          <span>Verified</span>
-                        </span>
-                      ) : (
-                        <span className="inline-flex items-center gap-1 text-[11px] font-bold text-amber-700 dark:text-amber-300 bg-amber-100 dark:bg-amber-950/50 border border-amber-300 dark:border-amber-800 px-2.5 py-0.5 rounded-full shadow-2xs">
-                          <FiAlertTriangle className="w-3 h-3" />
-                          <span>Not Verified</span>
-                        </span>
-                      ))}
+                          <span className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-700 dark:text-emerald-300 bg-emerald-100 dark:bg-emerald-950/50 border border-emerald-300 dark:border-emerald-800 px-2.5 py-0.5 rounded-full shadow-2xs">
+                            <FiCheckCircle className="w-3 h-3" />
+                            <span>Verified</span>
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 text-[11px] font-bold text-amber-700 dark:text-amber-300 bg-amber-100 dark:bg-amber-950/50 border border-amber-300 dark:border-amber-800 px-2.5 py-0.5 rounded-full shadow-2xs">
+                            <FiAlertTriangle className="w-3 h-3" />
+                            <span>Not Verified</span>
+                          </span>
+                        ))}
                     </div>
                     <p className="text-xs text-muted-foreground font-medium mt-0.5">
                       {employee.position} · {employee.department} · {branchesList.find(b => b.id == employee.branch_id)?.name || employee.branch?.name || '—'}
@@ -480,8 +491,8 @@ export default function ProfileModal({ open, isOpen, onClose }) {
                 {/* Account Verification Banner - Employee Only (Exclude Admin) */}
                 {!isCustomer && !isAdmin && (
                   <div className={`p-4 rounded-2xl border ${isVerified
-                      ? 'bg-emerald-50/40 dark:bg-emerald-950/20 border-emerald-200 dark:border-emerald-900/60'
-                      : 'bg-amber-50/40 dark:bg-amber-950/20 border-amber-200 dark:border-amber-900/60'
+                    ? 'bg-emerald-50/40 dark:bg-emerald-950/20 border-emerald-200 dark:border-emerald-900/60'
+                    : 'bg-amber-50/40 dark:bg-amber-950/20 border-amber-200 dark:border-amber-900/60'
                     }`}>
                     <div className="flex items-start justify-between gap-3">
                       <div className="flex items-start gap-2.5">
@@ -537,11 +548,12 @@ export default function ProfileModal({ open, isOpen, onClose }) {
                             <select
                               value={editForm.gender || ''}
                               onChange={e => setEditForm(p => ({ ...p, gender: e.target.value }))}
-                              className="w-full px-3 py-2 rounded-xl border border-border bg-black/5 text-foreground text-sm font-medium focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition-all appearance-none"
+                              className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground text-sm font-medium focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition-all appearance-none cursor-pointer [color-scheme:dark] [&>option]:bg-[#0f172a] [&>option]:text-white"
                             >
-                              <option value="">Select...</option>
-                              <option value="Male">Male</option>
-                              <option value="Female">Female</option>
+                              <option value="" className="bg-[#0f172a] text-white">Select...</option>
+                              <option value="Male" className="bg-[#0f172a] text-white">Male</option>
+                              <option value="Female" className="bg-[#0f172a] text-white">Female</option>
+                              <option value="Other" className="bg-[#0f172a] text-white">Other</option>
                             </select>
                             <FiChevronDown className="w-3.5 h-3.5 text-muted-foreground absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
                           </div>
@@ -554,9 +566,11 @@ export default function ProfileModal({ open, isOpen, onClose }) {
                         {isEditing && !isCustomer ? (
                           <input
                             type="date"
+                            max={new Date().toISOString().split('T')[0]}
                             value={editForm.birth_date || editForm.date_of_birth ? new Date(editForm.birth_date || editForm.date_of_birth).toISOString().split('T')[0] : ''}
+                            onClick={(e) => { try { e.target.showPicker() } catch (_) {} }}
                             onChange={e => setEditForm(p => ({ ...p, birth_date: e.target.value, date_of_birth: e.target.value }))}
-                            className="w-full px-3 py-2 rounded-xl border border-border bg-black/5 text-foreground text-sm font-medium focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition-all"
+                            className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground text-sm font-medium focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition-all cursor-pointer [color-scheme:dark]"
                           />
                         ) : (
                           <div className="font-semibold text-foreground">{employee.birth_date || employee.date_of_birth ? fmtDate(employee.birth_date || employee.date_of_birth).split(',')[0] : '—'}</div>
@@ -571,13 +585,13 @@ export default function ProfileModal({ open, isOpen, onClose }) {
                                 <select
                                   value={editForm.marital_status || ''}
                                   onChange={e => setEditForm(p => ({ ...p, marital_status: e.target.value }))}
-                                  className="w-full px-3 py-2 rounded-xl border border-border bg-black/5 text-foreground text-sm font-medium focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition-all appearance-none"
+                                  className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground text-sm font-medium focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition-all appearance-none cursor-pointer [color-scheme:dark] [&>option]:bg-[#0f172a] [&>option]:text-white"
                                 >
-                                  <option value="">Select...</option>
-                                  <option value="Single">Single</option>
-                                  <option value="Married">Married</option>
-                                  <option value="Divorced">Divorced</option>
-                                  <option value="Widowed">Widowed</option>
+                                  <option value="" className="bg-[#0f172a] text-white">Select...</option>
+                                  <option value="Single" className="bg-[#0f172a] text-white">Single</option>
+                                  <option value="Married" className="bg-[#0f172a] text-white">Married</option>
+                                  <option value="Divorced" className="bg-[#0f172a] text-white">Divorced</option>
+                                  <option value="Widowed" className="bg-[#0f172a] text-white">Widowed</option>
                                 </select>
                                 <FiChevronDown className="w-3.5 h-3.5 text-muted-foreground absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
                               </div>
@@ -674,7 +688,7 @@ export default function ProfileModal({ open, isOpen, onClose }) {
                 <div className="p-4 bg-card rounded-2xl border border-border space-y-4">
                   <h4 className="font-bold uppercase tracking-wider text-muted-foreground text-[11px] flex items-center gap-1.5 border-b border-border pb-2">
                     <FiPhone className="w-3.5 h-3.5 text-primary" />
-                    <span>Contact & Payment Information</span>
+                    <span>Contact Information</span>
                   </h4>
 
                   {isEditing ? (
@@ -738,7 +752,7 @@ export default function ProfileModal({ open, isOpen, onClose }) {
                             className="w-full px-3 py-2.5 rounded-xl border border-border bg-black/5  text-foreground text-sm font-medium focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition-all"
                           />
                         </div>
-                        {isCustomer && (
+                        {!isAdmin && (
                           <div>
                             <label className="block text-[11px] font-bold text-muted-foreground mb-1.5">Branch</label>
                             <div className="relative">
@@ -746,7 +760,7 @@ export default function ProfileModal({ open, isOpen, onClose }) {
                                 name="branch_id"
                                 value={editForm.branch_id || ''}
                                 onChange={e => setEditForm(p => ({ ...p, branch_id: e.target.value }))}
-                                className="w-full px-3 py-2.5 rounded-xl border border-border bg-black/5  text-foreground text-sm font-medium focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition-all appearance-none"
+                                className="w-full px-3 py-2.5 rounded-xl border border-border bg-black/5 text-foreground text-sm font-medium focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition-all appearance-none"
                               >
                                 <option value="">Select a Branch...</option>
                                 {branchesList.map(branch => (
@@ -758,69 +772,6 @@ export default function ProfileModal({ open, isOpen, onClose }) {
                           </div>
                         )}
                       </div>
-
-                      {/* Row 3: Payment & Branch */}
-                      {!isCustomer && !isAdmin && (
-                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                          <div>
-                            <label className="block text-[11px] font-bold text-muted-foreground mb-1.5">Pay Type</label>
-                            <div className="relative">
-                              <select
-                                value={editForm.pay_type || ''}
-                                onChange={e => setEditForm(p => ({ ...p, pay_type: e.target.value }))}
-                                className="w-full px-3 py-2.5 rounded-xl border border-border bg-black/5 text-foreground text-sm font-medium focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition-all appearance-none"
-                              >
-                                <option value="Cash">Cash</option>
-                                <option value="GCash">GCash</option>
-                                <option value="Bank Transfer">Bank Transfer</option>
-                                <option value="PayMaya">PayMaya</option>
-                              </select>
-                              <FiChevronDown className="w-3.5 h-3.5 text-muted-foreground absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
-                            </div>
-                          </div>
-                          <div>
-                            <label className="block text-[11px] font-bold text-muted-foreground mb-1.5">Account/Reference</label>
-                            {editForm.pay_type === 'GCash' || editForm.pay_type === 'PayMaya' ? (
-                              <input
-                                type="text"
-                                value={editForm.ewallet_account_no || ''}
-                                onChange={e => setEditForm(p => ({ ...p, ewallet_account_no: e.target.value }))}
-                                placeholder={`${editForm.pay_type} Number`}
-                                className="w-full px-3 py-2.5 rounded-xl border border-border bg-black/5 text-foreground text-sm font-medium focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition-all"
-                              />
-                            ) : editForm.pay_type === 'Bank Transfer' ? (
-                              <input
-                                type="text"
-                                value={editForm.bank_account_no || ''}
-                                onChange={e => setEditForm(p => ({ ...p, bank_account_no: e.target.value }))}
-                                placeholder="Bank Account No."
-                                className="w-full px-3 py-2.5 rounded-xl border border-border bg-black/5 text-foreground text-sm font-medium focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition-all"
-                              />
-                            ) : (
-                              <div className="w-full px-3 py-2.5 rounded-xl border border-border bg-black/5 text-foreground text-sm font-medium cursor-not-allowed text-muted-foreground">
-                                N/A
-                              </div>
-                            )}
-                          </div>
-                          <div>
-                            <label className="block text-[11px] font-bold text-muted-foreground mb-1.5">Branch</label>
-                            <div className="relative">
-                              <select
-                                name="branch_id"
-                                value={editForm.branch_id || ''}
-                                onChange={e => setEditForm(p => ({ ...p, branch_id: e.target.value }))}
-                                className="w-full px-3 py-2.5 rounded-xl border border-border bg-black/5 text-foreground text-sm font-medium focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition-all appearance-none"
-                              >
-                                <option value="">Select a Branch...</option>
-                                {branchesList.map(branch => (
-                                  <option key={branch.id} value={branch.id}>{branch.name}</option>
-                                ))}
-                              </select>
-                              <FiChevronDown className="w-3.5 h-3.5 text-muted-foreground absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
-                            </div>
-                          </div>
-                        </div>
-                      )}
                     </div>
                   ) : (
                     <div className="space-y-4">
@@ -848,43 +799,16 @@ export default function ProfileModal({ open, isOpen, onClose }) {
                             {employee.address || '—'}
                           </div>
                         </div>
-                        {isCustomer && (
+                        {!isAdmin && (
                           <div>
                             <div className="text-[11px] font-bold text-muted-foreground mb-1.5">Branch</div>
-                            <div className="w-full px-3 py-2.5 rounded-xl border border-border bg-black/5  text-foreground text-sm font-medium">
-                              {employee.branch?.name || '—'}
-                            </div>
-                          </div>
-                        )}
-                      </div>
-
-                      {/* Row 3: Payment & Branch */}
-                      {!isCustomer && !isAdmin && (
-                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                          <div>
-                            <div className="text-[11px] font-bold text-muted-foreground mb-1.5">Pay Type</div>
-                            <div className="w-full px-3 py-2.5 rounded-xl border border-border bg-black/5  text-foreground text-sm font-medium flex justify-between items-center">
-                              <span>{employee.pay_type || '—'}</span>
-                              <FiChevronDown className="w-3.5 h-3.5 text-muted-foreground" />
-                            </div>
-                          </div>
-                          <div>
-                            <div className="text-[11px] font-bold text-muted-foreground mb-1.5">Account/Reference</div>
-                            <div className="w-full px-3 py-2.5 rounded-xl border border-border bg-black/5  text-foreground text-sm font-medium">
-                              {employee.pay_type === 'GCash' ? (employee.ewallet_account_no || '—')
-                                : employee.pay_type === 'Bank Transfer' ? (employee.bank_account_no || '—')
-                                  : employee.pay_type === 'Cash' ? 'N/A' : '—'}
-                            </div>
-                          </div>
-                          <div>
-                            <div className="text-[11px] font-bold text-muted-foreground mb-1.5">Branch</div>
-                            <div className="w-full px-3 py-2.5 rounded-xl border border-border bg-black/5  text-foreground text-sm font-medium flex justify-between items-center overflow-hidden">
+                            <div className="w-full px-3 py-2.5 rounded-xl border border-border bg-black/5 text-foreground text-sm font-medium flex justify-between items-center overflow-hidden">
                               <span className="truncate pr-2">{branchesList.find(b => b.id == employee.branch_id)?.name || employee.branch?.name || '—'}</span>
                               <FiChevronDown className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
                             </div>
                           </div>
-                        </div>
-                      )}
+                        )}
+                      </div>
                     </div>
                   )}
                 </div>
@@ -1037,7 +961,7 @@ export default function ProfileModal({ open, isOpen, onClose }) {
               <div className="space-y-4">
                 <div className="p-4 bg-card rounded-2xl border border-border">
                   <h4 className="font-bold text-sm text-foreground mb-4">My Attendance Log</h4>
-                  
+
                   {loadingAttendance ? (
                     <div className="py-8 text-center text-muted-foreground text-xs animate-pulse">Loading attendance records...</div>
                   ) : myAttendance.length === 0 ? (
@@ -1083,7 +1007,7 @@ export default function ProfileModal({ open, isOpen, onClose }) {
               <h4 className="font-bold text-sm text-foreground mb-4 flex items-center gap-2">
                 <FiKey className="w-4 h-4 text-primary" /> Change Attendance PIN
               </h4>
-              
+
               {pinSuccess && (
                 <div className="mb-4 p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-500 text-xs font-semibold flex items-center gap-2">
                   <FiCheckCircle /> {pinSuccess}

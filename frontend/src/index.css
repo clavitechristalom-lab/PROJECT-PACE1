@@ -1138,3 +1138,24 @@ body.swal2-toast-shown .swal2-container.swal2-center {
   color: #ffffff !important;
 }
 
+/* Fix select option styling across browsers (prevents white-on-white text in Chrome/Edge) */
+select option {
+  background-color: #0f172a;
+  color: #f8fafc;
+}
+
+html:not(.dark) select:not(.dark-select) option {
+  background-color: #ffffff;
+  color: #0f172a;
+}
+
+html.dark select option,
+.dark select option,
+select.dark-select option {
+  background-color: #0f172a;
+  color: #f8fafc;
+}
+
+input[type="date"] {
+  color-scheme: dark light;
+}

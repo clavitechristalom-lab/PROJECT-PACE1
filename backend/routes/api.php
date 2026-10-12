@@ -146,7 +146,7 @@ Route::middleware('auth:sanctum')->group(function () {
     });
 
     // ─── Employee Management (Role-based access is handled in the controller) ────────
-    Route::middleware('role:Administrator,Store Administrator,Store Admin,Employee')->group(function () {
+    Route::middleware('role:Administrator,Store Administrator,Store Admin')->group(function () {
         Route::get('/employees', [EmployeeController::class, 'index']);
         Route::get('/employees/{id}', [EmployeeController::class, 'show']);
         Route::post('/employees', [EmployeeController::class, 'store']);

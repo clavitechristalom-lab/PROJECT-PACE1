@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useMemo } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { useSearchParams, Navigate } from 'react-router-dom'
 import {
   FiUser, FiUsers, FiPlus, FiEdit, FiTrash2, FiEye,
   FiPhone, FiMail, FiMapPin, FiKey, FiCamera, FiPrinter, FiCreditCard, FiCalendar, FiClock, FiShield,
@@ -25,6 +25,10 @@ export default function EmployeesPage({ branchFilter, embedded }) {
   const isAdmin = user?.role === 'Administrator'
   const isStoreAdmin = user?.role === 'Store Administrator' || user?.role === 'Store Admin'
   const isEmployee = user?.role === 'Employee'
+
+  if (isEmployee && !embedded) {
+    return <Navigate to="/employee/dashboard" replace />
+  }
   const [searchParams] = useSearchParams()
   const [employees, setEmployees] = useState([])
   const [branchesList, setBranchesList] = useState([])
@@ -925,19 +929,22 @@ export default function EmployeesPage({ branchFilter, embedded }) {
                     <select
                       value={form.gender}
                       onChange={e => setForm(f => ({ ...f, gender: e.target.value }))}
-                      className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground font-semibold"
+                      className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground font-semibold cursor-pointer [color-scheme:dark] [&>option]:bg-[#0f172a] [&>option]:text-white"
                     >
-                      <option value="Male">Male</option>
-                      <option value="Female">Female</option>
+                      <option value="Male" className="bg-[#0f172a] text-white">Male</option>
+                      <option value="Female" className="bg-[#0f172a] text-white">Female</option>
+                      <option value="Other" className="bg-[#0f172a] text-white">Other</option>
                     </select>
                   </div>
                   <div>
                     <label className="block font-bold text-muted-foreground mb-1">Date of Birth</label>
                     <input
                       type="date"
+                      max={new Date().toISOString().split('T')[0]}
                       value={form.date_of_birth}
+                      onClick={(e) => { try { e.target.showPicker() } catch (_) {} }}
                       onChange={e => setForm(f => ({ ...f, date_of_birth: e.target.value, birth_date: e.target.value }))}
-                      className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground font-mono"
+                      className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground font-mono cursor-pointer [color-scheme:dark]"
                     />
                   </div>
                   <div>
@@ -945,12 +952,13 @@ export default function EmployeesPage({ branchFilter, embedded }) {
                     <select
                       value={form.marital_status}
                       onChange={e => setForm(f => ({ ...f, marital_status: e.target.value }))}
-                      className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground font-semibold"
+                      className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground font-semibold cursor-pointer [color-scheme:dark] [&>option]:bg-[#0f172a] [&>option]:text-white"
                     >
-                      <option value="Single">Single</option>
-                      <option value="Married">Married</option>
-                      <option value="Widowed">Widowed</option>
-                      <option value="Separated">Separated</option>
+                      <option value="Single" className="bg-[#0f172a] text-white">Single</option>
+                      <option value="Married" className="bg-[#0f172a] text-white">Married</option>
+                      <option value="Widowed" className="bg-[#0f172a] text-white">Widowed</option>
+                      <option value="Separated" className="bg-[#0f172a] text-white">Separated</option>
+                      <option value="Divorced" className="bg-[#0f172a] text-white">Divorced</option>
                     </select>
                   </div>
                 </div>

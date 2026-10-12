@@ -84,6 +84,8 @@ class SystemController extends Controller
                     'branch' => $branchObj,
                     'branch_name' => $branchName,
                     'pay_type' => $emp->pay_type,
+                    'working_hours' => $emp->working_hours,
+                    'basic_salary' => $emp->basic_salary,
                     'phone' => $emp->phone,
                     'email' => $emp->email,
                     'address' => $emp->address,
@@ -179,6 +181,8 @@ class SystemController extends Controller
                     'branch' => $branchObj,
                     'branch_name' => $branchName,
                     'pay_type' => $emp->pay_type,
+                    'working_hours' => $emp->working_hours,
+                    'basic_salary' => $emp->basic_salary,
                     'phone' => $emp->phone,
                     'email' => $emp->email,
                     'address' => $emp->address,
@@ -418,9 +422,10 @@ class SystemController extends Controller
         $validated = $request->validate([
             'username' => "required|string|unique:users,username,{$id},user_id|max:100",
             'password' => 'nullable|string|min:4',
-            'role' => 'required|string|in:Administrator,Store Administrator,Employee',
+            'role' => 'required|string|in:Administrator,Store Administrator,Store Admin,Employee,Customer',
             'is_active' => 'nullable|boolean',
             'employee_id' => 'nullable|exists:employees,employee_id',
+            'customer_id' => 'nullable|exists:customers,customer_id',
         ]);
 
         if (in_array($validated['role'], ['Store Administrator', 'Store Admin']) && !empty($validated['employee_id']) && ($validated['is_active'] ?? $user->is_active)) {
@@ -445,7 +450,8 @@ class SystemController extends Controller
             'username' => $validated['username'],
             'role' => $validated['role'],
             'is_active' => $validated['is_active'] ?? $user->is_active,
-            'employee_id' => $validated['employee_id'] ?? $user->employee_id,
+            'employee_id' => $validated['role'] === 'Customer' ? null : ($validated['employee_id'] ?? $user->employee_id),
+            'customer_id' => $validated['role'] === 'Customer' ? ($validated['customer_id'] ?? $user->customer_id) : null,
         ];
 
         if (!empty($validated['password'])) {
@@ -453,6 +459,58 @@ class SystemController extends Controller
         }
 
         $user->update($data);
+
+        // Update linked Employee profile details if present
+        if ($user->employee_id) {
+            $employee = \App\Models\Employee::find($user->employee_id);
+            if ($employee) {
+                $empData = [];
+                if ($request->has('gender')) $empData['gender'] = $request->input('gender');
+                if ($request->filled('date_of_birth')) {
+                    $dob = $request->input('date_of_birth');
+                    $empData['date_of_birth'] = $dob;
+                    $empData['birth_date'] = $dob;
+                } elseif ($request->filled('birth_date')) {
+                    $dob = $request->input('birth_date');
+                    $empData['date_of_birth'] = $dob;
+                    $empData['birth_date'] = $dob;
+                }
+                if ($request->has('marital_status')) $empData['marital_status'] = $request->input('marital_status');
+                if ($request->has('position')) $empData['position'] = $request->input('position');
+                if ($request->has('department')) $empData['department'] = $request->input('department');
+                if ($request->filled('branch_id')) $empData['branch_id'] = $request->input('branch_id');
+                if ($request->has('working_hours')) $empData['working_hours'] = $request->input('working_hours');
+                if ($request->has('basic_salary')) $empData['basic_salary'] = $request->input('basic_salary');
+                if ($request->has('pay_type')) $empData['pay_type'] = $request->input('pay_type');
+                if ($request->has('phone')) $empData['phone'] = $request->input('phone');
+                if ($request->has('email')) $empData['email'] = $request->input('email');
+                if ($request->has('address')) $empData['address'] = $request->input('address');
+                if ($request->has('first_name')) $empData['first_name'] = $request->input('first_name');
+                if ($request->has('last_name')) $empData['last_name'] = $request->input('last_name');
+                if (!empty($empData)) {
+                    $employee->update($empData);
+                }
+            }
+        } elseif ($user->customer_id) {
+            $customer = \App\Models\Customer::find($user->customer_id);
+            if ($customer) {
+                $custData = [];
+                if ($request->has('gender')) $custData['gender'] = $request->input('gender');
+                if ($request->filled('date_of_birth')) {
+                    $dob = $request->input('date_of_birth');
+                    $custData['date_of_birth'] = $dob;
+                    $custData['birth_date'] = $dob;
+                }
+                if ($request->has('marital_status')) $custData['marital_status'] = $request->input('marital_status');
+                if ($request->has('phone')) $custData['phone'] = $request->input('phone');
+                if ($request->has('email')) $custData['email'] = $request->input('email');
+                if ($request->has('address')) $custData['address'] = $request->input('address');
+                if ($request->filled('branch_id')) $custData['branch_id'] = $request->input('branch_id');
+                if (!empty($custData)) {
+                    $customer->update($custData);
+                }
+            }
+        }
 
         SystemLog::create([
             'user_id' => $request->input('auth_user_id', 1),
@@ -463,16 +521,80 @@ class SystemController extends Controller
             'user_agent' => $request->userAgent(),
         ]);
 
+        $u = User::with(['employee.branch', 'customer.branch', 'verifiedBy'])->find($id);
+        $emp = $u->employee;
+        $cust = $u->customer;
+        $branchObj = null;
+        $branchName = null;
+        $branchId = null;
+        if ($emp && $emp->branch) {
+            $branchId = $emp->branch->id;
+            $branchName = $emp->branch->name;
+            $branchObj = ['id' => $emp->branch->id, 'name' => $emp->branch->name];
+        } elseif ($emp && $emp->branch_id) {
+            $branchId = $emp->branch_id;
+            $bp = \App\Models\BranchProfile::find($emp->branch_id);
+            $branchName = $bp ? $bp->name : null;
+            if ($branchName) $branchObj = ['id' => $branchId, 'name' => $branchName];
+        } elseif ($cust && $cust->branch) {
+            $branchId = $cust->branch->id;
+            $branchName = $cust->branch->name;
+            $branchObj = ['id' => $cust->branch->id, 'name' => $cust->branch->name];
+        }
+
         return response()->json([
             'message' => 'User updated successfully',
             'user' => [
-                'user_id' => $user->user_id,
-                'username' => $user->username,
-                'role' => $user->role,
-                'is_active' => (bool)$user->is_active,
-                'employee_id' => $user->employee_id,
-                'last_login' => $user->last_login ? date('Y-m-d H:i', strtotime($user->last_login)) : '—',
-                'created_date' => date('Y-m-d', strtotime($user->created_at)),
+                'user_id' => $u->user_id,
+                'username' => $u->username,
+                'role' => $u->role,
+                'is_active' => (bool)$u->is_active,
+                'employee_id' => $u->employee_id,
+                'customer_id' => $u->customer_id,
+                'account_verified' => (bool)$u->account_verified,
+                'account_verified_at' => $u->account_verified_at ? date('Y-m-d H:i:s', strtotime($u->account_verified_at)) : null,
+                'account_verified_by' => $u->account_verified_by,
+                'verified_by_name' => $u->verifiedBy ? ($u->verifiedBy->employee ? trim("{$u->verifiedBy->employee->first_name} {$u->verifiedBy->employee->last_name}") : $u->verifiedBy->username) : ($u->account_verified ? 'Administrator' : null),
+                'last_login' => $u->last_login ? date('Y-m-d H:i', strtotime($u->last_login)) : '—',
+                'created_date' => date('Y-m-d', strtotime($u->created_at)),
+                'branch_id' => $branchId,
+                'branch_name' => $branchName,
+                'branch' => $branchObj,
+                'employee' => $emp ? [
+                    'employee_id' => $emp->employee_id,
+                    'employee_code' => $emp->employee_code,
+                    'first_name' => $emp->first_name,
+                    'middle_name' => $emp->middle_name,
+                    'last_name' => $emp->last_name,
+                    'gender' => $emp->gender,
+                    'date_of_birth' => $emp->date_of_birth ?: $emp->birth_date,
+                    'marital_status' => $emp->marital_status,
+                    'position' => $emp->position,
+                    'department' => $emp->department,
+                    'branch_id' => $emp->branch_id,
+                    'branch' => $branchObj,
+                    'branch_name' => $branchName,
+                    'pay_type' => $emp->pay_type,
+                    'working_hours' => $emp->working_hours,
+                    'basic_salary' => $emp->basic_salary,
+                    'phone' => $emp->phone,
+                    'email' => $emp->email,
+                    'address' => $emp->address,
+                    'status' => $emp->status,
+                ] : null,
+                'customer' => $cust ? [
+                    'customer_id' => $cust->customer_id,
+                    'customer_code' => $cust->customer_code,
+                    'first_name' => $cust->first_name,
+                    'last_name' => $cust->last_name,
+                    'phone' => $cust->phone,
+                    'email' => $cust->email,
+                    'address' => $cust->address,
+                    'status' => $cust->status,
+                    'branch_id' => $cust->branch_id,
+                    'branch' => $branchObj,
+                    'branch_name' => $branchName,
+                ] : null,
             ]
         ]);
     }

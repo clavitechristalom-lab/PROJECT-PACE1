@@ -151,7 +151,7 @@ class EmployeeController extends Controller
             'first_name' => 'required|string|max:255',
             'middle_name' => 'nullable|string|max:255',
             'last_name' => 'required|string|max:255',
-            'gender' => 'nullable|string|in:Male,Female',
+            'gender' => 'nullable|string|in:Male,Female,Other',
             'birth_date' => 'nullable|date',
             'date_of_birth' => 'nullable|date',
             'marital_status' => 'nullable|string',
@@ -243,7 +243,7 @@ class EmployeeController extends Controller
             'first_name' => 'required|string|max:255',
             'middle_name' => 'nullable|string|max:255',
             'last_name' => 'required|string|max:255',
-            'gender' => 'nullable|string|in:Male,Female',
+            'gender' => 'nullable|string|in:Male,Female,Other',
             'birth_date' => 'nullable|date',
             'date_of_birth' => 'nullable|date',
             'marital_status' => 'nullable|string',
@@ -869,6 +869,10 @@ class EmployeeController extends Controller
             'phone' => 'nullable|string|max:50',
             'email' => 'nullable|email|max:255',
             'address' => 'nullable|string|max:500',
+            'gender' => 'nullable|string|in:Male,Female,Other',
+            'birth_date' => 'nullable|date',
+            'date_of_birth' => 'nullable|date',
+            'marital_status' => 'nullable|string',
             'pay_type' => 'nullable|string|max:50',
             'ewallet_provider' => 'nullable|string|max:50',
             'ewallet_account_no' => 'nullable|string|max:50',
@@ -881,6 +885,12 @@ class EmployeeController extends Controller
             'notes' => 'nullable|string',
             'basic_salary' => 'nullable|numeric|min:0',
         ]);
+
+        if (!empty($validated['birth_date']) && empty($validated['date_of_birth'])) {
+            $validated['date_of_birth'] = $validated['birth_date'];
+        } elseif (!empty($validated['date_of_birth']) && empty($validated['birth_date'])) {
+            $validated['birth_date'] = $validated['date_of_birth'];
+        }
 
         if (in_array($user->role, ['Administrator', 'Admin', 'System Administrator'])) {
             unset($validated['basic_salary'], $validated['branch_id'], $validated['pay_type']);
