@@ -192,13 +192,13 @@ function AdminBusinessDashboard() {
   }
 
   const quickActions = [
-    ...(isAdmin ? [{ label: 'QR Requests', icon: <FiShield className="w-4 h-4" />, action: () => setShowQrWidgetModal(true), color: 'bg-amber-600', badge: qrRequestSummary?.pending || 0 }] : []),
-    { label: 'View Sales', icon: <FiShoppingCart className="w-4 h-4" />, path: '/sales', color: 'bg-emerald-600' },
-    { label: 'Record Payment', icon: <TbCurrencyPeso className="w-4 h-4" />, path: '/payments', color: 'bg-blue-600' },
-    { label: 'Installment', icon: <FiCreditCard className="w-4 h-4" />, path: '/installments', color: 'bg-indigo-600' },
-    { label: 'Overdue Monitoring', icon: <FiAlertTriangle className="w-4 h-4" />, path: '/installments?tab=overdue', color: 'bg-rose-600' },
-    { label: 'Products / Stock', icon: <FiPackage className="w-4 h-4" />, path: '/products', color: 'bg-amber-600' },
-    { label: 'Business Reports', icon: <FiBarChart2 className="w-4 h-4" />, path: '/reports', color: 'bg-purple-600' },
+    ...(isAdmin ? [{ label: 'QR Requests', icon: <FiShield className="w-5 h-5 !text-white text-white" />, action: () => setShowQrWidgetModal(true), color: 'bg-amber-600', badge: qrRequestSummary?.pending || 0 }] : []),
+    { label: 'View Sales', icon: <FiShoppingCart className="w-5 h-5 !text-white text-white" />, path: '/sales', color: 'bg-emerald-600' },
+    { label: 'Record Payment', icon: <TbCurrencyPeso className="w-5 h-5 !text-white text-white" />, path: '/payments', color: 'bg-blue-600' },
+    { label: 'Installment', icon: <FiCreditCard className="w-5 h-5 !text-white text-white" />, path: '/installments', color: 'bg-indigo-600' },
+    { label: 'Overdue Monitoring', icon: <FiAlertTriangle className="w-5 h-5 !text-white text-white" />, path: '/installments?tab=overdue', color: 'bg-rose-600' },
+    { label: 'Products / Stock', icon: <FiPackage className="w-5 h-5 !text-white text-white" />, path: '/products', color: 'bg-amber-600' },
+    { label: 'Business Reports', icon: <FiBarChart2 className="w-5 h-5 !text-white text-white" />, path: '/reports', color: 'bg-purple-600' },
   ]
 
   // The Branch Details Modal is rendered inline at the bottom.
@@ -212,9 +212,9 @@ function AdminBusinessDashboard() {
         action={
           <button
             onClick={() => setShowCreateBranchModal(true)}
-            className="flex items-center gap-2 px-4 py-2 bg-primary hover:bg-primary/90 text-primary-foreground font-semibold text-xs rounded-xl shadow-xs transition-all cursor-pointer"
+            className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-emerald-600 via-emerald-600 to-teal-700 hover:from-emerald-500 hover:to-teal-600 text-white font-semibold text-xs rounded-xl shadow-sm shadow-emerald-950/40 border border-emerald-400/30 transition-all cursor-pointer"
           >
-            <FiPlus className="w-4 h-4" />
+            <FiPlus className="w-4 h-4 text-amber-200" />
             <span>Create Branch</span>
           </button>
         }
@@ -352,7 +352,7 @@ function AdminBusinessDashboard() {
 
       {/* ─── SECTION 2: TIMEFRAME PERFORMANCE FILTER ─── */}
       <Card noPad className="border border-border overflow-hidden">
-        <div className="p-4 border-b border-border bg-muted/40 flex flex-col md:flex-row md:items-center justify-between gap-3">
+        <div className="p-4 border-b border-border bg-emerald-950/10 dark:bg-emerald-950/30 flex flex-col md:flex-row md:items-center justify-between gap-3">
           <div>
             <h3 className="text-sm font-bold text-foreground">Business Performance Breakdown</h3>
             <p className="text-xs text-muted-foreground">Filter sales, collections, and overdue recovery by timeframe</p>
@@ -370,8 +370,8 @@ function AdminBusinessDashboard() {
                 key={t.id}
                 onClick={() => handleTimeframeChange(t.id)}
                 className={`px-3 py-1.5 rounded-xl text-xs font-semibold cursor-pointer transition-all ${timeframe === t.id
-                  ? 'bg-primary text-primary-foreground shadow-xs'
-                  : 'bg-card border border-border text-muted-foreground hover:text-foreground'
+                  ? 'bg-gradient-to-r from-emerald-600 to-emerald-700 text-white shadow-xs border border-emerald-400/30'
+                  : 'bg-card/70 border border-emerald-500/20 text-muted-foreground hover:text-foreground hover:bg-emerald-500/10'
                   }`}
               >
                 {t.label}
@@ -402,7 +402,7 @@ function AdminBusinessDashboard() {
             </div>
             <button
               type="submit"
-              className="px-3 py-1 bg-primary text-primary-foreground font-bold rounded-xl cursor-pointer"
+              className="px-3 py-1 bg-gradient-to-r from-emerald-600 to-emerald-700 text-white font-bold rounded-xl border border-emerald-400/30 shadow-xs cursor-pointer"
             >
               Apply Custom Filter
             </button>
@@ -414,10 +414,10 @@ function AdminBusinessDashboard() {
         ) : (
           <div className="p-4 grid grid-cols-1 md:grid-cols-3 gap-4">
             {/* Sales Breakdown */}
-            <div className="p-3.5 rounded-2xl bg-muted/20 border border-border space-y-2 text-xs">
+            <div className="p-3.5 rounded-2xl bg-emerald-950/15 dark:bg-emerald-950/30 border border-emerald-500/20 backdrop-blur-xs space-y-2 text-xs">
               <div className="font-bold text-foreground border-b border-border pb-1.5 flex justify-between">
                 <span>Sales Revenue</span>
-                <span className="font-mono text-primary">{perfData?.sales?.transactions || 0} Transactions</span>
+                <span className="font-mono text-emerald-600 dark:text-emerald-400">{perfData?.sales?.transactions || 0} Transactions</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Gross Sales:</span>
@@ -429,7 +429,7 @@ function AdminBusinessDashboard() {
               </div>
               <div className="flex justify-between border-t border-border pt-1 font-bold">
                 <span className="text-foreground">Net Sales:</span>
-                <span className="font-mono text-emerald-600">{fmt(perfData?.sales?.net_sales || 0)}</span>
+                <span className="font-mono text-emerald-600 dark:text-emerald-400">{fmt(perfData?.sales?.net_sales || 0)}</span>
               </div>
               <div className="pt-1 text-[11px] text-muted-foreground flex justify-between">
                 <span>Cash vs Financing:</span>
@@ -438,10 +438,10 @@ function AdminBusinessDashboard() {
             </div>
 
             {/* Collections Breakdown */}
-            <div className="p-3.5 rounded-2xl bg-muted/20 border border-border space-y-2 text-xs">
+            <div className="p-3.5 rounded-2xl bg-emerald-950/15 dark:bg-emerald-950/30 border border-emerald-500/20 backdrop-blur-xs space-y-2 text-xs">
               <div className="font-bold text-foreground border-b border-border pb-1.5 flex justify-between">
                 <span>Payment Collections</span>
-                <span className="font-mono text-blue-600">{perfData?.collections?.payments_count || 0} Receipts</span>
+                <span className="font-mono text-teal-600 dark:text-teal-400">{perfData?.collections?.payments_count || 0} Receipts</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Cash Payments:</span>
@@ -453,23 +453,23 @@ function AdminBusinessDashboard() {
               </div>
               <div className="flex justify-between border-t border-border pt-1 font-bold">
                 <span className="text-foreground">Total Collections:</span>
-                <span className="font-mono text-blue-600">{fmt(perfData?.collections?.total_collected || 0)}</span>
+                <span className="font-mono text-teal-600 dark:text-teal-400">{fmt(perfData?.collections?.total_collected || 0)}</span>
               </div>
               <div className="pt-1 text-[11px] text-muted-foreground flex justify-between">
                 <span>Down Payments Collected:</span>
-                <span className="font-mono text-emerald-600">{fmt(perfData?.collections?.down_payments || 0)}</span>
+                <span className="font-mono text-emerald-600 dark:text-emerald-400">{fmt(perfData?.collections?.down_payments || 0)}</span>
               </div>
             </div>
 
             {/* Overdue & Receivables Recovery */}
-            <div className="p-3.5 rounded-2xl bg-muted/20 border border-border space-y-2 text-xs">
+            <div className="p-3.5 rounded-2xl bg-emerald-950/15 dark:bg-emerald-950/30 border border-emerald-500/20 backdrop-blur-xs space-y-2 text-xs">
               <div className="font-bold text-foreground border-b border-border pb-1.5 flex justify-between">
                 <span>Receivables & Overdue</span>
-                <span className="font-mono text-amber-600">Recovery</span>
+                <span className="font-mono text-amber-600 dark:text-amber-400">Recovery</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Overdue Payments Collected:</span>
-                <span className="font-mono font-semibold text-emerald-600">{fmt(perfData?.overdue_collected || 0)}</span>
+                <span className="font-mono font-semibold text-emerald-600 dark:text-emerald-400">{fmt(perfData?.overdue_collected || 0)}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Total Financed Credit:</span>
@@ -547,51 +547,51 @@ function AdminBusinessDashboard() {
             <h3 className="text-xl font-bold text-foreground mb-1">Revenue overview</h3>
             <p className="text-xs text-muted-foreground">Sales and collections across selected timeframe</p>
           </div>
-          
+
           <div className="h-64 w-full relative z-10">
             <ResponsiveContainer width="100%" height="100%">
               <ComposedChart data={charts?.sales_trend || []} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
                 <defs>
                   <linearGradient id="colorSales" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#4F8AFF" stopOpacity={0.3}/>
-                    <stop offset="95%" stopColor="#4F8AFF" stopOpacity={0}/>
+                    <stop offset="5%" stopColor="#4F8AFF" stopOpacity={0.3} />
+                    <stop offset="95%" stopColor="#4F8AFF" stopOpacity={0} />
                   </linearGradient>
                 </defs>
                 <CartesianGrid strokeDasharray="0" vertical={false} stroke="#64748b30" />
-                <XAxis 
-                  dataKey="month" 
-                  tick={{ fill: '#64748b', fontSize: 11 }} 
-                  axisLine={false} 
-                  tickLine={false} 
+                <XAxis
+                  dataKey="month"
+                  tick={{ fill: '#64748b', fontSize: 11 }}
+                  axisLine={false}
+                  tickLine={false}
                   dy={10}
                 />
-                <YAxis 
-                  tick={{ fill: '#64748b', fontSize: 11 }} 
-                  tickFormatter={v => `₱${(v / 1000).toFixed(0)}k`} 
-                  axisLine={false} 
-                  tickLine={false} 
+                <YAxis
+                  tick={{ fill: '#64748b', fontSize: 11 }}
+                  tickFormatter={v => `₱${(v / 1000).toFixed(0)}k`}
+                  axisLine={false}
+                  tickLine={false}
                   dx={-10}
                 />
-                <Tooltip 
+                <Tooltip
                   contentStyle={{ backgroundColor: '#0f172a', borderColor: '#1e293b', borderRadius: '12px', color: '#f8fafc' }}
                   itemStyle={{ color: '#e2e8f0' }}
-                  formatter={v => `₱${v.toLocaleString()}`} 
+                  formatter={v => `₱${v.toLocaleString()}`}
                 />
-                <Area 
-                  type="monotone" 
-                  dataKey="sales" 
-                  stroke="#4F8AFF" 
+                <Area
+                  type="monotone"
+                  dataKey="sales"
+                  stroke="#4F8AFF"
                   strokeWidth={3}
-                  fillOpacity={1} 
-                  fill="url(#colorSales)" 
+                  fillOpacity={1}
+                  fill="url(#colorSales)"
                   name="Sales"
                 />
-                <Line 
-                  type="monotone" 
-                  dataKey="collections" 
-                  stroke="#2dd4bf" 
+                <Line
+                  type="monotone"
+                  dataKey="collections"
+                  stroke="#2dd4bf"
                   strokeWidth={3}
-                  strokeDasharray="5 5" 
+                  strokeDasharray="5 5"
                   dot={false}
                   name="Collections"
                 />
@@ -640,8 +640,10 @@ function AdminBusinessDashboard() {
                 {action.badge}
               </span>
             )}
-            <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-white text-lg ${action.color} group-hover:scale-105 transition-transform shadow-sm`}>
-              {action.icon}
+            <div className={`w-10 h-10 rounded-xl flex items-center justify-center !text-white text-lg ${action.color} group-hover:scale-105 transition-transform shadow-sm`}>
+              <span className="!text-white [&>svg]:!text-white [&>svg]:!stroke-white flex items-center justify-center">
+                {action.icon}
+              </span>
             </div>
             <div className="text-xs font-bold text-foreground leading-tight">{action.label}</div>
           </button>

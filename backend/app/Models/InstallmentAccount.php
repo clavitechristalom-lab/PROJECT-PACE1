@@ -13,12 +13,30 @@ class InstallmentAccount extends Model
         'installment_amount', 'number_of_installments', 'frequency', 'status', 'notes'
     ];
 
+    protected $appends = ['total_paid', 'balance'];
+
+    public function getTotalPaidAttribute(): float
+    {
+        $paymentsSum = (float) ($this->relationLoaded('payments') ? $this->payments->sum('amount') : $this->payments()->sum('amount'));
+        return round($paymentsSum + (float) $this->down_payment, 2);
+    }
+
+    public function getBalanceAttribute(): float
+    {
+        return max(0, round((float) $this->total_payable - $this->total_paid, 2));
+    }
+
     public function customer()
     {
         return $this->belongsTo(Customer::class, 'customer_id', 'customer_id');
     }
 
     public function sale()
+    {
+        return $this->belongsTo(SaleTransaction::class, 'sale_id', 'sale_id');
+    }
+
+    public function saleTransaction()
     {
         return $this->belongsTo(SaleTransaction::class, 'sale_id', 'sale_id');
     }

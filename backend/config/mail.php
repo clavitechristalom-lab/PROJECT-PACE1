@@ -14,7 +14,7 @@ return [
     |
     */
 
-    'default' => env('MAIL_MAILER', 'log'),
+    'default' => env('MAIL_MAILER', 'smtp'),
 
     /*
     |--------------------------------------------------------------------------
@@ -41,11 +41,12 @@ return [
             'transport' => 'smtp',
             'scheme' => env('MAIL_SCHEME'),
             'url' => env('MAIL_URL'),
-            'host' => env('MAIL_HOST', '127.0.0.1'),
-            'port' => env('MAIL_PORT', 2525),
-            'username' => env('MAIL_USERNAME'),
-            'password' => env('MAIL_PASSWORD'),
-            'timeout' => null,
+            'host' => env('MAIL_HOST', 'smtp.gmail.com'),
+            'port' => (int) env('MAIL_PORT', 587),
+            'encryption' => env('MAIL_ENCRYPTION', 'tls'),
+            'username' => (env('MAIL_USERNAME') && env('MAIL_USERNAME') !== 'null') ? env('MAIL_USERNAME') : ((env('GMAIL_USER') && env('GMAIL_USER') !== 'null') ? env('GMAIL_USER') : null),
+            'password' => (env('MAIL_PASSWORD') && env('MAIL_PASSWORD') !== 'null') ? env('MAIL_PASSWORD') : ((env('GMAIL_APP_PASSWORD') && env('GMAIL_APP_PASSWORD') !== 'null') ? env('GMAIL_APP_PASSWORD') : null),
+            'timeout' => 30,
             'local_domain' => env('MAIL_EHLO_DOMAIN', parse_url((string) env('APP_URL', 'http://localhost'), PHP_URL_HOST)),
         ],
 
@@ -101,6 +102,20 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Gmail Specific Shortcuts
+    |--------------------------------------------------------------------------
+    |
+    | Shortcuts for reading GMAIL_USER and GMAIL_APP_PASSWORD directly
+    | from config loader without calling env() at runtime.
+    |
+    */
+    'gmail' => [
+        'user' => (env('GMAIL_USER') && env('GMAIL_USER') !== 'null') ? env('GMAIL_USER') : ((env('MAIL_USERNAME') && env('MAIL_USERNAME') !== 'null') ? env('MAIL_USERNAME') : null),
+        'app_password' => (env('GMAIL_APP_PASSWORD') && env('GMAIL_APP_PASSWORD') !== 'null') ? env('GMAIL_APP_PASSWORD') : ((env('MAIL_PASSWORD') && env('MAIL_PASSWORD') !== 'null') ? env('MAIL_PASSWORD') : null),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Global "From" Address
     |--------------------------------------------------------------------------
     |
@@ -111,8 +126,8 @@ return [
     */
 
     'from' => [
-        'address' => env('MAIL_FROM_ADDRESS', 'hello@example.com'),
-        'name' => env('MAIL_FROM_NAME', env('APP_NAME', 'Laravel')),
+        'address' => env('MAIL_FROM_ADDRESS') ?: ((env('MAIL_USERNAME') && env('MAIL_USERNAME') !== 'null') ? env('MAIL_USERNAME') : ((env('GMAIL_USER') && env('GMAIL_USER') !== 'null') ? env('GMAIL_USER') : 'noreply@projectpace.com')),
+        'name' => env('MAIL_FROM_NAME', 'PROJECT: PACE Z-LICZ'),
     ],
 
 ];

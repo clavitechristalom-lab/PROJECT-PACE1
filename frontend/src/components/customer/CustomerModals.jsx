@@ -8,7 +8,7 @@ import { useAuth } from '../../context/AuthContext';
 import { triggerDataSync } from '../../lib/realtimeSync';
 import Swal from 'sweetalert2';
 
-export function ProductListModal({ isOpen, onClose, category, availableCategories = [], initialProductId = null }) {
+export function ProductListModal({ isOpen, onClose, category, availableCategories = [], initialProductId = null, onBuyProduct }) {
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -134,7 +134,6 @@ export function ProductListModal({ isOpen, onClose, category, availableCategorie
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4 flex-1 items-start">
                   {visibleProducts.map(p => {
                     const salePrice = p.discount_price || null;
-                    const image = p.image_url || 'https://via.placeholder.com/300x200?text=No+Image';
 
                     return (
                       <div
@@ -143,8 +142,12 @@ export function ProductListModal({ isOpen, onClose, category, availableCategorie
                         className="border border-border rounded-xl p-0 bg-card flex flex-col hover:border-primary transition-colors cursor-pointer overflow-hidden shadow-sm hover:shadow-md h-full"
                       >
                         {/* Product Image */}
-                        <div className="h-32 w-full bg-slate-200 dark:bg-slate-800 relative shrink-0">
-                          <img src={image} alt={p.product_name} className="w-full h-full object-cover" />
+                        <div className="h-32 w-full bg-muted relative shrink-0 flex items-center justify-center overflow-hidden">
+                          {p.image_url ? (
+                            <img src={p.image_url} alt={p.product_name} className="w-full h-full object-cover" />
+                          ) : (
+                            <FiPackage className="w-8 h-8 text-muted-foreground/40" />
+                          )}
                           {salePrice && (
                             <div className="absolute top-2 left-2 bg-emerald-600 text-white text-[10px] font-bold px-2 py-1 rounded shadow-sm">
                               ON SALE
@@ -161,14 +164,30 @@ export function ProductListModal({ isOpen, onClose, category, availableCategorie
 
                           <p className="text-xs text-muted-foreground line-clamp-2 mt-2 flex-1">{p.description || 'No description available.'}</p>
 
-                          <div className="mt-3 pt-2 border-t border-border flex flex-col shrink-0">
-                            {salePrice ? (
-                              <>
-                                <div className="text-[10px] text-muted-foreground line-through">{fmt(p.unit_price)}</div>
-                                <div className="font-mono font-bold text-emerald-600">{fmt(salePrice)}</div>
-                              </>
-                            ) : (
-                              <div className="font-mono font-bold text-primary">{fmt(p.unit_price)}</div>
+                          <div className="mt-3 pt-2 border-t border-border flex items-center justify-between shrink-0">
+                            <div>
+                              {salePrice ? (
+                                <>
+                                  <div className="text-[10px] text-muted-foreground line-through">{fmt(p.unit_price)}</div>
+                                  <div className="font-mono font-bold text-emerald-600">{fmt(salePrice)}</div>
+                                </>
+                              ) : (
+                                <div className="font-mono font-bold text-primary">{fmt(p.unit_price)}</div>
+                              )}
+                            </div>
+                            {onBuyProduct && (
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  onBuyProduct(p);
+                                }}
+                                className="px-3 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-700 active:bg-purple-800 text-white text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shadow-xs hover:scale-105"
+                                title="Make Payment for this product"
+                              >
+                                <FiShoppingCart className="w-3.5 h-3.5" />
+                                <span>Pay</span>
+                              </button>
                             )}
                           </div>
                         </div>
@@ -208,16 +227,20 @@ export function ProductListModal({ isOpen, onClose, category, availableCategorie
         <ProductDetailModal
           product={selectedProduct}
           onClose={() => setSelectedProduct(null)}
+          onBuyProduct={(prod) => {
+            setSelectedProduct(null);
+            if (onBuyProduct) onBuyProduct(prod);
+          }}
         />
       )}
     </>
   );
 }
 
-function ProductDetailModal({ product, onClose }) {
+function ProductDetailModal({ product, onClose, onBuyProduct }) {
   // Image gallery state
   const availableImages = [product.image_url, product.image_url_2, product.image_url_3, product.image_url_4].filter(Boolean);
-  const images = availableImages.length > 0 ? availableImages : ['https://via.placeholder.com/600x400?text=No+Image'];
+  const images = availableImages.length > 0 ? availableImages : [];
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
 
   // Keyboard navigation
@@ -247,8 +270,22 @@ function ProductDetailModal({ product, onClose }) {
           </button>
 
           <div className="relative flex-1 min-h-[300px]">
-            <img src={images[currentImageIndex]} alt={product.product_name} className="w-full h-full object-contain p-4 absolute inset-0" />
-            <div className="absolute inset-0 bg-gradient-to-t from-black/20 to-transparent pointer-events-none"></div>
+            {images.length > 0 ? (
+              <>
+                <img 
+                  src={images[currentImageIndex]} 
+                  alt={product.product_name} 
+                  className="w-full h-full object-contain p-4 absolute inset-0" 
+                  onError={(e) => { e.target.style.display = 'none'; }}
+                />
+                <div className="absolute inset-0 bg-gradient-to-t from-black/20 to-transparent pointer-events-none"></div>
+              </>
+            ) : (
+              <div className="w-full h-full min-h-[300px] flex flex-col items-center justify-center p-6 text-muted-foreground">
+                <FiPackage className="w-16 h-16 opacity-30 mb-2" />
+                <span className="text-sm font-medium">No Image Available</span>
+              </div>
+            )}
 
             {/* Gallery Counter */}
             {images.length > 1 && (
@@ -359,10 +396,25 @@ function ProductDetailModal({ product, onClose }) {
             </div>
           </div>
 
-          {/* View Only Indicator (Replaces Add to Cart) */}
-          <div className="w-full mt-6 bg-blue-50 dark:bg-blue-950/30 text-blue-800 dark:text-blue-300 border border-blue-100 dark:border-blue-900 font-medium py-3 px-4 rounded-xl flex items-center justify-center gap-2 text-sm text-center">
-            <FiAlertCircle className="w-5 h-5 shrink-0" />
-            <span>Product Catalog is for viewing only. Please visit the store branch to purchase.</span>
+          {/* Active Payment Action Button */}
+          <div className="w-full mt-6 space-y-2">
+            {onBuyProduct && (
+              <button
+                type="button"
+                onClick={() => {
+                  onClose();
+                  onBuyProduct(product);
+                }}
+                className="w-full py-3.5 px-4 rounded-xl bg-[#7c3aed] hover:bg-[#6d28d9] active:bg-[#5b21b6] text-white font-bold text-sm shadow-md shadow-purple-600/25 flex items-center justify-center gap-2 transition-all cursor-pointer hover:scale-[1.01]"
+              >
+                <FiShoppingCart className="w-4 h-4" />
+                <span>Make Payment for this Product ({fmt(product.discount_price || product.unit_price)})</span>
+              </button>
+            )}
+            <div className="w-full bg-blue-50 dark:bg-blue-950/30 text-blue-800 dark:text-blue-300 border border-blue-100 dark:border-blue-900 font-medium py-2.5 px-3 rounded-xl flex items-center justify-center gap-2 text-xs text-center">
+              <FiCheckCircle className="w-4 h-4 text-emerald-500 shrink-0" />
+              <span>Instant checkout via GCash, Maya, or BDO Online Banking</span>
+            </div>
           </div>
         </div>
 
@@ -520,7 +572,7 @@ export function FullyPaidProductDetailsModal({ isOpen, onClose, accountData }) {
               src={(item.image_url || item.image)?.startsWith('http') ? (item.image_url || item.image) : `http://127.0.0.1:8000${item.image_url || item.image}`}
               alt={item.product_name}
               className="w-32 h-32 object-cover rounded-xl border border-emerald-200 dark:border-emerald-700/50 bg-white shrink-0 shadow-sm"
-              onError={(e) => { e.target.src = 'https://via.placeholder.com/150?text=No+Image'; }}
+              onError={(e) => { e.target.style.display = 'none'; }}
             />
           ) : (
             <div className="w-32 h-32 bg-emerald-100/50 dark:bg-emerald-800/30 border border-emerald-200 dark:border-emerald-700/50 rounded-xl flex items-center justify-center shrink-0 shadow-sm">
@@ -693,7 +745,7 @@ export function InstallmentAccountDetailsModal({ isOpen, onClose, installmentId 
               src={(item.image_url || item.image)?.startsWith('http') ? (item.image_url || item.image) : `http://127.0.0.1:8000${item.image_url || item.image}`}
               alt={item.product_name}
               className="w-32 h-32 object-cover rounded-xl border border-border bg-white shrink-0 shadow-sm"
-              onError={(e) => { e.target.src = 'https://via.placeholder.com/150?text=No+Image'; }}
+              onError={(e) => { e.target.style.display = 'none'; }}
             />
           ) : (
             <div className="w-32 h-32 bg-muted border border-border rounded-xl flex items-center justify-center shrink-0 shadow-sm">
@@ -1009,7 +1061,8 @@ export function MakePaymentModal({ isOpen, onClose, installments, onPaymentSucce
       product: i.product || i.productName || 'Product',
       account_no: i.account_no,
       installment_id: i.installment_id,
-      installment_balance: i.balance !== undefined ? i.balance : balance
+      installment_balance: i.balance !== undefined ? i.balance : balance,
+      image_url: i.image_url || null
     }));
   }).sort((a, b) => new Date(a.due_date) - new Date(b.due_date));
 
@@ -1200,24 +1253,50 @@ export function MakePaymentModal({ isOpen, onClose, installments, onPaymentSucce
             </div>
 
             {selectedScheduleDetails && (
-              <div className="bg-muted/30 p-4 rounded-xl text-sm border border-border space-y-2">
-                <div className="flex justify-between items-center border-b border-border/50 pb-2 mb-2">
-                  <span className="text-muted-foreground">Product</span>
-                  <span className="font-bold text-foreground truncate max-w-[200px]" title={selectedScheduleDetails.product}>{selectedScheduleDetails.product}</span>
+              <div className="bg-muted/30 p-4 rounded-xl text-sm border border-border space-y-3">
+                <div className="flex items-center gap-3 border-b border-border/50 pb-3">
+                  {selectedScheduleDetails.image_url ? (
+                    <img
+                      src={selectedScheduleDetails.image_url.startsWith('http') ? selectedScheduleDetails.image_url : `http://127.0.0.1:8000${selectedScheduleDetails.image_url}`}
+                      alt={selectedScheduleDetails.product}
+                      className="w-12 h-12 rounded-xl object-cover border border-border bg-card shrink-0"
+                      onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                    />
+                  ) : (
+                    <div className="w-12 h-12 rounded-xl bg-purple-100 dark:bg-purple-950/60 text-purple-600 dark:text-purple-300 flex items-center justify-center border border-purple-200 dark:border-purple-800 shrink-0">
+                      <FiPackage className="w-6 h-6" />
+                    </div>
+                  )}
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className="font-bold text-foreground truncate" title={selectedScheduleDetails.product}>
+                        {selectedScheduleDetails.product}
+                      </span>
+                      {selectedScheduleDetails.account_no && (
+                        <span className="font-mono text-[10px] font-bold px-1.5 py-0.5 rounded bg-muted text-muted-foreground border border-border shrink-0">
+                          {selectedScheduleDetails.account_no}
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      Schedule Due: {selectedScheduleDetails.due_date}
+                    </p>
+                  </div>
                 </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-muted-foreground">Installment Schedule</span>
-                  <span className="font-bold text-foreground">{selectedScheduleDetails.due_date}</span>
-                </div>
+
                 <div className="flex justify-between items-center">
                   <span className="text-muted-foreground">Current Payment Due</span>
-                  <span className="font-bold text-rose-500">{fmt(Math.min(Number(selectedScheduleDetails.balance_due ?? selectedScheduleDetails.amount_due ?? 0), Number(selectedScheduleDetails.installment_balance ?? 0)))}</span>
+                  <span className="font-bold text-rose-500 font-mono">
+                    {fmt(Math.min(Number(selectedScheduleDetails.balance_due ?? selectedScheduleDetails.amount_due ?? 0), Number(selectedScheduleDetails.installment_balance ?? 0)))}
+                  </span>
                 </div>
                 <div className="flex justify-between items-center">
                   <span className="text-muted-foreground">Remaining Balance</span>
-                  <span className="font-bold text-foreground">{fmt(selectedScheduleDetails.installment_balance)}</span>
+                  <span className="font-bold text-foreground font-mono">
+                    {fmt(selectedScheduleDetails.installment_balance)}
+                  </span>
                 </div>
-                <div className="flex justify-between items-center pt-1">
+                <div className="flex justify-between items-center pt-1 border-t border-border/40">
                   <span className="text-muted-foreground">Payment Status</span>
                   <span className="font-bold text-blue-500">{selectedScheduleDetails.status}</span>
                 </div>
@@ -1775,4 +1854,239 @@ export function SupportModal({ isOpen, onClose }) {
     </Modal>
   );
 }
+
+export function InstallmentsModal({ isOpen, onClose, onMakePayment, onViewLedger, onBrowseProducts }) {
+  const [installments, setInstallments] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [activeFilter, setActiveFilter] = useState('All'); // 'All' | 'Active' | 'Overdue' | 'Completed'
+
+  const loadData = async () => {
+    setLoading(true);
+    try {
+      const res = await api.customerApp.getInstallments();
+      setInstallments(res.installments || []);
+    } catch (err) {
+      console.error('Failed to load customer installments', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (isOpen) {
+      loadData();
+    }
+  }, [isOpen]);
+
+  if (!isOpen) return null;
+
+  const activeAccounts = installments.filter(i => i.status === 'Active' || i.status === 'Pending' || i.status === 'Overdue');
+  const totalBalance = activeAccounts.reduce((sum, i) => sum + (Number(i.balance) || 0), 0);
+  const monthlyAmortization = activeAccounts.reduce((sum, i) => sum + (Number(i.monthly_payment) || 0), 0);
+
+  const filteredInstallments = installments.filter(i => {
+    if (activeFilter === 'Active') return i.status === 'Active' || i.status === 'Pending';
+    if (activeFilter === 'Overdue') return i.status === 'Overdue';
+    if (activeFilter === 'Completed') return i.status === 'Completed';
+    return true;
+  });
+
+  return (
+    <Modal isOpen={isOpen} onClose={onClose} title="My Installments & Accounts" size="xl">
+      <div className="space-y-6">
+        {/* Top Summary Banner / KPIs */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div className="p-4 rounded-2xl bg-card border border-border shadow-xs flex items-center gap-3.5">
+            <div className="w-11 h-11 rounded-xl bg-purple-100 dark:bg-purple-950/60 text-purple-600 dark:text-purple-300 flex items-center justify-center font-bold">
+              <FiCreditCard className="w-5 h-5" />
+            </div>
+            <div>
+              <p className="text-[10px] uppercase font-bold tracking-wider text-muted-foreground">Active Accounts</p>
+              <p className="text-xl font-black text-foreground">{activeAccounts.length}</p>
+            </div>
+          </div>
+
+          <div className="p-4 rounded-2xl bg-card border border-border shadow-xs flex items-center gap-3.5">
+            <div className="w-11 h-11 rounded-xl bg-blue-100 dark:bg-blue-950/60 text-blue-600 dark:text-blue-300 flex items-center justify-center font-bold">
+              <FiCalendar className="w-5 h-5" />
+            </div>
+            <div>
+              <p className="text-[10px] uppercase font-bold tracking-wider text-muted-foreground">Monthly Payment</p>
+              <p className="text-xl font-black text-foreground">{fmt(monthlyAmortization)}</p>
+            </div>
+          </div>
+
+          <div className="p-4 rounded-2xl bg-card border border-border shadow-xs flex items-center gap-3.5">
+            <div className="w-11 h-11 rounded-xl bg-emerald-100 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-300 flex items-center justify-center font-bold">
+              <TbCurrencyPeso className="w-6 h-6" />
+            </div>
+            <div>
+              <p className="text-[10px] uppercase font-bold tracking-wider text-muted-foreground">Remaining Balance</p>
+              <p className="text-xl font-black text-emerald-600 dark:text-emerald-400">{fmt(totalBalance)}</p>
+            </div>
+          </div>
+        </div>
+
+        {/* Filter Tabs & Quick Action */}
+        <div className="flex items-center justify-between flex-wrap gap-2 pt-1 border-t border-border">
+          <div className="flex p-1 rounded-xl bg-muted border border-border">
+            {['All', 'Active', 'Overdue', 'Completed'].map(tab => (
+              <button
+                key={tab}
+                type="button"
+                onClick={() => setActiveFilter(tab)}
+                className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all cursor-pointer ${
+                  activeFilter === tab
+                    ? 'bg-card text-foreground shadow-xs'
+                    : 'text-muted-foreground hover:text-foreground'
+                }`}
+              >
+                {tab}
+                {tab === 'Overdue' && installments.some(i => i.status === 'Overdue') && (
+                  <span className="ml-1 px-1.5 py-0.2 text-[9px] rounded-full bg-rose-500 text-white font-bold">
+                    !
+                  </span>
+                )}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Content Area */}
+        {loading ? (
+          <LoadingState message="Loading your installment accounts..." />
+        ) : filteredInstallments.length === 0 ? (
+          <div className="py-12 text-center rounded-2xl border border-dashed border-border p-6 bg-muted/10 space-y-3">
+            <FiCreditCard className="w-12 h-12 text-muted-foreground/30 mx-auto" />
+            <h3 className="text-base font-bold text-foreground">No Installments Found</h3>
+            <p className="text-xs text-muted-foreground max-w-sm mx-auto">
+              {activeFilter === 'All'
+                ? 'You do not have any active installment accounts.'
+                : `No accounts found under the "${activeFilter}" filter.`}
+            </p>
+          </div>
+        ) : (
+          <div className="space-y-3.5 max-h-[58vh] overflow-y-auto pr-1">
+            {filteredInstallments.map(inst => {
+              const progressPct = inst.total_amount > 0
+                ? Math.min(100, Math.round(((inst.paid_amount || 0) / inst.total_amount) * 100))
+                : 0;
+
+              return (
+                <div
+                  key={inst.installment_id}
+                  className="p-4 rounded-2xl border border-border bg-card shadow-xs hover:border-primary/40 transition-all space-y-3"
+                >
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                    <div className="flex items-center gap-3">
+                      {inst.image_url ? (
+                        <img
+                          src={inst.image_url.startsWith('http') ? inst.image_url : `http://127.0.0.1:8000${inst.image_url}`}
+                          alt={inst.product}
+                          className="w-12 h-12 rounded-xl object-cover border border-border bg-muted shrink-0"
+                          onError={(e) => { e.target.style.display = 'none'; }}
+                        />
+                      ) : (
+                        <div className="w-12 h-12 rounded-xl bg-purple-50 dark:bg-purple-950/40 text-purple-600 flex items-center justify-center border border-purple-200 dark:border-purple-800 shrink-0">
+                          <FiPackage className="w-6 h-6" />
+                        </div>
+                      )}
+                      <div>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-bold text-sm text-foreground">{inst.product}</span>
+                          <span className="font-mono text-[10px] font-bold px-2 py-0.5 rounded-md bg-muted text-muted-foreground border border-border">
+                            {inst.account_no}
+                          </span>
+                        </div>
+                        <p className="text-xs text-muted-foreground mt-0.5">
+                          Started: {inst.purchase_date || 'N/A'}
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <StatusBadge status={inst.status || 'Active'} />
+                    </div>
+                  </div>
+
+                  {/* Progress Bar */}
+                  <div className="space-y-1">
+                    <div className="flex justify-between items-center text-xs">
+                      <span className="text-muted-foreground">Repayment Progress</span>
+                      <span className="font-semibold text-foreground font-mono">
+                        {fmt(inst.paid_amount || 0)} / {fmt(inst.total_amount)} ({progressPct}%)
+                      </span>
+                    </div>
+                    <div className="w-full h-2 rounded-full bg-muted overflow-hidden">
+                      <div
+                        className="h-full bg-gradient-to-r from-emerald-500 to-teal-400 rounded-full transition-all duration-500"
+                        style={{ width: `${progressPct}%` }}
+                      />
+                    </div>
+                  </div>
+
+                  {/* Key Financials Grid */}
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs p-3 rounded-xl bg-muted/30 border border-border/60">
+                    <div>
+                      <p className="text-[10px] text-muted-foreground uppercase font-bold">Total Financed</p>
+                      <p className="font-mono font-bold text-foreground mt-0.5">{fmt(inst.total_amount)}</p>
+                    </div>
+                    <div>
+                      <p className="text-[10px] text-muted-foreground uppercase font-bold">Monthly Payment</p>
+                      <p className="font-mono font-bold text-purple-600 dark:text-purple-400 mt-0.5">{fmt(inst.monthly_payment)}</p>
+                    </div>
+                    <div>
+                      <p className="text-[10px] text-muted-foreground uppercase font-bold">Remaining Balance</p>
+                      <p className={`font-mono font-bold mt-0.5 ${inst.balance > 0 ? 'text-rose-600 dark:text-rose-400' : 'text-emerald-600'}`}>
+                        {fmt(inst.balance)}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-[10px] text-muted-foreground uppercase font-bold">Next Due Date</p>
+                      <p className="font-semibold text-foreground mt-0.5">
+                        {inst.next_due_date || (inst.balance <= 0 ? 'Fully Paid' : 'N/A')}
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Action Buttons */}
+                  <div className="flex items-center justify-end gap-2 pt-1 flex-wrap">
+                    {onViewLedger && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          onClose();
+                          onViewLedger(inst);
+                        }}
+                        className="px-3 py-1.5 rounded-xl border border-border hover:bg-muted text-xs font-bold text-foreground transition-all flex items-center gap-1.5 cursor-pointer"
+                      >
+                        <FiFileText className="w-3.5 h-3.5" />
+                        <span>View Ledger & Schedules</span>
+                      </button>
+                    )}
+
+                    {inst.balance > 0 && onMakePayment && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          onClose();
+                          onMakePayment(inst);
+                        }}
+                        className="px-3.5 py-1.5 rounded-xl bg-[#7c3aed] hover:bg-[#6d28d9] text-white text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shadow-xs hover:scale-105"
+                      >
+                        <FiCreditCard className="w-3.5 h-3.5" />
+                        <span>Pay Due ({fmt(inst.monthly_payment)})</span>
+                      </button>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </Modal>
+  );
+}
+
 

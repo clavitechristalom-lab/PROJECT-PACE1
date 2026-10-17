@@ -21,19 +21,40 @@ use App\Http\Controllers\NotificationController;
 use App\Http\Controllers\QrRequestController;
 use App\Http\Controllers\BranchController;
 use App\Http\Controllers\SyncController;
+use App\Http\Controllers\EWalletController;
 
 // ─── Authentication (Public) ──────────────────────────────────────────────────
 Route::get('/login', function () {
     return response()->json(['message' => 'Unauthenticated.'], 401);
 })->name('login');
 Route::post('/login', [AuthController::class, 'login']);
+Route::post('/login/verify-otp', [AuthController::class, 'verifyLoginOtp'])->middleware('throttle:60,1');
+Route::post('/verify-otp', [AuthController::class, 'verifyLoginOtp'])->middleware('throttle:60,1');
+Route::post('/verify_otp', [AuthController::class, 'verifyLoginOtp'])->middleware('throttle:60,1');
+Route::post('/login/resend-otp', [AuthController::class, 'resendLoginOtp'])->middleware('throttle:60,1');
+Route::post('/send-otp', [AuthController::class, 'resendLoginOtp'])->middleware('throttle:60,1');
+Route::post('/send_otp', [AuthController::class, 'resendLoginOtp'])->middleware('throttle:60,1');
 Route::post('/register', [AuthController::class, 'register']);
+Route::post('/create_user', [AuthController::class, 'createUser'])->middleware('throttle:60,1');
+Route::post('/create-user', [AuthController::class, 'createUser'])->middleware('throttle:60,1');
 Route::get('/registration-options', [AuthController::class, 'registrationOptions']);
+Route::post('/forgot-password/send-otp', [AuthController::class, 'sendOtp'])->middleware('throttle:60,1');
+Route::post('/forgot-password', [AuthController::class, 'sendOtp'])->middleware('throttle:60,1');
+Route::post('/forgot-password/verify-otp', [AuthController::class, 'verifyOtp'])->middleware('throttle:60,1');
+Route::post('/forgot-password/reset-password', [AuthController::class, 'resetPassword'])->middleware('throttle:60,1');
+Route::post('/reset-password', [AuthController::class, 'resetPassword'])->middleware('throttle:60,1');
+Route::post('/reset_password', [AuthController::class, 'resetPassword'])->middleware('throttle:60,1');
 Route::get('/public/products', [ProductController::class, 'indexPublic']);
 Route::get('/public/settings', [SystemController::class, 'settings']);
 Route::post('/public/support-messages', [\App\Http\Controllers\SupportMessageController::class, 'storePublic']);
 
 Route::post('/logout', [AuthController::class, 'logout']);
+
+// ─── E-Wallet & Mobile Payment Routes (Public / Direct) ──────────────────────
+Route::post('/webhooks/payment', [EWalletController::class, 'handleWebhook']);
+Route::post('/webhooks/gcash', [EWalletController::class, 'handleWebhook']);
+Route::get('/payments/ewallet/status/{reference}', [EWalletController::class, 'checkStatus']);
+Route::post('/payments/ewallet/simulate-webhook', [EWalletController::class, 'simulateWebhook']);
 
 // ─── Protected Routes (Sanctum Authenticated) ─────────────────────────────────
 Route::middleware('auth:sanctum')->group(function () {
@@ -46,6 +67,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/branches/{id}', [BranchController::class, 'show']);
     Route::post('/branches', [BranchController::class, 'store']);
     Route::put('/branches/{id}', [BranchController::class, 'update']);
+    Route::post('/branches/{id}', [BranchController::class, 'update']);
     Route::delete('/branches/{id}', [BranchController::class, 'destroy']);
     Route::post('/branches/{id}/image', [BranchController::class, 'uploadImage']);
 
@@ -78,6 +100,8 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::delete('/customers/{id}', [CustomerController::class, 'destroy']);
     // Admin-only: assign customer to a branch
     Route::put('/customers/{id}/branch', [CustomerController::class, 'assignBranch']);
+    // Store Admin: allow/disallow customer to undergo installment process
+    Route::put('/customers/{id}/allow-installment', [CustomerController::class, 'toggleInstallment']);
 
     // ─── Sales ──────────────────────────────────────────────────────────────────
     Route::get('/sales', [SaleController::class, 'index']);
@@ -99,8 +123,14 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/payments/{id}', [PaymentController::class, 'show']);
     Route::post('/payments/{id}/log-print', [PaymentController::class, 'logPrint']);
     Route::post('/payments', [PaymentController::class, 'store']);
+    Route::post('/payments/{id}/receive', [PaymentController::class, 'receivePayment']);
+    Route::post('/payments/{id}/reject', [PaymentController::class, 'rejectPayment']);
     Route::delete('/payments/{id}', [PaymentController::class, 'destroy']);
     Route::get('/payment-schedules', [PaymentController::class, 'schedules']);
+
+    // ─── E-Wallet Deposits & Checkout (Sanctum Authenticated) ───────────────────
+    Route::post('/payments/ewallet/checkout', [EWalletController::class, 'createCheckout']);
+    Route::get('/customer/wallet', [EWalletController::class, 'getWalletInfo']);
 
     // ─── Employee Self-Service (Employee Role / Scoped) ─────────────────────────
     Route::get('/employee/me', [EmployeeController::class, 'me']);
@@ -219,11 +249,11 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/backups', [SystemController::class, 'backups']);
         Route::post('/backups/create', [SystemController::class, 'createBackup']);
         Route::post('/backups/{id}/restore', [SystemController::class, 'restoreBackup']);
-        Route::post('/settings', [SystemController::class, 'saveSettings']);
     });
     
     // ─── Settings ──────────────────────────────────────────────────────────
     Route::get('/settings', [SystemController::class, 'settings']);
+    Route::post('/settings', [SystemController::class, 'saveSettings'])->middleware('role:Administrator,Store Administrator,Store Admin');
     Route::get('/system/storage', [SystemController::class, 'storage']);
 
     // ─── Notifications ──────────────────────────────────────────────────────────
@@ -241,6 +271,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/customer/dashboard', [CustomerDashboardController::class, 'getDashboard']);
     Route::get('/customer/installments', [CustomerDashboardController::class, 'getInstallments']);
     Route::post('/customer/product-requests', [CustomerDashboardController::class, 'requestProduct']);
+    Route::post('/customer/request-installment', [CustomerDashboardController::class, 'requestInstallment']);
     
     // Support Messages
     Route::get('/support-messages', [\App\Http\Controllers\SupportMessageController::class, 'index']);

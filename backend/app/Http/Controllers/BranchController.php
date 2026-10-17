@@ -4,6 +4,8 @@ namespace App\Http\Controllers;
 
 use App\Models\BranchProfile;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 
 class BranchController extends Controller
 {
@@ -67,6 +69,15 @@ class BranchController extends Controller
 
         $branch = BranchProfile::create($validated);
 
+        if ($request->hasFile('image')) {
+            $request->validate([
+                'image' => 'image|mimes:jpeg,png,jpg,gif,webp|max:5120',
+            ]);
+            $path = $request->file('image')->store('branches', 'public');
+            $branch->image_url = url('storage/' . $path);
+            $branch->save();
+        }
+
         return response()->json([
             'message' => 'Branch created successfully',
             'branch' => $branch
@@ -85,13 +96,24 @@ class BranchController extends Controller
         ]);
 
         if ($request->hasFile('image')) {
+            $oldImageUrl = $branch->image_url;
+
+            // Delete old stored image if exists
+            if ($oldImageUrl) {
+                $oldRel = Str::after($oldImageUrl, '/storage/');
+                if ($oldRel && Storage::disk('public')->exists($oldRel)) {
+                    Storage::disk('public')->delete($oldRel);
+                }
+            }
+
             $path = $request->file('image')->store('branches', 'public');
             $branch->image_url = url('storage/' . $path);
             $branch->save();
 
             return response()->json([
                 'message' => 'Image updated successfully',
-                'image_url' => $branch->image_url
+                'image_url' => $branch->image_url,
+                'branch' => $branch->fresh()
             ]);
         }
 
@@ -104,14 +126,17 @@ class BranchController extends Controller
     public function update(Request $request, $id)
     {
         $branch = BranchProfile::findOrFail($id);
+        $oldImageUrl = $branch->image_url;
 
         $validated = $request->validate([
             'name' => 'required|string|max:255|unique:branch_profiles,name,' . $id,
             'location' => 'nullable|string|max:255',
             'manager_name' => 'nullable|string|max:255',
+            'manager_id' => 'nullable',
             'contact_number' => 'nullable|string|max:255',
             'status' => 'nullable|string',
             'color' => 'nullable|string',
+            'image_url' => 'nullable|string',
         ]);
 
         $branch->update($validated);
@@ -120,14 +145,33 @@ class BranchController extends Controller
             $request->validate([
                 'image' => 'image|mimes:jpeg,png,jpg,gif,webp|max:5120',
             ]);
+
+            // Delete old stored image if exists
+            if ($oldImageUrl) {
+                $oldRel = Str::after($oldImageUrl, '/storage/');
+                if ($oldRel && Storage::disk('public')->exists($oldRel)) {
+                    Storage::disk('public')->delete($oldRel);
+                }
+            }
+
             $path = $request->file('image')->store('branches', 'public');
             $branch->image_url = url('storage/' . $path);
             $branch->save();
         }
 
+        // Dynamically append manager username if not present
+        if (!$branch->manager) {
+            $manager = \App\Models\User::where('role', 'Store Administrator')
+                ->whereHas('employee', function ($q) use ($branch) {
+                    $q->where('branch_id', $branch->id);
+                })->first();
+            $branch->manager = $manager ? $manager->username : null;
+        }
+
         return response()->json([
             'message' => 'Branch updated successfully',
-            'branch' => $branch
+            'image_url' => $branch->image_url,
+            'branch' => $branch->fresh()
         ]);
     }
 

@@ -72,6 +72,7 @@ function canUserAccessPath(role, path) {
     return cleanPath.startsWith('/employee') || cleanPath === '/notifications'
   }
   if (r === 'store administrator' || r === 'store admin') {
+    if (cleanPath.startsWith('/customer') || cleanPath.startsWith('/employee')) return false
     const adminOnly = [
       '/branches', '/admin-dashboard', '/qr-monitoring', '/admin/qr-monitoring',
       '/admin/qr-requests', '/users', '/system-logs', '/backups', '/settings', '/payroll'
@@ -79,6 +80,7 @@ function canUserAccessPath(role, path) {
     return !adminOnly.includes(cleanPath)
   }
   if (r === 'administrator' || r === 'admin') {
+    if (cleanPath.startsWith('/customer') || cleanPath.startsWith('/employee')) return false
     return true
   }
   return false
@@ -113,13 +115,44 @@ function RoutePersistenceTracker() {
   const location = useLocation()
 
   useEffect(() => {
-    if (location.pathname && location.pathname !== '/' && location.pathname !== '/login') {
+    const publicSections = ['/', '/login', '/home', '/appliances', '/furniture', '/about', '/support']
+    if (location.pathname && !publicSections.includes(location.pathname)) {
       const fullPath = location.pathname + location.search
       sessionStorage.setItem('pace_last_path', fullPath)
+    }
+
+    // Check for payment redirect query params
+    const searchParams = new URLSearchParams(window.location.search || location.search)
+    const paymentStatus = searchParams.get('payment_status')
+    const ref = searchParams.get('ref')
+    if (paymentStatus === 'success' && ref) {
+      triggerDataSync('payments')
+      triggerDataSync('sales')
+      triggerDataSync('installments')
+      try {
+        window.history.replaceState(null, '', window.location.pathname + window.location.hash)
+      } catch (_) {}
     }
   }, [location])
 
   return null
+}
+
+function SupportRouteDispatcher() {
+  const { user, checkingAuth } = useAuth()
+  if (checkingAuth) return <FullPageLoader />
+  if (!user) {
+    return (
+      <PublicRoute>
+        <LoginPage />
+      </PublicRoute>
+    )
+  }
+  const role = (user.role || '').trim().toLowerCase()
+  if (role === 'administrator' || role === 'admin' || role === 'store administrator' || role === 'store admin') {
+    return <Navigate to="/admin/support" replace />
+  }
+  return <Navigate to={getDefaultDashboard(user.role)} replace />
 }
 
 function RequireAuth({ children, roles }) {
@@ -194,6 +227,42 @@ function AppRoutes() {
             </PublicRoute>
           }
         />
+        <Route
+          path="/home"
+          element={
+            <PublicRoute>
+              <LoginPage />
+            </PublicRoute>
+          }
+        />
+        <Route
+          path="/appliances"
+          element={
+            <PublicRoute>
+              <LoginPage />
+            </PublicRoute>
+          }
+        />
+        <Route
+          path="/furniture"
+          element={
+            <PublicRoute>
+              <LoginPage />
+            </PublicRoute>
+          }
+        />
+        <Route
+          path="/about"
+          element={
+            <PublicRoute>
+              <LoginPage />
+            </PublicRoute>
+          }
+        />
+        <Route
+          path="/support"
+          element={<SupportRouteDispatcher />}
+        />
 
         <Route element={<RequireAuth><AppShell /></RequireAuth>}>
           <Route path="/dashboard" element={<RequireAuth roles={['Administrator', 'Store Administrator', 'Store Admin']}><DashboardPage /></RequireAuth>} />
@@ -210,6 +279,7 @@ function AppRoutes() {
           <Route path="/attendance/qr" element={<RequireAuth roles={['Administrator', 'Store Administrator', 'Store Admin']}><AttendancePage /></RequireAuth>} />
           <Route path="/payroll" element={<RequireAuth roles={['Administrator']}><PayrollPage /></RequireAuth>} />
           <Route path="/reports" element={<RequireAuth roles={['Administrator', 'Store Administrator', 'Store Admin']}><ReportsPage /></RequireAuth>} />
+          <Route path="/admin/support" element={<RequireAuth roles={['Administrator', 'Store Administrator', 'Store Admin']}><SupportPage /></RequireAuth>} />
           <Route path="/support" element={<RequireAuth roles={['Administrator', 'Store Administrator', 'Store Admin']}><SupportPage /></RequireAuth>} />
           <Route path="/notifications" element={<RequireAuth><NotificationsPage /></RequireAuth>} />
           <Route path="/employee/dashboard" element={<RequireAuth roles={['Employee']}><EmployeeDashboard /></RequireAuth>} />

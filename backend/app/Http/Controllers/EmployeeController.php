@@ -400,7 +400,7 @@ class EmployeeController extends Controller
                 'name' => "{$employee->first_name} {$employee->last_name}",
                 'position' => $employee->position,
                 'department' => $employee->department,
-                'branch' => $employee->branch ? $employee->branch->name : null,
+                'branch' => $employee->branch_name,
                 'gender' => $employee->gender,
                 'working_hours' => $employee->working_hours,
             ]
@@ -444,7 +444,7 @@ class EmployeeController extends Controller
                 'name' => "{$employee->first_name} {$employee->last_name}",
                 'position' => $employee->position,
                 'department' => $employee->department,
-                'branch' => $employee->branch ? $employee->branch->name : null,
+                'branch' => $employee->branch_name,
             ],
             'qr_token' => $employee->qr_token,
             'qr_active' => (bool)$employee->qr_active,

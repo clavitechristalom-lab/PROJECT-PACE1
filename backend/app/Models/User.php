@@ -20,6 +20,8 @@ class User extends Authenticatable
         'employee_id',
         'customer_id',
         'username',
+        'email',
+        'phone_number',
         'password_hash',
         'role',
         'is_active',
@@ -27,11 +29,15 @@ class User extends Authenticatable
         'account_verified_at',
         'account_verified_by',
         'last_login',
+        'otp_code',
+        'otp_expires_at',
+        'otp_created_at',
         'user_id',
     ];
 
     protected $hidden = [
         'password_hash',
+        'otp_code',
     ];
 
     protected $casts = [
@@ -39,6 +45,8 @@ class User extends Authenticatable
         'account_verified' => 'boolean',
         'account_verified_at' => 'datetime',
         'last_login' => 'datetime',
+        'otp_expires_at' => 'datetime',
+        'otp_created_at' => 'datetime',
     ];
 
     /**

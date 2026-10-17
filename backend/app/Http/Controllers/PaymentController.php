@@ -8,6 +8,7 @@ use App\Models\PaymentSchedule;
 use App\Models\InstallmentAccount;
 use App\Models\SaleTransaction;
 use App\Models\SystemLog;
+use App\Models\EWalletDeposit;
 use Illuminate\Support\Facades\DB;
 use App\Services\NotificationService;
 
@@ -136,7 +137,7 @@ class PaymentController extends Controller
                 $branch = $p->receivedBy->employee->branch->name;
             }
 
-            $receivedBy = $p->receivedBy ? ($p->receivedBy->employee ? "{$p->receivedBy->employee->first_name} {$p->receivedBy->employee->last_name}" : $p->receivedBy->username) : 'Staff';
+            $receivedBy = $p->receivedBy ? ($p->receivedBy->employee ? "{$p->receivedBy->employee->first_name} {$p->receivedBy->employee->last_name}" : $p->receivedBy->username) : ($p->status === 'Pending' ? null : 'Staff');
 
             return [
                 'payment_id' => $p->payment_id,
@@ -152,7 +153,7 @@ class PaymentController extends Controller
                 'customer_phone' => $cust ? $cust->phone : '',
                 'account_no' => $accNo,
                 'branch' => $branch,
-                'status' => 'Completed',
+                'status' => $p->status ?: 'Completed',
                 'notes' => $p->notes,
                 'proof_of_payment' => $p->proof_of_payment ? asset('storage/' . $p->proof_of_payment) : null,
             ];
@@ -575,6 +576,185 @@ class PaymentController extends Controller
     }
 
     /**
+     * Store Admin receives and confirms a pending payment.
+     */
+    public function receivePayment(Request $request, $id)
+    {
+        $user = $request->user();
+        if ($user && !in_array($user->role, ['Store Administrator', 'Store Admin', 'Administrator', 'Admin', 'Manager'])) {
+            return response()->json(['success' => false, 'message' => 'Unauthorized: Only Store Administrators can receive payments.'], 403);
+        }
+
+        return DB::transaction(function () use ($id, $user, $request) {
+            $payment = Payment::with(['installmentAccount.customer', 'installmentAccount.sale', 'paymentSchedule'])
+                ->lockForUpdate()
+                ->findOrFail($id);
+
+            if ($payment->status === 'Completed') {
+                return response()->json(['success' => true, 'message' => 'Payment has already been received.', 'payment' => $payment]);
+            }
+
+            // 1. Mark Payment as Completed & Set received_by to current Store Admin
+            $payment->status = 'Completed';
+            $payment->received_by = $user ? $user->user_id : 1;
+            $payment->save();
+
+            // 2. Update Associated EWalletDeposit if exists
+            $deposit = EWalletDeposit::where('payment_id', $payment->payment_id)
+                ->orWhere('transaction_reference', $payment->reference_no)
+                ->first();
+
+            if ($deposit) {
+                $deposit->status = 'paid';
+                $deposit->paid_at = now();
+                $deposit->save();
+            }
+
+            $inst = $payment->installmentAccount;
+            $payAmount = (float)$payment->amount;
+            $payDate = $payment->payment_date ?: now()->toDateString();
+
+            // 3. Apply to Installment Schedules and Account Balance if linked
+            if ($inst) {
+                $currentPaid = (float)$inst->payments()->where('status', 'Completed')->where('payment_id', '!=', $payment->payment_id)->sum('amount') + (float)$inst->down_payment;
+                $remainingPayment = $payAmount;
+
+                $schedules = PaymentSchedule::where('installment_id', $inst->installment_id)
+                    ->where('balance_due', '>', 0)
+                    ->orderBy('installment_no')
+                    ->get();
+
+                foreach ($schedules as $sched) {
+                    if ($remainingPayment <= 0) break;
+
+                    $dueOnSchedule = (float)$sched->balance_due;
+                    $applyToSched = min($remainingPayment, $dueOnSchedule);
+
+                    $newPaid = round((float)$sched->amount_paid + $applyToSched, 2);
+                    $newBal = max(0, round((float)$sched->amount_due - $newPaid, 2));
+                    $newStatus = $newBal <= 0 ? 'Paid' : 'Partially Paid';
+
+                    $sched->update([
+                        'amount_paid' => $newPaid,
+                        'balance_due' => $newBal,
+                        'status' => $newStatus,
+                        'paid_date' => $newBal <= 0 ? $payDate : $sched->paid_date,
+                    ]);
+
+                    $remainingPayment = round($remainingPayment - $applyToSched, 2);
+                }
+
+                $newTotalPaid = round($currentPaid + $payAmount, 2);
+                $newBalance = max(0, round((float)$inst->total_payable - $newTotalPaid, 2));
+
+                $newAccStatus = $inst->status;
+                if ($newBalance <= 0) {
+                    $newAccStatus = 'Completed';
+                    PaymentSchedule::where('installment_id', $inst->installment_id)
+                        ->update([
+                            'balance_due' => 0,
+                            'amount_paid' => DB::raw('amount_due'),
+                            'status' => 'Fully Paid',
+                            'paid_date' => DB::raw("IFNULL(paid_date, '{$payDate}')"),
+                        ]);
+                } else {
+                    $hasOverdue = PaymentSchedule::where('installment_id', $inst->installment_id)
+                        ->where('due_date', '<', date('Y-m-d'))
+                        ->where('balance_due', '>', 0)
+                        ->exists();
+                    $newAccStatus = $hasOverdue ? 'Overdue' : 'Active';
+                }
+
+                $inst->update([
+                    'status' => $newAccStatus,
+                ]);
+
+                // Update Sale Transaction if linked
+                if ($inst->sale_id) {
+                    $sale = SaleTransaction::find($inst->sale_id);
+                    if ($sale) {
+                        $newSalePaid = round((float)$sale->amount_paid + $payAmount, 2);
+                        $newSaleBal = max(0, round((float)$sale->total_amount - $newSalePaid, 2));
+                        $sale->update([
+                            'amount_paid' => $newSalePaid,
+                            'balance_due' => $newSaleBal,
+                            'status' => $newSaleBal <= 0 ? 'Completed' : 'Partially Paid',
+                        ]);
+                    }
+                }
+            }
+
+            // 4. System Audit Log
+            $adminName = $user ? ($user->employee ? "{$user->employee->first_name} {$user->employee->last_name}" : $user->username) : 'Store Admin';
+            SystemLog::create([
+                'user_id' => $user ? $user->user_id : 1,
+                'action' => 'PAYMENT_RECEIVED',
+                'module' => 'Payments',
+                'description' => "Store Admin {$adminName} officially received payment {$payment->receipt_no} (₱" . number_format($payAmount, 2) . ") via {$payment->payment_method}.",
+                'ip_address' => $request->ip(),
+                'user_agent' => $request->userAgent(),
+            ]);
+
+            // 5. Notify Customer
+            $customerUserId = $deposit?->user_id ?? $inst?->customer?->user_id;
+            if (!$customerUserId && $inst?->customer?->email) {
+                $customerUserId = \App\Models\User::where('username', $inst->customer->email)->value('user_id');
+            }
+
+            if ($customerUserId) {
+                NotificationService::sendToUser($customerUserId, [
+                    'type' => 'payment_received',
+                    'title' => 'Payment Officially Received! 🎉',
+                    'message' => "Your payment of ₱" . number_format($payAmount, 2) . " ({$payment->receipt_no}) has been verified and received by {$adminName}.",
+                    'module' => 'Payments',
+                    'priority' => 'high',
+                ]);
+            }
+
+            return response()->json([
+                'success' => true,
+                'message' => "Payment {$payment->receipt_no} of ₱" . number_format($payAmount, 2) . " has been officially received.",
+                'payment' => $payment,
+            ]);
+        });
+    }
+
+    /**
+     * Store Admin rejects a pending payment.
+     */
+    public function rejectPayment(Request $request, $id)
+    {
+        $user = $request->user();
+        if ($user && !in_array($user->role, ['Store Administrator', 'Store Admin', 'Administrator', 'Admin', 'Manager'])) {
+            return response()->json(['success' => false, 'message' => 'Unauthorized.'], 403);
+        }
+
+        $reason = $request->input('reason', 'Payment proof verification failed.');
+
+        return DB::transaction(function () use ($id, $user, $request, $reason) {
+            $payment = Payment::findOrFail($id);
+            $payment->status = 'Rejected';
+            $payment->notes = ($payment->notes ? $payment->notes . " | " : "") . "Rejected: {$reason}";
+            $payment->save();
+
+            $deposit = EWalletDeposit::where('payment_id', $payment->payment_id)
+                ->orWhere('transaction_reference', $payment->reference_no)
+                ->first();
+
+            if ($deposit) {
+                $deposit->status = 'rejected';
+                $deposit->save();
+            }
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Payment has been rejected.',
+                'payment' => $payment,
+            ]);
+        });
+    }
+
+    /**
      * List payment schedules.
      */
     public function schedules(Request $request)
@@ -677,8 +857,15 @@ class PaymentController extends Controller
         }
 
         DB::transaction(function() use ($payment) {
-            if ($payment->installment_id) {
-                $account = InstallmentAccount::find($payment->installment_id);
+            $instId = $payment->installment_id;
+            $payAmount = (float) $payment->amount;
+
+            // Clear reference in any attached e_wallet_deposits
+            \App\Models\EWalletDeposit::where('payment_id', $payment->payment_id)
+                ->update(['payment_id' => null, 'status' => 'cancelled']);
+
+            if ($instId) {
+                $account = InstallmentAccount::find($instId);
                 
                 // If it's a "Cash / Fully Paid" product request (has 0 installments), void the entire request
                 if ($account && $account->number_of_installments == 0) {
@@ -695,25 +882,104 @@ class PaymentController extends Controller
                         \App\Models\SaleTransaction::where('sale_id', $account->sale_id)->delete();
                     }
                     \App\Models\PaymentSchedule::where('installment_id', $account->installment_id)->delete();
+                    $payment->delete();
                     $account->delete();
+                    return;
                 } 
                 else if ($account) {
-                    // Normal installment payment deletion: just reverse balances
-                    $account->total_paid = max(0, $account->total_paid - $payment->amount);
-                    $account->balance_due = $account->total_amount - $account->total_paid;
-                    if ($account->balance_due > 0) {
-                        $account->status = 'Active';
+                    // Delete the payment record first so remaining payments can be accurately recalculated
+                    $payment->delete();
+
+                    // 1. Recalculate all schedules for this installment account from scratch
+                    $schedules = PaymentSchedule::where('installment_id', $account->installment_id)
+                        ->orderBy('installment_no')
+                        ->get();
+
+                    foreach ($schedules as $sched) {
+                        $sched->amount_paid = 0;
+                        $sched->balance_due = $sched->amount_due;
+                        $sched->status = 'Pending';
+                        $sched->paid_date = null;
+                        $sched->save();
+                    }
+
+                    // Get all remaining completed payments
+                    $remainingPayments = Payment::where('installment_id', $account->installment_id)
+                        ->where('status', 'Completed')
+                        ->orderBy('payment_date')
+                        ->orderBy('payment_id')
+                        ->get();
+
+                    $totalRemainingPaid = 0;
+                    foreach ($remainingPayments as $p) {
+                        $rem = (float) $p->amount;
+                        $totalRemainingPaid += $rem;
+                        foreach ($schedules as $sched) {
+                            if ($rem <= 0) break;
+                            $schedBal = (float) $sched->balance_due;
+                            if ($schedBal <= 0) continue;
+
+                            $apply = min($rem, $schedBal);
+                            $newPaid = round((float) $sched->amount_paid + $apply, 2);
+                            $newBal = max(0, round((float) $sched->amount_due - $newPaid, 2));
+
+                            $sched->amount_paid = $newPaid;
+                            $sched->balance_due = $newBal;
+                            $sched->status = $newBal <= 0 ? 'Paid' : 'Partially Paid';
+                            $sched->paid_date = $newBal <= 0 ? $p->payment_date : $sched->paid_date;
+                            $sched->save();
+
+                            $rem = round($rem - $apply, 2);
+                        }
+                    }
+
+                    // Mark overdue schedules if due date has passed
+                    $today = date('Y-m-d');
+                    foreach ($schedules as $sched) {
+                        if ($sched->balance_due > 0 && $sched->due_date < $today) {
+                            $sched->status = 'Overdue';
+                            $sched->save();
+                        }
+                    }
+
+                    // 2. Recalculate Installment Account status
+                    $totalPaidWithDown = round((float) $account->down_payment + $totalRemainingPaid, 2);
+                    $newBalance = max(0, round((float) $account->total_payable - $totalPaidWithDown, 2));
+
+                    if ($newBalance <= 0) {
+                        $account->status = 'Completed';
+                    } else {
+                        $hasOverdue = PaymentSchedule::where('installment_id', $account->installment_id)
+                            ->where('due_date', '<', $today)
+                            ->where('balance_due', '>', 0)
+                            ->exists();
+                        $account->status = $hasOverdue ? 'Overdue' : 'Active';
                     }
                     $account->save();
+
+                    // 3. Update Sale Transaction if linked
+                    if ($account->sale_id) {
+                        $sale = SaleTransaction::find($account->sale_id);
+                        if ($sale) {
+                            $newSalePaid = max(0, round((float) $sale->amount_paid - $payAmount, 2));
+                            $newSaleBal = max(0, round((float) $sale->total_amount - $newSalePaid, 2));
+                            $sale->amount_paid = $newSalePaid;
+                            $sale->balance_due = $newSaleBal;
+                            $sale->status = $newSaleBal <= 0 ? 'Completed' : 'Active Installment';
+                            $sale->save();
+                        }
+                    }
+
+                    return;
                 }
             }
 
             if ($payment->schedule_id) {
                 $schedule = PaymentSchedule::find($payment->schedule_id);
                 if ($schedule) {
-                    $schedule->amount_paid = max(0, $schedule->amount_paid - $payment->amount);
-                    $schedule->balance_due = $schedule->amount_due - $schedule->amount_paid;
-                    $schedule->status = $schedule->balance_due > 0 ? 'Pending' : 'Paid';
+                    $schedule->amount_paid = max(0, round((float) $schedule->amount_paid - $payAmount, 2));
+                    $schedule->balance_due = max(0, round((float) $schedule->amount_due - (float) $schedule->amount_paid, 2));
+                    $schedule->status = $schedule->balance_due > 0 ? ($schedule->due_date < date('Y-m-d') ? 'Overdue' : 'Pending') : 'Paid';
                     $schedule->save();
                 }
             }

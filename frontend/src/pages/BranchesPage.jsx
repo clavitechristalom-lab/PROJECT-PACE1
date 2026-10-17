@@ -1,7 +1,7 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import {
   FiBriefcase, FiPlus, FiEdit, FiTrash2, FiSearch,
-  FiMapPin, FiPhone, FiInfo
+  FiMapPin, FiPhone, FiInfo, FiImage, FiCamera, FiUploadCloud
 } from 'react-icons/fi'
 import {
   Btn, Badge, StatusBadge, Input, Select, Modal, ConfirmDialog,
@@ -30,6 +30,9 @@ export default function BranchesPage() {
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [editItem, setEditItem] = useState(null)
   const [saving, setSaving] = useState(false)
+  const [editImageFile, setEditImageFile] = useState(null)
+  const [editImagePreview, setEditImagePreview] = useState('')
+  const editFileInputRef = useRef(null)
 
   const loadData = async (silent = false) => {
     if (!silent) setLoading(true)
@@ -72,9 +75,47 @@ export default function BranchesPage() {
       contact_number: b.contact_number || '',
       status: b.status || 'open',
       color: b.color || '#2b5ce6',
+      image_url: b.image_url || '',
     })
+    setEditImageFile(null)
+    setEditImagePreview(b.image_url || '')
     setFormErrors({})
     setEditItem(b)
+  }
+
+  const handleImageChange = (e) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    if (file.size > 5 * 1024 * 1024) {
+      showToast('Please select an image smaller than 5MB', 'error')
+      return
+    }
+
+    if (!file.type.startsWith('image/')) {
+      showToast('Please upload a valid image file (PNG, JPG, WebP)', 'error')
+      return
+    }
+
+    setEditImageFile(file)
+
+    // Instant live preview with object URL
+    const objectUrl = URL.createObjectURL(file)
+    setEditImagePreview(objectUrl)
+
+    // Also read with FileReader for data URL fallback
+    const reader = new FileReader()
+    reader.onload = (event) => {
+      if (event.target?.result) {
+        setEditImagePreview(event.target.result)
+      }
+    }
+    reader.readAsDataURL(file)
+  }
+
+  const handleResetImage = () => {
+    setEditImageFile(null)
+    setEditImagePreview(editItem?.image_url || '')
   }
 
   const handleDelete = async (id, name) => {
@@ -105,9 +146,22 @@ export default function BranchesPage() {
 
     setSaving(true)
     try {
-      await api.branches.update(editItem.id, form)
+      const payload = new FormData()
+      payload.append('name', (form.name || '').trim())
+      payload.append('location', (form.location || '').trim())
+      payload.append('contact_number', (form.contact_number || '').trim())
+      payload.append('status', form.status || 'open')
+      payload.append('color', form.color || '#2b5ce6')
+
+      if (editImageFile instanceof File) {
+        payload.append('image', editImageFile)
+      }
+
+      await api.branches.update(editItem.id, payload)
       showToast('Branch updated successfully', 'success')
       setEditItem(null)
+      setEditImageFile(null)
+      setEditImagePreview('')
       loadData(true)
       triggerDataSync('branches')
     } catch (err) {
@@ -198,9 +252,17 @@ export default function BranchesPage() {
                   <TR key={b.id} index={i}>
                     <TD>
                       <div className="flex items-center gap-3">
-                        <div className="w-8 h-8 rounded-xl flex items-center justify-center shrink-0 border border-border" style={{ backgroundColor: `${b.color || '#3b82f6'}20`, color: b.color || '#3b82f6' }}>
-                          <FiBriefcase className="w-4 h-4" />
-                        </div>
+                        {b.image_url ? (
+                          <img
+                            src={b.image_url}
+                            alt={b.name}
+                            className="w-8 h-8 rounded-xl object-cover shrink-0 border border-border shadow-xs"
+                          />
+                        ) : (
+                          <div className="w-8 h-8 rounded-xl flex items-center justify-center shrink-0 border border-border" style={{ backgroundColor: `${b.color || '#3b82f6'}20`, color: b.color || '#3b82f6' }}>
+                            <FiBriefcase className="w-4 h-4" />
+                          </div>
+                        )}
                         <div>
                           <div className="font-bold text-foreground text-sm flex items-center gap-2">
                             {b.name}
@@ -270,6 +332,84 @@ export default function BranchesPage() {
       {editItem && (
         <Modal onClose={() => setEditItem(null)} title="Edit Branch Details" size="md">
           <form onSubmit={handleEditSubmit} className="space-y-4 p-1">
+            {/* Branch Image */}
+            <div className="space-y-1.5">
+              <label className="text-xs font-bold text-muted-foreground uppercase flex items-center justify-between">
+                <span className="flex items-center gap-1.5">
+                  <FiImage className="w-3.5 h-3.5" /> Branch Image
+                </span>
+                {editImagePreview && (
+                  <span className="text-[10px] text-muted-foreground font-normal lowercase">
+                    (click photo to change)
+                  </span>
+                )}
+              </label>
+
+            {/* Hidden Single File Input */}
+            <input
+              ref={editFileInputRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={handleImageChange}
+              onClick={(e) => { e.target.value = null }}
+            />
+
+            <div className="flex items-center gap-4 p-3 bg-muted/20 border border-border rounded-2xl">
+              <div className="relative group shrink-0">
+                <button
+                  type="button"
+                  onClick={() => editFileInputRef.current?.click()}
+                  className="w-20 h-20 sm:w-24 sm:h-24 rounded-xl bg-card border-2 border-dashed border-border flex flex-col items-center justify-center cursor-pointer overflow-hidden transition-all hover:border-primary/50 relative block shadow-xs p-0 text-left"
+                >
+                  {editImagePreview ? (
+                    <img
+                      src={editImagePreview}
+                      alt="Branch Preview"
+                      className="w-full h-full object-cover"
+                    />
+                  ) : (
+                    <div className="flex flex-col items-center justify-center text-muted-foreground p-2 text-center w-full h-full">
+                      <FiImage className="w-6 h-6 mb-1 text-muted-foreground/50" />
+                      <span className="text-[10px] font-semibold">No Image</span>
+                    </div>
+                  )}
+
+                  <div className="absolute inset-0 bg-black/60 text-white flex flex-col items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity rounded-xl">
+                    <FiCamera className="w-5 h-5 mb-1 text-blue-400" />
+                    <span className="text-[9px] font-bold">Change</span>
+                  </div>
+                </button>
+              </div>
+
+              <div className="flex-1 space-y-2">
+                <p className="text-xs text-muted-foreground leading-relaxed">
+                  Upload a photo of this storefront or location. PNG, JPG or WebP up to 5MB.
+                </p>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => editFileInputRef.current?.click()}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary/10 hover:bg-primary/20 text-primary text-xs font-semibold cursor-pointer transition-colors"
+                  >
+                    <FiUploadCloud className="w-3.5 h-3.5" />
+                    <span>{editImagePreview ? 'Change Photo' : 'Upload Photo'}</span>
+                  </button>
+
+                  {editImageFile && (
+                    <button
+                      type="button"
+                      onClick={handleResetImage}
+                      className="text-xs text-rose-500 hover:text-rose-600 font-semibold px-2 py-1 transition-colors cursor-pointer"
+                    >
+                      Revert
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+            </div>
+
             <div className="space-y-1">
               <label className="text-xs font-bold text-muted-foreground uppercase">Branch Name *</label>
               <Input

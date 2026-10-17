@@ -14,7 +14,7 @@ class CustomerController extends Controller
 {
     public function index(Request $request)
     {
-        $query = Customer::with(['installmentAccounts.payments', 'saleTransactions', 'branch', 'user']);
+        $query = Customer::with(['installmentAccounts.payments', 'saleTransactions', 'branch', 'user', 'installmentAllowedByUser']);
 
         $user = auth()->user();
 
@@ -88,7 +88,7 @@ class CustomerController extends Controller
                         $c->phone,
                         $c->email,
                         $c->address,
-                        $c->branch ? $c->branch->name : 'Unassigned',
+                        $c->branch_name ?: 'Unassigned',
                         $c->status,
                         $c->notes,
                         $c->created_at ? $c->created_at->format('Y-m-d H:i:s') : ''
@@ -120,9 +120,14 @@ class CustomerController extends Controller
                 'date_of_birth'       => $c->date_of_birth,
                 'marital_status'      => $c->marital_status,
                 'status'              => $c->user ? ($c->user->is_active ? 'Active' : 'Inactive') : $c->status,
+                'allow_installment'   => (bool)$c->allow_installment,
+                'installment_allowed_at' => $c->installment_allowed_at ? $c->installment_allowed_at->toIso8601String() : null,
+                'installment_allowed_by' => $c->installment_allowed_by,
+                'installment_allowed_by_name' => $c->installmentAllowedByUser ? $c->installmentAllowedByUser->username : null,
+                'installment_notes'   => $c->installment_notes,
                 'notes'               => $c->notes,
                 'branch_id'           => $c->branch_id,
-                'branch_name'         => $c->branch ? $c->branch->name : null,
+                'branch_name'         => $c->branch_name,
                 'active_installments' => $activeInsts,
                 'balance'             => $totalBalance,
             ];
@@ -159,6 +164,7 @@ class CustomerController extends Controller
         $customer = Customer::with([
             'branch',
             'user',
+            'installmentAllowedByUser',
             'saleTransactions' => function ($q) {
                 $q->orderByDesc('sale_date');
             },
@@ -245,9 +251,14 @@ class CustomerController extends Controller
                 'date_of_birth'       => $customer->date_of_birth,
                 'marital_status'      => $customer->marital_status,
                 'status'              => $customer->user ? ($customer->user->is_active ? 'Active' : 'Inactive') : $customer->status,
+                'allow_installment'   => (bool)$customer->allow_installment,
+                'installment_allowed_at' => $customer->installment_allowed_at ? $customer->installment_allowed_at->toIso8601String() : null,
+                'installment_allowed_by' => $customer->installment_allowed_by,
+                'installment_allowed_by_name' => $customer->installmentAllowedByUser ? $customer->installmentAllowedByUser->username : null,
+                'installment_notes'   => $customer->installment_notes,
                 'notes'               => $customer->notes,
                 'branch_id'           => $customer->branch_id,
-                'branch_name'         => $customer->branch ? $customer->branch->name : null,
+                'branch_name'         => $customer->branch_name,
                 'active_installments' => $activeInsts,
                 'balance'             => $totalBalance,
                 'monthly_payment'     => $monthlyPayment,
@@ -400,13 +411,16 @@ class CustomerController extends Controller
         ]);
 
         $customer = Customer::findOrFail($id);
-        $oldBranchName = $customer->branch ? $customer->branch->name : 'Unassigned';
+        $oldBranchName = $customer->branch_name ?: 'Unassigned';
 
-        $customer->branch_id = $request->input('branch_id'); // null = unassign
+        $bId = $request->input('branch_id'); // null = unassign
+        $customer->branch_id = $bId;
+        $bp = $bId ? \App\Models\BranchProfile::find($bId) : null;
+        $customer->branch = $bp ? $bp->name : null;
         $customer->save();
         $customer->load('branch');
 
-        $newBranchName = $customer->branch ? $customer->branch->name : 'Unassigned';
+        $newBranchName = $customer->branch_name ?: 'Unassigned';
 
         SystemLog::create([
             'user_id'     => $request->user()->user_id,
@@ -444,6 +458,88 @@ class CustomerController extends Controller
             'customer_id' => $customer->customer_id,
             'branch_id'   => $customer->branch_id,
             'branch_name' => $newBranchName,
+        ]);
+    }
+
+    /**
+     * Store Administrator action: allow or disallow a customer to undergo the installment process.
+     */
+    public function toggleInstallment(Request $request, $id)
+    {
+        $user = auth()->user();
+
+        // STRICT: Only Store Administrator / Store Admin (or Administrator) can authorize
+        if (!$user || !in_array($user->role, ['Store Administrator', 'Store Admin', 'Administrator'])) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Unauthorized: Only Store Administrators are authorized to approve customer installment privileges.'
+            ], 403);
+        }
+
+        $customer = Customer::with(['user'])->findOrFail($id);
+
+        // Branch verification for Store Administrator
+        if (in_array($user->role, ['Store Administrator', 'Store Admin'])) {
+            $adminBranch = $user->employee ? $user->employee->branch_id : null;
+            if ($customer->branch_id !== null && $adminBranch !== null && $customer->branch_id != $adminBranch) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Access denied: You can only authorize installment for customers in your branch.'
+                ], 403);
+            }
+        }
+
+        $validated = $request->validate([
+            'allow_installment' => 'required|boolean',
+            'notes' => 'nullable|string|max:500',
+        ]);
+
+        $allow = (bool)$validated['allow_installment'];
+        $customer->allow_installment = $allow;
+        $customer->installment_allowed_at = $allow ? now() : null;
+        $customer->installment_allowed_by = $allow ? $user->user_id : null;
+        if (array_key_exists('notes', $validated)) {
+            $customer->installment_notes = $validated['notes'];
+        }
+        $customer->save();
+
+        // Audit Logging
+        SystemLog::create([
+            'user_id' => $user->user_id,
+            'action' => $allow ? 'INSTALLMENT_ALLOWED' : 'INSTALLMENT_REVOKED',
+            'module' => 'Installments',
+            'description' => "Store Admin {$user->username} " . ($allow ? "granted" : "revoked") . " installment authorization for customer {$customer->first_name} {$customer->last_name} ({$customer->customer_code}).",
+            'ip_address' => $request->ip(),
+            'user_agent' => $request->userAgent(),
+        ]);
+
+        // Send Instant Notification to Customer
+        if ($customer->user) {
+            $notifData = [
+                'type' => $allow ? 'installment_approved' : 'installment_revoked',
+                'title' => $allow ? 'Installment Plan Authorized! 🎉' : 'Installment Status Updated',
+                'message' => $allow
+                    ? "Great news! Your Store Administrator has approved your account for installment purchases."
+                    : "Installment purchases are currently restricted by your Store Administrator.",
+                'module' => 'Installments',
+                'priority' => 'high',
+            ];
+            \App\Services\NotificationService::sendToUser($customer->user->user_id, $notifData);
+        }
+
+        return response()->json([
+            'success' => true,
+            'message' => $allow
+                ? "Installment process successfully ALLOWED for {$customer->first_name} {$customer->last_name}."
+                : "Installment process REVOKED for {$customer->first_name} {$customer->last_name}.",
+            'customer' => [
+                'customer_id' => $customer->customer_id,
+                'allow_installment' => (bool)$customer->allow_installment,
+                'installment_allowed_at' => $customer->installment_allowed_at ? $customer->installment_allowed_at->toIso8601String() : null,
+                'installment_allowed_by' => $customer->installment_allowed_by,
+                'installment_allowed_by_name' => $user->username,
+                'installment_notes' => $customer->installment_notes,
+            ]
         ]);
     }
 }

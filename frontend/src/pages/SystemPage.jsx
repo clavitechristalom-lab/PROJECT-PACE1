@@ -34,12 +34,13 @@ export default function SystemPage({ defaultTab = 'users' }) {
   const [userFormStep, setUserFormStep] = useState(1)
   const [editUser, setEditUser] = useState(null)
   const [deleteUser, setDeleteUser] = useState(null)
-  const [userForm, setUserForm] = useState({
+  const initialUserForm = {
     username: '', password: '', confirmPassword: '', role: 'Employee', is_active: true, employee_id: '', customer_id: '',
     employee_code: '', first_name: '', last_name: '', middle_name: '', phone: '', address: '', gender: 'Male', date_of_birth: '', marital_status: 'Single', email: '',
     branch_id: '', department: '', position: '', working_hours: '8 AM to 5 PM', basic_salary: '', pay_type: 'Cash',
     attendance_pin: '', confirm_attendance_pin: ''
-  })
+  }
+  const [userForm, setUserForm] = useState(initialUserForm)
   const [userSearch, setUserSearch] = useState('')
   const [employeesList, setEmployeesList] = useState([])
   const [customersList, setCustomersList] = useState([])
@@ -89,16 +90,18 @@ export default function SystemPage({ defaultTab = 'users' }) {
     if (!silent) setError('')
     try {
       if (tab === 'users') {
-        const [userData, empData, custList, regOptions] = await Promise.all([
-          api.system.getUsers(),
+        const [userData, empData, custList, regOptions, branchList] = await Promise.all([
+          api.system.getUsers().catch(() => ({ users: [] })),
           api.employees.getAll().catch(() => ({ employees: [] })),
           api.customers.getAll().catch(() => ({ customers: [] })),
           api.auth.registrationOptions().catch(() => ({ branches: [] })),
+          api.branches.getAll().catch(() => ({ branches: [] })),
         ])
         setUsers(userData.users || [])
         setEmployeesList(empData.employees || [])
         setCustomersList(custList.customers || [])
-        if (regOptions && regOptions.branches) setRegistrationOptions(regOptions)
+        const allBranches = (regOptions?.branches?.length) ? regOptions.branches : (branchList?.branches || branchList || [])
+        setRegistrationOptions({ branches: Array.isArray(allBranches) ? allBranches : [] })
       } else if (tab === 'logs') {
         const data = await api.system.getLogs({
           module: logModule !== 'All' ? logModule : undefined,
@@ -123,6 +126,16 @@ export default function SystemPage({ defaultTab = 'users' }) {
     loadTabData(activeTab)
   }, [activeTab, logModule])
 
+  useEffect(() => {
+    const handleSettingsUpdated = (e) => {
+      if (e.detail) {
+        setSettings(prev => ({ ...(prev || {}), ...e.detail }))
+      }
+    }
+    window.addEventListener('system:settingsUpdated', handleSettingsUpdated)
+    return () => window.removeEventListener('system:settingsUpdated', handleSettingsUpdated)
+  }, [])
+
   useRealtimeSync(() => {
     loadTabData(activeTab, true)
   }, [activeTab, logModule])
@@ -144,22 +157,45 @@ export default function SystemPage({ defaultTab = 'users' }) {
   // User Actions
   const handleSaveUser = async (e) => {
     e.preventDefault()
-    showLoading('Saving user...')
-    if (!userForm.username) {
+    if (!userForm.username?.trim()) {
       showToast('Username is required', 'error')
-      closeLoading()
       return
     }
-    if (!editUser && userForm.password !== userForm.confirmPassword) {
-      showToast('Passwords do not match', 'error')
-      closeLoading()
-      return
+
+    if (!editUser) {
+      if (!userForm.password) {
+        showToast('Password is required', 'error')
+        return
+      }
+      if (userForm.password !== userForm.confirmPassword) {
+        showToast('Passwords do not match', 'error')
+        return
+      }
+
+      const role = userForm.role === 'Store Admin' ? 'Store Administrator' : userForm.role
+      if (role !== 'Administrator') {
+        if (userForm.attendance_pin && !/^\d{4,6}$/.test(userForm.attendance_pin)) {
+          showToast('Attendance PIN must be between 4 and 6 numeric digits', 'error')
+          return
+        }
+        if (userForm.attendance_pin && userForm.attendance_pin !== userForm.confirm_attendance_pin) {
+          showToast('Attendance PINs do not match', 'error')
+          return
+        }
+        if (['Store Administrator', 'Employee'].includes(role) && !userForm.branch_id) {
+          showToast('Please select a branch for this staff account', 'error')
+          return
+        }
+      }
     }
+
+    showLoading(editUser ? 'Updating user...' : 'Creating user...')
 
     try {
       if (editUser) {
         const payload = {
           ...userForm,
+          role: userForm.role === 'Store Admin' ? 'Store Administrator' : userForm.role,
           employee_id: userForm.role === 'Customer' ? null : (userForm.employee_id || null),
           customer_id: userForm.role === 'Customer' ? (userForm.customer_id || null) : null,
           auth_user_id: user?.user_id || 1,
@@ -168,23 +204,34 @@ export default function SystemPage({ defaultTab = 'users' }) {
         setUsers(prev => prev.map(u => u.user_id === editUser.user_id ? (res.user || { ...u, ...payload }) : u))
         showToast('User account updated successfully', 'success')
       } else {
-        await api.auth.register({ ...userForm, from_admin: true })
-        showToast('User account created successfully', 'success')
-        // Refresh users list
-        const userData = await api.system.getUsers()
+        const rolePayload = userForm.role === 'Store Admin' ? 'Store Administrator' : userForm.role
+        const payload = {
+          ...userForm,
+          role: rolePayload,
+          from_admin: true,
+        }
+        if (rolePayload === 'Administrator') {
+          delete payload.branch_id
+          delete payload.attendance_pin
+          delete payload.confirm_attendance_pin
+        }
+        const res = await api.auth.createUser(payload)
+        showToast(res.message || `${rolePayload} account created successfully! Welcome email sent to ${userForm.email}.`, 'success')
+        // Refresh users and employees list automatically
+        const [userData, empData] = await Promise.all([
+          api.system.getUsers().catch(() => ({ users: [] })),
+          api.employees.getAll().catch(() => ({ employees: [] })),
+        ])
         setUsers(userData.users || [])
+        setEmployeesList(empData.employees || [])
       }
       triggerDataSync('users')
       triggerDataSync('dashboard')
+      triggerDataSync('employees')
       setUserModal(false)
       setUserFormStep(1)
       setEditUser(null)
-      setUserForm({
-        username: '', password: '', confirmPassword: '', role: 'Employee', is_active: true, employee_id: '', customer_id: '',
-        employee_code: '', first_name: '', last_name: '', middle_name: '', phone: '', address: '', gender: 'Male', date_of_birth: '', marital_status: 'Single', email: '',
-        branch_id: '', department: '', position: '', working_hours: '8 AM to 5 PM', basic_salary: '', pay_type: 'Cash',
-        attendance_pin: '', confirm_attendance_pin: ''
-      })
+      setUserForm(initialUserForm)
     } catch (err) {
       showToast(err.message || 'Failed to save user', 'error')
     } finally {
@@ -481,7 +528,7 @@ export default function SystemPage({ defaultTab = 'users' }) {
             </div>
             <div className="flex gap-2 w-full sm:w-auto justify-end">
               <button
-                onClick={() => { setEditUser(null); setUserForm({ username: '', password: '', role: 'Employee', is_active: true, employee_id: '' }); setUserModal(true) }}
+                onClick={() => { setEditUser(null); setUserForm(initialUserForm); setUserFormStep(1); setUserModal(true) }}
                 className="flex items-center gap-1.5 px-4 py-2 bg-primary hover:bg-primary/90 text-primary-foreground font-bold text-xs rounded-xl shadow-xs transition-all cursor-pointer"
               >
                 <FiPlus className="w-4 h-4" />
@@ -1472,7 +1519,7 @@ export default function SystemPage({ defaultTab = 'users' }) {
                           type="date"
                           max={new Date().toISOString().split('T')[0]}
                           value={userForm.date_of_birth ? new Date(userForm.date_of_birth).toISOString().split('T')[0] : ''}
-                          onClick={(e) => { try { e.target.showPicker() } catch (_) {} }}
+                          onClick={(e) => { try { e.target.showPicker() } catch (_) { } }}
                           onChange={e => setUserForm(f => ({ ...f, date_of_birth: e.target.value }))}
                           className="w-full border border-border rounded-xl px-3 py-2 bg-card text-foreground text-xs font-medium cursor-pointer [color-scheme:dark]"
                         />
@@ -1526,6 +1573,21 @@ export default function SystemPage({ defaultTab = 'users' }) {
                         </div>
                         <div>
                           <label className="text-[10px] text-muted-foreground uppercase tracking-wider font-bold mb-1 block">
+                            Branch
+                          </label>
+                          <select
+                            value={userForm.branch_id || ''}
+                            onChange={e => setUserForm(f => ({ ...f, branch_id: e.target.value }))}
+                            className="w-full border border-border rounded-xl px-3 py-2 bg-card text-foreground text-xs font-medium cursor-pointer [color-scheme:dark] [&>option]:bg-[#0f172a] [&>option]:text-white"
+                          >
+                            <option value="">Select Branch (Optional)</option>
+                            {registrationOptions.branches.map(b => (
+                              <option key={b.id} value={b.id}>{b.name}</option>
+                            ))}
+                          </select>
+                        </div>
+                        <div>
+                          <label className="text-[10px] text-muted-foreground uppercase tracking-wider font-bold mb-1 block">
                             Department
                           </label>
                           <input
@@ -1546,7 +1608,7 @@ export default function SystemPage({ defaultTab = 'users' }) {
                             className="w-full border border-border rounded-xl px-3 py-2 bg-card text-foreground text-xs font-medium"
                           />
                         </div>
-                        <div>
+                        <div className="col-span-2">
                           <label className="text-[10px] text-muted-foreground uppercase tracking-wider font-bold mb-1 block">
                             Working Hours
                           </label>
@@ -1733,7 +1795,6 @@ export default function SystemPage({ defaultTab = 'users' }) {
                       { value: 'Administrator', label: 'Administrator', icon: FiShield, description: 'Full system access and user management' },
                       { value: 'Store Admin', label: 'Store Admin', icon: FiHome, description: 'Store settings, reports and staff' },
                       { value: 'Employee', label: 'Employee', icon: FiBriefcase, description: 'Point of sale and inventory' },
-                      { value: 'Customer', label: 'Customer', icon: FiUser, description: 'Customer access and self-service portal' },
                     ].map(({ value, label, icon: Icon, description }) => (
                       <button
                         key={value}
@@ -1819,7 +1880,7 @@ export default function SystemPage({ defaultTab = 'users' }) {
                   </div>
                   <div>
                     <label className="block font-bold text-muted-foreground mb-1">Birthday *</label>
-                    <input type="date" max={new Date().toISOString().split('T')[0]} value={userForm.date_of_birth} onClick={(e) => { try { e.target.showPicker() } catch (_) {} }} onChange={e => setUserForm(f => ({ ...f, date_of_birth: e.target.value }))} required className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground cursor-pointer [color-scheme:dark]" />
+                    <input type="date" max={new Date().toISOString().split('T')[0]} value={userForm.date_of_birth} onClick={(e) => { try { e.target.showPicker() } catch (_) { } }} onChange={e => setUserForm(f => ({ ...f, date_of_birth: e.target.value }))} required className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground cursor-pointer [color-scheme:dark]" />
                   </div>
                   <div>
                     <label className="block font-bold text-muted-foreground mb-1">Status *</label>
@@ -1853,14 +1914,54 @@ export default function SystemPage({ defaultTab = 'users' }) {
                   </div>
                 </div>
 
-                {(userForm.role === 'Store Admin' || userForm.role === 'Employee') && (
-                  <div>
-                    <label className="block font-bold text-muted-foreground mb-1">Store/Branch *</label>
-                    <select value={userForm.branch_id} onChange={e => setUserForm(f => ({ ...f, branch_id: e.target.value }))} required className="w-full border border-border rounded-xl px-3 py-2 bg-card text-foreground">
-                      <option value="">Select a branch</option>
-                      {registrationOptions.branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
-                    </select>
-                  </div>
+                {userForm.role !== 'Administrator' && (
+                  <>
+                    <div>
+                      <label className="block font-bold text-muted-foreground mb-1">
+                        Store/Branch *
+                      </label>
+                      <select
+                        value={userForm.branch_id || ''}
+                        onChange={e => setUserForm(f => ({ ...f, branch_id: e.target.value }))}
+                        required
+                        className="w-full border border-border rounded-xl px-3 py-2 bg-card text-foreground cursor-pointer [color-scheme:dark] [&>option]:bg-[#0f172a] [&>option]:text-white"
+                      >
+                        <option value="" className="bg-[#0f172a] text-white">Select a branch</option>
+                        {registrationOptions.branches.map(b => (
+                          <option key={b.id} value={b.id} className="bg-[#0f172a] text-white">{b.name}</option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block font-bold text-muted-foreground mb-1">
+                          Attendance PIN (4-6 digits)
+                        </label>
+                        <input
+                          type="password"
+                          maxLength={6}
+                          value={userForm.attendance_pin || ''}
+                          onChange={e => setUserForm(f => ({ ...f, attendance_pin: e.target.value.replace(/\D/g, '') }))}
+                          placeholder="4-6 numeric digits"
+                          className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground font-mono text-center tracking-widest text-xs"
+                        />
+                      </div>
+                      <div>
+                        <label className="block font-bold text-muted-foreground mb-1">
+                          Confirm Attendance PIN
+                        </label>
+                        <input
+                          type="password"
+                          maxLength={6}
+                          value={userForm.confirm_attendance_pin || ''}
+                          onChange={e => setUserForm(f => ({ ...f, confirm_attendance_pin: e.target.value.replace(/\D/g, '') }))}
+                          placeholder="••••"
+                          className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground font-mono text-center tracking-widest text-xs"
+                        />
+                      </div>
+                    </div>
+                  </>
                 )}
 
                 <div className="flex justify-between gap-2 pt-5 mt-4 border-t border-border">
@@ -1957,14 +2058,15 @@ function trimName(emp) {
 
 function getUserBranchName(u, registrationOptions = { branches: [] }) {
   if (!u) return '—'
+  if (u.branch?.name) return u.branch.name
+  if (typeof u.branch === 'string' && u.branch) return u.branch
+  if (u.branch_name) return u.branch_name
   if (u.employee?.branch?.name) return u.employee.branch.name
   if (typeof u.employee?.branch === 'string' && u.employee.branch) return u.employee.branch
   if (u.employee?.branch_name) return u.employee.branch_name
   if (u.customer?.branch?.name) return u.customer.branch.name
   if (typeof u.customer?.branch === 'string' && u.customer.branch) return u.customer.branch
   if (u.customer?.branch_name) return u.customer.branch_name
-  if (u.branch_name) return u.branch_name
-  if (u.branch?.name) return u.branch.name
   const branchId = u.employee?.branch_id || u.customer?.branch_id || u.branch_id
   if (branchId && registrationOptions?.branches?.length) {
     const b = registrationOptions.branches.find(x => String(x.id) === String(branchId))

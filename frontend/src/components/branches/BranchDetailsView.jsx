@@ -31,9 +31,9 @@ export default function BranchDetailsView({ branchData, onBack }) {
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
 
   // Extract branch name for image generation and filtering
-  const branchName = localBranchData.branch
+  const branchName = localBranchData.branch || localBranchData.name
   const [heroImage, setHeroImage] = useState(
-    localBranchData.image || `https://picsum.photos/seed/${branchName.replace(/\s+/g, '')}/1200/400`
+    localBranchData.image_url || localBranchData.image || ''
   )
 
   const handleImageUpload = async (e) => {
@@ -47,8 +47,14 @@ export default function BranchDetailsView({ branchData, onBack }) {
     showLoading('Uploading image...')
     try {
       const res = await api.branches.uploadImage(branchData.id, formData)
-      if (res.image_url) {
-        setHeroImage(res.image_url)
+      const newImg = res.image_url || res.branch?.image_url
+      if (newImg) {
+        setHeroImage(newImg)
+        setLocalBranchData(prev => ({
+          ...prev,
+          image_url: newImg,
+          image: newImg,
+        }))
         showToast('Photo changed successfully', 'success')
       }
     } catch (error) {
@@ -67,14 +73,24 @@ export default function BranchDetailsView({ branchData, onBack }) {
     try {
       const res = await api.branches.update(id, formData)
       if (res.branch) {
+        const updated = res.branch
+        const newImg = updated.image_url || res.image_url
         // Update local state to immediately reflect changes
-        setLocalBranchData({
-          ...localBranchData,
-          branch: res.branch.name,
-          location: res.branch.location,
-          manager: res.branch.manager_name,
-          contact: res.branch.contact_number,
-        })
+        setLocalBranchData(prev => ({
+          ...prev,
+          ...updated,
+          branch: updated.name || prev.branch,
+          name: updated.name || prev.name,
+          location: updated.location !== undefined ? updated.location : prev.location,
+          manager: updated.manager || updated.manager_name || prev.manager,
+          contact: updated.contact_number !== undefined ? updated.contact_number : prev.contact,
+          contact_number: updated.contact_number !== undefined ? updated.contact_number : prev.contact_number,
+          image_url: newImg || prev.image_url,
+          image: newImg || prev.image,
+        }))
+        if (newImg) {
+          setHeroImage(newImg)
+        }
         showToast('Branch updated successfully', 'success')
       }
     } catch (error) {
@@ -115,12 +131,19 @@ export default function BranchDetailsView({ branchData, onBack }) {
     <div className="space-y-6 animate-fadeIn pb-12">
       {/* ─── BRANCH HERO SECTION ─── */}
       <div className="bg-card border border-border rounded-2xl overflow-hidden shadow-sm">
-        <div className="relative w-full h-48 sm:h-64 group">
-          <img 
-            src={heroImage} 
-            alt={branchName}
-            className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105"
-          />
+        <div className="relative w-full h-48 sm:h-64 group bg-slate-900 overflow-hidden">
+          {heroImage ? (
+            <img 
+              src={heroImage} 
+              alt={branchName}
+              className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105"
+              onError={() => setHeroImage('')}
+            />
+          ) : (
+            <div className="w-full h-full flex items-center justify-center bg-gradient-to-r from-[#176B87]/30 via-slate-800/50 to-slate-900/80">
+              <FiMapPin className="w-16 h-16 text-muted-foreground/20" />
+            </div>
+          )}
 
           {canEditImage && (
             <>

@@ -52,7 +52,7 @@ function LedgerTable({ title, icon, items, type, onView, onDelete }) {
                       src={inst.image_url.startsWith('http') ? inst.image_url : `http://127.0.0.1:8000${inst.image_url}`} 
                       alt={inst.product}
                       className="w-10 h-10 rounded object-cover border border-border bg-white"
-                      onError={(e) => { e.target.src = 'https://via.placeholder.com/40?text=No+Image'; }}
+                      onError={(e) => { e.target.style.display = 'none'; }}
                     />
                   ) : (
                     <div className="w-10 h-10 rounded bg-muted flex items-center justify-center border border-border text-slate-400">

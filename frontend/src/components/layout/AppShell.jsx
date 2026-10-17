@@ -5,7 +5,7 @@ import {
   FiCalendar, FiUser, FiClock, FiFileText,
   FiBarChart2, FiSettings, FiShield, FiDatabase, FiActivity,
   FiSun, FiMoon, FiSearch, FiLogOut, FiMenu, FiChevronDown,
-  FiCheckCircle, FiX, FiBell, FiCamera, FiLayers, FiDollarSign, FiMessageSquare
+  FiCheckCircle, FiX, FiBell, FiCamera, FiLayers, FiMessageSquare
 } from 'react-icons/fi'
 import { useAuth } from '../../context/AuthContext'
 import { NotificationBell, showToast } from '../ui'
@@ -13,7 +13,7 @@ import { api } from '../../lib/api'
 import { useRealtimeSync, triggerDataSync } from '../../lib/realtimeSync'
 import { useTheme } from '../../context/ThemeContext'
 import ProfileModal from './ProfileModal'
-import CompanyConfigurationModal from '../CompanyConfigurationModal'
+import CompanyConfigurationModal, { resolveLogoUrl } from '../CompanyConfigurationModal'
 import EmployeePinVerificationModal from '../attendance/EmployeePinVerificationModal'
 import { TbCurrencyPeso } from 'react-icons/tb'
 
@@ -24,9 +24,9 @@ const icons = {
   sales: <FiShoppingCart className="w-4 h-4 flex-shrink-0" />,
   installment: <FiCreditCard className="w-4 h-4 flex-shrink-0" />,
   schedule: <FiCalendar className="w-4 h-4 flex-shrink-0" />,
-  payments: <FiDollarSign className="w-4 h-4 flex-shrink-0" />,
+  payments: <TbCurrencyPeso className="w-4 h-4 flex-shrink-0" />,
   employees: <FiUsers className="w-4 h-4 flex-shrink-0" />,
-  payroll: <FiDollarSign className="w-4 h-4 flex-shrink-0" />,
+  payroll: <TbCurrencyPeso className="w-4 h-4 flex-shrink-0" />,
   attendance: <FiClock className="w-4 h-4 flex-shrink-0" />,
   qr: <FiCamera className="w-4 h-4 flex-shrink-0" />,
   reports: <FiBarChart2 className="w-4 h-4 flex-shrink-0" />,
@@ -127,7 +127,7 @@ function navByRole(role, onOpenConfig) {
 
   base.push({ label: 'Reports', path: '/reports', icon: icons.reports })
 
-  base.push({ label: 'Customer Support', path: '/support', icon: icons.support })
+  base.push({ label: 'Customer Support', path: '/admin/support', icon: icons.support })
 
   if (isAdmin) {
     base.push({ label: 'Company Configuration', action: onOpenConfig, icon: icons.settings })
@@ -147,11 +147,11 @@ function SidebarGroup({ group, collapsed }) {
       <button
         onClick={() => !collapsed && setOpen(o => !o)}
         title={collapsed ? group.label : undefined}
-        className={`w-full flex items-center gap-2.5 px-3 py-2 text-xs font-semibold uppercase tracking-wider transition-colors cursor-pointer rounded-xl mx-1 ${isActive ? 'text-foreground' : 'text-muted-foreground hover:text-foreground'
+        className={`w-full flex items-center gap-2.5 px-3 py-2 text-xs font-semibold uppercase tracking-wider transition-colors cursor-pointer rounded-xl mx-1 ${isActive ? 'text-emerald-700 dark:text-emerald-300' : 'text-slate-700 dark:text-emerald-200/70 hover:text-emerald-800 dark:hover:text-white hover:bg-emerald-500/10'
           }`}
         style={{ width: collapsed ? 44 : 'calc(100% - 8px)' }}
       >
-        <span className="flex-shrink-0">{group.icon}</span>
+        <span className="flex-shrink-0 text-emerald-800 dark:text-emerald-400">{group.icon}</span>
         {!collapsed && (
           <>
             <span className="flex-1 text-left truncate">{group.label}</span>
@@ -160,21 +160,25 @@ function SidebarGroup({ group, collapsed }) {
         )}
       </button>
       {(open || collapsed) && (
-        <div className={collapsed ? '' : 'ml-3 border-l border-border pl-2 space-y-0.5 mt-0.5'}>
+        <div className={collapsed ? '' : 'ml-3 border-l border-emerald-500/25 pl-2 space-y-0.5 mt-0.5'}>
           {group.items.map(item => (
             <NavLink
               key={item.path}
               to={item.path}
               title={collapsed ? item.label : undefined}
               className={({ isActive }) =>
-                `flex items-center gap-2.5 px-3 py-2 text-xs rounded-xl transition-colors cursor-pointer ${location.pathname === item.path
-                  ? 'bg-primary text-primary-foreground font-semibold shadow-xs'
-                  : 'text-muted-foreground hover:bg-muted/50 hover:text-foreground'
+                `flex items-center gap-2.5 px-3 py-2 text-xs rounded-xl transition-all cursor-pointer ${location.pathname === item.path
+                  ? 'bg-gradient-to-r from-emerald-600 via-emerald-600 to-teal-700 text-white font-bold shadow-md shadow-emerald-950/40 border border-emerald-400/30'
+                  : 'text-slate-700 dark:text-emerald-100/70 hover:bg-emerald-500/10 hover:text-emerald-950 dark:hover:text-white'
                 }`
               }
             >
-              {item.icon}
-              {!collapsed && <span className="truncate">{item.label}</span>}
+              {({ isActive }) => (
+                <>
+                  <span className={`flex-shrink-0 ${isActive ? 'text-white' : 'text-emerald-800 dark:text-emerald-400'}`}>{item.icon}</span>
+                  {!collapsed && <span className="truncate">{item.label}</span>}
+                </>
+              )}
             </NavLink>
           ))}
         </div>
@@ -203,33 +207,38 @@ function Sidebar({ collapsed, settings, mobileOpen, onCloseMobile, onOpenConfig 
       )}
 
       <aside
-        className={`flex flex-col h-full overflow-hidden flex-shrink-0 transition-all duration-200 print:hidden dark:bg-card dark:border-r dark:border-white/10 ${mobileOpen
+        className={`sidebar-shell flex flex-col h-full overflow-hidden flex-shrink-0 transition-all duration-200 print:hidden ${mobileOpen
             ? 'fixed inset-y-0 left-0 z-50 shadow-2xl flex'
             : 'hidden lg:flex'
           }`}
-        style={{ width: mobileOpen ? 260 : (collapsed ? 64 : 240), backgroundColor: 'var(--card)' }}
+        style={{ width: mobileOpen ? 260 : (collapsed ? 64 : 240) }}
       >
         {/* Logo */}
-        <div className="flex items-center justify-between px-4 py-4 border-b border-white/10 flex-shrink-0">
+        <div className="flex items-center justify-between px-4 py-4 border-b border-emerald-500/15 flex-shrink-0">
           <div className="flex items-center gap-2.5 min-w-0">
-            {settings?.logo ? (
-              <img src={`http://localhost:8000${settings.logo}`} alt="Logo" className="w-8 h-8 rounded-xl object-cover flex-shrink-0 shadow-xs bg-white" />
+            {resolveLogoUrl(settings?.logo_url || settings?.logo) ? (
+              <img
+                src={resolveLogoUrl(settings?.logo_url || settings?.logo)}
+                alt="Logo"
+                className="w-8 h-8 rounded-xl object-contain flex-shrink-0 shadow-xs bg-white p-0.5"
+                onError={(e) => { e.currentTarget.style.display = 'none'; }}
+              />
             ) : (
-              <div className="w-8 h-8 rounded-xl bg-primary flex items-center justify-center text-primary-foreground font-bold text-sm flex-shrink-0 shadow-xs">
-                {companyName.charAt(0)}
+              <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-emerald-600 via-emerald-700 to-amber-600 border border-amber-400/30 flex items-center justify-center text-amber-100 font-bold text-sm flex-shrink-0 shadow-xs">
+                {(companyName || 'P').charAt(0).toUpperCase()}
               </div>
             )}
             {(!collapsed || mobileOpen) && (
               <div className="overflow-hidden">
-                <div className="text-foreground font-bold text-sm tracking-wide leading-tight truncate">{companyName}</div>
-                <div className="text-muted-foreground text-[9px] font-mono leading-tight truncate">{siteName}</div>
+                <div className="text-emerald-950 dark:text-emerald-50 font-bold text-sm tracking-wide leading-tight truncate">{companyName}</div>
+                <div className="text-emerald-700 dark:text-emerald-300/80 text-[9px] font-mono leading-tight truncate">{siteName}</div>
               </div>
             )}
           </div>
           {mobileOpen && (
             <button
               onClick={onCloseMobile}
-              className="lg:hidden text-muted-foreground hover:text-foreground p-1 rounded-lg hover:bg-muted cursor-pointer"
+              className="lg:hidden text-emerald-800 dark:text-emerald-200 hover:text-foreground p-1 rounded-lg hover:bg-emerald-500/15 cursor-pointer"
               aria-label="Close menu"
             >
               <FiX className="w-5 h-5" />
@@ -247,9 +256,9 @@ function Sidebar({ collapsed, settings, mobileOpen, onCloseMobile, onOpenConfig 
                 key={entry.label}
                 onClick={(e) => { e.preventDefault(); entry.action(); }}
                 title={collapsed && !mobileOpen ? entry.label : undefined}
-                className="w-full text-left flex items-center gap-2.5 px-3 py-2 text-xs rounded-xl transition-colors cursor-pointer text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+                className="w-full text-left flex items-center gap-2.5 px-3 py-2 text-xs rounded-xl transition-all cursor-pointer text-slate-700 dark:text-emerald-100/70 hover:bg-emerald-500/10 hover:text-emerald-950 dark:hover:text-white"
               >
-                <span className="flex-shrink-0">{entry.icon}</span>
+                <span className="flex-shrink-0 text-emerald-800 dark:text-emerald-400">{entry.icon}</span>
                 {(!collapsed || mobileOpen) && <span className="truncate flex-1">{entry.label}</span>}
               </button>
             ) : (
@@ -258,18 +267,22 @@ function Sidebar({ collapsed, settings, mobileOpen, onCloseMobile, onOpenConfig 
                 to={entry.path}
                 title={collapsed && !mobileOpen ? entry.label : undefined}
                 className={({ isActive }) =>
-                  `flex items-center gap-2.5 px-3 py-2 text-xs rounded-xl transition-colors cursor-pointer ${isActive
-                    ? 'bg-primary text-primary-foreground font-semibold shadow-xs'
-                    : 'text-muted-foreground hover:bg-muted/50 hover:text-foreground'
+                  `flex items-center gap-2.5 px-3 py-2 text-xs rounded-xl transition-all cursor-pointer ${isActive
+                    ? 'bg-gradient-to-r from-emerald-600 via-emerald-600 to-teal-700 text-white font-bold shadow-md shadow-emerald-950/40 border border-emerald-400/30'
+                    : 'text-slate-700 dark:text-emerald-100/70 hover:bg-emerald-500/10 hover:text-emerald-950 dark:hover:text-white'
                   }`
                 }
               >
-                <span className="flex-shrink-0">{entry.icon}</span>
-                {(!collapsed || mobileOpen) && <span className="truncate flex-1">{entry.label}</span>}
-                {(!collapsed || mobileOpen) && entry.badge && (
-                  <span className="text-[10px] font-bold font-mono bg-rose-500 text-white px-1.5 py-0.2 rounded-full shrink-0">
-                    {entry.badge}
-                  </span>
+                {({ isActive }) => (
+                  <>
+                    <span className={`flex-shrink-0 ${isActive ? 'text-white' : 'text-emerald-800 dark:text-emerald-400'}`}>{entry.icon}</span>
+                    {(!collapsed || mobileOpen) && <span className="truncate flex-1">{entry.label}</span>}
+                    {(!collapsed || mobileOpen) && entry.badge && (
+                      <span className="text-[10px] font-bold font-mono bg-rose-600 text-white px-1.5 py-0.2 rounded-full shrink-0">
+                        {entry.badge}
+                      </span>
+                    )}
+                  </>
                 )}
               </NavLink>
             )
@@ -305,20 +318,20 @@ function SystemStorageWidget({ collapsed, mobileOpen }) {
   const percentage = storage.total > 0 ? ((storage.used / storage.total) * 100).toFixed(1) : 0
 
   return (
-    <div className={`mx-3 mb-4 mt-2 p-3.5 rounded-2xl bg-transparent`}>
+    <div className={`mx-3 mb-4 mt-2 p-3.5 rounded-2xl bg-emerald-950/15 dark:bg-emerald-950/50 border border-emerald-500/20 backdrop-blur-md`}>
       <div className="flex items-center justify-between mb-2.5">
-        <span className="text-[11px] font-medium text-muted-foreground tracking-wide">System storage</span>
-        <span className="text-xs font-bold text-foreground tracking-tight">{percentage}%</span>
+        <span className="text-[11px] font-semibold text-emerald-800 dark:text-emerald-300 tracking-wide">System storage</span>
+        <span className="text-xs font-bold text-emerald-950 dark:text-emerald-100 tracking-tight font-mono">{percentage}%</span>
       </div>
       
-      <div className="h-1.5 w-full bg-slate-200 dark:bg-slate-800/80 rounded-full overflow-hidden mb-2.5">
+      <div className="h-1.5 w-full bg-slate-200 dark:bg-emerald-950/80 rounded-full overflow-hidden mb-2.5 border border-emerald-500/10">
         <div 
-          className="h-full bg-gradient-to-r from-[#4F8AFF] to-[#40C9FF] rounded-full" 
+          className="h-full bg-gradient-to-r from-emerald-500 via-teal-400 to-amber-400 rounded-full shadow-[0_0_8px_rgba(52,211,153,0.5)] transition-all duration-500" 
           style={{ width: `${Math.min(100, percentage)}%` }}
         ></div>
       </div>
       
-      <div className="text-[10px] text-muted-foreground/80 font-medium tracking-wide">
+      <div className="text-[10px] text-emerald-700/80 dark:text-emerald-300/70 font-mono">
         {formatGB(storage.used)} GB of {formatGB(storage.total)} GB used
       </div>
     </div>
@@ -335,10 +348,10 @@ function RealTimeClock() {
 
   return (
     <div className="hidden lg:flex flex-col items-end mr-4 text-right">
-      <span className="text-xs font-bold font-mono text-foreground tracking-tight">
+      <span className="text-xs font-bold font-mono text-emerald-950 dark:text-white tracking-tight">
         {time.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
       </span>
-      <span className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider">
+      <span className="text-[10px] text-emerald-700 dark:text-emerald-400 font-semibold uppercase tracking-wider">
         {time.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })}
       </span>
     </div>
@@ -474,19 +487,19 @@ function Header({
   }
 
   return (
-    <header className="h-14 border-b border-border bg-card px-4 flex items-center justify-between gap-4 flex-shrink-0 z-30 print:hidden">
+    <header className="header-shell h-14 px-4 flex items-center justify-between gap-4 flex-shrink-0 z-30 print:hidden">
       {/* Left: toggle + title */}
       <div className="flex items-center gap-3">
         {user?.role !== 'Customer' && (
           <button
             onClick={onToggle}
-            className="w-8 h-8 rounded-xl hover:bg-muted flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+            className="w-8 h-8 rounded-xl border border-emerald-500/20 bg-emerald-950/10 dark:bg-emerald-950/30 hover:bg-emerald-500/20 flex items-center justify-center text-emerald-800 dark:text-emerald-200 hover:text-emerald-950 dark:hover:text-white transition-colors cursor-pointer"
             aria-label="Toggle sidebar"
           >
             <FiMenu className="w-4 h-4" />
           </button>
         )}
-        <h1 className="text-sm font-bold text-foreground truncate">{title}</h1>
+        <h1 className="text-sm font-bold text-emerald-950 dark:text-emerald-50 truncate tracking-wide">{title}</h1>
       </div>
 
       {/* Center: Live Global Search Bar */}
@@ -503,11 +516,11 @@ function Header({
             onFocus={() => setSearchOpen(true)}
             onKeyDown={handleSearchKeyDown}
             placeholder="Search records across system (Ctrl+K)..."
-            className="w-full h-9 pl-9 pr-16 text-xs rounded-xl border border-border bg-muted/40 text-foreground placeholder:text-muted-foreground/70 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
+            className="w-full h-9 pl-9 pr-16 text-xs rounded-xl border border-emerald-500/25 dark:border-emerald-500/25 bg-emerald-50/50 dark:bg-emerald-950/40 text-emerald-950 dark:text-emerald-50 placeholder:text-emerald-700/50 dark:placeholder:text-emerald-300/40 focus:outline-none focus:ring-2 focus:ring-emerald-500/30 focus:border-emerald-500 transition-all"
           />
-          <div className="absolute left-3 top-2.5 text-muted-foreground pointer-events-none">
+          <div className="absolute left-3 top-2.5 text-emerald-600 dark:text-emerald-400 pointer-events-none">
             {isSearching ? (
-              <svg className="animate-spin w-4 h-4 text-primary" fill="none" viewBox="0 0 24 24">
+              <svg className="animate-spin w-4 h-4 text-emerald-500" fill="none" viewBox="0 0 24 24">
                 <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                 <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
               </svg>
@@ -520,13 +533,13 @@ function Header({
               <button
                 type="button"
                 onClick={() => { setSearchQuery(''); setSearchResults([]); setGroupedResults({}); }}
-                className="text-muted-foreground hover:text-foreground p-0.5 rounded cursor-pointer"
+                className="text-emerald-700 dark:text-emerald-300 hover:text-foreground p-0.5 rounded cursor-pointer"
                 title="Clear search query"
               >
                 <FiX className="w-3.5 h-3.5" />
               </button>
             )}
-            <kbd className="hidden lg:inline-block px-1.5 py-0.5 text-[10px] font-mono text-muted-foreground bg-muted border border-border rounded shadow-2xs">
+            <kbd className="hidden lg:inline-block px-1.5 py-0.5 text-[10px] font-mono text-emerald-700 dark:text-emerald-300 bg-emerald-100/60 dark:bg-emerald-900/40 border border-emerald-500/25 rounded shadow-2xs">
               Ctrl+K
             </kbd>
           </div>
@@ -534,21 +547,21 @@ function Header({
 
         {/* Global Search Dropdown Modal */}
         {searchOpen && (
-          <div className="absolute top-11 left-0 right-0 !bg-white dark:!bg-[#0f172a] rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xl z-50 overflow-hidden max-h-[420px] flex flex-col animate-[slideUp_0.15s_ease]">
-            <div className="p-2.5 border-b border-slate-200 dark:border-slate-800 !bg-slate-50 dark:!bg-[#1e293b] flex items-center justify-between text-[11px] text-muted-foreground">
+          <div className="absolute top-11 left-0 right-0 !bg-white/95 dark:!bg-[#071d14]/95 backdrop-blur-xl rounded-2xl border border-emerald-500/30 shadow-2xl z-50 overflow-hidden max-h-[420px] flex flex-col animate-[slideUp_0.15s_ease]">
+            <div className="p-2.5 border-b border-emerald-500/20 !bg-emerald-50/70 dark:!bg-emerald-950/70 flex items-center justify-between text-[11px] text-emerald-800 dark:text-emerald-300">
               <span>
                 {searchQuery.trim().length < 2
                   ? 'Type at least 2 characters to search MySQL database...'
                   : `${totalMatches} matching record${totalMatches === 1 ? '' : 's'} found`}
               </span>
-              {isSearching && <span className="text-primary font-medium animate-pulse">Searching database...</span>}
+              {isSearching && <span className="text-emerald-600 dark:text-emerald-400 font-medium animate-pulse">Searching database...</span>}
             </div>
 
-            <div className="overflow-y-auto flex-1 p-1 divide-y divide-border/50 !bg-white dark:!bg-[#0f172a]" ref={listRef}>
+            <div className="overflow-y-auto flex-1 p-1 divide-y divide-emerald-500/10 !bg-transparent" ref={listRef}>
               {searchQuery.trim().length >= 2 && searchResults.length === 0 && !isSearching && (
                 <div className="py-8 text-center text-xs text-muted-foreground">
-                  <FiSearch className="w-8 h-8 mx-auto text-muted-foreground/30 mb-1" />
-                  <p className="font-semibold text-foreground">No matching database records found</p>
+                  <FiSearch className="w-8 h-8 mx-auto text-emerald-500/30 mb-1" />
+                  <p className="font-semibold text-emerald-950 dark:text-white">No matching database records found</p>
                   <p className="text-[11px] text-muted-foreground mt-0.5">Try searching by employee name, code, customer, SKU, invoice #, or log keyword.</p>
                 </div>
               )}
@@ -559,9 +572,9 @@ function Header({
 
                 return (
                   <div key={groupCategory} className="py-1">
-                    <div className="px-3 py-1 text-[10px] font-bold text-muted-foreground uppercase tracking-wider flex items-center justify-between">
+                    <div className="px-3 py-1 text-[10px] font-bold text-emerald-700 dark:text-emerald-400 uppercase tracking-wider flex items-center justify-between">
                       <span>{groupCategory}</span>
-                      <span className="font-mono text-[9px] bg-muted px-1.5 py-0.2 rounded text-foreground">{groupItems.length}</span>
+                      <span className="font-mono text-[9px] bg-emerald-500/15 text-emerald-800 dark:text-emerald-200 px-1.5 py-0.2 rounded">{groupItems.length}</span>
                     </div>
 
                     {groupItems.map((item) => {
@@ -573,7 +586,7 @@ function Header({
                           key={item.id}
                           onClick={() => handleSelectResult(item)}
                           onMouseEnter={() => setSelectedIndex(flatIndex)}
-                          className={`px-3 py-2 text-xs rounded-xl cursor-pointer flex items-center justify-between gap-3 transition-colors ${isSelected ? 'bg-primary text-primary-foreground font-medium shadow-xs' : 'hover:bg-muted text-foreground'
+                          className={`px-3 py-2 text-xs rounded-xl cursor-pointer flex items-center justify-between gap-3 transition-colors ${isSelected ? 'bg-gradient-to-r from-emerald-600 to-emerald-700 text-white font-medium shadow-xs border border-emerald-400/30' : 'hover:bg-emerald-500/10 text-foreground'
                             }`}
                         >
                           <div className="flex items-center gap-2.5 min-w-0">
@@ -582,13 +595,13 @@ function Header({
                               <div className="font-semibold truncate flex items-center gap-1.5">
                                 <span>{item.title}</span>
                               </div>
-                              <div className={`text-[11px] truncate ${isSelected ? 'text-primary-foreground/80' : 'text-muted-foreground'}`}>
+                              <div className={`text-[11px] truncate ${isSelected ? 'text-white/80' : 'text-muted-foreground'}`}>
                                 {item.subtitle}
                               </div>
                             </div>
                           </div>
 
-                          <span className={`text-[10px] font-mono shrink-0 ${isSelected ? 'text-primary-foreground/80' : 'text-muted-foreground'}`}>
+                          <span className={`text-[10px] font-mono shrink-0 ${isSelected ? 'text-white/80' : 'text-muted-foreground'}`}>
                             {item.module} →
                           </span>
                         </div>
@@ -600,13 +613,13 @@ function Header({
             </div>
 
             {searchResults.length > 0 && (
-              <div className="p-2 border-t border-border bg-muted/20 flex items-center justify-between text-[10px] text-muted-foreground">
+              <div className="p-2 border-t border-emerald-500/20 bg-emerald-950/10 dark:bg-emerald-950/30 flex items-center justify-between text-[10px] text-muted-foreground">
                 <span className="flex items-center gap-2">
                   <span><kbd className="px-1 py-0.5 bg-muted rounded border border-border">↑</kbd> <kbd className="px-1 py-0.5 bg-muted rounded border border-border">↓</kbd> Navigate</span>
                   <span><kbd className="px-1 py-0.5 bg-muted rounded border border-border">↵</kbd> Select</span>
                   <span><kbd className="px-1 py-0.5 bg-muted rounded border border-border">Esc</kbd> Close</span>
                 </span>
-                <span className="text-[9px] text-muted-foreground font-mono">Live Search</span>
+                <span className="text-[9px] text-emerald-600 dark:text-emerald-400 font-mono">Live Search</span>
               </div>
             )}
           </div>
@@ -624,7 +637,7 @@ function Header({
             setTimeout(() => searchInputRef.current?.focus(), 100)
           }}
           title="Search system"
-          className="sm:hidden w-9 h-9 flex items-center justify-center rounded-xl border border-border bg-muted/40 hover:bg-muted text-foreground transition-colors cursor-pointer text-base shadow-2xs"
+          className="sm:hidden w-9 h-9 flex items-center justify-center rounded-xl border border-emerald-500/25 bg-emerald-50/50 dark:bg-emerald-950/40 hover:bg-emerald-500/20 text-emerald-900 dark:text-emerald-100 transition-colors cursor-pointer text-base shadow-2xs"
         >
           <FiSearch className="w-4 h-4" />
         </button>
@@ -633,9 +646,9 @@ function Header({
         <button
           onClick={toggleMode}
           title={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
-          className="w-9 h-9 flex items-center justify-center rounded-xl border border-border bg-muted/40 hover:bg-muted text-foreground transition-colors cursor-pointer text-base shadow-2xs"
+          className="w-9 h-9 flex items-center justify-center rounded-xl border border-emerald-500/25 bg-emerald-50/50 dark:bg-emerald-950/40 hover:bg-emerald-500/20 text-emerald-900 dark:text-emerald-100 transition-colors cursor-pointer text-base shadow-2xs"
         >
-          {isDark ? <FiSun className="w-4 h-4 text-amber-500" /> : <FiMoon className="w-4 h-4 text-foreground" />}
+          {isDark ? <FiSun className="w-4 h-4 text-amber-400 drop-shadow-[0_0_6px_rgba(251,191,36,0.6)]" /> : <FiMoon className="w-4 h-4 text-emerald-700 dark:text-emerald-300" />}
         </button>
 
         {/* Real Notification Bell with Live DB Count & Dropdown */}
@@ -652,9 +665,9 @@ function Header({
         <div className="relative" ref={userRef}>
           <button
             onClick={() => setUserOpen(o => !o)}
-            className="flex items-center gap-2 px-2.5 py-1.5 rounded-xl border border-border bg-muted/30 hover:bg-muted transition-colors cursor-pointer shadow-2xs"
+            className="flex items-center gap-2 px-2.5 py-1.5 rounded-xl border border-emerald-500/25 bg-emerald-50/50 dark:bg-emerald-950/40 hover:bg-emerald-500/20 transition-colors cursor-pointer shadow-2xs"
           >
-            <div className="w-7 h-7 rounded-full bg-primary flex items-center justify-center text-primary-foreground text-xs font-bold overflow-hidden shadow-xs shrink-0">
+            <div className="w-7 h-7 rounded-full bg-gradient-to-br from-emerald-600 to-amber-600 border border-amber-400/30 flex items-center justify-center text-amber-100 text-xs font-bold overflow-hidden shadow-xs shrink-0">
               {user?.profile_image ? (
                 <img src={user.profile_image} alt="Profile" className="w-full h-full object-cover" />
               ) : (
@@ -662,43 +675,43 @@ function Header({
               )}
             </div>
             <div className="hidden sm:block text-left">
-              <div className="text-xs font-semibold text-foreground leading-tight">{user?.name ? user.name.split(' ')[0] : 'User'}</div>
-              <div className="text-[10px] text-muted-foreground font-mono leading-tight">{user?.role}</div>
+              <div className="text-xs font-semibold text-emerald-950 dark:text-emerald-50 leading-tight">{user?.name ? user.name.split(' ')[0] : 'User'}</div>
+              <div className="text-[10px] text-emerald-700 dark:text-emerald-300/80 font-mono leading-tight">{user?.role}</div>
             </div>
           </button>
           {userOpen && (
-            <div className="absolute right-0 top-12 w-56 !bg-white dark:!bg-[#0f172a] rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xl z-40 overflow-hidden animate-[slideUp_0.15s_ease]">
-              <div className="px-4 py-3 border-b border-slate-200 dark:border-slate-800 !bg-slate-50 dark:!bg-[#1e293b]">
-                <div className="text-xs font-bold text-foreground truncate">{user.name}</div>
-                <div className="text-[11px] text-muted-foreground font-mono truncate">{user.username}</div>
+            <div className="absolute right-0 top-12 w-56 !bg-white/95 dark:!bg-[#071d14]/95 backdrop-blur-xl rounded-2xl border border-emerald-500/30 shadow-2xl z-40 overflow-hidden animate-[slideUp_0.15s_ease]">
+              <div className="px-4 py-3 border-b border-emerald-500/20 !bg-emerald-50/70 dark:!bg-emerald-950/70">
+                <div className="text-xs font-bold text-emerald-950 dark:text-white truncate">{user.name}</div>
+                <div className="text-[11px] text-emerald-700 dark:text-emerald-300 font-mono truncate">{user.username}</div>
               </div>
-              <div className="p-1 space-y-0.5 !bg-white dark:!bg-[#0f172a]">
+              <div className="p-1 space-y-0.5 !bg-transparent">
                 <button
                   onClick={() => { onOpenProfile?.(); setUserOpen(false) }}
-                  className="w-full text-left px-3 py-2 text-xs text-foreground hover:bg-slate-100 dark:hover:bg-slate-800/80 rounded-xl cursor-pointer flex items-center gap-2 font-medium transition-colors"
+                  className="w-full text-left px-3 py-2 text-xs text-foreground hover:bg-emerald-500/10 rounded-xl cursor-pointer flex items-center gap-2 font-medium transition-colors"
                 >
-                  <FiUser className="w-3.5 h-3.5 text-primary" />
+                  <FiUser className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
                   <span>Profile Information</span>
                 </button>
                 <button
                   onClick={() => { navigate('/notifications'); setUserOpen(false) }}
-                  className="w-full text-left px-3 py-2 text-xs text-foreground hover:bg-slate-100 dark:hover:bg-slate-800/80 rounded-xl cursor-pointer flex items-center gap-2 font-medium transition-colors"
+                  className="w-full text-left px-3 py-2 text-xs text-foreground hover:bg-emerald-500/10 rounded-xl cursor-pointer flex items-center gap-2 font-medium transition-colors"
                 >
-                  <FiBell className="w-3.5 h-3.5 text-primary" />
+                  <FiBell className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
                   <span>Notifications</span>
                 </button>
                 {(user?.role === 'Administrator' || user?.role === 'Store Administrator' || user?.role === 'Store Admin') && (
                   <button
                     onClick={() => { onOpenConfig?.(); setUserOpen(false) }}
-                    className="w-full text-left px-3 py-2 text-xs text-foreground hover:bg-slate-100 dark:hover:bg-slate-800/80 rounded-xl cursor-pointer flex items-center gap-2 font-medium transition-colors"
+                    className="w-full text-left px-3 py-2 text-xs text-foreground hover:bg-emerald-500/10 rounded-xl cursor-pointer flex items-center gap-2 font-medium transition-colors"
                   >
-                    <FiSettings className="w-3.5 h-3.5 text-primary" />
+                    <FiSettings className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
                     <span>{(user?.role === 'Store Administrator' || user?.role === 'Store Admin') ? 'Branch Configuration' : 'Company Configuration'}</span>
                   </button>
                 )}
                 <button
                   onClick={async () => { await logout(); navigate('/login') }}
-                  className="w-full text-left px-3 py-2 text-xs text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-xl cursor-pointer flex items-center gap-2 font-bold transition-colors border-t border-slate-200 dark:border-slate-800 mt-1"
+                  className="w-full text-left px-3 py-2 text-xs text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-xl cursor-pointer flex items-center gap-2 font-bold transition-colors border-t border-emerald-500/20 mt-1"
                 >
                   <FiLogOut className="w-3.5 h-3.5" />
                   <span>Logout</span>
@@ -758,6 +771,7 @@ export default function AppShell() {
   const location = useLocation()
   const navigate = useNavigate()
   const { user } = useAuth()
+  const pageTitle = ROUTE_TITLES[location.pathname] || 'Z-LICZ'
 
   useEffect(() => {
     setMobileMenuOpen(false)
@@ -825,6 +839,22 @@ export default function AppShell() {
     return () => clearInterval(timer)
   }, [user])
 
+  useEffect(() => {
+    const handleSettingsUpdated = (e) => {
+      if (e.detail) {
+        setAppSettings(prev => ({ ...(prev || {}), ...e.detail }))
+      }
+    }
+    window.addEventListener('system:settingsUpdated', handleSettingsUpdated)
+    return () => window.removeEventListener('system:settingsUpdated', handleSettingsUpdated)
+  }, [])
+
+  useEffect(() => {
+    if (appSettings?.company_name) {
+      document.title = `${appSettings.company_name} | ${pageTitle}`
+    }
+  }, [appSettings?.company_name, pageTitle])
+
   useRealtimeSync(() => {
     loadData()
   }, [user])
@@ -866,8 +896,6 @@ export default function AppShell() {
     }
   }
 
-  const pageTitle = ROUTE_TITLES[location.pathname] || 'Z-LICZ'
-
   return (
     <div className="admin-shell flex h-screen bg-transparent text-foreground overflow-hidden font-sans">
       <Sidebar
@@ -907,7 +935,12 @@ export default function AppShell() {
         isOpen={configOpen}
         onClose={() => setConfigOpen(false)}
         currentSettings={appSettings}
-        onSave={loadData}
+        onSave={(updated) => {
+          if (updated) {
+            setAppSettings(prev => ({ ...(prev || {}), ...updated }))
+          }
+          loadData()
+        }}
       />
 
       <EmployeePinVerificationModal

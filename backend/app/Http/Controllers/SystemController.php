@@ -12,10 +12,48 @@ use App\Models\Payment;
 use App\Models\Payroll;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 use App\Services\NotificationService;
 use App\Models\Setting;
+use App\Models\BranchProfile;
+
 class SystemController extends Controller
 {
+    private function resolveBranch($model)
+    {
+        if (!$model) return [null, null, null];
+        $branchId = $model->branch_id ?? null;
+        $branchName = null;
+
+        if ($model->relationLoaded('branch') && $model->getRelation('branch') instanceof \App\Models\BranchProfile) {
+            $branchObj = $model->getRelation('branch');
+            $branchId = $branchObj->id;
+            $branchName = $branchObj->name;
+        } elseif ($model->relationLoaded('branchProfile') && $model->getRelation('branchProfile') instanceof \App\Models\BranchProfile) {
+            $branchObj = $model->getRelation('branchProfile');
+            $branchId = $branchObj->id;
+            $branchName = $branchObj->name;
+        }
+
+        if (!$branchName && !empty($model->getAttributes()['branch'])) {
+            $branchName = (string)$model->getAttributes()['branch'];
+        }
+
+        if (!$branchName && $branchId) {
+            $bp = \App\Models\BranchProfile::find($branchId);
+            $branchName = $bp ? $bp->name : null;
+        }
+
+        if (!$branchId && $branchName) {
+            $bp = \App\Models\BranchProfile::where('name', $branchName)->first();
+            $branchId = $bp ? $bp->id : null;
+        }
+
+        $branchObj = ($branchId || $branchName) ? ['id' => $branchId, 'name' => $branchName] : null;
+        return [$branchId, $branchName, $branchObj];
+    }
+
     // ─── Users ──────────────────────────────────────────────────────────────────
     public function users(Request $request)
     {
@@ -25,33 +63,7 @@ class SystemController extends Controller
             $verifiedBy = $u->verifiedBy;
             $verifiedByName = $verifiedBy ? ($verifiedBy->employee ? trim("{$verifiedBy->employee->first_name} {$verifiedBy->employee->last_name}") : $verifiedBy->username) : ($u->account_verified ? 'Administrator' : null);
 
-            $branchObj = null;
-            $branchName = null;
-            $branchId = null;
-
-            if ($emp && $emp->branch) {
-                $branchId = $emp->branch->id;
-                $branchName = $emp->branch->name;
-                $branchObj = ['id' => $emp->branch->id, 'name' => $emp->branch->name];
-            } elseif ($emp && $emp->branch_id) {
-                $branchId = $emp->branch_id;
-                $bp = \App\Models\BranchProfile::find($emp->branch_id);
-                $branchName = $bp ? $bp->name : null;
-                if ($branchName) {
-                    $branchObj = ['id' => $branchId, 'name' => $branchName];
-                }
-            } elseif ($cust && $cust->branch) {
-                $branchId = $cust->branch->id;
-                $branchName = $cust->branch->name;
-                $branchObj = ['id' => $cust->branch->id, 'name' => $cust->branch->name];
-            } elseif ($cust && $cust->branch_id) {
-                $branchId = $cust->branch_id;
-                $bp = \App\Models\BranchProfile::find($cust->branch_id);
-                $branchName = $bp ? $bp->name : null;
-                if ($branchName) {
-                    $branchObj = ['id' => $branchId, 'name' => $branchName];
-                }
-            }
+            list($branchId, $branchName, $branchObj) = $this->resolveBranch($emp ?: $cust);
 
             return [
                 'user_id' => $u->user_id,
@@ -121,33 +133,7 @@ class SystemController extends Controller
         $verifiedBy = $u->verifiedBy;
         $verifiedByName = $verifiedBy ? ($verifiedBy->employee ? trim("{$verifiedBy->employee->first_name} {$verifiedBy->employee->last_name}") : $verifiedBy->username) : ($u->account_verified ? 'Administrator' : null);
 
-        $branchObj = null;
-        $branchName = null;
-        $branchId = null;
-
-        if ($emp && $emp->branch) {
-            $branchId = $emp->branch->id;
-            $branchName = $emp->branch->name;
-            $branchObj = ['id' => $emp->branch->id, 'name' => $emp->branch->name];
-        } elseif ($emp && $emp->branch_id) {
-            $branchId = $emp->branch_id;
-            $bp = \App\Models\BranchProfile::find($emp->branch_id);
-            $branchName = $bp ? $bp->name : null;
-            if ($branchName) {
-                $branchObj = ['id' => $branchId, 'name' => $branchName];
-            }
-        } elseif ($cust && $cust->branch) {
-            $branchId = $cust->branch->id;
-            $branchName = $cust->branch->name;
-            $branchObj = ['id' => $cust->branch->id, 'name' => $cust->branch->name];
-        } elseif ($cust && $cust->branch_id) {
-            $branchId = $cust->branch_id;
-            $bp = \App\Models\BranchProfile::find($cust->branch_id);
-            $branchName = $bp ? $bp->name : null;
-            if ($branchName) {
-                $branchObj = ['id' => $branchId, 'name' => $branchName];
-            }
-        }
+        list($branchId, $branchName, $branchObj) = $this->resolveBranch($emp ?: $cust);
 
         return response()->json([
             'user' => [
@@ -357,9 +343,10 @@ class SystemController extends Controller
         $validated = $request->validate([
             'username' => 'required|string|unique:users,username|max:100',
             'password' => 'required|string|min:4',
-            'role' => 'required|string|in:Administrator,Store Administrator,Employee',
+            'role' => 'required|string|in:Administrator,Store Administrator,Employee,Customer',
             'is_active' => 'nullable|boolean',
             'employee_id' => 'nullable|exists:employees,employee_id',
+            'customer_id' => 'nullable|exists:customers,customer_id',
         ]);
 
         if (in_array($validated['role'], ['Store Administrator', 'Store Admin']) && !empty($validated['employee_id']) && ($validated['is_active'] ?? true)) {
@@ -384,7 +371,8 @@ class SystemController extends Controller
             'password_hash' => Hash::make($validated['password']),
             'role' => $validated['role'],
             'is_active' => $validated['is_active'] ?? true,
-            'employee_id' => $validated['employee_id'] ?? null,
+            'employee_id' => $validated['role'] === 'Customer' ? null : ($validated['employee_id'] ?? null),
+            'customer_id' => $validated['role'] === 'Customer' ? ($validated['customer_id'] ?? null) : null,
         ]);
 
         SystemLog::create([
@@ -396,6 +384,9 @@ class SystemController extends Controller
             'user_agent' => $request->userAgent(),
         ]);
 
+        $u = User::with(['employee.branch', 'customer.branch'])->find($user->user_id);
+        list($branchId, $branchName, $branchObj) = $this->resolveBranch($u ? ($u->employee ?: $u->customer) : null);
+
         return response()->json([
             'message' => 'User created successfully',
             'user' => [
@@ -404,6 +395,10 @@ class SystemController extends Controller
                 'role' => $user->role,
                 'is_active' => (bool)$user->is_active,
                 'employee_id' => $user->employee_id,
+                'customer_id' => $user->customer_id,
+                'branch_id' => $branchId,
+                'branch_name' => $branchName,
+                'branch' => $branchObj,
                 'last_login' => '—',
                 'created_date' => date('Y-m-d'),
             ]
@@ -478,7 +473,12 @@ class SystemController extends Controller
                 if ($request->has('marital_status')) $empData['marital_status'] = $request->input('marital_status');
                 if ($request->has('position')) $empData['position'] = $request->input('position');
                 if ($request->has('department')) $empData['department'] = $request->input('department');
-                if ($request->filled('branch_id')) $empData['branch_id'] = $request->input('branch_id');
+                if ($request->has('branch_id')) {
+                    $bId = $request->input('branch_id') ?: null;
+                    $empData['branch_id'] = $bId;
+                    $bp = $bId ? \App\Models\BranchProfile::find($bId) : null;
+                    $empData['branch'] = $bp ? $bp->name : null;
+                }
                 if ($request->has('working_hours')) $empData['working_hours'] = $request->input('working_hours');
                 if ($request->has('basic_salary')) $empData['basic_salary'] = $request->input('basic_salary');
                 if ($request->has('pay_type')) $empData['pay_type'] = $request->input('pay_type');
@@ -505,7 +505,12 @@ class SystemController extends Controller
                 if ($request->has('phone')) $custData['phone'] = $request->input('phone');
                 if ($request->has('email')) $custData['email'] = $request->input('email');
                 if ($request->has('address')) $custData['address'] = $request->input('address');
-                if ($request->filled('branch_id')) $custData['branch_id'] = $request->input('branch_id');
+                if ($request->has('branch_id')) {
+                    $bId = $request->input('branch_id') ?: null;
+                    $custData['branch_id'] = $bId;
+                    $bp = $bId ? \App\Models\BranchProfile::find($bId) : null;
+                    $custData['branch'] = $bp ? $bp->name : null;
+                }
                 if (!empty($custData)) {
                     $customer->update($custData);
                 }
@@ -524,23 +529,7 @@ class SystemController extends Controller
         $u = User::with(['employee.branch', 'customer.branch', 'verifiedBy'])->find($id);
         $emp = $u->employee;
         $cust = $u->customer;
-        $branchObj = null;
-        $branchName = null;
-        $branchId = null;
-        if ($emp && $emp->branch) {
-            $branchId = $emp->branch->id;
-            $branchName = $emp->branch->name;
-            $branchObj = ['id' => $emp->branch->id, 'name' => $emp->branch->name];
-        } elseif ($emp && $emp->branch_id) {
-            $branchId = $emp->branch_id;
-            $bp = \App\Models\BranchProfile::find($emp->branch_id);
-            $branchName = $bp ? $bp->name : null;
-            if ($branchName) $branchObj = ['id' => $branchId, 'name' => $branchName];
-        } elseif ($cust && $cust->branch) {
-            $branchId = $cust->branch->id;
-            $branchName = $cust->branch->name;
-            $branchObj = ['id' => $cust->branch->id, 'name' => $cust->branch->name];
-        }
+        list($branchId, $branchName, $branchObj) = $this->resolveBranch($emp ?: $cust);
 
         return response()->json([
             'message' => 'User updated successfully',
@@ -829,63 +818,198 @@ class SystemController extends Controller
     }
 
     // ─── Settings ───────────────────────────────────────────────────────────────
-    public function settings()
+    public function getMergedSettings(): array
     {
         $settings = Setting::all()->pluck('value', 'key')->toArray();
         
         $defaults = [
-            'company_name' => '',
-            'address'      => '',
-            'phone'        => '',
-            'email'        => '',
-            'currency'     => 'PHP',
-            'date_format'  => 'YYYY-MM-DD',
-            'timezone'     => 'Asia/Manila (GMT+8)',
+            'company_name'      => 'PROJECT: PACE Z-LICZ',
+            'name'              => 'PROJECT: PACE Z-LICZ',
+            'branch_name'       => '',
+            'address'           => '',
+            'phone'             => '',
+            'email'             => '',
+            'currency'          => 'PHP',
+            'date_format'       => 'YYYY-MM-DD',
+            'timezone'          => 'Asia/Manila (GMT+8)',
             'attendance_cutoff' => '08:00',
-            'tax_id'       => '',
-            'web_links'    => '',
-            'logo'         => '',
+            'cutoff_time'       => '08:00',
+            'tax_id'            => '',
+            'web_links'         => '',
+            'logo'              => '',
         ];
 
         $dynamic = [
-            'total_products' => \App\Models\Product::count(),
-            'total_customers' => \App\Models\Customer::count(),
-            'total_branches' => \App\Models\BranchProfile::count(),
+            'total_products'   => \App\Models\Product::count(),
+            'total_customers'  => \App\Models\Customer::count(),
+            'total_branches'   => \App\Models\BranchProfile::count(),
             'total_appliances' => \App\Models\Product::where('category', 'Appliances')->count(),
-            'total_furniture' => \App\Models\Product::where('category', 'Furniture')->count(),
+            'total_furniture'  => \App\Models\Product::where('category', 'Furniture')->count(),
         ];
 
-        return response()->json(array_merge($defaults, $settings, $dynamic));
+        $merged = array_merge($defaults, $settings, $dynamic);
+
+        // Alias synchronization
+        if (!empty($merged['company_name'])) {
+            $merged['name'] = $merged['company_name'];
+        } elseif (!empty($merged['name'])) {
+            $merged['company_name'] = $merged['name'];
+        }
+
+        if (!empty($merged['attendance_cutoff'])) {
+            $merged['cutoff_time'] = $merged['attendance_cutoff'];
+        } elseif (!empty($merged['cutoff_time'])) {
+            $merged['attendance_cutoff'] = $merged['cutoff_time'];
+        }
+
+        if (!empty($merged['logo'])) {
+            $logoVal = $merged['logo'];
+            if (!str_starts_with($logoVal, 'http://') && !str_starts_with($logoVal, 'https://')) {
+                $merged['logo_url'] = url($logoVal);
+            } else {
+                $merged['logo_url'] = $logoVal;
+            }
+        } else {
+            $merged['logo_url'] = null;
+        }
+
+        return $merged;
+    }
+
+    public function settings()
+    {
+        return response()->json($this->getMergedSettings());
     }
 
     public function saveSettings(Request $request)
     {
-        $data = $request->except(['user_id', 'logo']);
-        
-        foreach ($data as $key => $value) {
-            if ($value !== null) {
-                Setting::updateOrCreate(['key' => $key], ['value' => $value]);
+        // Support field aliases
+        if ($request->has('name') && !$request->has('company_name')) {
+            $request->merge(['company_name' => $request->input('name')]);
+        }
+        if ($request->has('company_name') && !$request->has('name')) {
+            $request->merge(['name' => $request->input('company_name')]);
+        }
+        if ($request->has('cutoff_time') && !$request->has('attendance_cutoff')) {
+            $request->merge(['attendance_cutoff' => $request->input('cutoff_time')]);
+        }
+        if ($request->has('attendance_cutoff') && !$request->has('cutoff_time')) {
+            $request->merge(['cutoff_time' => $request->input('attendance_cutoff')]);
+        }
+
+        // Clean empty email string so nullable passes
+        if ($request->has('email') && trim((string)$request->input('email')) === '') {
+            $request->merge(['email' => null]);
+        }
+
+        $validated = $request->validate([
+            'company_name'      => 'nullable|string|max:255',
+            'name'              => 'nullable|string|max:255',
+            'branch_name'       => 'nullable|string|max:255',
+            'tax_id'            => 'nullable|string|max:100',
+            'address'           => 'nullable|string|max:500',
+            'phone'             => 'nullable|string|max:50',
+            'email'             => 'nullable|email|max:255',
+            'currency'          => 'nullable|string|max:10',
+            'date_format'       => 'nullable|string|max:50',
+            'timezone'          => 'nullable|string|max:100',
+            'attendance_cutoff' => 'nullable|string|max:20',
+            'cutoff_time'       => 'nullable|string|max:20',
+            'web_links'         => 'nullable|string|max:500',
+            'logo'              => 'nullable|image|mimes:jpeg,png,jpg,gif,webp,svg|max:5120',
+        ]);
+
+        $fillableKeys = [
+            'company_name',
+            'name',
+            'branch_name',
+            'tax_id',
+            'address',
+            'phone',
+            'email',
+            'currency',
+            'date_format',
+            'timezone',
+            'attendance_cutoff',
+            'cutoff_time',
+            'web_links',
+        ];
+
+        foreach ($fillableKeys as $key) {
+            if ($request->has($key)) {
+                $val = $request->input($key);
+                Setting::updateOrCreate(['key' => $key], ['value' => $val !== null ? trim((string)$val) : '']);
             }
         }
 
+        // Also ensure company_name and name stay strictly in sync
+        if ($request->has('company_name')) {
+            Setting::updateOrCreate(['key' => 'name'], ['value' => trim((string)$request->input('company_name'))]);
+        } elseif ($request->has('name')) {
+            Setting::updateOrCreate(['key' => 'company_name'], ['value' => trim((string)$request->input('name'))]);
+        }
+
+        if ($request->has('attendance_cutoff')) {
+            Setting::updateOrCreate(['key' => 'cutoff_time'], ['value' => trim((string)$request->input('attendance_cutoff'))]);
+        } elseif ($request->has('cutoff_time')) {
+            Setting::updateOrCreate(['key' => 'attendance_cutoff'], ['value' => trim((string)$request->input('cutoff_time'))]);
+        }
+
+        // Process logo image upload if present
         if ($request->hasFile('logo')) {
+            $oldLogo = Setting::where('key', 'logo')->value('value');
+            if ($oldLogo) {
+                $relPath = Str::after($oldLogo, '/storage/');
+                if ($relPath && Storage::disk('public')->exists($relPath)) {
+                    Storage::disk('public')->delete($relPath);
+                }
+            }
+
             $path = $request->file('logo')->store('company', 'public');
             Setting::updateOrCreate(['key' => 'logo'], ['value' => '/storage/' . $path]);
         }
 
+        // Handle Store Administrator branch profile sync if applicable
+        $user = $request->user();
+        if ($user && ($user->role === 'Store Administrator' || $user->role === 'Store Admin')) {
+            $branchId = $user->employee?->branch_id ?? $request->input('branch_id');
+            if ($branchId) {
+                $branch = BranchProfile::find($branchId);
+                if ($branch) {
+                    if ($request->has('branch_name') && $request->filled('branch_name')) {
+                        $branch->name = trim($request->input('branch_name'));
+                    }
+                    if ($request->has('address')) {
+                        $branch->location = trim((string)$request->input('address'));
+                    }
+                    if ($request->has('phone')) {
+                        $branch->contact_number = trim((string)$request->input('phone'));
+                    }
+                    $branch->save();
+                }
+            }
+        }
+
+        // Audit log in SystemLog
+        $actingUserId = $user?->user_id ?? $request->input('user_id', 1);
+        $roleName = $user?->role ?? 'Administrator';
         SystemLog::create([
-            'user_id' => $request->input('user_id', 1),
-            'action' => 'UPDATE',
-            'module' => 'System',
-            'description' => "Updated system settings",
-            'ip_address' => $request->ip(),
-            'user_agent' => $request->userAgent(),
+            'user_id'     => $actingUserId,
+            'action'      => 'UPDATE',
+            'module'      => 'System',
+            'description' => "{$roleName} updated system company configuration settings",
+            'ip_address'  => $request->ip(),
+            'user_agent'  => $request->userAgent(),
         ]);
 
+        $updated = $this->getMergedSettings();
+
         return response()->json([
-            'message' => 'Settings saved successfully',
-            'settings' => Setting::all()->pluck('value', 'key'),
-        ]);
+            'success'  => true,
+            'message'  => 'Settings saved successfully',
+            'settings' => $updated,
+            'data'     => $updated,
+        ], 200);
     }
 
     public function qrMonitoring(Request $request)

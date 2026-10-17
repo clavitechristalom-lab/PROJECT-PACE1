@@ -3,7 +3,8 @@ import { useSearchParams } from 'react-router-dom'
 import {
   FiCreditCard, FiTrendingUp, FiSmartphone,
   FiEye, FiPlus, FiPrinter, FiSearch, FiCalendar,
-  FiCheckCircle, FiX, FiAlertTriangle, FiFileText, FiFilter, FiTrash2
+  FiCheckCircle, FiX, FiAlertTriangle, FiFileText, FiFilter, FiTrash2,
+  FiClock, FiImage
 } from 'react-icons/fi'
 import {
   Btn, Badge, StatusBadge, Input, Select, Textarea, Modal,
@@ -17,6 +18,19 @@ import { useRealtimeSync, triggerDataSync } from '../lib/realtimeSync'
 import { TbCurrencyPeso } from 'react-icons/tb'
 import { FiDownload } from 'react-icons/fi'
 import Swal from 'sweetalert2'
+
+export const formatProofUrl = (url) => {
+  if (!url) return null;
+  if (typeof url !== 'string') return null;
+  if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('data:') || url.startsWith('blob:')) {
+    return url;
+  }
+  const clean = url.startsWith('/') ? url : `/${url}`;
+  const base = (typeof window !== 'undefined' && window.location.hostname && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1')
+    ? `http://${window.location.hostname}:8000`
+    : 'http://127.0.0.1:8000';
+  return `${base}${clean.startsWith('/storage') ? clean : `/storage${clean}`}`;
+};
 
 function PaymentMethodBadge({ method, provider }) {
   const m = (provider || method || '').toLowerCase()
@@ -231,12 +245,84 @@ export default function PaymentsPage() {
       await api.payments.delete(id)
       showToast('Payment deleted successfully', 'success')
       loadData(true)
+      triggerDataSync('payments')
+      triggerDataSync('installments')
+      triggerDataSync('dashboard')
     } catch (err) {
       showToast(err.message || 'Failed to delete payment', 'error')
     } finally {
       closeLoading()
     }
   }
+
+  const handleReceivePayment = async (p) => {
+    if (!p) return;
+    const proofUrl = formatProofUrl(p.proof_of_payment);
+    const isDark = document.documentElement.classList.contains('dark');
+    const borderCol = isDark ? '#334155' : '#e2e8f0';
+    const bgBox = isDark ? '#0f172a' : '#f8fafc';
+    const textMuted = isDark ? '#94a3b8' : '#64748b';
+    const textMain = isDark ? '#f8fafc' : '#0f172a';
+
+    const result = await Swal.fire({
+      title: 'Receive & Confirm Payment?',
+      html: `
+        <div style="text-align: left; font-size: 13px; margin-top: 8px;">
+          <div style="background: ${isDark ? 'rgba(30, 41, 59, 0.6)' : 'rgba(241, 245, 249, 0.7)'}; border: 1px solid ${borderCol}; border-radius: 10px; padding: 12px; margin-bottom: 12px; line-height: 1.6;">
+            <div><strong style="color: ${textMuted};">Receipt #:</strong> <span style="font-family: monospace; font-weight: bold; color: ${textMain};">${p.receipt_no}</span></div>
+            <div><strong style="color: ${textMuted};">Account #:</strong> <span style="font-family: monospace; font-weight: bold; color: #3b82f6;">${p.account_no}</span> <span style="color: ${textMuted};">(${p.customer_name})</span></div>
+            <div><strong style="color: ${textMuted};">Amount:</strong> <span style="color: #10b981; font-family: monospace; font-weight: bold; font-size: 14px;">${fmt(p.amount)}</span> <span style="color: ${textMuted}; font-size: 12px;">via ${p.payment_method}</span></div>
+            ${p.reference_no ? `<div><strong style="color: ${textMuted};">Ref Code:</strong> <code style="font-family: monospace; font-weight: bold; background: ${isDark ? '#334155' : '#e2e8f0'}; padding: 1px 6px; border-radius: 4px; color: ${textMain};">${p.reference_no}</code></div>` : ''}
+          </div>
+
+          <div style="margin-bottom: 12px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+              <strong style="font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: ${textMuted};">Proof of Payment:</strong>
+              ${proofUrl ? `<a href="${proofUrl}" target="_blank" rel="noopener noreferrer" style="font-size: 11px; color: #10b981; font-weight: 600; text-decoration: underline; cursor: pointer;">View Full Image ↗</a>` : ''}
+            </div>
+            ${proofUrl ? `
+              <div style="border: 1px solid ${borderCol}; border-radius: 10px; overflow: hidden; background: ${bgBox}; padding: 6px; display: flex; align-items: center; justify-content: center; max-height: 220px; cursor: pointer;" onclick="window.open('${proofUrl}', '_blank')" title="Click to view full image">
+                <img src="${proofUrl}" alt="Proof of Payment" style="max-height: 205px; max-width: 100%; object-fit: contain; border-radius: 6px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);" />
+              </div>
+            ` : `
+              <div style="border: 1px dashed ${borderCol}; border-radius: 8px; padding: 12px; text-align: center; color: ${textMuted}; font-size: 11px; background: ${bgBox};">
+                No proof of payment attached.
+              </div>
+            `}
+          </div>
+
+          <p style="font-size: 11px; color: ${textMuted}; text-align: center; margin: 0; line-height: 1.4;">
+            Confirming receipt will credit the customer's account and mark the payment as Completed.
+          </p>
+        </div>
+      `,
+      icon: 'question',
+      showCancelButton: true,
+      confirmButtonColor: '#10b981',
+      cancelButtonColor: '#64748b',
+      confirmButtonText: 'Yes, Receive Payment',
+      cancelButtonText: 'Cancel',
+      background: isDark ? '#1e293b' : '#fff',
+      color: textMain,
+      width: '480px',
+    });
+
+    if (!result.isConfirmed) return;
+
+    showLoading('Receiving payment...');
+    try {
+      await api.payments.receive(p.payment_id);
+      showToast('Payment received and credited successfully! 🎉', 'success');
+      loadData(true);
+      triggerDataSync('payments');
+      triggerDataSync('installments');
+      triggerDataSync('dashboard');
+    } catch (err) {
+      showToast(err.message || 'Failed to receive payment', 'error');
+    } finally {
+      closeLoading();
+    }
+  };
 
   const handlePrintSummary = async () => {
     setPrintMode('summary')
@@ -451,7 +537,7 @@ export default function PaymentsPage() {
       ) : (
         <Card noPad className="border border-border overflow-hidden">
           <div className="overflow-x-auto">
-            <table className="w-full text-xs min-w-[720px]">
+            <table className="w-full text-xs min-w-[760px]">
               <thead>
                 <tr className="border-b border-border bg-muted/50 text-muted-foreground uppercase font-semibold text-[11px]">
                   <th className="py-3 px-4 text-left">Receipt #</th>
@@ -461,13 +547,14 @@ export default function PaymentsPage() {
                   <th className="py-3 px-4 text-left">Branch</th>
                   <th className="py-3 px-4 text-right">Amount</th>
                   <th className="py-3 px-4 text-left">Method</th>
+                  <th className="py-3 px-4 text-center">Status</th>
                   <th className="py-3 px-4 text-left">Received By</th>
                   <th className="py-3 px-4 text-center">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
                 {paginated.length === 0 ? (
-                  <tr><td colSpan={9} className="py-8 text-center text-muted-foreground">No payments recorded</td></tr>
+                  <tr><td colSpan={10} className="py-8 text-center text-muted-foreground">No payments recorded</td></tr>
                 ) : (
                   paginated.map((p, i) => (
                     <tr key={p.payment_id || i} className={`hover:bg-muted/40 transition-colors ${i % 2 === 1 ? 'bg-muted/10' : ''}`}>
@@ -477,9 +564,55 @@ export default function PaymentsPage() {
                       <td className="py-3 px-4 font-semibold text-foreground">{p.customer_name}</td>
                       <td className="py-3 px-4 text-muted-foreground">{p.branch}</td>
                       <td className="py-3 px-4 text-right font-mono font-bold text-emerald-600">{fmt(p.amount)}</td>
-                      <td className="py-3 px-4"><PaymentMethodBadge method={p.payment_method} /></td>
-                      <td className="py-3 px-4 text-muted-foreground">{p.received_by}</td>
+                      <td className="py-3 px-4">
+                        <div className="flex items-center gap-1.5">
+                          <PaymentMethodBadge method={p.payment_method} />
+                          {p.proof_of_payment && (
+                            <a
+                              href={formatProofUrl(p.proof_of_payment)}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex items-center justify-center w-6 h-6 rounded-md bg-emerald-50 text-emerald-600 hover:bg-emerald-100 dark:bg-emerald-950/40 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800 transition-colors cursor-pointer"
+                              title="View Proof of Payment"
+                            >
+                              <FiImage className="w-3.5 h-3.5" />
+                            </a>
+                          )}
+                        </div>
+                      </td>
+                      <td className="py-3 px-4 text-center">
+                        {p.status === 'Pending' ? (
+                          <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300 border border-amber-300 dark:border-amber-700 shadow-xs">
+                            <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse"></span>
+                            <span>Pending Payment</span>
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700">
+                            <FiCheckCircle className="w-3 h-3 text-emerald-600" />
+                            <span>Completed</span>
+                          </span>
+                        )}
+                      </td>
+                      <td className="py-3 px-4">
+                        {p.status === 'Pending' || !p.received_by ? (
+                          <span className="italic font-semibold text-amber-600 dark:text-amber-400 text-[11px]">
+                            Pending Receipt
+                          </span>
+                        ) : (
+                          <span className="text-muted-foreground">{p.received_by}</span>
+                        )}
+                      </td>
                       <td className="py-3 px-4 text-center flex items-center justify-center gap-1.5">
+                        {p.status === 'Pending' && (
+                          <button
+                            onClick={() => handleReceivePayment(p)}
+                            className="inline-flex items-center gap-1 px-2.5 py-1 text-xs rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold cursor-pointer transition-colors shadow-xs"
+                            title="Receive & Confirm Payment"
+                          >
+                            <FiCheckCircle className="w-3.5 h-3.5" />
+                            <span>Receive</span>
+                          </button>
+                        )}
                         <button
                           onClick={() => setViewPayment(p)}
                           className="inline-flex items-center justify-center w-7 h-7 rounded-lg border border-border hover:bg-muted font-semibold cursor-pointer transition-colors"
@@ -494,14 +627,6 @@ export default function PaymentsPage() {
                         >
                           <FiFileText className="w-3.5 h-3.5 text-amber-500" />
                           <span>Receipt</span>
-                        </button>
-                        <button
-                          onClick={() => handlePrintReceipt(p)}
-                          className="inline-flex items-center gap-1 px-2.5 py-1 text-xs rounded-lg border border-border bg-card hover:bg-muted font-semibold cursor-pointer transition-colors text-foreground shadow-2xs"
-                          title="Print / PDF Official Receipt"
-                        >
-                          <FiPrinter className="w-3.5 h-3.5 text-primary" />
-                          <span>Print / PDF</span>
                         </button>
                         <button
                           onClick={() => handleDeletePayment(p.payment_id)}
@@ -719,6 +844,32 @@ export default function PaymentsPage() {
           size="md"
         >
           <div className="space-y-4 text-xs">
+            {viewPayment.status === 'Pending' && (
+              <div className="p-3.5 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-800 flex items-center justify-between gap-3 shadow-xs">
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <FiClock className="w-5 h-5 text-amber-600 shrink-0 animate-pulse" />
+                  <div className="min-w-0">
+                    <p className="font-bold text-xs text-amber-900 dark:text-amber-200">Pending Store Admin Receipt</p>
+                    <p className="text-[11px] text-amber-700 dark:text-amber-300 truncate">
+                      This payment has not yet been received or credited to the account.
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const p = viewPayment;
+                    setViewPayment(null);
+                    handleReceivePayment(p);
+                  }}
+                  className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl cursor-pointer transition-colors shadow-xs shrink-0 flex items-center gap-1.5"
+                >
+                  <FiCheckCircle className="w-3.5 h-3.5" />
+                  <span>Receive Payment</span>
+                </button>
+              </div>
+            )}
+
             <div className="space-y-2 p-3 bg-muted/20 rounded-xl border border-border">
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Receipt #:</span>
@@ -740,10 +891,16 @@ export default function PaymentsPage() {
                 <span className="text-muted-foreground">Method:</span>
                 <PaymentMethodBadge method={viewPayment.payment_method} />
               </div>
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Status:</span>
+                <span className={`font-bold ${viewPayment.status === 'Pending' ? 'text-amber-600 dark:text-amber-400' : 'text-emerald-600'}`}>
+                  {viewPayment.status === 'Pending' ? 'Pending Payment (Not Received)' : 'Completed'}
+                </span>
+              </div>
               {viewPayment.reference_no && (
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">Reference Number:</span>
-                  <span className="font-mono text-foreground">{viewPayment.reference_no}</span>
+                  <span className="font-mono font-bold text-purple-600 dark:text-purple-400">{viewPayment.reference_no}</span>
                 </div>
               )}
               <div className="flex justify-between items-center pt-2 border-t border-border mt-2">
@@ -754,10 +911,20 @@ export default function PaymentsPage() {
 
             {viewPayment.proof_of_payment ? (
               <div className="space-y-1">
-                <label className="block font-bold text-muted-foreground mb-1 text-[11px] uppercase">Proof of Payment</label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block font-bold text-muted-foreground text-[11px] uppercase">Proof of Payment</label>
+                  <a
+                    href={formatProofUrl(viewPayment.proof_of_payment)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-emerald-600 dark:text-emerald-400 font-semibold hover:underline text-[11px]"
+                  >
+                    View Full Image ↗
+                  </a>
+                </div>
                 <div className="border border-border rounded-xl overflow-hidden bg-muted/20 flex justify-center p-2">
-                  <a href={viewPayment.proof_of_payment} target="_blank" rel="noopener noreferrer">
-                    <img src={viewPayment.proof_of_payment} alt="Proof of Payment" className="max-h-64 object-contain rounded-lg shadow-sm" />
+                  <a href={formatProofUrl(viewPayment.proof_of_payment)} target="_blank" rel="noopener noreferrer">
+                    <img src={formatProofUrl(viewPayment.proof_of_payment)} alt="Proof of Payment" className="max-h-64 object-contain rounded-lg shadow-sm" />
                   </a>
                 </div>
               </div>
@@ -782,14 +949,30 @@ export default function PaymentsPage() {
                 <FiPrinter className="w-3.5 h-3.5" />
                 <span>Print / PDF</span>
               </button>
-              <button
-                type="button"
-                onClick={() => setViewPayment(null)}
-                className="flex items-center gap-1 px-4 py-1.5 rounded-xl border border-border hover:bg-muted font-semibold cursor-pointer"
-              >
-                <FiX className="w-3.5 h-3.5" />
-                <span>Close</span>
-              </button>
+              <div className="flex items-center gap-2">
+                {viewPayment.status === 'Pending' && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const p = viewPayment;
+                      setViewPayment(null);
+                      handleReceivePayment(p);
+                    }}
+                    className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold cursor-pointer transition-colors shadow-xs"
+                  >
+                    <FiCheckCircle className="w-3.5 h-3.5" />
+                    <span>Receive Payment</span>
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setViewPayment(null)}
+                  className="flex items-center gap-1 px-4 py-1.5 rounded-xl border border-border hover:bg-muted font-semibold cursor-pointer"
+                >
+                  <FiX className="w-3.5 h-3.5" />
+                  <span>Close</span>
+                </button>
+              </div>
             </div>
           </div>
         </Modal>
@@ -1014,6 +1197,7 @@ export default function PaymentsPage() {
           </div>
         </div>
       )}
+
     </div>
     </>
   )

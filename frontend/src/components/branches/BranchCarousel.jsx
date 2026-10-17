@@ -73,10 +73,16 @@ export default function BranchCarousel({ branches, selectedBranch, onSelect }) {
                 style={{ backgroundColor: '#1e293b' }}
               >
                 {/* Background Image */}
-                <div 
-                  className="absolute inset-0 bg-cover bg-center transition-transform duration-700 group-hover:scale-110 opacity-100"
-                  style={{ backgroundImage: `url(${b.image || 'https://picsum.photos/400/300'})` }}
-                />
+                {(b.image || b.image_url) ? (
+                  <div 
+                    className="absolute inset-0 bg-cover bg-center transition-transform duration-700 group-hover:scale-110 opacity-100"
+                    style={{ backgroundImage: `url(${b.image || b.image_url})` }}
+                  />
+                ) : (
+                  <div className="absolute inset-0 bg-gradient-to-br from-slate-800 to-slate-900 flex items-center justify-center">
+                    <span className="text-2xl font-bold text-slate-400/60">{(b.branch || b.name || 'B').charAt(0)}</span>
+                  </div>
+                )}
                 
                 {/* Gradient Overlay */}
                 <div className={`absolute inset-0 transition-opacity duration-300

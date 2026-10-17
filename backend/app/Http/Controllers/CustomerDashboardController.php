@@ -92,10 +92,12 @@ class CustomerDashboardController extends Controller
                 ->where('due_date', '<', now()->format('Y-m-d'))
                 ->where('status', 'Pending')
                 ->count();
+            $walletBalance = (float)(\App\Models\Customer::where('customer_id', $customerId)->value('wallet_balance') ?? 0);
         } else {
             $monthlyPayment = 0;
             $totalCreditBalance = 0;
             $overdueCount = 0;
+            $walletBalance = 0;
         }
 
         return response()->json([
@@ -106,7 +108,9 @@ class CustomerDashboardController extends Controller
                 'total_credit_balance' => $totalCreditBalance,
                 'sale_items_count' => $saleItemCount,
                 'out_of_stock_count' => $outOfStockCount,
-                'overdue_count' => $overdueCount
+                'overdue_count' => $overdueCount,
+                'wallet_balance' => $walletBalance,
+                'allow_installment' => (bool)(\App\Models\Customer::where('customer_id', $customerId)->value('allow_installment') ?? false),
             ]
         ]);
     }
@@ -144,12 +148,12 @@ class CustomerDashboardController extends Controller
         $formatted = $installments->map(function ($inst) {
             $productName = 'Unknown Product';
             $imageUrl = null;
-            if ($inst->sale && $inst->sale->items->count() === 1) {
-                $productName = $inst->sale->items->first()->product?->product_name ?? 'Unknown Product';
-                $imageUrl = $inst->sale->items->first()->product?->image_url ?? null;
-            } elseif ($inst->sale && $inst->sale->items->count() > 1) {
-                $productName = 'Multiple Items';
-                $imageUrl = $inst->sale->items->first()->product?->image_url ?? null;
+            if ($inst->sale && $inst->sale->items && $inst->sale->items->count() > 0) {
+                $firstItem = $inst->sale->items->first();
+                $productName = $inst->sale->items->count() === 1
+                    ? ($firstItem->product?->product_name ?? 'Unknown Product')
+                    : ($firstItem->product ? $firstItem->product->product_name . ' (+' . ($inst->sale->items->count() - 1) . ' items)' : 'Multiple Items');
+                $imageUrl = $firstItem->product?->image_url ?? $firstItem->product?->image ?? null;
             }
 
             $paidAmount = (float)$inst->payments->sum('amount');
@@ -222,6 +226,15 @@ class CustomerDashboardController extends Controller
         $actualPrice = $product->discount_price > 0 ? $product->discount_price : $product->unit_price;
 
         $isFullPayment = $validated['amount'] >= $actualPrice;
+
+        if (!$isFullPayment) {
+            $customer = \App\Models\Customer::find($customerId);
+            if (!$customer || !$customer->allow_installment) {
+                return response()->json([
+                    'message' => 'Installment is not permitted for your account. Only your Store Administrator can allow the installment process.',
+                ], 403);
+            }
+        }
 
         return DB::transaction(function () use ($validated, $customerId, $product, $actualPrice, $isFullPayment, $request) {
             $sale = \App\Models\SaleTransaction::create([
@@ -349,5 +362,67 @@ class CustomerDashboardController extends Controller
                 'message' => 'Product request submitted successfully.',
             ]);
         });
+    }
+
+    /**
+     * Customer submits an application/request to Store Admin for installment eligibility.
+     */
+    public function requestInstallment(Request $request)
+    {
+        $user = $request->user();
+        if (!$user || $user->role !== 'Customer') {
+            return response()->json(['message' => 'Unauthorized or missing customer profile'], 403);
+        }
+
+        $customerId = $user->customer_id ?? $user->customer?->customer_id;
+        if (!$customerId) {
+            $customerId = \App\Models\Customer::where('email', $user->username)->value('customer_id');
+        }
+
+        $customer = \App\Models\Customer::findOrFail($customerId);
+
+        if ($customer->allow_installment) {
+            return response()->json([
+                'success' => true,
+                'message' => 'Your account is already authorized for installment purchases.'
+            ]);
+        }
+
+        $notes = $request->input('notes', 'Customer applied for installment approval via dashboard.');
+
+        // Update customer installment notes
+        $customer->installment_notes = $notes;
+        $customer->save();
+
+        // Send alert to Store Administrators of the branch
+        $notifData = [
+            'type' => 'installment_request',
+            'title' => 'Customer Installment Request',
+            'message' => "Customer {$customer->first_name} {$customer->last_name} ({$customer->customer_code}) has requested authorization for installment purchases.",
+            'module' => 'Installments',
+            'related_id' => $customer->customer_id,
+            'related_type' => 'App\Models\Customer',
+            'action_url' => "/customers?search={$customer->customer_code}",
+            'priority' => 'high',
+        ];
+
+        \App\Services\NotificationService::sendToAdmins($notifData);
+        if ($customer->branch_id) {
+            \App\Services\NotificationService::sendToStoreAdmins($notifData, $customer->branch_id);
+        }
+
+        \App\Models\SystemLog::create([
+            'user_id' => $user->user_id,
+            'action' => 'INSTALLMENT_REQUEST_SUBMITTED',
+            'module' => 'Installments',
+            'description' => "Customer {$customer->first_name} {$customer->last_name} requested Store Admin installment approval.",
+            'ip_address' => $request->ip(),
+            'user_agent' => $request->userAgent(),
+        ]);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Installment request submitted successfully. Your Store Administrator has been notified to review and allow your account.',
+        ]);
     }
 }

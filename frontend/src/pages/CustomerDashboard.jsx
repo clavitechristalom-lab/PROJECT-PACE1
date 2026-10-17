@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { api } from '../lib/api';
@@ -16,8 +17,9 @@ import ImageCarousel from '../components/customer/ImageCarousel';
 import {
   ProductListModal, PaymentDetailsModal, CreditDetailsModal,
   OverduePaymentsModal, InstallmentAccountDetailsModal,
-  StatementModal, MakePaymentModal, SupportModal
+  StatementModal, MakePaymentModal, SupportModal, InstallmentsModal
 } from '../components/customer/CustomerModals';
+import DepositModal from '../components/customer/DepositModal';
 
 export default function CustomerDashboard() {
   const { user } = useAuth();
@@ -83,11 +85,16 @@ export default function CustomerDashboard() {
       case 'Browse Products':
         openModal('productList');
         break;
+      case 'Installments':
+      case 'Installment Plans':
+        openModal('installments');
+        break;
       case 'View Statements':
         openModal('statement');
         break;
       case 'Make Payment':
-        openModal('makePayment');
+      case 'Deposit Funds':
+        openModal('deposit');
         break;
       case 'Support':
         openModal('support');
@@ -114,7 +121,7 @@ export default function CustomerDashboard() {
       <main className="py-2">
 
         {/* Welcome Section */}
-        <div className="flex flex-col md:flex-row md:items-center justify-between mb-8 gap-4">
+        <div className="mb-8">
           <div>
             <h2 className="text-3xl font-extrabold text-[#176B87] dark:text-[#64ccc5] tracking-tight flex items-center gap-2">
               <FiUser className="w-8 h-8" /> My Account
@@ -175,7 +182,7 @@ export default function CustomerDashboard() {
 
         {/* Secondary Stats Grid */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 mb-8">
-          {stats?.categories?.map((cat, index) => (
+          {(Array.isArray(stats?.categories) ? stats.categories : []).map((cat, index) => (
             <DashboardCard
               key={cat.category}
               title={cat.category}
@@ -229,7 +236,27 @@ export default function CustomerDashboard() {
         onClose={closeModal}
         category={modalArgs?.category}
         initialProductId={modalArgs?.initialProductId}
-        availableCategories={stats?.categories?.map(c => c.category) || []}
+        availableCategories={(Array.isArray(stats?.categories) ? stats.categories : []).map(c => c.category)}
+        onBuyProduct={(prod, term = 'full') => {
+          closeModal();
+          openModal('makePayment', { product: prod, term });
+        }}
+      />
+      <InstallmentsModal
+        isOpen={activeModal === 'installments'}
+        onClose={closeModal}
+        onMakePayment={(inst) => {
+          closeModal();
+          openModal('makePayment', { installmentId: inst.installment_id, amount: String(inst.monthly_payment), installment: inst });
+        }}
+        onViewLedger={(inst) => {
+          closeModal();
+          openModal('installmentAccount', inst.installment_id);
+        }}
+        onBrowseProducts={() => {
+          closeModal();
+          openModal('productList');
+        }}
       />
       <PaymentDetailsModal
         isOpen={activeModal === 'paymentDetails'}
@@ -255,11 +282,17 @@ export default function CustomerDashboard() {
         isOpen={activeModal === 'statement'}
         onClose={closeModal}
       />
-      <MakePaymentModal
-        isOpen={activeModal === 'makePayment'}
+      <DepositModal
+        isOpen={activeModal === 'deposit' || activeModal === 'makePayment'}
         onClose={closeModal}
         installments={installments}
-        onPaymentSuccess={fetchDashboardData}
+        initialProducts={modalArgs?.products || (modalArgs?.product ? [modalArgs.product] : [])}
+        initialAmount={modalArgs?.amount || ''}
+        defaultInstallmentId={modalArgs?.installmentId || null}
+        initialInstallment={modalArgs?.installment || null}
+        initialPaymentTerm={modalArgs?.term || 'full'}
+        allowInstallment={Boolean(stats?.allow_installment)}
+        onSuccess={() => fetchDashboardData('mutation')}
       />
       <SupportModal
         isOpen={activeModal === 'support'}

@@ -17,6 +17,7 @@ import { useRealtimeSync, triggerDataSync } from '../lib/realtimeSync'
 import { FiDownload } from 'react-icons/fi'
 import { TbCurrencyPeso } from 'react-icons/tb'
 import { useAuth } from '../context/AuthContext'
+import Swal from 'sweetalert2'
 
 export default function CustomersPage({ branchFilter, embedded }) {
   const { user } = useAuth()
@@ -97,6 +98,50 @@ export default function CustomersPage({ branchFilter, embedded }) {
       setAssigningSaving(false)
     }
   }
+
+  // Store Admin: Toggle installment authorization for a customer
+  const handleToggleInstallment = async (c) => {
+    const nextState = !c.allow_installment;
+    const actionText = nextState ? 'Allow' : 'Revoke';
+    const confirmResult = await Swal.fire({
+      title: `${actionText} Installment Process?`,
+      text: nextState
+        ? `Allow customer "${c.first_name} ${c.last_name}" to process purchases via installment plans?`
+        : `Revoke installment purchasing privileges for "${c.first_name} ${c.last_name}"?`,
+      icon: nextState ? 'question' : 'warning',
+      showCancelButton: true,
+      confirmButtonColor: nextState ? '#10b981' : '#ef4444',
+      cancelButtonColor: '#6b7280',
+      confirmButtonText: `Yes, ${actionText} Installment`,
+    });
+
+    if (confirmResult.isConfirmed) {
+      try {
+        const res = await api.customers.toggleInstallment(c.customer_id, {
+          allow_installment: nextState,
+        });
+        setCustomers(prev => prev.map(item =>
+          item.customer_id === c.customer_id
+            ? { ...item, allow_installment: nextState, installment_allowed_at: res.customer?.installment_allowed_at }
+            : item
+        ));
+        if (detailCustomer && (detailCustomer.customer_id === c.customer_id || detailCustomer.customer?.customer_id === c.customer_id)) {
+          setDetailCustomer(prev => ({
+            ...prev,
+            customer: {
+              ...(prev.customer || prev),
+              allow_installment: nextState,
+              installment_allowed_at: res.customer?.installment_allowed_at,
+            }
+          }));
+        }
+        showToast(res.message || `Installment ${nextState ? 'allowed' : 'revoked'} successfully`, 'success');
+        triggerDataSync('customers');
+      } catch (err) {
+        showToast(err.message || 'Failed to update installment permission', 'error');
+      }
+    }
+  };
 
   // Form
   const emptyForm = {
@@ -347,6 +392,7 @@ export default function CustomersPage({ branchFilter, embedded }) {
                     <th className="py-3 px-4 text-center">Active Accounts</th>
                     <th className="py-3 px-4 text-right">Total Balance</th>
                     <th className="py-3 px-4 text-center">Status</th>
+                    <th className="py-3 px-4 text-center">Installment</th>
                     <th className="py-3 px-4 text-center">Actions</th>
                   </tr>
                 </thead>
@@ -402,7 +448,26 @@ export default function CustomersPage({ branchFilter, embedded }) {
                       <td className="py-3 px-4 text-center">
                         <StatusBadge status={c.status} />
                       </td>
-                        <td className="py-3 px-4 text-center">
+                      <td className="py-3 px-4 text-center">
+                        {c.allow_installment ? (
+                          <span
+                            title={c.installment_allowed_at ? `Allowed by Store Admin on ${new Date(c.installment_allowed_at).toLocaleDateString()}` : 'Installment Allowed'}
+                            className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-extrabold bg-emerald-100 text-emerald-800 dark:bg-emerald-950/80 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800"
+                          >
+                            <FiCheckCircle className="w-3 h-3 text-emerald-600" />
+                            <span>Allowed</span>
+                          </span>
+                        ) : (
+                          <span
+                            title="Only Store Admin can allow installment for this customer"
+                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-muted text-muted-foreground border border-border"
+                          >
+                            <FiX className="w-3 h-3 opacity-60" />
+                            <span>Restricted</span>
+                          </span>
+                        )}
+                      </td>
+                      <td className="py-3 px-4 text-center">
                         <div className="flex items-center justify-center gap-1">
                           <button
                             onClick={() => openDetail(c)}
@@ -411,6 +476,19 @@ export default function CustomersPage({ branchFilter, embedded }) {
                           >
                             <FiEye className="w-3.5 h-3.5" />
                           </button>
+                          {(isStoreAdmin || isAdmin) && (
+                            <button
+                              onClick={() => handleToggleInstallment(c)}
+                              title={c.allow_installment ? "Revoke Installment Permission" : "Allow Customer Installment Process"}
+                              className={`p-1.5 rounded-lg border transition-all cursor-pointer ${
+                                c.allow_installment
+                                  ? 'border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-rose-50 hover:text-rose-600 hover:border-rose-300 dark:bg-emerald-950/40 dark:border-emerald-800 dark:text-emerald-300'
+                                  : 'border-border hover:bg-emerald-50 hover:text-emerald-600 hover:border-emerald-300 text-muted-foreground'
+                              }`}
+                            >
+                              <FiCreditCard className="w-3.5 h-3.5" />
+                            </button>
+                          )}
                           {isAdmin && (
                             <button
                               onClick={() => openAssignBranch(c)}
@@ -669,6 +747,45 @@ export default function CustomersPage({ branchFilter, embedded }) {
                       <span className="text-[10px] text-muted-foreground uppercase font-bold block mb-1">Last Order</span>
                       <span className="text-xs font-bold font-mono text-foreground mt-1.5 block">{detailCustomer.customer.last_purchase || 'None'}</span>
                     </div>
+                  </div>
+
+                  {/* Store Admin Installment Authorization Card */}
+                  <div className="p-3.5 border border-border rounded-xl bg-card flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-2xs">
+                    <div className="space-y-0.5">
+                      <div className="flex items-center gap-2">
+                        <FiCreditCard className={`w-4 h-4 ${detailCustomer.customer.allow_installment ? 'text-emerald-600' : 'text-muted-foreground'}`} />
+                        <span className="font-bold text-foreground text-xs">Installment Authorization:</span>
+                        {detailCustomer.customer.allow_installment ? (
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-emerald-100 text-emerald-800 dark:bg-emerald-950/80 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800 flex items-center gap-1">
+                            <FiCheckCircle className="w-3 h-3 text-emerald-600" /> Allowed by Store Admin
+                          </span>
+                        ) : (
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-muted text-muted-foreground border border-border flex items-center gap-1">
+                            <FiX className="w-3 h-3 opacity-60" /> Restricted (Store Admin Only)
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-[11px] text-muted-foreground">
+                        {detailCustomer.customer.allow_installment
+                          ? `Authorized by Store Admin${detailCustomer.customer.installment_allowed_by_name ? ` (${detailCustomer.customer.installment_allowed_by_name})` : ''} ${detailCustomer.customer.installment_allowed_at ? `on ${new Date(detailCustomer.customer.installment_allowed_at).toLocaleDateString()}` : ''}. Customer can apply for or purchase via installment plans.`
+                          : 'Only the Store Administrator can authorize this customer to undergo the installment process.'}
+                      </p>
+                    </div>
+
+                    {(isStoreAdmin || isAdmin) && (
+                      <button
+                        type="button"
+                        onClick={() => handleToggleInstallment(detailCustomer.customer)}
+                        className={`px-3.5 py-1.5 rounded-xl font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer shrink-0 shadow-xs ${
+                          detailCustomer.customer.allow_installment
+                            ? 'bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 dark:bg-rose-950/40 dark:text-rose-300 dark:border-rose-900'
+                            : 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-emerald-600/20'
+                        }`}
+                      >
+                        <FiCreditCard className="w-3.5 h-3.5" />
+                        <span>{detailCustomer.customer.allow_installment ? 'Revoke Installment' : 'Allow Installment Process'}</span>
+                      </button>
+                    )}
                   </div>
                 </div>
               )}

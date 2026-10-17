@@ -1,52 +1,75 @@
-import React, { useState, useEffect } from 'react'
-import { FiX, FiSave, FiUploadCloud } from 'react-icons/fi'
+import React, { useState, useEffect, useRef } from 'react'
+import { FiX, FiSave, FiUploadCloud, FiClock, FiTrash2 } from 'react-icons/fi'
 import { showLoading, closeLoading, showSuccess, showError } from '../lib/swal'
 import { api, STORAGE_BASE } from '../lib/api'
+import { triggerDataSync } from '../lib/realtimeSync'
 import { useAuth } from '../context/AuthContext'
+
+export const resolveLogoUrl = (logo) => {
+  if (!logo) return null
+  if (logo.startsWith('blob:') || logo.startsWith('data:') || logo.startsWith('http://') || logo.startsWith('https://')) return logo
+  const path = logo.startsWith('/') ? logo : (logo.startsWith('storage/') ? `/${logo}` : `/storage/${logo}`)
+  return `${STORAGE_BASE || 'http://localhost:8000'}${path}`
+}
+
+const INITIAL_FORM_DATA = {
+  company_name: 'PROJECT: PACE Z-LICZ',
+  name: 'PROJECT: PACE Z-LICZ',
+  branch_name: '',
+  tax_id: '',
+  address: '',
+  phone: '',
+  email: '',
+  currency: 'PHP',
+  attendance_cutoff: '08:00',
+  cutoff_time: '08:00',
+  date_format: 'YYYY-MM-DD',
+  timezone: 'Asia/Manila (GMT+8)',
+  web_links: ''
+}
 
 export default function CompanyConfigurationModal({ isOpen, onClose, onSave, currentSettings }) {
   const { user } = useAuth()
   const isStoreAdmin = user?.role === 'Store Administrator' || user?.role === 'Store Admin'
-  const [formData, setFormData] = useState({
-    company_name: '',
-    branch_name: '',
-    address: '',
-    phone: '',
-    email: '',
-    currency: 'PHP',
-    date_format: 'YYYY-MM-DD',
-    timezone: 'Asia/Manila',
-    attendance_cutoff: '08:00',
-    tax_id: '',
-    web_links: ''
-  })
+  
+  const [formData, setFormData] = useState(INITIAL_FORM_DATA)
   const [logoFile, setLogoFile] = useState(null)
   const [logoPreview, setLogoPreview] = useState(null)
+  const isInitializedRef = useRef(false)
 
+  // Initialize state only when modal opens, avoiding resets on parent re-renders/polls
   useEffect(() => {
-    if (isOpen) {
+    if (!isOpen) {
+      isInitializedRef.current = false
+      return
+    }
+
+    if (isOpen && !isInitializedRef.current) {
+      isInitializedRef.current = true
+      setLogoFile(null)
+
       if (currentSettings) {
         setFormData({
-          company_name: currentSettings.company_name || 'PROJECT: PACE Z-LICZ',
-          branch_name: currentSettings.branch_name || user?.employee?.branch?.name || 'C-LICZ CDO',
+          company_name: currentSettings.company_name || currentSettings.name || 'PROJECT: PACE Z-LICZ',
+          name: currentSettings.name || currentSettings.company_name || 'PROJECT: PACE Z-LICZ',
+          branch_name: currentSettings.branch_name || user?.employee?.branch?.name || '',
+          tax_id: currentSettings.tax_id || '',
           address: (isStoreAdmin && user?.employee?.branch?.location) ? user.employee.branch.location : (currentSettings.address || ''),
           phone: (isStoreAdmin && user?.employee?.branch?.contact_number) ? user.employee.branch.contact_number : (currentSettings.phone || ''),
           email: currentSettings.email || '',
           currency: currentSettings.currency || 'PHP',
+          attendance_cutoff: currentSettings.attendance_cutoff || currentSettings.cutoff_time || '08:00',
+          cutoff_time: currentSettings.cutoff_time || currentSettings.attendance_cutoff || '08:00',
           date_format: currentSettings.date_format || 'YYYY-MM-DD',
-          timezone: currentSettings.timezone || 'Asia/Manila',
-          attendance_cutoff: currentSettings.attendance_cutoff || '08:00',
-          tax_id: currentSettings.tax_id || '',
+          timezone: currentSettings.timezone || 'Asia/Manila (GMT+8)',
           web_links: currentSettings.web_links || ''
         })
-        if (currentSettings.logo) {
-          setLogoPreview(`${STORAGE_BASE}${currentSettings.logo}`)
-        }
+        setLogoPreview(resolveLogoUrl(currentSettings.logo_url || currentSettings.logo))
       } else {
         loadSettings()
       }
     }
-  }, [isOpen, currentSettings])
+  }, [isOpen])
 
   const loadSettings = async () => {
     try {
@@ -64,21 +87,21 @@ export default function CompanyConfigurationModal({ isOpen, onClose, onSave, cur
 
       if (res) {
         setFormData({
-          company_name: res.company_name || 'PROJECT: PACE Z-LICZ',
-          branch_name: branchData?.name || res.branch_name || user?.employee?.branch?.name || 'C-LICZ CDO',
+          company_name: res.company_name || res.name || 'PROJECT: PACE Z-LICZ',
+          name: res.name || res.company_name || 'PROJECT: PACE Z-LICZ',
+          branch_name: branchData?.name || res.branch_name || user?.employee?.branch?.name || '',
+          tax_id: res.tax_id || '',
           address: (isStoreAdmin && branchData?.location) ? branchData.location : (res.address || user?.employee?.branch?.location || ''),
           phone: (isStoreAdmin && branchData?.contact_number) ? branchData.contact_number : (res.phone || user?.employee?.branch?.contact_number || ''),
           email: res.email || '',
           currency: res.currency || 'PHP',
+          attendance_cutoff: res.attendance_cutoff || res.cutoff_time || '08:00',
+          cutoff_time: res.cutoff_time || res.attendance_cutoff || '08:00',
           date_format: res.date_format || 'YYYY-MM-DD',
-          timezone: res.timezone || 'Asia/Manila',
-          attendance_cutoff: res.attendance_cutoff || '08:00',
-          tax_id: res.tax_id || '',
+          timezone: res.timezone || 'Asia/Manila (GMT+8)',
           web_links: res.web_links || ''
         })
-        if (res.logo) {
-          setLogoPreview(`${STORAGE_BASE}${res.logo}`)
-        }
+        setLogoPreview(resolveLogoUrl(res.logo_url || res.logo))
       }
     } catch (error) {
       console.error('Error loading settings:', error)
@@ -86,66 +109,97 @@ export default function CompanyConfigurationModal({ isOpen, onClose, onSave, cur
   }
 
   const handleFileChange = (e) => {
-    const file = e.target.files[0]
-    if (file) {
-      setLogoFile(file)
-      const reader = new FileReader()
-      reader.onloadend = () => {
-        setLogoPreview(reader.result)
-      }
-      reader.readAsDataURL(file)
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    // Validate size (max 5MB)
+    if (file.size > 5 * 1024 * 1024) {
+      showError('File Too Large', 'Please select an image smaller than 5MB.')
+      return
     }
+
+    // Validate file type
+    if (!file.type.startsWith('image/')) {
+      showError('Invalid File Type', 'Please upload a valid image file (PNG, JPG, SVG, WebP, etc.).')
+      return
+    }
+
+    setLogoFile(file)
+    setLogoPreview(URL.createObjectURL(file))
+  }
+
+  const handleResetLogo = () => {
+    setLogoFile(null)
+    setLogoPreview(resolveLogoUrl(currentSettings?.logo_url || currentSettings?.logo))
   }
 
   const handleSubmit = async (e) => {
     e.preventDefault()
+
+    // Frontend validation
+    if (!isStoreAdmin && !formData.company_name?.trim()) {
+      showError('Validation Error', 'Company Name is required.')
+      return
+    }
+
+    if (formData.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email.trim())) {
+      showError('Validation Error', 'Please enter a valid email address (e.g. contact@clicz.com).')
+      return
+    }
+
     showLoading('Saving settings...')
 
     try {
       const payload = new FormData()
 
-      if (isStoreAdmin) {
-        payload.append('branch_name', formData.branch_name || '')
-        payload.append('address', formData.address || '')
-        payload.append('phone', formData.phone || '')
+      const companyNameVal = (formData.company_name || formData.name || '').trim()
+      payload.append('company_name', companyNameVal)
+      payload.append('name', companyNameVal)
+      payload.append('tax_id', (formData.tax_id || '').trim())
+      payload.append('address', (formData.address || '').trim())
+      payload.append('phone', (formData.phone || '').trim())
+      payload.append('email', (formData.email || '').trim())
+      payload.append('currency', (formData.currency || 'PHP').trim())
 
-        // Also update the Store Admin's specific branch profile in database
+      const cutoffVal = (formData.attendance_cutoff || formData.cutoff_time || '08:00').trim()
+      payload.append('attendance_cutoff', cutoffVal)
+      payload.append('cutoff_time', cutoffVal)
+
+      payload.append('date_format', formData.date_format || 'YYYY-MM-DD')
+      payload.append('timezone', formData.timezone || 'Asia/Manila (GMT+8)')
+      payload.append('web_links', formData.web_links || '')
+
+      if (isStoreAdmin) {
+        payload.append('branch_name', (formData.branch_name || '').trim())
         const branchId = user?.employee?.branch_id || user?.branch_id
         if (branchId) {
-          try {
-            const branchPayload = new FormData()
-            branchPayload.append('name', formData.branch_name || '')
-            if (formData.address) branchPayload.append('location', formData.address)
-            if (formData.phone) branchPayload.append('contact_number', formData.phone)
-            await api.branches.update(branchId, branchPayload)
-          } catch (branchErr) {
-            console.warn('Direct branch sync error (handled by backend settings):', branchErr)
-          }
+          payload.append('branch_id', branchId)
         }
-      } else {
-        Object.keys(formData).forEach(key => {
-          if (formData[key] !== null && formData[key] !== undefined) {
-            payload.append(key, formData[key])
-          }
-        })
+      }
 
-        if (logoFile) {
-          payload.append('logo', logoFile)
-        }
+      if (logoFile instanceof File) {
+        payload.append('logo', logoFile)
       }
 
       const res = await api.system.saveSettings(payload)
 
       closeLoading()
 
-      if (res && res.message) {
-        showSuccess('Settings Saved', isStoreAdmin ? 'Branch configuration updated successfully' : 'Company configuration updated successfully')
-        if (onSave) onSave()
-        onClose()
+      const updatedSettings = res?.settings || res?.data || res
+      showSuccess('Settings Saved', isStoreAdmin ? 'Branch configuration updated successfully.' : 'Company configuration updated successfully.')
+
+      if (onSave) {
+        onSave(updatedSettings)
       }
+
+      // Dispatch global system event so entire UI immediately updates in real-time
+      window.dispatchEvent(new CustomEvent('system:settingsUpdated', { detail: updatedSettings }))
+      triggerDataSync('system', { settings: updatedSettings })
+
+      onClose()
     } catch (error) {
       closeLoading()
-      showError('Save Failed', error.message || 'Could not save settings')
+      showError('Save Failed', error.message || 'Could not save settings.')
     }
   }
 
@@ -157,129 +211,161 @@ export default function CompanyConfigurationModal({ isOpen, onClose, onSave, cur
         className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm"
         onClick={onClose}
       />
-      <div className="relative bg-card rounded-3xl shadow-2xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+      <div className="relative bg-card rounded-3xl shadow-2xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in-95 duration-200 border border-border">
+        {/* Modal Header */}
         <div className="flex items-center justify-between p-6 border-b border-border">
           <h2 className="text-xl font-bold text-foreground">
             {isStoreAdmin ? 'Branch Configuration' : 'Company Configuration'}
           </h2>
           <button
             onClick={onClose}
-            className="p-2 text-muted-foreground hover:text-foreground rounded-full hover:bg-muted transition-colors"
+            type="button"
+            className="p-2 text-muted-foreground hover:text-foreground rounded-full hover:bg-muted transition-colors cursor-pointer"
+            aria-label="Close modal"
           >
             <FiX className="w-5 h-5" />
           </button>
         </div>
 
-        <div className="p-6 overflow-y-auto max-h-[70vh]">
-          <form id="configForm" onSubmit={handleSubmit} className="space-y-6">
+        {/* Modal Body */}
+        <div className="p-6 overflow-y-auto max-h-[75vh]">
+          <form id="configForm" onSubmit={handleSubmit} className="space-y-5">
 
             {/* Logo Section - Admin Only */}
             {!isStoreAdmin && (
-              <div className="flex flex-col items-center justify-center p-6 border-2 border-dashed border-border rounded-2xl bg-muted/50">
-                <div className="mb-4 relative group">
-                  {logoPreview ? (
-                    <img src={logoPreview} alt="Logo" className="w-24 h-24 object-contain bg-white rounded-xl shadow-sm border border-slate-200" />
-                  ) : (
-                    <div className="w-24 h-24 rounded-xl bg-card border border-border flex items-center justify-center text-slate-400 shadow-sm">
-                      No Logo
+              <div className="flex flex-col items-center justify-center p-5 border-2 border-dashed border-border rounded-2xl bg-muted/30">
+                <div className="relative group">
+                  <label className="w-24 h-24 rounded-2xl bg-card border border-border flex flex-col items-center justify-center shadow-xs cursor-pointer overflow-hidden transition-all hover:border-primary/50 block">
+                    {logoPreview ? (
+                      <img src={logoPreview} alt="Logo" className="w-full h-full object-contain p-2" />
+                    ) : (
+                      <div className="text-slate-400 font-medium text-sm flex flex-col items-center justify-center h-full">
+                        No Logo
+                      </div>
+                    )}
+                    <div className="absolute inset-0 bg-black/60 text-white flex flex-col items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity rounded-2xl">
+                      <FiUploadCloud className="w-6 h-6 mb-1 text-blue-400" />
+                      <span className="text-[10px] font-semibold tracking-wide">Upload Logo</span>
                     </div>
-                  )}
-                  <label className="absolute inset-0 flex items-center justify-center bg-black/50 text-white rounded-xl opacity-0 group-hover:opacity-100 cursor-pointer transition-opacity">
-                    <FiUploadCloud className="w-6 h-6" />
                     <input type="file" accept="image/*" className="hidden" onChange={handleFileChange} />
                   </label>
                 </div>
-                <p className="text-sm font-medium text-muted-foreground">Company Logo</p>
+                <div className="flex items-center gap-2 mt-2">
+                  <p className="text-sm font-medium text-muted-foreground">Company Logo</p>
+                  {logoFile && (
+                    <button
+                      type="button"
+                      onClick={handleResetLogo}
+                      title="Revert selected logo"
+                      className="text-xs text-rose-500 hover:text-rose-400 flex items-center gap-1 cursor-pointer font-medium ml-1"
+                    >
+                      <FiTrash2 className="w-3 h-3" /> Revert
+                    </button>
+                  )}
+                </div>
               </div>
             )}
 
-            <div className="grid grid-cols-1 gap-5">
+            <div className="grid grid-cols-1 gap-4">
+              {/* Company / Branch Name */}
               <div className="space-y-1.5">
-                <label className="text-sm font-semibold text-foreground">
+                <label className="text-xs font-semibold text-foreground">
                   {isStoreAdmin ? 'Branch Name' : 'Company Name'}
                 </label>
                 <input
                   type="text"
-                  value={isStoreAdmin ? formData.branch_name : formData.company_name}
-                  onChange={e => {
-                    const val = e.target.value
-                    setFormData(prev => ({
-                      ...prev,
-                      [isStoreAdmin ? 'branch_name' : 'company_name']: val
-                    }))
-                  }}
-                  className="w-full px-4 py-2.5 rounded-xl border border-border bg-card text-foreground focus:ring-2 focus:ring-primary/20 outline-none transition-all"
-                  placeholder={isStoreAdmin ? 'e.g. C-LICZ CDO' : 'e.g. PROJECT: PACE Z-LICZ'}
+                  name={isStoreAdmin ? 'branch_name' : 'company_name'}
+                  value={isStoreAdmin ? (formData.branch_name || '') : (formData.company_name || '')}
+                  onChange={(e) => setFormData({
+                    ...formData,
+                    [isStoreAdmin ? 'branch_name' : 'company_name']: e.target.value,
+                    ...(isStoreAdmin ? {} : { name: e.target.value })
+                  })}
+                  className="w-full px-4 py-2.5 rounded-xl border border-border bg-card text-foreground focus:ring-2 focus:ring-primary/20 outline-none transition-all text-sm placeholder:text-muted-foreground/60"
+                  placeholder={isStoreAdmin ? 'e.g. C-LICZ CDO' : 'PROJECT: PACE Z-LICZ'}
                 />
               </div>
 
+              {/* Tax ID / TIN */}
               {!isStoreAdmin && (
                 <div className="space-y-1.5">
-                  <label className="text-sm font-semibold text-foreground">Tax ID / TIN</label>
+                  <label className="text-xs font-semibold text-foreground">Tax ID / TIN</label>
                   <input
                     type="text"
-                    value={formData.tax_id}
-                    onChange={e => setFormData({ ...formData, tax_id: e.target.value })}
-                    className="w-full px-4 py-2.5 rounded-xl border border-border bg-card text-foreground focus:ring-2 focus:ring-primary/20 outline-none transition-all"
+                    name="tax_id"
+                    value={formData.tax_id || ''}
+                    onChange={(e) => setFormData({ ...formData, tax_id: e.target.value })}
+                    className="w-full px-4 py-2.5 rounded-xl border border-border bg-card text-foreground focus:ring-2 focus:ring-primary/20 outline-none transition-all text-sm placeholder:text-muted-foreground/60"
                     placeholder="000-000-000"
                   />
                 </div>
               )}
 
+              {/* Address */}
               <div className="space-y-1.5">
-                <label className="text-sm font-semibold text-foreground">Address</label>
+                <label className="text-xs font-semibold text-foreground">Address</label>
                 <input
                   type="text"
-                  value={formData.address}
-                  onChange={e => setFormData({ ...formData, address: e.target.value })}
-                  className="w-full px-4 py-2.5 rounded-xl border border-border bg-card text-foreground focus:ring-2 focus:ring-primary/20 outline-none transition-all"
+                  name="address"
+                  value={formData.address || ''}
+                  onChange={(e) => setFormData({ ...formData, address: e.target.value })}
+                  className="w-full px-4 py-2.5 rounded-xl border border-border bg-card text-foreground focus:ring-2 focus:ring-primary/20 outline-none transition-all text-sm placeholder:text-muted-foreground/60"
                   placeholder="Full business address"
                 />
               </div>
 
+              {/* Phone */}
               <div className="space-y-1.5">
-                <label className="text-sm font-semibold text-foreground">Phone</label>
+                <label className="text-xs font-semibold text-foreground">Phone</label>
                 <input
                   type="text"
-                  value={formData.phone}
-                  onChange={e => setFormData({ ...formData, phone: e.target.value })}
-                  className="w-full px-4 py-2.5 rounded-xl border border-border bg-card text-foreground focus:ring-2 focus:ring-primary/20 outline-none transition-all"
+                  name="phone"
+                  value={formData.phone || ''}
+                  onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+                  className="w-full px-4 py-2.5 rounded-xl border border-border bg-card text-foreground focus:ring-2 focus:ring-primary/20 outline-none transition-all text-sm placeholder:text-muted-foreground/60"
                   placeholder="+63 900 000 0000"
                 />
               </div>
 
+              {/* Email, Currency, Attendance Cutoff */}
               {!isStoreAdmin && (
                 <>
                   <div className="space-y-1.5">
-                    <label className="text-sm font-semibold text-foreground">Email</label>
+                    <label className="text-xs font-semibold text-foreground">Email</label>
                     <input
                       type="email"
-                      value={formData.email}
-                      onChange={e => setFormData({ ...formData, email: e.target.value })}
-                      className="w-full px-4 py-2.5 rounded-xl border border-border bg-card text-foreground focus:ring-2 focus:ring-primary/20 outline-none transition-all"
+                      name="email"
+                      value={formData.email || ''}
+                      onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                      className="w-full px-4 py-2.5 rounded-xl border border-border bg-card text-foreground focus:ring-2 focus:ring-primary/20 outline-none transition-all text-sm placeholder:text-muted-foreground/60"
                       placeholder="contact@clicz.com"
                     />
                   </div>
 
                   <div className="space-y-1.5">
-                    <label className="text-sm font-semibold text-foreground">Currency</label>
+                    <label className="text-xs font-semibold text-foreground">Currency</label>
                     <input
                       type="text"
-                      value={formData.currency}
-                      onChange={e => setFormData({ ...formData, currency: e.target.value })}
-                      className="w-full px-4 py-2.5 rounded-xl border border-border bg-card text-foreground focus:ring-2 focus:ring-primary/20 outline-none transition-all"
+                      name="currency"
+                      value={formData.currency || ''}
+                      onChange={(e) => setFormData({ ...formData, currency: e.target.value })}
+                      className="w-full px-4 py-2.5 rounded-xl border border-border bg-card text-foreground focus:ring-2 focus:ring-primary/20 outline-none transition-all text-sm placeholder:text-muted-foreground/60"
                       placeholder="PHP"
                     />
                   </div>
 
                   <div className="space-y-1.5">
-                    <label className="text-sm font-semibold text-foreground">Attendance Cutoff Time</label>
-                    <input
-                      type="time"
-                      value={formData.attendance_cutoff}
-                      onChange={e => setFormData({ ...formData, attendance_cutoff: e.target.value })}
-                      className="w-full px-4 py-2.5 rounded-xl border border-border bg-card text-foreground focus:ring-2 focus:ring-primary/20 outline-none transition-all"
-                    />
+                    <label className="text-xs font-semibold text-foreground">Attendance Cutoff Time</label>
+                    <div className="relative">
+                      <input
+                        type="time"
+                        name="attendance_cutoff"
+                        value={formData.attendance_cutoff || ''}
+                        onChange={(e) => setFormData({ ...formData, attendance_cutoff: e.target.value, cutoff_time: e.target.value })}
+                        className="w-full px-4 py-2.5 pr-10 rounded-xl border border-border bg-card text-foreground focus:ring-2 focus:ring-primary/20 outline-none transition-all text-sm cursor-pointer"
+                      />
+                      <FiClock className="absolute right-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
+                    </div>
                   </div>
                 </>
               )}
@@ -288,18 +374,19 @@ export default function CompanyConfigurationModal({ isOpen, onClose, onSave, cur
           </form>
         </div>
 
+        {/* Modal Footer */}
         <div className="p-6 border-t border-border bg-slate-50 dark:bg-slate-800/30 flex justify-end gap-3">
           <button
             type="button"
             onClick={onClose}
-            className="px-6 py-2.5 rounded-xl font-bold text-muted-foreground bg-card border border-border hover:bg-muted/50 transition-colors"
+            className="px-6 py-2.5 rounded-xl font-bold text-muted-foreground bg-card border border-border hover:bg-muted/50 transition-colors cursor-pointer text-sm"
           >
             Cancel
           </button>
           <button
             type="submit"
             form="configForm"
-            className="px-6 py-2.5 rounded-xl font-bold text-white bg-[#007aff] hover:bg-[#0062cc] shadow-sm hover:shadow transition-all flex items-center gap-2"
+            className="px-6 py-2.5 rounded-xl font-bold text-white bg-[#007aff] hover:bg-[#0062cc] shadow-sm hover:shadow transition-all flex items-center gap-2 cursor-pointer text-sm active:scale-[0.99]"
           >
             <FiSave className="w-4 h-4" /> Save Settings
           </button>

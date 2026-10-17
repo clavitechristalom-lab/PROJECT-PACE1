@@ -91,6 +91,18 @@ export function AuthProvider({ children }) {
   const login = async (username, password, remember = true) => {
     try {
       const data = await api.auth.login(username, password)
+      if (data?.requires_otp) {
+        return {
+          success: true,
+          requires_otp: true,
+          user_id: data.user_id,
+          username: data.username,
+          masked_email: data.masked_email,
+          message: data.message,
+          expires_in_seconds: data.expires_in_seconds,
+          cooldown_seconds: data.cooldown_seconds || 60,
+        }
+      }
       if (data?.user) {
         // Mark to skip the next verifySession triggered by storage change
         skipNextVerifyRef.current = true
@@ -111,10 +123,75 @@ export function AuthProvider({ children }) {
     }
   }
 
+  const verifyLoginOtp = async (userIdOrTarget, otp) => {
+    try {
+      const data = await api.auth.loginVerifyOtp(userIdOrTarget, otp)
+      const token = data?.session_token || data?.token;
+      if (data?.user && token) {
+        skipNextVerifyRef.current = true
+        setUser(data.user)
+        setCheckingAuth(false)
+        const sessionPayload = JSON.stringify({
+          user_id: data.user.user_id,
+          token: token,
+          cached_user: data.user,
+        })
+        sessionStorage.setItem('pace_session', sessionPayload)
+        return { success: true, user: data.user }
+      }
+      return { success: false, message: data?.message || 'Login verification failed' }
+    } catch (error) {
+      console.error('Verify login OTP error:', error)
+      return { success: false, message: error.message || 'Invalid or expired OTP code.' }
+    }
+  }
+
+  const resendLoginOtp = async (userIdOrTarget) => {
+    try {
+      const data = await api.auth.loginResendOtp(userIdOrTarget)
+      return {
+        success: true,
+        message: data.message,
+        cooldown_seconds: data.cooldown_seconds || 60,
+      }
+    } catch (error) {
+      console.error('Resend login OTP error:', error)
+      return {
+        success: false,
+        message: error.message || 'Failed to resend code. Please try again.',
+      }
+    }
+  }
+
   const register = async (signUpData) => {
     try {
       const data = await api.auth.register(signUpData)
-      return { success: true, user: data.user }
+      if (data?.requires_otp) {
+        return {
+          success: true,
+          requires_otp: true,
+          user_id: data.user_id,
+          username: data.username,
+          email: data.email,
+          masked_email: data.masked_email,
+          message: data.message,
+          expires_in_seconds: data.expires_in_seconds || 900,
+          cooldown_seconds: data.cooldown_seconds || 60,
+        }
+      }
+      const token = data?.session_token || data?.token
+      if (data?.user && token) {
+        skipNextVerifyRef.current = true
+        setUser(data.user)
+        setCheckingAuth(false)
+        const sessionPayload = JSON.stringify({
+          user_id: data.user.user_id,
+          token: token,
+          cached_user: data.user,
+        })
+        sessionStorage.setItem('pace_session', sessionPayload)
+      }
+      return { success: true, user: data?.user, token: token, message: data?.message }
     } catch (error) {
       console.error('Register error:', error)
       return { success: false, message: error.message || 'Registration failed', errors: error.data?.errors || {} }
@@ -131,11 +208,12 @@ export function AuthProvider({ children }) {
     } finally {
       setUser(null)
       sessionStorage.removeItem('pace_session')
+      sessionStorage.removeItem('pace_last_path')
     }
   }
 
   return (
-    <AuthContext.Provider value={{ user, login, register, logout, checkingAuth, verifySession }}>
+    <AuthContext.Provider value={{ user, login, verifyLoginOtp, resendLoginOtp, register, logout, checkingAuth, verifySession }}>
       {children}
     </AuthContext.Provider>
   )

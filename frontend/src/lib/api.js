@@ -99,8 +99,31 @@ export const api = {
         method: 'POST',
         body: JSON.stringify({ username, password }),
       }),
+    loginVerifyOtp: (userIdOrTarget, otp) =>
+      request('/login/verify-otp', {
+        method: 'POST',
+        body: JSON.stringify(
+          typeof userIdOrTarget === 'number' || /^\d+$/.test(userIdOrTarget)
+            ? { user_id: Number(userIdOrTarget), otp }
+            : { target: userIdOrTarget, otp }
+        ),
+      }),
+    loginResendOtp: (userIdOrTarget) =>
+      request('/login/resend-otp', {
+        method: 'POST',
+        body: JSON.stringify(
+          typeof userIdOrTarget === 'number' || /^\d+$/.test(userIdOrTarget)
+            ? { user_id: Number(userIdOrTarget) }
+            : { target: userIdOrTarget }
+        ),
+      }),
     register: (data) =>
       request('/register', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+    createUser: (data) =>
+      request('/create_user', {
         method: 'POST',
         body: JSON.stringify(data),
       }),
@@ -115,6 +138,26 @@ export const api = {
       request('/user/profile-image', {
         method: 'POST',
         body: formData,
+      }),
+    sendOtp: (targetOrType, maybeTarget) => {
+      const target = maybeTarget !== undefined ? maybeTarget : targetOrType;
+      return request('/forgot-password/send-otp', {
+        method: 'POST',
+        body: JSON.stringify({ target }),
+      });
+    },
+    verifyOtp: (arg1, arg2, arg3) => {
+      const target = arg3 !== undefined ? arg2 : arg1;
+      const otp = arg3 !== undefined ? arg3 : arg2;
+      return request('/forgot-password/verify-otp', {
+        method: 'POST',
+        body: JSON.stringify({ target, otp }),
+      });
+    },
+    resetPassword: (payload) =>
+      request('/forgot-password/reset-password', {
+        method: 'POST',
+        body: JSON.stringify(payload),
       }),
   },
 
@@ -190,6 +233,12 @@ export const api = {
       request(`/customers/${id}/branch`, {
         method: 'PUT',
         body: JSON.stringify({ branch_id: branchId }),
+      }),
+    // Store Admin only: allow or disallow customer to undergo installment process
+    toggleInstallment: (id, data) =>
+      request(`/customers/${id}/allow-installment`, {
+        method: 'PUT',
+        body: JSON.stringify(data),
       }),
   },
 
@@ -272,11 +321,35 @@ export const api = {
         body: data instanceof FormData ? data : JSON.stringify(data),
       }),
     delete: (id) => request(`/payments/${id}`, { method: 'DELETE' }),
+    receive: (id) => request(`/payments/${id}/receive`, { method: 'POST' }),
+    reject: (id, data = {}) => request(`/payments/${id}/reject`, { method: 'POST', body: JSON.stringify(data) }),
     logPrint: (id) => request(id ? `/payments/${id}/log-print` : '/payments/log-print', { method: 'POST' }),
     getSchedules: (params = {}) => {
       const qs = new URLSearchParams(cleanParams(params)).toString();
       return request(`/payment-schedules${qs ? `?${qs}` : ''}`);
     },
+  },
+
+  // ─── E-Wallet & Payment Gateway ───
+  ewallet: {
+    createCheckout: (data) =>
+      request('/payments/ewallet/checkout', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+    checkStatus: (reference) =>
+      request(`/payments/ewallet/status/${encodeURIComponent(reference)}`),
+    simulateWebhook: (payload) => {
+      const isFormData = payload instanceof FormData;
+      return request('/payments/ewallet/simulate-webhook', {
+        method: 'POST',
+        body: isFormData
+          ? payload
+          : JSON.stringify(typeof payload === 'string' ? { reference: payload } : payload),
+      });
+    },
+    getWalletInfo: () =>
+      request('/customer/wallet'),
   },
 
   // ─── Employees ───
@@ -634,6 +707,7 @@ export const api = {
     getDashboard: () => request('/customer/dashboard'),
     getInstallments: () => request('/customer/installments'),
     requestProduct: (data) => request('/customer/product-requests', { method: 'POST', body: data }),
+    requestInstallment: (data = {}) => request('/customer/request-installment', { method: 'POST', body: JSON.stringify(data) }),
   },
 
   // ─── Support Messages ───

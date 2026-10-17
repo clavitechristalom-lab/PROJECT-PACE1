@@ -28,6 +28,11 @@ class SaleTransaction extends Model
         return $this->hasMany(SaleItem::class, 'sale_id', 'sale_id');
     }
 
+    public function saleItems()
+    {
+        return $this->hasMany(SaleItem::class, 'sale_id', 'sale_id');
+    }
+
     public function installmentAccount()
     {
         return $this->hasOne(InstallmentAccount::class, 'sale_id', 'sale_id');

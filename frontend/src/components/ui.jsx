@@ -397,8 +397,8 @@ export function PageHeader({ title, subtitle, action }) {
   return (
     <div className="flex flex-col sm:flex-row sm:items-start justify-between mb-5 gap-3">
       <div>
-        <h1 className="text-lg md:text-xl font-bold text-foreground tracking-tight">{title}</h1>
-        {subtitle && <p className="text-xs text-muted-foreground mt-0.5">{subtitle}</p>}
+        <h1 className="text-lg md:text-xl font-black text-white tracking-tight drop-shadow-sm">{title}</h1>
+        {subtitle && <p className="text-xs text-white/90 mt-0.5 drop-shadow-xs font-medium">{subtitle}</p>}
       </div>
       {action && <div className="flex-shrink-0 flex items-center gap-2 flex-wrap">{action}</div>}
     </div>
@@ -408,23 +408,23 @@ export function PageHeader({ title, subtitle, action }) {
 // ─── Stat Card ────────────────────────────────────────────────────────────────
 export function StatCard({ title, value, sub, icon, color = 'blue' }) {
   const colors = {
-    blue: 'bg-blue-50 text-blue-600 border border-blue-200',
-    green: 'bg-emerald-50 text-emerald-600 border border-emerald-200',
-    red: 'bg-rose-50 text-rose-600 border border-rose-200',
-    yellow: 'bg-amber-50 text-amber-600 border border-amber-200',
-    purple: 'bg-purple-50 text-purple-600 border border-purple-200',
-    indigo: 'bg-indigo-50 text-indigo-600 border border-indigo-200',
+    blue: 'bg-teal-500/15 text-teal-700 border-teal-300/80 dark:bg-teal-500/20 dark:text-teal-300 dark:border-teal-500/40 dark:shadow-[0_0_12px_rgba(20,184,166,0.25)]',
+    green: 'bg-emerald-500/15 text-emerald-700 border-emerald-300/80 dark:bg-emerald-500/20 dark:text-emerald-300 dark:border-emerald-500/40 dark:shadow-[0_0_12px_rgba(16,185,129,0.25)]',
+    red: 'bg-rose-500/15 text-rose-700 border-rose-300/80 dark:bg-rose-900/30 dark:text-rose-300 dark:border-rose-500/40 dark:shadow-[0_0_12px_rgba(244,63,94,0.25)]',
+    yellow: 'bg-amber-500/15 text-amber-700 border-amber-300/80 dark:bg-amber-500/20 dark:text-amber-300 dark:border-amber-500/40 dark:shadow-[0_0_12px_rgba(245,158,11,0.25)]',
+    purple: 'bg-rose-700/15 text-rose-800 border-rose-300/80 dark:bg-rose-950/40 dark:text-rose-300 dark:border-rose-400/40 dark:shadow-[0_0_12px_rgba(190,18,60,0.25)]',
+    indigo: 'bg-emerald-600/15 text-emerald-700 border-emerald-300/80 dark:bg-emerald-500/20 dark:text-emerald-300 dark:border-emerald-400/40 dark:shadow-[0_0_12px_rgba(16,185,129,0.25)]',
   }
   return (
-    <div className="bg-card rounded-2xl border border-border p-4 hover:shadow-sm transition-all">
+    <div className="bg-card rounded-2xl border border-border p-4 hover:shadow-lg transition-all duration-300 hover:scale-[1.02] backdrop-blur-md">
       <div className="flex items-start justify-between mb-2.5">
-        <span className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider leading-tight">{title}</span>
-        <span className={`w-8 h-8 rounded-xl flex items-center justify-center text-sm flex-shrink-0 shadow-2xs ${colors[color] || colors.blue}`}>
+        <span className="text-[11px] font-bold text-emerald-900/75 dark:text-emerald-200/80 uppercase tracking-wider leading-tight">{title}</span>
+        <span className={`w-8 h-8 rounded-xl flex items-center justify-center text-sm flex-shrink-0 border shadow-2xs ${colors[color] || colors.green}`}>
           {icon}
         </span>
       </div>
-      <div className="text-xl md:text-2xl font-black text-foreground tracking-tight font-mono">{value !== undefined ? value : '—'}</div>
-      {sub && <div className="text-[11px] text-muted-foreground mt-1 font-mono">{sub}</div>}
+      <div className="text-xl md:text-2xl font-black text-emerald-950 dark:text-white tracking-tight font-mono">{value !== undefined ? value : '—'}</div>
+      {sub && <div className="text-[11px] text-emerald-800/70 dark:text-emerald-300/60 mt-1 font-mono">{sub}</div>}
     </div>
   )
 }
@@ -639,7 +639,7 @@ export function EmptyState({ icon, title, description, action }) {
 export function TabBar({ tabs = [], activeTab, active, onChange }) {
   const current = activeTab || active
   return (
-    <div className="flex border-b border-border mb-5 overflow-x-auto gap-2">
+    <div className="flex border-b border-white/20 mb-5 overflow-x-auto gap-2">
       {tabs.map(tab => {
         const id = typeof tab === 'object' && tab !== null ? tab.id : tab
         const label = typeof tab === 'object' && tab !== null ? tab.label : tab
@@ -651,15 +651,15 @@ export function TabBar({ tabs = [], activeTab, active, onChange }) {
           <button
             key={id}
             onClick={() => onChange(id)}
-            className={`flex items-center gap-2 px-4 py-2.5 text-xs font-bold cursor-pointer transition-colors border-b-2 -mb-px whitespace-nowrap ${isActive
-                ? 'border-primary text-primary'
-                : 'border-transparent text-muted-foreground hover:text-foreground'
+            className={`flex items-center gap-2 px-4 py-2.5 text-xs font-bold cursor-pointer transition-all border-b-2 -mb-px whitespace-nowrap ${isActive
+                ? 'border-emerald-400 text-white drop-shadow-sm font-extrabold'
+                : 'border-transparent text-white/85 hover:text-white drop-shadow-2xs font-semibold hover:border-white/40'
               }`}
           >
-            {icon && <span className="shrink-0">{icon}</span>}
-            <span>{label}</span>
+            {icon && <span className={`shrink-0 ${isActive ? 'text-emerald-300 drop-shadow-sm' : 'text-white/85'}`}>{icon}</span>}
+            <span className="text-white drop-shadow-sm">{label}</span>
             {badge && (
-              <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-rose-500 text-white font-mono">
+              <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-rose-600 text-white font-mono font-bold shadow-xs">
                 {badge}
               </span>
             )}
@@ -721,23 +721,23 @@ export function NotificationBell({
           setOpen(o => !o)
           if (!open && onRefresh) onRefresh()
         }}
-        className="w-9 h-9 rounded-xl border border-border hover:bg-muted flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors cursor-pointer relative shadow-2xs"
+        className="w-9 h-9 rounded-xl border border-emerald-500/25 bg-emerald-50/50 dark:bg-emerald-950/40 hover:bg-emerald-500/20 flex items-center justify-center text-emerald-800 dark:text-emerald-200 hover:text-emerald-950 dark:hover:text-white transition-colors cursor-pointer relative shadow-2xs"
         aria-label="Notifications"
         title="Notification Center"
       >
         <FiBell className="w-4 h-4" />
         {unreadCount > 0 && (
-          <span className="absolute -top-1 -right-1 min-w-4 h-4 bg-rose-500 text-white text-[10px] font-bold font-mono px-1 rounded-full flex items-center justify-center shadow-xs animate-fadeIn">
+          <span className="absolute -top-1 -right-1 min-w-4 h-4 bg-rose-600 text-white text-[10px] font-bold font-mono px-1 rounded-full flex items-center justify-center shadow-xs animate-fadeIn">
             {unreadCount > 9 ? '9+' : unreadCount}
           </span>
         )}
       </button>
 
       {open && (
-        <div className="absolute right-0 mt-2 w-88 sm:w-[420px] !bg-white dark:!bg-[#0f172a] rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-800 z-50 animate-[slideUp_0.15s_ease] overflow-hidden flex flex-col max-h-[500px]">
-          <div className="flex items-center justify-between px-4 py-3 border-b border-slate-200 dark:border-slate-800 !bg-slate-50 dark:!bg-[#1e293b] shrink-0">
+        <div className="absolute right-0 mt-2 w-88 sm:w-[420px] !bg-white/95 dark:!bg-[#071d14]/95 backdrop-blur-xl rounded-2xl shadow-2xl border border-emerald-500/30 z-50 animate-[slideUp_0.15s_ease] overflow-hidden flex flex-col max-h-[500px]">
+          <div className="flex items-center justify-between px-4 py-3 border-b border-emerald-500/20 !bg-emerald-50/70 dark:!bg-emerald-950/70 shrink-0">
             <div className="flex items-center gap-2">
-              <span className="text-xs font-bold uppercase tracking-wider text-foreground">Notification Bar</span>
+              <span className="text-xs font-bold uppercase tracking-wider text-emerald-950 dark:text-emerald-100">Notification Bar</span>
               {unreadCount > 0 && (
                 <span className="text-[10px] font-bold font-mono bg-rose-100 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300 border border-rose-300 dark:border-rose-800 px-1.5 py-0.2 rounded-full">
                   {unreadCount} unread
