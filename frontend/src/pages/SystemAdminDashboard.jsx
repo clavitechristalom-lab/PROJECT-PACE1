@@ -10,7 +10,7 @@ import {
   Btn, Modal, Pagination
 } from '../components/ui'
 import { api } from '../lib/api'
-import { triggerDataSync } from '../lib/realtimeSync'
+import { triggerDataSync, useRealtimeSync } from '../lib/realtimeSync'
 import { fmtDate } from '../lib/utils'
 import Swal from 'sweetalert2'
 
@@ -53,8 +53,9 @@ export default function SystemAdminDashboard() {
   // Carousel State
   const [carouselImages, setCarouselImages] = useState([])
 
-  const loadData = async (tab) => {
-    setLoading(true)
+  const loadData = async (tab, source) => {
+    const isBg = source === 'timer' || source === 'database' || source === 'event' || source === 'sync' || source === 'focus';
+    if (!isBg) setLoading(true)
     setError('')
     try {
       if (tab === 'metrics') {
@@ -75,14 +76,18 @@ export default function SystemAdminDashboard() {
       }
     } catch (err) {
       console.error(`Failed to load ${tab}:`, err)
-      setError(err.message || 'Failed to load data')
+      if (!isBg) setError(err.message || 'Failed to load data')
     } finally {
-      setLoading(false)
+      if (!isBg) setLoading(false)
     }
   }
 
   useEffect(() => {
     loadData(activeTab)
+  }, [activeTab])
+
+  useRealtimeSync((source) => {
+    loadData(activeTab, source)
   }, [activeTab])
 
   // --- Handlers ---
@@ -152,6 +157,7 @@ export default function SystemAdminDashboard() {
       })
       setUsers(users.map(u => u.user_id === userRecord.user_id ? { ...u, is_active: !u.is_active } : u))
       showToast('User status updated successfully', 'success')
+      triggerDataSync('users')
     } catch (err) {
       showToast(err.message || 'Failed to update user status', 'error')
     } finally {
@@ -182,6 +188,7 @@ export default function SystemAdminDashboard() {
     try {
       await api.system.saveSettings(updated)
       showToast('Settings saved automatically', 'success')
+      triggerDataSync('settings')
     } catch (err) {
       showToast('Failed to save settings', 'error')
       setSettings(settings)

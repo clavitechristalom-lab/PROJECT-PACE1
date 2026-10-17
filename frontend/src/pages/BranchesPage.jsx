@@ -144,6 +144,12 @@ export default function BranchesPage() {
       return
     }
 
+    const branchId = editItem?.id || editItem?.branch_id
+    if (!branchId) {
+      showToast('Invalid branch ID', 'error')
+      return
+    }
+
     setSaving(true)
     try {
       const payload = new FormData()
@@ -152,12 +158,15 @@ export default function BranchesPage() {
       payload.append('contact_number', (form.contact_number || '').trim())
       payload.append('status', form.status || 'open')
       payload.append('color', form.color || '#2b5ce6')
+      if (form.image_url) {
+        payload.append('image_url', form.image_url)
+      }
 
       if (editImageFile instanceof File) {
         payload.append('image', editImageFile)
       }
 
-      await api.branches.update(editItem.id, payload)
+      await api.branches.update(branchId, payload)
       showToast('Branch updated successfully', 'success')
       setEditItem(null)
       setEditImageFile(null)
@@ -216,7 +225,7 @@ export default function BranchesPage() {
         <div className="p-4 border-b border-border flex flex-col md:flex-row justify-between items-center gap-4 bg-muted/20">
           <SearchBar value={search} onChange={setSearch} placeholder="Search branches..." className="w-full md:w-80" />
           <div className="flex items-center gap-3 w-full md:w-auto">
-            <Select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} className="w-full md:w-40">
+            <Select value={statusFilter} onChange={e => setStatusFilter(e?.target ? e.target.value : e)} className="w-full md:w-40">
               <option value="All">All Status</option>
               <option value="open">Open</option>
               <option value="closed">Closed</option>
@@ -414,7 +423,7 @@ export default function BranchesPage() {
               <label className="text-xs font-bold text-muted-foreground uppercase">Branch Name *</label>
               <Input
                 value={form.name}
-                onChange={e => setForm({ ...form, name: e.target.value })}
+                onChange={e => setForm({ ...form, name: e?.target ? e.target.value : e })}
                 placeholder="e.g. Main Branch"
                 error={formErrors.name}
               />
@@ -427,7 +436,7 @@ export default function BranchesPage() {
                 </label>
                 <Input
                   value={form.location}
-                  onChange={e => setForm({ ...form, location: e.target.value })}
+                  onChange={e => setForm({ ...form, location: e?.target ? e.target.value : e })}
                   placeholder="City or Address"
                 />
               </div>
@@ -437,7 +446,7 @@ export default function BranchesPage() {
                 </label>
                 <Input
                   value={form.contact_number}
-                  onChange={e => setForm({ ...form, contact_number: e.target.value })}
+                  onChange={e => setForm({ ...form, contact_number: e?.target ? e.target.value : e })}
                   placeholder="(+63) 900-000-0000"
                 />
               </div>
@@ -446,10 +455,27 @@ export default function BranchesPage() {
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-1">
                 <label className="text-xs font-bold text-muted-foreground uppercase">Status</label>
-                <Select value={form.status} onChange={e => setForm({ ...form, status: e.target.value })}>
+                <Select value={form.status} onChange={e => setForm({ ...form, status: e?.target ? e.target.value : e })}>
                   <option value="open">Open (Active)</option>
                   <option value="closed">Closed (Inactive)</option>
                 </Select>
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs font-bold text-muted-foreground uppercase">Accent Color</label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="color"
+                    value={form.color || '#2b5ce6'}
+                    onChange={e => setForm({ ...form, color: e.target.value })}
+                    className="w-10 h-9 p-0.5 rounded-xl border border-border bg-card cursor-pointer shrink-0"
+                  />
+                  <Input
+                    value={form.color}
+                    onChange={e => setForm({ ...form, color: e?.target ? e.target.value : e })}
+                    placeholder="#2b5ce6"
+                    className="font-mono text-xs uppercase"
+                  />
+                </div>
               </div>
             </div>
 

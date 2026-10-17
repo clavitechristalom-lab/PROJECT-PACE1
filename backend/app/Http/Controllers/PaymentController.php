@@ -99,10 +99,12 @@ class PaymentController extends Controller
                     $accNo = $inst ? $inst->account_no : 'N/A';
                     
                     $branch = 'Main Branch';
-                    if ($inst && $inst->sale && $inst->sale->processedBy && $inst->sale->processedBy->employee && $inst->sale->processedBy->employee->branch) {
-                        $branch = $inst->sale->processedBy->employee->branch->name;
-                    } elseif ($p->receivedBy && $p->receivedBy->employee && $p->receivedBy->employee->branch) {
-                        $branch = $p->receivedBy->employee->branch->name;
+                    if ($inst && $inst->sale && $inst->sale->processedBy && $inst->sale->processedBy->employee) {
+                        $empB = $inst->sale->processedBy->employee->branch;
+                        $branch = is_object($empB) ? ($empB->name ?? 'Main Branch') : ((string)$empB ?: 'Main Branch');
+                    } elseif ($p->receivedBy && $p->receivedBy->employee) {
+                        $empB = $p->receivedBy->employee->branch;
+                        $branch = is_object($empB) ? ($empB->name ?? 'Main Branch') : ((string)$empB ?: 'Main Branch');
                     }
 
                     $receivedBy = $p->receivedBy ? ($p->receivedBy->employee ? "{$p->receivedBy->employee->first_name} {$p->receivedBy->employee->last_name}" : $p->receivedBy->username) : 'Staff';
@@ -131,10 +133,12 @@ class PaymentController extends Controller
             $accNo = $inst ? $inst->account_no : 'N/A';
 
             $branch = 'Main Branch';
-            if ($inst && $inst->sale && $inst->sale->processedBy && $inst->sale->processedBy->employee && $inst->sale->processedBy->employee->branch) {
-                $branch = $inst->sale->processedBy->employee->branch->name;
-            } elseif ($p->receivedBy && $p->receivedBy->employee && $p->receivedBy->employee->branch) {
-                $branch = $p->receivedBy->employee->branch->name;
+            if ($inst && $inst->sale && $inst->sale->processedBy && $inst->sale->processedBy->employee) {
+                $empB = $inst->sale->processedBy->employee->branch;
+                $branch = is_object($empB) ? ($empB->name ?? 'Main Branch') : ((string)$empB ?: 'Main Branch');
+            } elseif ($p->receivedBy && $p->receivedBy->employee) {
+                $empB = $p->receivedBy->employee->branch;
+                $branch = is_object($empB) ? ($empB->name ?? 'Main Branch') : ((string)$empB ?: 'Main Branch');
             }
 
             $receivedBy = $p->receivedBy ? ($p->receivedBy->employee ? "{$p->receivedBy->employee->first_name} {$p->receivedBy->employee->last_name}" : $p->receivedBy->username) : ($p->status === 'Pending' ? null : 'Staff');
@@ -264,17 +268,20 @@ class PaymentController extends Controller
         $branchLocation = '';
         $branchPhone = '';
         if ($inst && $inst->sale && $inst->sale->branch) {
-            $branchName = $inst->sale->branch->name;
-            $branchLocation = $inst->sale->branch->location;
-            $branchPhone = $inst->sale->branch->contact_number;
-        } elseif ($inst && $inst->sale && $inst->sale->processedBy && $inst->sale->processedBy->employee && $inst->sale->processedBy->employee->branch) {
-            $branchName = $inst->sale->processedBy->employee->branch->name;
-            $branchLocation = $inst->sale->processedBy->employee->branch->location;
-            $branchPhone = $inst->sale->processedBy->employee->branch->contact_number;
-        } elseif ($p->receivedBy && $p->receivedBy->employee && $p->receivedBy->employee->branch) {
-            $branchName = $p->receivedBy->employee->branch->name;
-            $branchLocation = $p->receivedBy->employee->branch->location;
-            $branchPhone = $p->receivedBy->employee->branch->contact_number;
+            $b = $inst->sale->branch;
+            $branchName = is_object($b) ? ($b->name ?? 'Main Branch') : ((string)$b ?: 'Main Branch');
+            $branchLocation = is_object($b) ? ($b->location ?? '') : '';
+            $branchPhone = is_object($b) ? ($b->contact_number ?? '') : '';
+        } elseif ($inst && $inst->sale && $inst->sale->processedBy && $inst->sale->processedBy->employee) {
+            $b = $inst->sale->processedBy->employee->branch;
+            $branchName = is_object($b) ? ($b->name ?? 'Main Branch') : ((string)$b ?: 'Main Branch');
+            $branchLocation = is_object($b) ? ($b->location ?? '') : '';
+            $branchPhone = is_object($b) ? ($b->contact_number ?? '') : '';
+        } elseif ($p->receivedBy && $p->receivedBy->employee) {
+            $b = $p->receivedBy->employee->branch;
+            $branchName = is_object($b) ? ($b->name ?? 'Main Branch') : ((string)$b ?: 'Main Branch');
+            $branchLocation = is_object($b) ? ($b->location ?? '') : '';
+            $branchPhone = is_object($b) ? ($b->contact_number ?? '') : '';
         }
 
         $settings = \App\Models\Setting::all()->pluck('value', 'key')->toArray();

@@ -56,10 +56,14 @@ Route::post('/webhooks/gcash', [EWalletController::class, 'handleWebhook']);
 Route::get('/payments/ewallet/status/{reference}', [EWalletController::class, 'checkStatus']);
 Route::post('/payments/ewallet/simulate-webhook', [EWalletController::class, 'simulateWebhook']);
 
+// ─── Real-Time Synchronization Stream (SSE & Query Token Authorized) ───────
+Route::get('/sync/stream', [\App\Http\Controllers\SyncController::class, 'stream']);
+
 // ─── Protected Routes (Sanctum Authenticated) ─────────────────────────────────
 Route::middleware('auth:sanctum')->group(function () {
     Route::get('/me', [AuthController::class, 'me']);
     Route::get('/sync/status', [SyncController::class, 'status']);
+    Route::post('/sync/trigger', [SyncController::class, 'triggerManualSync']);
     Route::post('/user/profile-image', [AuthController::class, 'uploadProfileImage']);
 
     // Branches
@@ -152,6 +156,7 @@ Route::middleware('auth:sanctum')->group(function () {
     // ─── Store Administrator QR Attendance Scanner (STRICT: Store Admin Only) ───
     Route::middleware('role:Store Administrator,Store Admin')->group(function () {
         Route::post('/attendance/scan', [AttendanceController::class, 'scan']);
+        Route::post('/attendance/record', [AttendanceController::class, 'scan']);
         Route::post('/attendance/scan-image', [AttendanceController::class, 'scanImage']);
         Route::post('/attendance/verify-qr', [AttendanceController::class, 'verifyQr']);
         Route::post('/attendance/verify-pin', [AttendanceController::class, 'verifyPin']);
@@ -172,7 +177,6 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/admin/qr-requests/{id}/review', [QrRequestController::class, 'review']);
         Route::post('/admin/qr-requests/{id}/approve', [QrRequestController::class, 'approve']);
         Route::post('/admin/qr-requests/{id}/reject', [QrRequestController::class, 'reject']);
-        Route::get('/admin/qr-monitoring', [SystemController::class, 'qrMonitoring']);
     });
 
     // ─── Employee Management (Role-based access is handled in the controller) ────────

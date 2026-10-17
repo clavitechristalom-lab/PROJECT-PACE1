@@ -47,6 +47,7 @@ function navByRole(role, onOpenConfig) {
       { label: 'My Attendance QR', path: '/employee/attendance', icon: icons.attendance },
       { label: 'My Payroll', path: '/employee/payroll', icon: icons.payroll },
       { label: 'My Payslips', path: '/employee/payslips', icon: icons.payslip },
+      { label: 'Notification Center', path: '/employee/notifications', icon: icons.notifications },
     ]
   }
 
@@ -128,6 +129,7 @@ function navByRole(role, onOpenConfig) {
   base.push({ label: 'Reports', path: '/reports', icon: icons.reports })
 
   base.push({ label: 'Customer Support', path: '/admin/support', icon: icons.support })
+  base.push({ label: 'Notification Center', path: '/notifications', icon: icons.notifications })
 
   if (isAdmin) {
     base.push({ label: 'Company Configuration', action: onOpenConfig, icon: icons.settings })

@@ -6,7 +6,7 @@ import {
   PageHeader, Card, StatusBadge, LoadingState, EmptyState, Pagination, SearchBar
 } from '../components/ui'
 import { api } from '../lib/api'
-import { useRealtimeSync } from '../lib/realtimeSync'
+import { useRealtimeSync, triggerDataSync } from '../lib/realtimeSync'
 import Swal from 'sweetalert2'
 
 const QUICK_RESPONSES = [
@@ -284,6 +284,7 @@ export default function SupportPage() {
   const handleSendResponse = async (id, responseText) => {
     await api.supportMessages.update(id, { new_message: responseText })
     loadMessages(true)
+    triggerDataSync('support')
     Swal.fire({
       icon: 'success',
       title: 'Message Sent',
@@ -314,6 +315,7 @@ export default function SupportPage() {
       try {
         await api.supportMessages.delete(id);
         loadMessages(true);
+        triggerDataSync('support');
         Swal.fire({
           icon: 'success',
           title: 'Deleted!',

@@ -49,13 +49,18 @@ export default function CompanyConfigurationModal({ isOpen, onClose, onSave, cur
       setLogoFile(null)
 
       if (currentSettings) {
+        const empBranch = user?.employee?.branch
+        const empBranchName = (typeof empBranch === 'object' ? empBranch?.name : empBranch) || ''
+        const empBranchLocation = (typeof empBranch === 'object' ? empBranch?.location : '') || ''
+        const empBranchContact = (typeof empBranch === 'object' ? empBranch?.contact_number : '') || ''
+
         setFormData({
           company_name: currentSettings.company_name || currentSettings.name || 'PROJECT: PACE Z-LICZ',
           name: currentSettings.name || currentSettings.company_name || 'PROJECT: PACE Z-LICZ',
-          branch_name: currentSettings.branch_name || user?.employee?.branch?.name || '',
+          branch_name: currentSettings.branch_name || empBranchName,
           tax_id: currentSettings.tax_id || '',
-          address: (isStoreAdmin && user?.employee?.branch?.location) ? user.employee.branch.location : (currentSettings.address || ''),
-          phone: (isStoreAdmin && user?.employee?.branch?.contact_number) ? user.employee.branch.contact_number : (currentSettings.phone || ''),
+          address: (isStoreAdmin && empBranchLocation) ? empBranchLocation : (currentSettings.address || ''),
+          phone: (isStoreAdmin && empBranchContact) ? empBranchContact : (currentSettings.phone || ''),
           email: currentSettings.email || '',
           currency: currentSettings.currency || 'PHP',
           attendance_cutoff: currentSettings.attendance_cutoff || currentSettings.cutoff_time || '08:00',
@@ -86,13 +91,18 @@ export default function CompanyConfigurationModal({ isOpen, onClose, onSave, cur
       }
 
       if (res) {
+        const empBranch = user?.employee?.branch
+        const empBranchName = (typeof empBranch === 'object' ? empBranch?.name : empBranch) || ''
+        const empBranchLocation = (typeof empBranch === 'object' ? empBranch?.location : '') || ''
+        const empBranchContact = (typeof empBranch === 'object' ? empBranch?.contact_number : '') || ''
+
         setFormData({
           company_name: res.company_name || res.name || 'PROJECT: PACE Z-LICZ',
           name: res.name || res.company_name || 'PROJECT: PACE Z-LICZ',
-          branch_name: branchData?.name || res.branch_name || user?.employee?.branch?.name || '',
+          branch_name: branchData?.name || res.branch_name || empBranchName,
           tax_id: res.tax_id || '',
-          address: (isStoreAdmin && branchData?.location) ? branchData.location : (res.address || user?.employee?.branch?.location || ''),
-          phone: (isStoreAdmin && branchData?.contact_number) ? branchData.contact_number : (res.phone || user?.employee?.branch?.contact_number || ''),
+          address: (isStoreAdmin && branchData?.location) ? branchData.location : (res.address || empBranchLocation),
+          phone: (isStoreAdmin && branchData?.contact_number) ? branchData.contact_number : (res.phone || empBranchContact),
           email: res.email || '',
           currency: res.currency || 'PHP',
           attendance_cutoff: res.attendance_cutoff || res.cutoff_time || '08:00',

@@ -65,12 +65,14 @@ class QrRequestController extends Controller
             $requestCode = 'REQ-' . str_pad($count, 4, '0', STR_PAD_LEFT);
         }
 
+        $qrBranch = $employee->branch_name ?? (is_object($employee->branch) ? $employee->branch->name : ((string)$employee->branch ?: null));
+
         $qrRequest = QrRequest::create([
             'request_code' => $requestCode,
             'user_id' => $user->user_id,
             'employee_id' => $employee->employee_id,
             'role' => $user->role,
-            'branch' => $employee->branch ? $employee->branch->name : null,
+            'branch' => $qrBranch,
             'department' => $employee->department ?: 'Operations',
             'position' => $employee->position ?: $user->role,
             'status' => 'PENDING',
@@ -94,11 +96,12 @@ class QrRequestController extends Controller
 
         // Notify Administrators
         $isStoreAdmin = in_array($user->role, ['Store Administrator', 'Store Admin']);
+        $displayBranch = $qrBranch ?: 'Unassigned';
         if ($isStoreAdmin) {
             NotificationService::sendToAdmins([
                 'type' => 'new_qr_request',
                 'title' => '🔔 NEW STORE ADMIN QR REQUEST',
-                'message' => "Name: {$employee->first_name} {$employee->last_name}, Role: Store Administrator, Branch: " . ($employee->branch ? $employee->branch->name : 'Unassigned') . ", Status: PENDING VERIFICATION",
+                'message' => "Name: {$employee->first_name} {$employee->last_name}, Role: Store Administrator, Branch: {$displayBranch}, Status: PENDING VERIFICATION",
                 'action_url' => '/admin/qr-requests',
                 'priority' => 'high',
             ]);
@@ -106,7 +109,7 @@ class QrRequestController extends Controller
             NotificationService::sendToAdmins([
                 'type' => 'new_qr_request',
                 'title' => '🔔 NEW QR REQUEST',
-                'message' => "Employee: {$employee->first_name} {$employee->last_name} ({$employee->employee_code}), Branch: " . ($employee->branch ? $employee->branch->name : 'Unassigned') . ", Request Date: " . now()->format('F j, Y') . ", Status: PENDING VERIFICATION",
+                'message' => "Employee: {$employee->first_name} {$employee->last_name} ({$employee->employee_code}), Branch: {$displayBranch}, Request Date: " . now()->format('F j, Y') . ", Status: PENDING VERIFICATION",
                 'action_url' => '/admin/qr-requests',
                 'priority' => 'high',
             ]);
@@ -175,7 +178,7 @@ class QrRequestController extends Controller
                 'name' => "{$employee->first_name} {$employee->last_name}",
                 'position' => $employee->position,
                 'department' => $employee->department,
-                'branch' => $employee->branch ? $employee->branch->name : null,
+                'branch' => $employee->branch_name ?? (is_object($employee->branch) ? $employee->branch->name : ((string)$employee->branch ?: null)),
                 'email' => $employee->email,
                 'phone' => $employee->phone,
             ] : null,

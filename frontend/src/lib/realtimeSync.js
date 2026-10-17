@@ -9,6 +9,8 @@ let lastVerifCount = null
 let lastQrCount = null
 let isPolling = false
 
+let eventSource = null
+
 // Initialize BroadcastChannel if supported
 try {
   if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
@@ -36,25 +38,77 @@ if (typeof window !== 'undefined') {
 }
 
 /**
- * Trigger an immediate data sync across all components and open tabs
+ * Connect to live Server-Sent Events (SSE) stream
+ */
+function connectEventSource() {
+  if (typeof window === 'undefined' || typeof EventSource === 'undefined') return
+
+  try {
+    const raw = sessionStorage.getItem('pace_session') || localStorage.getItem('pace_session')
+    let token = null
+    if (raw) {
+      try {
+        const parsed = JSON.parse(raw)
+        token = parsed.token || parsed.access_token
+      } catch (_) {}
+    }
+
+    if (!token) return
+
+    if (eventSource) {
+      eventSource.close()
+      eventSource = null
+    }
+
+    const streamUrl = `/api/sync/stream?token=${encodeURIComponent(token)}`
+    eventSource = new EventSource(streamUrl)
+
+    eventSource.addEventListener('sync', (e) => {
+      try {
+        const data = JSON.parse(e.data)
+        window.dispatchEvent(new CustomEvent('pace:data-sync', { detail: data }))
+        if (data.type === 'notifications') {
+          window.dispatchEvent(new CustomEvent('pace:notifications-sync', { detail: data }))
+        }
+      } catch (_) {}
+    })
+
+    eventSource.onerror = () => {
+      if (eventSource) {
+        eventSource.close()
+        eventSource = null
+      }
+    }
+  } catch (err) {
+    // Falls back seamlessly to pollStatus
+  }
+}
+
+/**
+ * Trigger an immediate data sync across all components, open tabs, and connected users
  */
 export function triggerDataSync(module = 'general', extra = {}) {
   const detail = { type: 'mutation', module, timestamp: Date.now(), ...extra }
   
-  // Local window dispatch
+  // 1. Local window dispatch
   window.dispatchEvent(new CustomEvent('pace:data-sync', { detail }))
 
-  // Cross-tab broadcast
+  // 2. Cross-tab broadcast
   try {
     if (broadcastChannel) {
       broadcastChannel.postMessage(detail)
     }
     localStorage.setItem('pace_cross_tab_sync', JSON.stringify(detail))
   } catch (e) {}
+
+  // 3. Inform server so other remote dashboards receive instant SSE notification
+  if (api.sync?.triggerSync) {
+    api.sync.triggerSync(module).catch(() => {})
+  }
 }
 
 /**
- * Poll sync status from backend
+ * Poll sync status from backend (high-reliability fallback)
  */
 async function pollStatus() {
   if (isPolling) return
@@ -105,20 +159,27 @@ async function pollStatus() {
 export function startRealtimeEngine() {
   if (syncInterval) clearInterval(syncInterval)
   
-  // Initial check
+  // 1. Initial status check & SSE stream connection
   pollStatus()
+  connectEventSource()
 
-  // High-frequency polling (2.5 seconds for instant multi-user updates)
+  // 2. Periodic poll fallback (every 2.5s when tab is active)
   syncInterval = setInterval(() => {
     if (document.visibilityState === 'visible') {
       pollStatus()
+      if (!eventSource) {
+        connectEventSource()
+      }
     }
   }, 2500)
 
-  // When tab becomes visible again, immediately poll
+  // 3. When tab becomes visible again, immediately re-verify
   const handleVisibility = () => {
     if (document.visibilityState === 'visible') {
       pollStatus()
+      if (!eventSource) {
+        connectEventSource()
+      }
       window.dispatchEvent(new CustomEvent('pace:data-sync', { detail: { type: 'tab_focus' } }))
     }
   }
@@ -126,6 +187,10 @@ export function startRealtimeEngine() {
 
   return () => {
     if (syncInterval) clearInterval(syncInterval)
+    if (eventSource) {
+      eventSource.close()
+      eventSource = null
+    }
     document.removeEventListener('visibilitychange', handleVisibility)
   }
 }

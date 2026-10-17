@@ -295,7 +295,7 @@ class PayrollController extends Controller
                 'employee_name' => $emp ? $emp->first_name . ' ' . $emp->last_name : 'Unknown',
                 'department' => $emp ? $emp->department : 'General',
                 'position' => $emp ? $emp->position : 'Staff',
-                'branch' => $emp && $emp->branch ? $emp->branch->name : null,
+                'branch' => $emp ? ($emp->branch_name ?? (is_object($emp->branch) ? $emp->branch->name : ((string)$emp->branch ?: null))) : null,
                 'pay_type' => $emp ? $emp->pay_type : 'Monthly',
                 'manager' => $emp ? $emp->manager : 'N/A', // fallback if exists
                 'basic_salary' => (float)$payroll->basic_salary,

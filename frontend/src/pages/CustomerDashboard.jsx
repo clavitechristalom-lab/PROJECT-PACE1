@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams, useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
 import { fmt } from '../lib/utils';
 import { FiPackage, FiMonitor, FiCreditCard, FiAlertCircle, FiTrendingUp, FiUser, FiGitBranch } from 'react-icons/fi';
@@ -23,6 +23,7 @@ import DepositModal from '../components/customer/DepositModal';
 
 export default function CustomerDashboard() {
   const { user } = useAuth();
+  const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState(null);
@@ -88,6 +89,9 @@ export default function CustomerDashboard() {
       case 'Installments':
       case 'Installment Plans':
         openModal('installments');
+        break;
+      case 'Notifications':
+        navigate('/notifications');
         break;
       case 'View Statements':
         openModal('statement');

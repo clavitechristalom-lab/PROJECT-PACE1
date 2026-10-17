@@ -8,7 +8,7 @@ import {
   FiCreditCard, FiPackage, FiAlertTriangle,
   FiTrendingUp, FiTrendingDown, FiShoppingCart, FiUsers,
   FiLayers, FiActivity, FiClock, FiEye, FiPlus, FiCheckCircle,
-  FiX, FiCamera, FiBarChart2, FiFileText, FiSmartphone, FiInfo, FiShield, FiPrinter
+  FiX, FiCamera, FiBarChart2, FiFileText, FiSmartphone, FiInfo, FiShield, FiPrinter, FiBell
 } from 'react-icons/fi'
 import { useAuth } from '../context/AuthContext'
 import {
@@ -927,13 +927,22 @@ export function EmployeeDashboard() {
         title="My Dashboard"
         subtitle={`Welcome back, ${user?.name ? user.name.split(' ')[0] : 'Employee'}`}
         action={
-          <button
-            onClick={() => navigate('/employee/attendance')}
-            className="flex items-center gap-2 px-4 py-2 bg-primary hover:bg-primary/90 text-primary-foreground font-semibold text-xs rounded-xl shadow-xs transition-all cursor-pointer"
-          >
-            <FiCamera className="w-4 h-4" />
-            <span>My Permanent QR Badge</span>
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => navigate('/employee/notifications')}
+              className="flex items-center gap-2 px-3.5 py-2 bg-card hover:bg-muted text-foreground border border-border font-semibold text-xs rounded-xl shadow-xs transition-all cursor-pointer"
+            >
+              <FiBell className="w-4 h-4 text-primary" />
+              <span>Notifications</span>
+            </button>
+            <button
+              onClick={() => navigate('/employee/attendance')}
+              className="flex items-center gap-2 px-4 py-2 bg-primary hover:bg-primary/90 text-primary-foreground font-semibold text-xs rounded-xl shadow-xs transition-all cursor-pointer"
+            >
+              <FiCamera className="w-4 h-4" />
+              <span>My Permanent QR Badge</span>
+            </button>
+          </div>
         }
       />
 

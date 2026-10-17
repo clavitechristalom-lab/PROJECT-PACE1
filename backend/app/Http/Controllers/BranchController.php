@@ -126,6 +126,7 @@ class BranchController extends Controller
     public function update(Request $request, $id)
     {
         $branch = BranchProfile::findOrFail($id);
+        $oldName = $branch->name;
         $oldImageUrl = $branch->image_url;
 
         $validated = $request->validate([
@@ -140,6 +141,25 @@ class BranchController extends Controller
         ]);
 
         $branch->update($validated);
+
+        // Cascade branch name change across linked records
+        if (!empty($validated['name']) && $validated['name'] !== $oldName) {
+            \App\Models\Employee::where('branch_id', $branch->id)
+                ->orWhere('branch', $oldName)
+                ->update(['branch' => $branch->name]);
+
+            \App\Models\Customer::where('branch_id', $branch->id)
+                ->orWhere('branch', $oldName)
+                ->update(['branch' => $branch->name]);
+
+            \Illuminate\Support\Facades\DB::table('attendance_scan_logs')
+                ->where('branch', $oldName)
+                ->update(['branch' => $branch->name]);
+
+            \Illuminate\Support\Facades\DB::table('qr_requests')
+                ->where('branch', $oldName)
+                ->update(['branch' => $branch->name]);
+        }
 
         if ($request->hasFile('image')) {
             $request->validate([
@@ -166,6 +186,27 @@ class BranchController extends Controller
                     $q->where('branch_id', $branch->id);
                 })->first();
             $branch->manager = $manager ? $manager->username : null;
+        }
+
+        $user = $request->user();
+        if ($user) {
+            \App\Models\SystemLog::create([
+                'user_id' => $user->user_id,
+                'action' => 'UPDATE',
+                'module' => 'Branches',
+                'description' => "Updated branch details for '{$branch->name}' (ID: {$branch->id})",
+                'ip_address' => $request->ip(),
+                'user_agent' => $request->userAgent(),
+            ]);
+
+            \App\Services\NotificationService::sendToAdmins([
+                'type' => 'branch_updated',
+                'title' => 'Branch Profile Updated',
+                'message' => "Branch '{$branch->name}' details were updated by {$user->username}.",
+                'module' => 'Branches',
+                'action_url' => '/branches',
+                'priority' => 'normal',
+            ]);
         }
 
         return response()->json([

@@ -87,13 +87,16 @@ class SupportMessageController extends Controller
         // Normally we'd pass a branch ID, but support is usually global. We'll send to all store admins.
         NotificationService::sendToStoreAdmins($notificationData);
 
-        SystemLog::create([
-            'user_id' => $user->user_id ?? 1,
-            'module' => 'Support',
-            'action' => 'Submitted Feedback',
-            'description' => "Customer {$customerName} submitted feedback: {$msg->topic}",
-            'ip_address' => $request->ip()
-        ]);
+        $actingId = $user?->user_id ?? \App\Models\User::value('user_id');
+        if ($actingId) {
+            SystemLog::create([
+                'user_id' => $actingId,
+                'module' => 'Support',
+                'action' => 'Submitted Feedback',
+                'description' => "Customer {$customerName} submitted feedback: {$msg->topic}",
+                'ip_address' => $request->ip()
+            ]);
+        }
 
         return response()->json(['message' => 'Message sent successfully', 'data' => $msg], 201);
     }

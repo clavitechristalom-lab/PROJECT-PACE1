@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { PageHeader, Card } from '../components/ui';
 import { api } from '../lib/api';
+import { useRealtimeSync, triggerDataSync } from '../lib/realtimeSync';
 import Swal from 'sweetalert2';
 import { FiTrash2, FiPlus, FiImage } from 'react-icons/fi';
 
@@ -9,22 +10,25 @@ export default function CarouselPage() {
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
 
-  const loadImages = async () => {
-    setLoading(true);
+  const loadImages = async (source) => {
+    const isBg = source === 'timer' || source === 'database' || source === 'event' || source === 'sync' || source === 'focus';
+    if (!isBg) setLoading(true);
     try {
       const data = await api.carouselImages.getAll();
       setImages(data || []);
     } catch (err) {
       console.error(err);
-      Swal.fire('Error', 'Failed to load carousel images', 'error');
+      if (!isBg) Swal.fire('Error', 'Failed to load carousel images', 'error');
     } finally {
-      setLoading(false);
+      if (!isBg) setLoading(false);
     }
   };
 
   useEffect(() => {
     loadImages();
   }, []);
+
+  useRealtimeSync(loadImages, []);
 
   const handleFileChange = async (e) => {
     if (images.length >= 10) {
@@ -44,6 +48,7 @@ export default function CarouselPage() {
     try {
       await api.carouselImages.create(formData);
       await loadImages();
+      triggerDataSync('carousel');
       Swal.fire({
         icon: 'success',
         title: 'Image Added',
@@ -74,6 +79,7 @@ export default function CarouselPage() {
       try {
         await api.carouselImages.delete(id);
         setImages(images.filter(img => img.id !== id));
+        triggerDataSync('carousel');
         Swal.fire({
           icon: 'success',
           title: 'Deleted!',

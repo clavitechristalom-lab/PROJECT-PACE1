@@ -7,6 +7,7 @@ import {
 } from '../components/ui'
 import { useAuth } from '../context/AuthContext'
 import { api } from '../lib/api'
+import { useRealtimeSync, triggerDataSync } from '../lib/realtimeSync'
 
 export default function StoreSettingsPage() {
   const { user } = useAuth()
@@ -30,11 +31,23 @@ export default function StoreSettingsPage() {
     fetchBranchDetails()
   }, [])
 
-  const fetchBranchDetails = async () => {
-    setLoading(true)
+  const fetchBranchDetails = async (source) => {
+    const isBg = source === 'timer' || source === 'database' || source === 'event' || source === 'sync' || source === 'focus';
+    if (!isBg) setLoading(true)
     try {
-      // Assuming user object has employee.branch_id or we need to fetch the branch tied to the Store Admin
-      const branch_id = user?.employee?.branch_id || user?.branch_id
+      let branch_id = user?.employee?.branch_id || user?.branch_id
+      if (!branch_id && user?.employee?.branch) {
+        try {
+          const allBranches = await api.branches.getAll()
+          const bList = allBranches.branches || allBranches.data || allBranches || []
+          const branchName = typeof user.employee.branch === 'object' ? user.employee.branch.name : user.employee.branch
+          const matched = bList.find(b => b.name === branchName)
+          if (matched) branch_id = matched.id
+        } catch (e) {
+          console.warn('Fallback branch lookup failed:', e)
+        }
+      }
+
       if (!branch_id) {
         throw new Error("No branch associated with this Store Admin account.")
       }
@@ -58,11 +71,13 @@ export default function StoreSettingsPage() {
       }
     } catch (err) {
       console.error(err)
-      setError(err.message || 'Failed to load store settings.')
+      if (!isBg) setError(err.message || 'Failed to load store settings.')
     } finally {
-      setLoading(false)
+      if (!isBg) setLoading(false)
     }
   }
+
+  useRealtimeSync(fetchBranchDetails, [branchId])
 
   const handleFileChange = (e) => {
     const file = e.target.files[0]
@@ -94,6 +109,8 @@ export default function StoreSettingsPage() {
       
       showToast('Store settings updated successfully', 'success')
       fetchBranchDetails()
+      triggerDataSync('branches')
+      triggerDataSync('dashboard')
     } catch (err) {
       showToast(err.message || 'Failed to update store settings', 'error')
     } finally {

@@ -179,7 +179,7 @@ const inputBase = 'w-full border border-border rounded-xl px-3 py-2 text-xs bg-c
 export function Input({ label, required, error, value, onChange, className = '', icon, ...props }) {
   const handleChange = (e) => {
     if (onChange) {
-      onChange(e.target.value, e)
+      onChange(e, e.target.value)
     }
   }
   return (
@@ -210,7 +210,7 @@ export function Input({ label, required, error, value, onChange, className = '',
 export function Select({ label, required, error, value, onChange, options, children, className = '', ...props }) {
   const handleChange = (e) => {
     if (onChange) {
-      onChange(e.target.value, e)
+      onChange(e, e.target.value)
     }
   }
   return (
@@ -242,7 +242,7 @@ export function Select({ label, required, error, value, onChange, options, child
 export function Textarea({ label, required, value, onChange, rows = 3, className = '', ...props }) {
   const handleChange = (e) => {
     if (onChange) {
-      onChange(e.target.value, e)
+      onChange(e, e.target.value)
     }
   }
   return (

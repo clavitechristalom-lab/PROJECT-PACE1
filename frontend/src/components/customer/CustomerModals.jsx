@@ -1552,6 +1552,7 @@ export function SupportModal({ isOpen, onClose }) {
       setMessage('');
       setActiveTab('history');
       loadMyMessages();
+      triggerDataSync('support');
     } catch (err) {
       console.error(err);
       Swal.fire({
@@ -1583,6 +1584,7 @@ export function SupportModal({ isOpen, onClose }) {
       try {
         await api.supportMessages.delete(id);
         loadMyMessages(true);
+        triggerDataSync('support');
         Swal.fire({
           icon: 'success',
           title: 'Deleted!',
@@ -1821,6 +1823,7 @@ export function SupportModal({ isOpen, onClose }) {
                       try {
                         await api.supportMessages.update(m.id, { new_message: reply });
                         loadMyMessages(true);
+                        triggerDataSync('support');
                         e.target.reset();
                       } catch (err) {
                         console.error(err);

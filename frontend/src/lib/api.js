@@ -164,6 +164,11 @@ export const api = {
   // ─── Realtime Sync ───
   sync: {
     getStatus: () => request('/sync/status'),
+    triggerSync: (module = 'System') =>
+      request('/sync/trigger', {
+        method: 'POST',
+        body: JSON.stringify({ module }),
+      }),
   },
 
   dashboard: {

@@ -54,6 +54,22 @@ class SystemController extends Controller
         return [$branchId, $branchName, $branchObj];
     }
 
+    private function resolveActingUserId(Request $request)
+    {
+        $user = $request->user('sanctum') ?? $request->user();
+        if ($user && $user->user_id) {
+            return $user->user_id;
+        }
+
+        $cand = $request->input('auth_user_id') ?? $request->input('user_id');
+        if ($cand && User::where('user_id', $cand)->exists()) {
+            return (int)$cand;
+        }
+
+        $adminId = User::where('role', 'Administrator')->value('user_id');
+        return $adminId ?: User::first()?->user_id;
+    }
+
     // ─── Users ──────────────────────────────────────────────────────────────────
     public function users(Request $request)
     {
@@ -376,7 +392,7 @@ class SystemController extends Controller
         ]);
 
         SystemLog::create([
-            'user_id' => $request->input('auth_user_id', 1),
+            'user_id' => $this->resolveActingUserId($request),
             'action' => 'CREATE',
             'module' => 'System',
             'description' => "Created user account: {$user->username} ({$user->role})",
@@ -518,7 +534,7 @@ class SystemController extends Controller
         }
 
         SystemLog::create([
-            'user_id' => $request->input('auth_user_id', 1),
+            'user_id' => $this->resolveActingUserId($request),
             'action' => 'UPDATE',
             'module' => 'System',
             'description' => "Updated user account: {$user->username} ({$user->role})",
@@ -596,7 +612,7 @@ class SystemController extends Controller
         $targetUser->delete();
 
         SystemLog::create([
-            'user_id' => $request->input('auth_user_id', 1),
+            'user_id' => $this->resolveActingUserId($request),
             'action' => 'DELETE',
             'module' => 'System',
             'description' => "Deleted user account: {$username}",
@@ -691,41 +707,118 @@ class SystemController extends Controller
         $timestamp = date('Ymd_His');
         $backupName = "pace_backup_{$timestamp}";
         $started = now();
-        $completed = now()->addSeconds(3);
+        $actingUserId = $this->resolveActingUserId($request);
+
+        // Generate full SQL dump from real database
+        $tables = DB::select('SHOW TABLES');
+        $dbName = DB::getDatabaseName();
+        $colName = 'Tables_in_' . $dbName;
+
+        $sql = "-- ========================================================\n";
+        $sql .= "-- PROJECT PACE DATABASE BACKUP\n";
+        $sql .= "-- Generated: " . now()->toIso8601String() . "\n";
+        $sql .= "-- Database: {$dbName}\n";
+        $sql .= "-- ========================================================\n\n";
+        $sql .= "SET FOREIGN_KEY_CHECKS=0;\n\n";
+
+        foreach ($tables as $t) {
+            $table = $t->$colName;
+            $createRes = DB::select("SHOW CREATE TABLE `{$table}`");
+            if (!empty($createRes[0]->{'Create Table'})) {
+                $sql .= "DROP TABLE IF EXISTS `{$table}`;\n";
+                $sql .= $createRes[0]->{'Create Table'} . ";\n\n";
+            }
+
+            $rows = DB::table($table)->get();
+            if ($rows->isNotEmpty()) {
+                foreach ($rows as $row) {
+                    $rowArray = (array)$row;
+                    $cols = array_map(fn($c) => "`{$c}`", array_keys($rowArray));
+                    $vals = array_map(function($v) {
+                        if ($v === null) return 'NULL';
+                        return "'" . addslashes((string)$v) . "'";
+                    }, array_values($rowArray));
+
+                    $sql .= "INSERT INTO `{$table}` (" . implode(', ', $cols) . ") VALUES (" . implode(', ', $vals) . ");\n";
+                }
+                $sql .= "\n";
+            }
+        }
+
+        $sql .= "SET FOREIGN_KEY_CHECKS=1;\n";
+
+        // Save backup file to disk
+        $filePath = "backups/{$backupName}.sql";
+        Storage::disk('local')->put($filePath, $sql);
+        $fullPath = Storage::disk('local')->path($filePath);
+        $bytes = file_exists($fullPath) ? filesize($fullPath) : strlen($sql);
+
+        if ($bytes >= 1048576) {
+            $formattedSize = round($bytes / 1048576, 2) . ' MB';
+        } else {
+            $formattedSize = max(0.1, round($bytes / 1024, 2)) . ' KB';
+        }
+
+        $completed = now();
 
         $backup = BackupLog::create([
             'backup_name' => $backupName,
-            'file_path' => "backups/{$backupName}.sql",
+            'file_path' => $filePath,
             'backup_type' => 'Manual',
-            'file_size' => '25.2 MB',
+            'file_size' => $formattedSize,
             'status' => 'Completed',
             'started_at' => $started,
             'completed_at' => $completed,
-            'created_by' => $request->input('user_id', 1),
-            'notes' => 'Manual backup via System Management',
+            'created_by' => $actingUserId,
+            'notes' => 'Live database snapshot via System Management',
         ]);
 
         SystemLog::create([
-            'user_id' => $request->input('user_id', 1),
+            'user_id' => $actingUserId,
             'action' => 'BACKUP',
             'module' => 'System',
-            'description' => "Created manual backup: {$backupName} (25.2 MB)",
+            'description' => "Created database backup: {$backupName} ({$formattedSize})",
             'ip_address' => $request->ip(),
             'user_agent' => $request->userAgent(),
         ]);
 
+        NotificationService::sendToAdmins([
+            'type' => 'backup_completed',
+            'title' => 'Database Backup Created',
+            'message' => "Snapshot '{$backupName}' ({$formattedSize}) successfully generated and archived.",
+            'module' => 'System',
+            'action_url' => '/system',
+            'priority' => 'normal',
+        ]);
+
         return response()->json([
             'message' => 'Backup created successfully',
-            'backup' => $backup,
+            'backup' => [
+                'backup_id' => $backup->id,
+                'backup_name' => $backup->backup_name,
+                'backup_type' => $backup->backup_type,
+                'file_size' => $backup->file_size,
+                'status' => $backup->status,
+                'started_at' => $backup->started_at ? date('Y-m-d H:i:s', strtotime($backup->started_at)) : '—',
+                'completed_at' => $backup->completed_at ? date('Y-m-d H:i:s', strtotime($backup->completed_at)) : '—',
+                'created_by' => $backup->createdBy ? $backup->createdBy->username : 'System',
+                'notes' => $backup->notes,
+            ],
         ]);
     }
 
     public function restoreBackup(Request $request, $id)
     {
         $backup = BackupLog::findOrFail($id);
+        $actingUserId = $this->resolveActingUserId($request);
+
+        if (Storage::disk('local')->exists($backup->file_path)) {
+            $sql = Storage::disk('local')->get($backup->file_path);
+            DB::unprepared($sql);
+        }
 
         SystemLog::create([
-            'user_id' => $request->input('user_id', 1),
+            'user_id' => $actingUserId,
             'action' => 'RESTORE',
             'module' => 'System',
             'description' => "Restored database from backup: {$backup->backup_name}",
@@ -733,8 +826,17 @@ class SystemController extends Controller
             'user_agent' => $request->userAgent(),
         ]);
 
+        NotificationService::sendToAdmins([
+            'type' => 'backup_restored',
+            'title' => 'Database Restored',
+            'message' => "System database was restored from snapshot '{$backup->backup_name}'.",
+            'module' => 'System',
+            'action_url' => '/system',
+            'priority' => 'critical',
+        ]);
+
         return response()->json([
-            'message' => "Database restored from {$backup->backup_name}",
+            'message' => "Database restored successfully from {$backup->backup_name}",
         ]);
     }
 
@@ -991,7 +1093,7 @@ class SystemController extends Controller
         }
 
         // Audit log in SystemLog
-        $actingUserId = $user?->user_id ?? $request->input('user_id', 1);
+        $actingUserId = $this->resolveActingUserId($request);
         $roleName = $user?->role ?? 'Administrator';
         SystemLog::create([
             'user_id'     => $actingUserId,
@@ -1045,7 +1147,7 @@ class SystemController extends Controller
 
                 $branchName = $log->branch;
                 if ($emp && $emp->branch) {
-                    $branchName = $emp->branch->name;
+                    $branchName = is_object($emp->branch) ? ($emp->branch->name ?? 'Unassigned') : ((string)$emp->branch ?: 'Unassigned');
                 }
 
                 return [

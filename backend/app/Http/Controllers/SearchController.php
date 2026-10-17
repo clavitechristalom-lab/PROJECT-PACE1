@@ -120,15 +120,16 @@ class SearchController extends Controller
 
             foreach ($employees as $emp) {
                 $isVer = (bool)($emp->account_verified || $emp->information_verified);
-                $results[] = [
-                    'id' => 'emp_' . $emp->employee_id,
-                    'record_id' => $emp->employee_id,
-                    'type' => 'employee',
-                    'module' => 'Employees',
-                    'title' => trim("{$emp->first_name} {$emp->last_name}"),
-                    'subtitle' => "{$emp->employee_code} · {$emp->position} · {$emp->department}",
-                    'description' => "Branch: ' . ($emp->branch ? $emp->branch->name : 'Unassigned') . ' · " . ($isVer ? 'Verified' : 'Not Verified') . " · Status: {$emp->status}",
-                    'url' => "/employees?id={$emp->employee_id}",
+                    $branchName = $emp->branch_name ?? (is_object($emp->branch) ? $emp->branch->name : ((string)$emp->branch ?: 'Unassigned'));
+                    $results[] = [
+                        'id' => 'emp_' . $emp->employee_id,
+                        'record_id' => $emp->employee_id,
+                        'type' => 'employee',
+                        'module' => 'Employees',
+                        'title' => trim("{$emp->first_name} {$emp->last_name}"),
+                        'subtitle' => "{$emp->employee_code} · {$emp->position} · {$emp->department}",
+                        'description' => "Branch: {$branchName} · " . ($isVer ? 'Verified' : 'Not Verified') . " · Status: {$emp->status}",
+                        'url' => "/employees?id={$emp->employee_id}",
                     'route' => "/employees?id={$emp->employee_id}",
                     'icon' => 'employee',
                 ];

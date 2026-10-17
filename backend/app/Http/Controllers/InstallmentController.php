@@ -689,10 +689,8 @@ class InstallmentController extends Controller
                 ? "{$adminUser->employee->first_name} {$adminUser->employee->last_name}" 
                 : $adminUser->username;
                 
-            if ($adminUser->employee && $adminUser->employee->branch) {
-                $branch = $adminUser->employee->branch->name ?? $adminUser->employee->branch->branch_name ?? 'Main Branch';
-            } elseif ($adminUser->employee && $adminUser->employee->branch_id) {
-                $branch = $adminUser->employee->branch_id;
+            if ($adminUser->employee) {
+                $branch = $adminUser->employee->branch_name ?? (is_object($adminUser->employee->branch) ? $adminUser->employee->branch->name : ((string)$adminUser->employee->branch ?: 'Main Branch'));
             }
         }
 

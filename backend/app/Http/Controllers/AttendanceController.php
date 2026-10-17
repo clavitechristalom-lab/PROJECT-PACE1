@@ -104,7 +104,7 @@ class AttendanceController extends Controller
                         $a->employee_id,
                         $emp ? "{$emp->first_name} {$emp->last_name}" : 'Employee',
                         $emp ? $emp->department : '',
-                        $emp && $emp->branch ? $emp->branch->name : '',
+                        $emp ? ($emp->branch_name ?? (is_object($emp->branch) ? $emp->branch->name : ((string)$emp->branch ?: ''))) : '',
                         $a->attendance_date,
                         $a->time_in,
                         $a->break_out,
@@ -136,7 +136,7 @@ class AttendanceController extends Controller
                 'employee_code' => $emp ? $emp->employee_code : '',
                 'department' => $emp ? $emp->department : '',
                 'position' => $emp ? $emp->position : '',
-                'branch' => $emp && $emp->branch ? $emp->branch->name : '',
+                'branch' => $emp ? ($emp->branch_name ?? (is_object($emp->branch) ? $emp->branch->name : ((string)$emp->branch ?: ''))) : '',
                 'attendance_date' => $a->attendance_date,
                 'regular_hours' => round($regularHours, 2),
                 'total_hours' => (float)$a->total_hours,
@@ -407,6 +407,7 @@ class AttendanceController extends Controller
         // 4. Branch Security: Verify employee belongs to Store Admin's authorized branch
         $employeeBranch = !empty($employee->branch_id) ? trim((string)$employee->branch_id) : null;
         if (strcasecmp((string)$employeeBranch, (string)$storeAdminBranch) !== 0) {
+            $empBranchStr = $employee->branch_name ?? (is_object($employee->branch) ? $employee->branch->name : ((string)$employee->branch ?: 'Unassigned'));
             AttendanceScanLog::create([
                 'employee_id' => $employee->employee_id,
                 'scanned_by' => $user->user_id,
@@ -416,7 +417,7 @@ class AttendanceController extends Controller
                 'pin_verified' => false,
                 'action_type' => 'UNAUTHORIZED_BRANCH_SCAN',
                 'status' => 'FAILED',
-                'failure_reason' => "This employee belongs to '" . ($employee->branch ? $employee->branch->name : 'Unassigned') . "', but your authorized branch is {$storeAdminBranch}",
+                'failure_reason' => "This employee belongs to '{$empBranchStr}', but your authorized branch is {$storeAdminBranch}",
                 'device_info' => $deviceInfo,
                 'ip_address' => $request->ip(),
             ]);
@@ -424,7 +425,7 @@ class AttendanceController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'This employee does not belong to your authorized branch.',
-                'employee_branch' => $employee->branch ? $employee->branch->name : null,
+                'employee_branch' => $empBranchStr,
                 'authorized_branch' => $storeAdminBranch,
             ], 403);
         }
@@ -486,7 +487,7 @@ class AttendanceController extends Controller
                 'employee_code' => $employee->employee_code,
                 'name' => "{$employee->first_name} {$employee->last_name}",
                 'department' => $employee->department,
-                'branch' => $employee->branch ? $employee->branch->name : $storeAdminBranch,
+                'branch' => $employee->branch_name ?? (is_object($employee->branch) ? $employee->branch->name : ((string)$employee->branch ?: $storeAdminBranch)),
             ],
             'available_actions' => [$action],
             'message' => 'Waiting for Employee verification...',
@@ -701,7 +702,7 @@ class AttendanceController extends Controller
                 'employee_name' => $emp ? "{$emp->first_name} {$emp->last_name}" : 'Unidentified',
                 'employee_code' => $emp ? $emp->employee_code : 'N/A',
                 'department' => $emp ? $emp->department : '—',
-                'branch' => $l->branch ?: ($emp && $emp->branch ? $emp->branch->name : null),
+                'branch' => $l->branch ?: ($emp ? ($emp->branch_name ?? (is_object($emp->branch) ? $emp->branch->name : ((string)$emp->branch ?: null))) : null),
                 'qr_token_scanned' => $l->qr_token_scanned ? substr($l->qr_token_scanned, 0, 8) . '...' : '—',
                 'scan_time' => $l->scan_time ? $l->scan_time->format('Y-m-d H:i:s') : '',
                 'qr_verified' => (bool)$l->qr_verified,

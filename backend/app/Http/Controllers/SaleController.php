@@ -269,6 +269,20 @@ class SaleController extends Controller
                 ]);
 
                 $product->decrement('stock_quantity', $itemData['quantity']);
+
+                $remainingStock = $product->fresh()->stock_quantity;
+                if ($remainingStock <= 2) {
+                    NotificationService::sendToStoreAdmins([
+                        'type' => 'low_stock_alert',
+                        'title' => 'Critical Low Stock Alert',
+                        'message' => "Stock for {$product->product_name} is critically low ({$remainingStock} remaining).",
+                        'module' => 'Inventory',
+                        'related_id' => $product->product_id,
+                        'related_type' => 'App\Models\Product',
+                        'action_url' => "/products?id={$product->product_id}",
+                        'priority' => 'urgent',
+                    ], $product->branch_id);
+                }
             }
 
             // If Installment, create or update account and schedule
@@ -366,8 +380,8 @@ class SaleController extends Controller
                 'user_agent' => $request->userAgent(),
             ]);
 
-            // Notify Store Admins & Admins about completed Sale
-            NotificationService::sendToStoreAdmins([
+            // Notify Admins, Store Admins, and Customer about completed Sale
+            $saleNotif = [
                 'type' => 'sale_created',
                 'title' => 'New Sales Transaction',
                 'message' => "Invoice {$sale->invoice_no} completed for {$custName} (₱" . number_format($totalAmount, 2) . ").",
@@ -376,7 +390,23 @@ class SaleController extends Controller
                 'related_type' => 'App\Models\SaleTransaction',
                 'action_url' => "/sales?id={$sale->sale_id}",
                 'priority' => 'normal',
-            ]);
+            ];
+
+            NotificationService::sendToAdmins($saleNotif);
+            NotificationService::sendToStoreAdmins($saleNotif, $userBranch);
+
+            if ($validated['customer_id']) {
+                NotificationService::sendToCustomer($validated['customer_id'], [
+                    'type' => 'sale_created',
+                    'title' => 'Purchase Confirmed',
+                    'message' => "Your invoice {$sale->invoice_no} has been processed successfully (₱" . number_format($totalAmount, 2) . ").",
+                    'module' => 'Sales',
+                    'related_id' => $sale->sale_id,
+                    'related_type' => 'App\Models\SaleTransaction',
+                    'action_url' => '/customer/dashboard',
+                    'priority' => 'high',
+                ]);
+            }
 
             return response()->json([
                 'message' => 'Sale created successfully',

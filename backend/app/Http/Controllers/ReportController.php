@@ -68,7 +68,7 @@ class ReportController extends Controller
         })->values();
 
         $byBranch = $allEmployees->groupBy(function($emp) {
-            return $emp->branch ? $emp->branch->name : 'Unassigned Branch';
+            return $emp->branch_name ?? (is_object($emp->branch) ? $emp->branch->name : ((string)$emp->branch ?: 'Unassigned Branch'));
         })->map(function ($group, $branchName) {
             return ['branch' => $branchName, 'count' => $group->count()];
         })->values();
@@ -84,7 +84,7 @@ class ReportController extends Controller
                 'name' => "{$emp->first_name} {$emp->last_name}",
                 'department' => $emp->department,
                 'position' => $emp->position,
-                'branch' => $emp->branch ? $emp->branch->name : 'Unassigned',
+                'branch' => $emp->branch_name ?? (is_object($emp->branch) ? $emp->branch->name : ((string)$emp->branch ?: 'Unassigned')),
                 'pay_type' => $emp->pay_type,
                 'basic_salary' => (float)$emp->basic_salary,
                 'status' => $emp->status,
@@ -176,7 +176,7 @@ class ReportController extends Controller
                 'employee_name' => $emp ? "{$emp->first_name} {$emp->last_name}" : 'Employee',
                 'employee_code' => $emp ? $emp->employee_code : '',
                 'department' => $emp ? $emp->department : '',
-                'branch' => $emp && $emp->branch ? $emp->branch->name : '',
+                'branch' => $emp ? ($emp->branch_name ?? (is_object($emp->branch) ? $emp->branch->name : ((string)$emp->branch ?: ''))) : '',
                 'attendance_date' => $a->attendance_date,
                 'time_in' => $a->time_in ? date('H:i', strtotime($a->time_in)) : '—',
                 'time_out' => $a->time_out ? date('H:i', strtotime($a->time_out)) : '—',
@@ -257,7 +257,7 @@ class ReportController extends Controller
                 'employee_name' => $emp ? "{$emp->first_name} {$emp->last_name}" : 'Employee',
                 'employee_code' => $emp ? $emp->employee_code : '',
                 'department' => $emp ? $emp->department : '',
-                'branch' => $emp && $emp->branch ? $emp->branch->name : '',
+                'branch' => $emp ? ($emp->branch_name ?? (is_object($emp->branch) ? $emp->branch->name : ((string)$emp->branch ?: ''))) : '',
                 'period_name' => $p->period ? $p->period->period_name : "Period #{$p->period_id}",
                 'basic_salary' => (float)$p->basic_salary,
                 'overtime_pay' => (float)$p->overtime_pay,
