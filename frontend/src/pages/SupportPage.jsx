@@ -3,11 +3,11 @@ import {
   FiMessageSquare, FiX, FiCheckCircle, FiSend, FiUser, FiClock, FiTag, FiZap, FiTrash2
 } from 'react-icons/fi'
 import {
-  PageHeader, Card, StatusBadge, LoadingState, EmptyState, Pagination, SearchBar
+  PageHeader, Card, StatusBadge, LoadingState, EmptyState, Pagination, SearchBar,
+  showToast, showError, confirmDelete
 } from '../components/ui'
 import { api } from '../lib/api'
 import { useRealtimeSync, triggerDataSync } from '../lib/realtimeSync'
-import Swal from 'sweetalert2'
 
 const QUICK_RESPONSES = [
   "Thank you for your feedback. We appreciate you taking the time to share your experience.",
@@ -282,60 +282,30 @@ export default function SupportPage() {
   const respondedCount = messages.filter(m => m.status === 'Responded').length
 
   const handleSendResponse = async (id, responseText) => {
-    await api.supportMessages.update(id, { new_message: responseText })
-    loadMessages(true)
-    triggerDataSync('support')
-    Swal.fire({
-      icon: 'success',
-      title: 'Message Sent',
-      text: 'The customer has been notified of your response.',
-      toast: true,
-      position: 'bottom-end',
-      showConfirmButton: false,
-      timer: 3000,
-      background: document.documentElement.classList.contains('dark') ? '#1e293b' : '#fff',
-      color: document.documentElement.classList.contains('dark') ? '#f8fafc' : '#0f172a',
-    })
+    try {
+      await api.supportMessages.update(id, { new_message: responseText })
+      loadMessages(true)
+      triggerDataSync('support')
+      showToast('Response sent to customer successfully', 'success')
+    } catch (err) {
+      showError('Failed to Send', err.message || 'Could not send response')
+    }
   }
 
   const handleDeleteMessage = async (id) => {
-    const res = await Swal.fire({
-      title: 'Are you sure?',
-      text: 'This will permanently delete this conversation and all its history.',
-      icon: 'warning',
-      showCancelButton: true,
-      confirmButtonText: 'Yes, delete it!',
-      cancelButtonText: 'Cancel',
-      confirmButtonColor: '#ef4444',
-      cancelButtonColor: '#64748b',
-      background: document.documentElement.classList.contains('dark') ? '#1e293b' : '#fff',
-      color: document.documentElement.classList.contains('dark') ? '#f8fafc' : '#0f172a',
-    });
-    if (res.isConfirmed) {
+    const confirmed = await confirmDelete(
+      'this support conversation',
+      'This will permanently delete this conversation and all its history.'
+    )
+    if (confirmed) {
       try {
-        await api.supportMessages.delete(id);
-        loadMessages(true);
-        triggerDataSync('support');
-        Swal.fire({
-          icon: 'success',
-          title: 'Deleted!',
-          text: 'The support message has been deleted.',
-          toast: true,
-          position: 'bottom-end',
-          showConfirmButton: false,
-          timer: 3000,
-          background: document.documentElement.classList.contains('dark') ? '#1e293b' : '#fff',
-          color: document.documentElement.classList.contains('dark') ? '#f8fafc' : '#0f172a',
-        });
+        await api.supportMessages.delete(id)
+        loadMessages(true)
+        triggerDataSync('support')
+        showToast('Support conversation deleted successfully', 'success')
       } catch (err) {
-        console.error(err);
-        Swal.fire({
-          icon: 'error',
-          title: 'Error',
-          text: 'Failed to delete support message.',
-          background: document.documentElement.classList.contains('dark') ? '#1e293b' : '#fff',
-          color: document.documentElement.classList.contains('dark') ? '#f8fafc' : '#0f172a',
-        });
+        console.error(err)
+        showError('Delete Failed', err.message || 'Failed to delete support message.')
       }
     }
   }

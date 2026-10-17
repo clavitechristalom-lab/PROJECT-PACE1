@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { Modal } from '../ui'
+import { Modal, showWarning } from '../ui'
 import { api } from '../../lib/api'
 import { FiMapPin, FiUser, FiPhone, FiImage } from 'react-icons/fi'
 
@@ -25,7 +25,7 @@ export default function CreateBranchModal({ isOpen, onClose, onCreate }) {
     const contactVal = e.target.elements.contact_number?.value || formData.contact_number
 
     if (!nameVal || !nameVal.trim()) {
-      alert("Please enter a Branch Name before creating.");
+      showWarning('Branch Name Required', 'Please enter a Branch Name before creating.');
       return;
     }
     setLoading(true)

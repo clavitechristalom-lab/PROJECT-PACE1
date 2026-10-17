@@ -8,7 +8,6 @@ import { BiWallet } from 'react-icons/bi';
 import { Spinner } from '../components/ui';
 import { useAuth } from '../context/AuthContext';
 import { useRealtimeSync, triggerDataSync } from '../lib/realtimeSync';
-import Swal from 'sweetalert2';
 
 import DashboardCard from '../components/customer/DashboardCard';
 import InstallmentLedger from '../components/customer/InstallmentLedger';

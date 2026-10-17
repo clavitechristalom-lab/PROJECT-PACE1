@@ -4,10 +4,9 @@ import {
   FiCheckCircle, FiAlertTriangle, FiFolder, FiFileText, FiLayers,
   FiActivity, FiZap, FiCheck, FiArrowRight
 } from 'react-icons/fi';
-import { Card, Btn, Spinner, showToast } from '../ui';
+import { Card, Btn, Spinner, showToast, showSuccess, showError, confirmAction } from '../ui';
 import { api } from '../../lib/api';
 import { triggerDataSync, useRealtimeSync } from '../../lib/realtimeSync';
-import Swal from 'sweetalert2';
 
 export default function StorageManagementTab({ onNavigateToBackups }) {
   const [storage, setStorage] = useState(null);
@@ -37,20 +36,15 @@ export default function StorageManagementTab({ onNavigateToBackups }) {
   }, []);
 
   const handleCleanAction = async (action, actionLabel) => {
-    const res = await Swal.fire({
+    const confirmed = await confirmAction({
       title: `Confirm ${actionLabel}?`,
       text: `This will safely scan and clean redundant ${action} files from the server.`,
-      icon: 'question',
-      showCancelButton: true,
       confirmButtonText: 'Yes, Clean Now',
       cancelButtonText: 'Cancel',
-      confirmButtonColor: '#059669',
-      cancelButtonColor: '#64748b',
-      background: document.documentElement.classList.contains('dark') ? '#0f172a' : '#fff',
-      color: document.documentElement.classList.contains('dark') ? '#f8fafc' : '#0f172a',
+      icon: 'warning',
     });
 
-    if (res.isConfirmed) {
+    if (confirmed) {
       setCleaning(true);
       try {
         const response = await api.system.cleanStorage(action);
@@ -61,22 +55,13 @@ export default function StorageManagementTab({ onNavigateToBackups }) {
         }
         triggerDataSync('storage');
 
-        Swal.fire({
-          icon: 'success',
-          title: 'Maintenance Completed',
-          html: `<div class="text-sm"><p>${response.result?.message || 'Cleaned successfully.'}</p><p class="mt-2 font-mono font-bold text-emerald-500">Reclaimed: ${response.result?.reclaimed_formatted || '0 B'}</p></div>`,
-          background: document.documentElement.classList.contains('dark') ? '#0f172a' : '#fff',
-          color: document.documentElement.classList.contains('dark') ? '#f8fafc' : '#0f172a',
-        });
+        showSuccess(
+          'Maintenance Completed',
+          `${response.result?.message || 'Cleaned successfully.'} Reclaimed: ${response.result?.reclaimed_formatted || '0 B'}`
+        );
       } catch (err) {
         console.error('Failed storage cleanup:', err);
-        Swal.fire({
-          icon: 'error',
-          title: 'Cleanup Failed',
-          text: err.message || 'Failed to complete storage maintenance.',
-          background: document.documentElement.classList.contains('dark') ? '#0f172a' : '#fff',
-          color: document.documentElement.classList.contains('dark') ? '#f8fafc' : '#0f172a',
-        });
+        showError('Cleanup Failed', err.message || 'Failed to complete storage maintenance.');
       } finally {
         setCleaning(false);
       }
@@ -109,44 +94,50 @@ export default function StorageManagementTab({ onNavigateToBackups }) {
   return (
     <div className="space-y-6">
       {/* ─── Health & Live Status Banner ─── */}
-      <div className={`p-4 sm:p-5 rounded-2xl border transition-all ${
+      <div className={`p-4 sm:p-5 rounded-2xl border transition-all shadow-xs ${
         isHealthy
-          ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-900 dark:text-emerald-200'
+          ? 'bg-gradient-to-r from-emerald-50/95 via-emerald-50/40 to-white dark:from-emerald-950/40 dark:via-emerald-950/20 dark:to-transparent border-emerald-200 dark:border-emerald-500/30'
           : isWarning
-          ? 'bg-amber-500/10 border-amber-500/30 text-amber-900 dark:text-amber-200'
-          : 'bg-rose-500/10 border-rose-500/30 text-rose-900 dark:text-rose-200'
+          ? 'bg-gradient-to-r from-amber-50/95 via-amber-50/40 to-white dark:from-amber-950/40 dark:via-amber-950/20 dark:to-transparent border-amber-200 dark:border-amber-500/30'
+          : 'bg-gradient-to-r from-rose-50/95 via-rose-50/40 to-white dark:from-rose-950/40 dark:via-rose-950/20 dark:to-transparent border-rose-200 dark:border-rose-500/30'
       }`}>
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
           <div className="flex items-start gap-3.5">
             <div className={`p-2.5 rounded-xl text-xl shrink-0 ${
               isHealthy
-                ? 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-400'
+                ? 'bg-emerald-600 text-white dark:bg-emerald-500/20 dark:text-emerald-400 shadow-sm shadow-emerald-600/20'
                 : isWarning
-                ? 'bg-amber-500/20 text-amber-600 dark:text-amber-400'
-                : 'bg-rose-500/20 text-rose-600 dark:text-rose-400'
+                ? 'bg-amber-500 text-white dark:bg-amber-500/20 dark:text-amber-400 shadow-sm shadow-amber-500/20'
+                : 'bg-rose-600 text-white dark:bg-rose-500/20 dark:text-rose-400 shadow-sm shadow-rose-600/20'
             }`}>
               {isHealthy ? <FiCheckCircle /> : <FiAlertTriangle />}
             </div>
             <div>
-              <div className="flex items-center gap-2">
-                <h3 className="font-bold text-sm sm:text-base">
-                  Storage Health: <span className="uppercase tracking-wider">{health.status}</span>
+              <div className="flex flex-wrap items-center gap-2">
+                <h3 className="font-bold text-sm sm:text-base text-slate-900 dark:text-white">
+                  Storage Health: <span className={`uppercase tracking-wider font-extrabold ${
+                    isHealthy
+                      ? 'text-emerald-700 dark:text-emerald-400'
+                      : isWarning
+                      ? 'text-amber-700 dark:text-amber-400'
+                      : 'text-rose-700 dark:text-rose-400'
+                  }`}>{health.status}</span>
                 </h3>
-                <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-slate-900/10 dark:bg-white/10 font-semibold">
+                <span className="text-[10px] font-mono px-2.5 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-500/20 text-emerald-800 dark:text-emerald-300 font-bold border border-emerald-300 dark:border-emerald-500/30 shadow-2xs">
                   LIVE SCAN
                 </span>
               </div>
-              <p className="text-xs opacity-90 mt-0.5">
+              <p className="text-xs text-slate-600 dark:text-emerald-200/90 mt-1 font-medium leading-relaxed">
                 {health.recommendation}
               </p>
             </div>
           </div>
 
-          <div className="flex items-center gap-2 self-end sm:self-auto">
+          <div className="flex items-center gap-2 self-end sm:self-auto shrink-0">
             <button
               onClick={() => loadStorage(false)}
               disabled={loading}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold border border-border bg-card hover:bg-muted text-foreground transition-all cursor-pointer disabled:opacity-50"
+              className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold border border-slate-200 dark:border-border bg-white dark:bg-card hover:bg-slate-50 dark:hover:bg-muted text-slate-800 dark:text-foreground transition-all cursor-pointer shadow-2xs disabled:opacity-50"
             >
               <FiRefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
               <span>Rescan Storage</span>
@@ -251,13 +242,13 @@ export default function StorageManagementTab({ onNavigateToBackups }) {
             type="button"
             onClick={() => handleCleanAction('cache', 'Application Cache Purge')}
             disabled={cleaning}
-            className="flex flex-col items-start p-3.5 rounded-xl border border-border bg-muted/20 hover:bg-muted/40 transition-all text-left cursor-pointer group disabled:opacity-50"
+            className="flex flex-col items-start p-3.5 rounded-xl border border-slate-200 dark:border-border bg-slate-50/80 hover:bg-slate-100 dark:bg-muted/20 dark:hover:bg-muted/40 transition-all text-left cursor-pointer group disabled:opacity-50 shadow-2xs"
           >
             <div className="flex items-center justify-between w-full mb-1.5">
-              <span className="font-bold text-xs text-foreground group-hover:text-primary transition-colors">Clear Cache & Views</span>
-              <span className="text-[10px] font-mono font-bold text-muted-foreground bg-muted px-2 py-0.5 rounded-md">{cache.size_formatted || '0 B'}</span>
+              <span className="font-bold text-xs text-slate-900 dark:text-foreground group-hover:text-primary transition-colors">Clear Cache & Views</span>
+              <span className="text-[10px] font-mono font-bold text-slate-700 dark:text-muted-foreground bg-slate-200/70 dark:bg-muted px-2 py-0.5 rounded-md">{cache.size_formatted || '0 B'}</span>
             </div>
-            <p className="text-[11px] text-muted-foreground leading-relaxed">
+            <p className="text-[11px] text-slate-500 dark:text-muted-foreground leading-relaxed">
               Purges compiled Blade views and framework cache files to release allocated storage.
             </p>
           </button>
@@ -266,13 +257,13 @@ export default function StorageManagementTab({ onNavigateToBackups }) {
             type="button"
             onClick={() => handleCleanAction('logs', 'Application Log Purge')}
             disabled={cleaning}
-            className="flex flex-col items-start p-3.5 rounded-xl border border-border bg-muted/20 hover:bg-muted/40 transition-all text-left cursor-pointer group disabled:opacity-50"
+            className="flex flex-col items-start p-3.5 rounded-xl border border-slate-200 dark:border-border bg-slate-50/80 hover:bg-slate-100 dark:bg-muted/20 dark:hover:bg-muted/40 transition-all text-left cursor-pointer group disabled:opacity-50 shadow-2xs"
           >
             <div className="flex items-center justify-between w-full mb-1.5">
-              <span className="font-bold text-xs text-foreground group-hover:text-primary transition-colors">Purge Server Logs</span>
-              <span className="text-[10px] font-mono font-bold text-muted-foreground bg-muted px-2 py-0.5 rounded-md">{logs.file_size_formatted || '0 B'}</span>
+              <span className="font-bold text-xs text-slate-900 dark:text-foreground group-hover:text-primary transition-colors">Purge Server Logs</span>
+              <span className="text-[10px] font-mono font-bold text-slate-700 dark:text-muted-foreground bg-slate-200/70 dark:bg-muted px-2 py-0.5 rounded-md">{logs.file_size_formatted || '0 B'}</span>
             </div>
-            <p className="text-[11px] text-muted-foreground leading-relaxed">
+            <p className="text-[11px] text-slate-500 dark:text-muted-foreground leading-relaxed">
               Safely truncates <span className="font-mono text-[10px]">laravel.log</span> while keeping file descriptors intact.
             </p>
           </button>
@@ -281,13 +272,13 @@ export default function StorageManagementTab({ onNavigateToBackups }) {
             type="button"
             onClick={() => handleCleanAction('temp', 'Stale Temporary Files Cleanup')}
             disabled={cleaning}
-            className="flex flex-col items-start p-3.5 rounded-xl border border-border bg-muted/20 hover:bg-muted/40 transition-all text-left cursor-pointer group disabled:opacity-50"
+            className="flex flex-col items-start p-3.5 rounded-xl border border-slate-200 dark:border-border bg-slate-50/80 hover:bg-slate-100 dark:bg-muted/20 dark:hover:bg-muted/40 transition-all text-left cursor-pointer group disabled:opacity-50 shadow-2xs"
           >
             <div className="flex items-center justify-between w-full mb-1.5">
-              <span className="font-bold text-xs text-foreground group-hover:text-primary transition-colors">Clean Temp Sessions</span>
-              <span className="text-[10px] font-mono font-bold text-muted-foreground bg-muted px-2 py-0.5 rounded-md">{cache.details?.sessions?.size_formatted || '0 B'}</span>
+              <span className="font-bold text-xs text-slate-900 dark:text-foreground group-hover:text-primary transition-colors">Clean Temp Sessions</span>
+              <span className="text-[10px] font-mono font-bold text-slate-700 dark:text-muted-foreground bg-slate-200/70 dark:bg-muted px-2 py-0.5 rounded-md">{cache.details?.sessions?.size_formatted || '0 B'}</span>
             </div>
-            <p className="text-[11px] text-muted-foreground leading-relaxed">
+            <p className="text-[11px] text-slate-500 dark:text-muted-foreground leading-relaxed">
               Scans and deletes expired temporary session files older than 7 days.
             </p>
           </button>
@@ -349,7 +340,7 @@ export default function StorageManagementTab({ onNavigateToBackups }) {
                   const totalApp = breakdown.app_total?.size_bytes || 1;
                   const pct = Math.max(2, Math.min(100, Math.round((item.bytes / totalApp) * 100)));
                   return (
-                    <div key={idx} className="p-2.5 rounded-xl bg-muted/20 border border-border/50">
+                    <div key={idx} className="p-2.5 rounded-xl bg-slate-50/90 dark:bg-muted/20 border border-slate-200/80 dark:border-border/50">
                       <div className="flex justify-between items-center text-xs mb-1.5">
                         <span className="font-semibold text-foreground flex items-center gap-2">
                           <span className={`w-2 h-2 rounded-full ${item.color}`} />
@@ -357,7 +348,7 @@ export default function StorageManagementTab({ onNavigateToBackups }) {
                         </span>
                         <span className="font-mono font-bold">{item.size || '0 B'}</span>
                       </div>
-                      <div className="h-1.5 w-full bg-muted rounded-full overflow-hidden">
+                      <div className="h-1.5 w-full bg-slate-200 dark:bg-muted rounded-full overflow-hidden">
                         <div className={`h-full ${item.color} rounded-full`} style={{ width: `${pct}%` }} />
                       </div>
                     </div>
@@ -389,12 +380,12 @@ export default function StorageManagementTab({ onNavigateToBackups }) {
               ) : (
                 <div className="space-y-2 max-h-[260px] overflow-y-auto pr-1">
                   {backups.files?.map((bf, idx) => (
-                    <div key={idx} className="flex justify-between items-center p-2.5 rounded-xl bg-muted/20 border border-border/50 text-xs">
+                    <div key={idx} className="flex justify-between items-center p-2.5 rounded-xl bg-slate-50/90 dark:bg-muted/20 border border-slate-200/80 dark:border-border/50 text-xs">
                       <div className="min-w-0 pr-2">
                         <div className="font-mono font-bold text-foreground truncate">{bf.filename}</div>
                         <div className="text-[10px] text-muted-foreground">{bf.created_at}</div>
                       </div>
-                      <span className="font-mono font-bold px-2 py-0.5 rounded bg-muted text-[11px] shrink-0">
+                      <span className="font-mono font-bold px-2 py-0.5 rounded bg-slate-200/70 dark:bg-muted text-slate-800 dark:text-foreground text-[11px] shrink-0">
                         {bf.size_formatted}
                       </span>
                     </div>
@@ -402,18 +393,18 @@ export default function StorageManagementTab({ onNavigateToBackups }) {
                 </div>
               )}
 
-              <div className="p-3 rounded-xl bg-slate-900/40 border border-slate-800 text-[11px] text-slate-400 space-y-1">
-                <div className="flex justify-between">
-                  <span>Server Environment:</span>
-                  <span className="font-semibold text-slate-200">{env.os}</span>
+              <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800/80 text-[11px] space-y-1.5 shadow-xs">
+                <div className="flex justify-between items-center">
+                  <span className="font-medium text-slate-500 dark:text-slate-400">Server Environment:</span>
+                  <span className="font-semibold text-slate-800 dark:text-slate-100">{env.os || 'Windows Host'}</span>
                 </div>
-                <div className="flex justify-between">
-                  <span>PHP Engine:</span>
-                  <span className="font-semibold text-slate-200">{env.php_version}</span>
+                <div className="flex justify-between items-center">
+                  <span className="font-medium text-slate-500 dark:text-slate-400">PHP Engine:</span>
+                  <span className="font-semibold font-mono text-emerald-600 dark:text-emerald-400">{env.php_version}</span>
                 </div>
-                <div className="flex justify-between">
-                  <span>Root Path:</span>
-                  <span className="font-mono text-[10px] text-slate-300 truncate max-w-[200px]" title={env.base_path}>{env.base_path}</span>
+                <div className="flex justify-between items-center">
+                  <span className="font-medium text-slate-500 dark:text-slate-400">Root Path:</span>
+                  <span className="font-mono text-[10px] font-medium text-slate-700 dark:text-slate-300 truncate max-w-[240px]" title={env.base_path}>{env.base_path}</span>
                 </div>
               </div>
             </Card>

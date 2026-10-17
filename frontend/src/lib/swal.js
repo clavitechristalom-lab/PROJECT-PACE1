@@ -1,159 +1,263 @@
 import Swal from 'sweetalert2'
 
-const baseConfig = {
-  customClass: {
-    popup: '!bg-[#0b1220] !backdrop-blur-xl border border-white/10 !rounded-[32px] shadow-2xl p-8 sm:p-10 max-w-[440px]',
-    title: 'hidden',
-    htmlContainer: '!m-0 !p-0',
-    actions: 'flex gap-4 mt-6 justify-center w-full',
-    confirmButton: 'inline-flex items-center justify-center font-bold !rounded-full cursor-pointer transition-all hover:bg-[#2e476d] active:scale-95 px-12 py-2.5 text-[16px] bg-[#253c5e] text-white border border-white/10 shadow-lg tracking-wide',
-    cancelButton: 'inline-flex items-center justify-center font-bold !rounded-full cursor-pointer transition-transform hover:scale-105 active:scale-95 px-8 py-2.5 text-[15px] bg-[#2f2b3b] hover:bg-[#3a3547] text-foreground shadow-sm border-none',
-  },
-  buttonsStyling: false,
-  background: 'transparent',
-  color: 'inherit',
-  showClass: {
-    popup: 'animate-[fadeIn_0.15s_ease-out]'
-  },
-  hideClass: {
-    popup: '',
-    backdrop: ''
+/**
+ * Global Theme Detector
+ */
+const isDarkMode = () => {
+  if (typeof document === 'undefined') return false
+  return document.documentElement.classList.contains('dark')
+}
+
+/**
+ * Build dynamic theme configuration for SweetAlert2 popups
+ */
+const getPopupConfig = (type = 'info', isDanger = false) => {
+  const dark = isDarkMode()
+
+  const popupBg = dark ? '!bg-[#0c1612] !border-emerald-500/25' : '!bg-white !border-slate-200'
+  const textColor = dark ? '!text-white' : '!text-slate-900'
+
+  let confirmBtnClass = 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-md shadow-emerald-600/20'
+  if (isDanger || type === 'error') {
+    confirmBtnClass = 'bg-rose-600 hover:bg-rose-700 text-white shadow-md shadow-rose-600/20'
+  } else if (type === 'warning') {
+    confirmBtnClass = 'bg-amber-600 hover:bg-amber-700 text-white shadow-md shadow-amber-600/20'
+  }
+
+  const cancelBtnClass = dark
+    ? 'bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700'
+    : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200'
+
+  return {
+    customClass: {
+      popup: `${popupBg} !backdrop-blur-xl border !rounded-3xl shadow-2xl p-6 sm:p-8 max-w-[420px] ${textColor}`,
+      title: 'hidden',
+      htmlContainer: '!m-0 !p-0',
+      actions: 'flex items-center justify-center gap-3 mt-6 w-full',
+      confirmButton: `inline-flex items-center justify-center font-bold !rounded-xl cursor-pointer transition-all active:scale-95 px-6 py-2.5 text-sm ${confirmBtnClass}`,
+      cancelButton: `inline-flex items-center justify-center font-semibold !rounded-xl cursor-pointer transition-all active:scale-95 px-5 py-2.5 text-sm ${cancelBtnClass}`,
+    },
+    buttonsStyling: false,
+    background: 'transparent',
+    color: 'inherit',
+    backdrop: dark ? 'rgba(0, 0, 0, 0.75)' : 'rgba(15, 23, 42, 0.45)',
+    showClass: {
+      popup: 'animate-[fadeIn_0.15s_ease-out]'
+    },
+    hideClass: {
+      popup: '',
+      backdrop: ''
+    }
   }
 }
 
-const buildHtml = (title, text, type = 'success') => {
-  const isSuccess = type === 'success';
-  const iconSvg = isSuccess
-    ? `<div class="w-12 h-12 rounded-2xl bg-[#063326] text-[#00c982] border border-[#00c982]/30 flex items-center justify-center shadow-sm mx-auto mb-3">
-        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 13l4 4L19 7"></path></svg>
-       </div>`
-    : `<div class="swal-close-icon flex items-center justify-center mx-auto mb-3.5 cursor-pointer hover:opacity-80 transition-opacity" title="Close">
-        <svg class="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+/**
+ * Unified HTML builder for dialog contents
+ */
+const buildHtml = (title, text = '', type = 'success') => {
+  const dark = isDarkMode()
+
+  let iconHtml = ''
+  if (type === 'success') {
+    iconHtml = `
+      <div class="w-13 h-13 rounded-2xl ${dark ? 'bg-emerald-950/80 text-emerald-400 border-emerald-500/30' : 'bg-emerald-50 text-emerald-600 border-emerald-200'} border flex items-center justify-center shadow-sm mx-auto mb-3.5">
+        <svg class="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="20 6 9 17 4 12"></polyline>
+        </svg>
+      </div>`
+  } else if (type === 'error') {
+    iconHtml = `
+      <div class="w-13 h-13 rounded-2xl ${dark ? 'bg-rose-950/80 text-rose-400 border-rose-500/30' : 'bg-rose-50 text-rose-600 border-rose-200'} border flex items-center justify-center shadow-sm mx-auto mb-3.5">
+        <svg class="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round">
           <line x1="18" y1="6" x2="6" y2="18"></line>
           <line x1="6" y1="6" x2="18" y2="18"></line>
         </svg>
-       </div>`;
+      </div>`
+  } else if (type === 'warning') {
+    iconHtml = `
+      <div class="w-13 h-13 rounded-2xl ${dark ? 'bg-amber-950/80 text-amber-400 border-amber-500/30' : 'bg-amber-50 text-amber-600 border-amber-200'} border flex items-center justify-center shadow-sm mx-auto mb-3.5">
+        <svg class="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
+          <line x1="12" y1="9" x2="12" y2="13"></line>
+          <line x1="12" y1="17" x2="12.01" y2="17"></line>
+        </svg>
+      </div>`
+  } else if (type === 'question' || type === 'delete') {
+    iconHtml = `
+      <div class="w-13 h-13 rounded-2xl ${dark ? 'bg-rose-950/80 text-rose-400 border-rose-500/30' : 'bg-rose-50 text-rose-600 border-rose-200'} border flex items-center justify-center shadow-sm mx-auto mb-3.5">
+        <svg class="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="3 6 5 6 21 6"></polyline>
+          <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+          <line x1="10" y1="11" x2="10" y2="17"></line>
+          <line x1="14" y1="11" x2="14" y2="17"></line>
+        </svg>
+      </div>`
+  } else {
+    // Info
+    iconHtml = `
+      <div class="w-13 h-13 rounded-2xl ${dark ? 'bg-blue-950/80 text-blue-400 border-blue-500/30' : 'bg-blue-50 text-blue-600 border-blue-200'} border flex items-center justify-center shadow-sm mx-auto mb-3.5">
+        <svg class="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="10"></circle>
+          <line x1="12" y1="16" x2="12" y2="12"></line>
+          <line x1="12" y1="8" x2="12.01" y2="8"></line>
+        </svg>
+      </div>`
+  }
+
+  const titleColor = dark ? 'text-white' : 'text-slate-900'
+  const textColor = dark ? 'text-slate-300' : 'text-slate-600'
 
   return `
     <div class="flex flex-col items-center pt-1 pb-1">
-      ${iconSvg}
-      <div class="text-center font-bold text-2xl text-white mb-2 tracking-tight">
+      ${iconHtml}
+      <div class="text-center font-bold text-xl sm:text-2xl ${titleColor} mb-2 tracking-tight">
         ${title}
       </div>
       ${text ? `
       <div class="flex items-start text-center w-full max-w-[340px] mx-auto justify-center">
-        <div class="text-slate-200 text-base font-normal leading-relaxed text-center">
+        <div class="${textColor} text-xs sm:text-sm font-normal leading-relaxed text-center">
           ${text}
         </div>
       </div>` : ''}
     </div>
-  `;
+  `
 }
 
-export const showSuccess = (title, text = '', timer = 1500) => {
+/**
+ * Success Alert Dialog (Auto-closes or Confirmable)
+ */
+export const showSuccess = (title, text = '', timer = 2000) => {
+  const config = getPopupConfig('success', false)
   return Swal.fire({
-    ...baseConfig,
+    ...config,
     html: buildHtml(title, text, 'success'),
     timer,
     timerProgressBar: true,
     showConfirmButton: false,
     customClass: {
-      ...baseConfig.customClass,
-      timerProgressBar: '!bg-[#00c982]',
+      ...config.customClass,
+      timerProgressBar: '!bg-emerald-500',
     }
   })
 }
 
+/**
+ * Error Alert Dialog
+ */
 export const showError = async (title, text = '', confirmButtonText = 'OK') => {
+  const config = getPopupConfig('error', true)
   const result = await Swal.fire({
-    ...baseConfig,
+    ...config,
     html: buildHtml(title, text, 'error'),
     showConfirmButton: true,
     confirmButtonText: typeof confirmButtonText === 'string' ? confirmButtonText : 'OK',
     showCancelButton: false,
     allowOutsideClick: true,
     allowEscapeKey: true,
-    allowEnterKey: true,
-    focusConfirm: true,
-    didRender: (popup) => {
-      const okBtn = popup.querySelector('.swal2-confirm')
-      if (okBtn) {
-        okBtn.onclick = () => {
-          Swal.close()
-        }
-      }
-      const closeIcon = popup.querySelector('.swal-close-icon')
-      if (closeIcon) {
-        closeIcon.onclick = () => {
-          Swal.close()
-        }
-      }
-    }
   })
-  if (Swal.isVisible()) {
-    Swal.close()
-  }
   return result
 }
 
+/**
+ * Warning Alert Dialog
+ */
 export const showWarning = async (title, text = '', confirmButtonText = 'OK') => {
+  const config = getPopupConfig('warning', false)
   const result = await Swal.fire({
-    ...baseConfig,
-    html: buildHtml(title, text, 'error'),
+    ...config,
+    html: buildHtml(title, text, 'warning'),
     showConfirmButton: true,
     confirmButtonText: typeof confirmButtonText === 'string' ? confirmButtonText : 'OK',
     showCancelButton: false,
     allowOutsideClick: true,
     allowEscapeKey: true,
-    allowEnterKey: true,
-    focusConfirm: true,
-    didRender: (popup) => {
-      const okBtn = popup.querySelector('.swal2-confirm')
-      if (okBtn) {
-        okBtn.onclick = () => {
-          Swal.close()
-        }
-      }
-      const closeIcon = popup.querySelector('.swal-close-icon')
-      if (closeIcon) {
-        closeIcon.onclick = () => {
-          Swal.close()
-        }
-      }
-    }
   })
-  if (Swal.isVisible()) {
-    Swal.close()
-  }
   return result
 }
 
-export const confirmAction = async (title, text = 'Are you sure you want to proceed?', confirmButtonText = 'YES') => {
-  const isDelete = confirmButtonText.toLowerCase().includes('delete') || text.toLowerCase().includes('delete');
-
+/**
+ * Info Alert Dialog
+ */
+export const showInfo = async (title, text = '', confirmButtonText = 'OK') => {
+  const config = getPopupConfig('info', false)
   const result = await Swal.fire({
-    ...baseConfig,
-    html: buildHtml(title, text, isDelete ? 'error' : 'success'),
+    ...config,
+    html: buildHtml(title, text, 'info'),
+    showConfirmButton: true,
+    confirmButtonText: typeof confirmButtonText === 'string' ? confirmButtonText : 'OK',
+    showCancelButton: false,
+    allowOutsideClick: true,
+    allowEscapeKey: true,
+  })
+  return result
+}
+
+/**
+ * Unified Confirmation Prompt
+ * Supports either:
+ * - confirmAction(title, text, confirmButtonText, isDanger)
+ * - confirmAction({ title, text, confirmButtonText, cancelButtonText, isDanger, icon })
+ */
+export const confirmAction = async (titleOrOptions, text = 'Are you sure you want to proceed?', confirmButtonText = 'Yes, Proceed', isDangerArg = false) => {
+  let title = titleOrOptions
+  let cancelButtonText = 'Cancel'
+  let isDanger = isDangerArg
+  let iconType = 'warning'
+
+  if (typeof titleOrOptions === 'object' && titleOrOptions !== null) {
+    title = titleOrOptions.title || 'Are you sure?'
+    text = titleOrOptions.text || ''
+    confirmButtonText = titleOrOptions.confirmButtonText || titleOrOptions.confirmLabel || 'Yes, Proceed'
+    cancelButtonText = titleOrOptions.cancelButtonText || 'Cancel'
+    isDanger = titleOrOptions.isDanger || titleOrOptions.danger || false
+    iconType = titleOrOptions.icon || (isDanger ? 'delete' : 'warning')
+  } else {
+    const isDelete = String(confirmButtonText).toLowerCase().includes('delete') || String(title).toLowerCase().includes('delete') || String(text).toLowerCase().includes('delete')
+    if (isDelete) {
+      isDanger = true
+      iconType = 'delete'
+    }
+  }
+
+  const config = getPopupConfig(iconType, isDanger)
+  const result = await Swal.fire({
+    ...config,
+    html: buildHtml(title, text, iconType),
     showCancelButton: true,
     confirmButtonText,
-    cancelButtonText: 'Cancel',
+    cancelButtonText,
     reverseButtons: true,
+    focusCancel: true,
+    allowOutsideClick: false,
+    allowEscapeKey: true,
   })
+
   return result.isConfirmed
 }
 
-export const confirmDelete = async (itemName = 'this item') => {
-  return await confirmAction(
-    'Delete Product?',
-    `Are you sure you want to delete ${itemName}? This cannot be undone.`,
-    'DELETE'
-  )
+/**
+ * Unified Delete Confirmation Prompt
+ */
+export const confirmDelete = async (itemName = 'this item', customText = null) => {
+  const text = customText || `Are you sure you want to permanently delete "${itemName}"? This action cannot be undone.`
+  return await confirmAction({
+    title: 'Confirm Deletion',
+    text,
+    confirmButtonText: 'Yes, Delete',
+    cancelButtonText: 'Cancel',
+    isDanger: true,
+    icon: 'delete',
+  })
 }
 
-export const showLoading = (title = 'Processing...') => {
+/**
+ * Loading Indicator Modal
+ */
+export const showLoading = (title = 'Processing...', text = 'Please wait while we complete this action...') => {
+  const config = getPopupConfig('info', false)
   Swal.fire({
-    ...baseConfig,
-    html: buildHtml(title, 'Please wait...', 'success'),
+    ...config,
+    html: buildHtml(title, text, 'info'),
     allowOutsideClick: false,
     allowEscapeKey: false,
     showConfirmButton: false,
@@ -163,13 +267,20 @@ export const showLoading = (title = 'Processing...') => {
   })
 }
 
+/**
+ * Close any active SweetAlert Loading / Modal
+ */
 export const closeLoading = () => {
   if (Swal.isVisible()) {
     Swal.close()
   }
 }
 
-export const showToast = (message, icon = 'success', position = 'center') => {
+/**
+ * Unified Toast Notification (Light & Dark Adaptive)
+ */
+export const showToast = (message, icon = 'success', position = 'top-end') => {
+  const dark = isDarkMode()
   const isSuccess = icon === 'success'
   const isInfo = icon === 'info'
   const isWarning = icon === 'warning'
@@ -179,7 +290,6 @@ export const showToast = (message, icon = 'success', position = 'center') => {
   let titleText = defaultTitle
   let bodyText = message
 
-  // If message contains a colon-separated header
   if (typeof message === 'string') {
     const colonIdx = message.indexOf(': ')
     if (colonIdx > 0 && colonIdx <= 35) {
@@ -188,38 +298,41 @@ export const showToast = (message, icon = 'success', position = 'center') => {
     }
   }
 
-  let bgBadge = 'bg-[#063326] text-[#00c982] border-[#00c982]/30'
-  let titleColor = 'text-[#00c982]'
-  let progressBarColor = '!bg-[#00c982]'
-  let iconSvg = `<svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 13l4 4L19 7"></path></svg>`
+  let bgBadge = dark ? 'bg-emerald-950/80 text-emerald-400 border-emerald-500/30' : 'bg-emerald-50 text-emerald-600 border-emerald-200'
+  let titleColor = dark ? 'text-emerald-400' : 'text-emerald-700'
+  let progressBarColor = '!bg-emerald-500'
+  let iconSvg = `<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>`
 
   if (isInfo) {
-    bgBadge = 'bg-blue-950/70 text-blue-400 border-blue-500/30'
-    titleColor = 'text-blue-400'
-    progressBarColor = '!bg-blue-400'
-    iconSvg = `<svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>`
+    bgBadge = dark ? 'bg-blue-950/80 text-blue-400 border-blue-500/30' : 'bg-blue-50 text-blue-600 border-blue-200'
+    titleColor = dark ? 'text-blue-400' : 'text-blue-700'
+    progressBarColor = '!bg-blue-500'
+    iconSvg = `<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>`
   } else if (isWarning) {
-    bgBadge = 'bg-amber-950/70 text-amber-400 border-amber-500/30'
-    titleColor = 'text-amber-400'
-    progressBarColor = '!bg-amber-400'
-    iconSvg = `<svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>`
+    bgBadge = dark ? 'bg-amber-950/80 text-amber-400 border-amber-500/30' : 'bg-amber-50 text-amber-600 border-amber-200'
+    titleColor = dark ? 'text-amber-400' : 'text-amber-700'
+    progressBarColor = '!bg-amber-500'
+    iconSvg = `<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>`
   } else if (isError) {
-    bgBadge = 'bg-rose-950/70 text-rose-400 border-rose-500/30'
-    titleColor = 'text-rose-400'
-    progressBarColor = '!bg-rose-400'
-    iconSvg = `<svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>`
+    bgBadge = dark ? 'bg-rose-950/80 text-rose-400 border-rose-500/30' : 'bg-rose-50 text-rose-600 border-rose-200'
+    titleColor = dark ? 'text-rose-400' : 'text-rose-700'
+    progressBarColor = '!bg-rose-500'
+    iconSvg = `<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>`
   }
 
+  const toastBg = dark ? '!bg-[#0c1612]/95 !border-emerald-500/25 text-white' : '!bg-white/95 !border-slate-200 text-slate-800'
+  const closeColor = dark ? '!text-slate-400 hover:!text-white' : '!text-slate-400 hover:!text-slate-700'
+
   const html = `
-    <div class="flex items-center gap-3.5 w-full py-1 text-left">
-      <div class="flex-shrink-0 w-11 h-11 rounded-2xl border flex items-center justify-center ${bgBadge}">
+    <div class="flex items-center gap-3 w-full py-0.5 text-left">
+      <div class="flex-shrink-0 w-9 h-9 rounded-xl border flex items-center justify-center ${bgBadge} shadow-2xs">
         ${iconSvg}
       </div>
       <div class="flex-1 min-w-0 pr-1">
-        <div class="text-[11px] font-extrabold uppercase tracking-wider ${titleColor} mb-0.5">
+        <div class="text-[10px] font-extrabold uppercase tracking-wider ${titleColor} mb-0.5">
           ${titleText}
         </div>
-        <div class="text-[16px] font-bold text-white leading-snug break-words">
+        <div class="text-xs sm:text-sm font-semibold leading-snug break-words">
           ${bodyText}
         </div>
       </div>
@@ -236,9 +349,40 @@ export const showToast = (message, icon = 'success', position = 'center') => {
     timerProgressBar: true,
     background: 'transparent',
     customClass: {
-      popup: '!bg-[#0c1322] !backdrop-blur-md !border !border-white/10 !rounded-2xl !shadow-2xl !p-3.5 !min-w-[300px] !max-w-[440px]',
-      closeButton: '!text-slate-400 hover:!text-white !text-sm focus:!shadow-none',
+      popup: `${toastBg} !backdrop-blur-md !border !rounded-2xl !shadow-xl !p-3 !min-w-[280px] !max-w-[420px]`,
+      closeButton: `${closeColor} !text-xs focus:!shadow-none`,
       timerProgressBar: progressBarColor,
     }
   })
+}
+
+/**
+ * Raw Unified SweetAlert wrapper
+ * Always enforces the unified branding and returns full Swal result
+ */
+export const unifiedAlert = (options) => {
+  const isDanger = options.isDanger || options.danger || options.icon === 'error' || options.confirmButtonColor === '#ef4444'
+  const config = getPopupConfig(options.icon || 'info', isDanger)
+
+  return Swal.fire({
+    ...config,
+    ...options,
+    customClass: {
+      ...config.customClass,
+      ...(options.customClass || {})
+    }
+  })
+}
+
+export default {
+  showToast,
+  showSuccess,
+  showError,
+  showWarning,
+  showInfo,
+  confirmAction,
+  confirmDelete,
+  showLoading,
+  closeLoading,
+  unifiedAlert,
 }

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react'
-import { Modal } from '../ui'
+import { Modal, showError, showWarning, showToast } from '../ui'
 import { api } from '../../lib/api'
 import { FiMapPin, FiUser, FiPhone, FiTrash2, FiImage, FiCamera, FiUploadCloud } from 'react-icons/fi'
 
@@ -56,12 +56,12 @@ export default function EditBranchModal({ isOpen, onClose, onUpdate, initialData
     if (!file) return
 
     if (file.size > 5 * 1024 * 1024) {
-      alert('Please select an image smaller than 5MB')
+      showWarning('File Too Large', 'Please select an image smaller than 5MB')
       return
     }
 
     if (!file.type.startsWith('image/')) {
-      alert('Please upload a valid image file (PNG, JPG, WebP)')
+      showWarning('Invalid File', 'Please upload a valid image file (PNG, JPG, WebP)')
       return
     }
 
@@ -115,7 +115,7 @@ export default function EditBranchModal({ isOpen, onClose, onUpdate, initialData
       onClose()
     } catch (err) {
       console.error('Failed to update branch:', err)
-      alert(err.message || 'Failed to update branch details.')
+      showError('Update Failed', err.message || 'Failed to update branch details.')
     } finally {
       setLoading(false)
     }

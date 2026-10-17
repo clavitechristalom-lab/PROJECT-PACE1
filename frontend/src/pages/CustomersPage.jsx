@@ -17,7 +17,6 @@ import { useRealtimeSync, triggerDataSync } from '../lib/realtimeSync'
 import { FiDownload } from 'react-icons/fi'
 import { TbCurrencyPeso } from 'react-icons/tb'
 import { useAuth } from '../context/AuthContext'
-import Swal from 'sweetalert2'
 
 export default function CustomersPage({ branchFilter, embedded }) {
   const { user } = useAuth()
@@ -103,19 +102,18 @@ export default function CustomersPage({ branchFilter, embedded }) {
   const handleToggleInstallment = async (c) => {
     const nextState = !c.allow_installment;
     const actionText = nextState ? 'Allow' : 'Revoke';
-    const confirmResult = await Swal.fire({
+    const confirmed = await confirmAction({
       title: `${actionText} Installment Process?`,
       text: nextState
         ? `Allow customer "${c.first_name} ${c.last_name}" to process purchases via installment plans?`
         : `Revoke installment purchasing privileges for "${c.first_name} ${c.last_name}"?`,
-      icon: nextState ? 'question' : 'warning',
-      showCancelButton: true,
-      confirmButtonColor: nextState ? '#10b981' : '#ef4444',
-      cancelButtonColor: '#6b7280',
       confirmButtonText: `Yes, ${actionText} Installment`,
+      cancelButtonText: 'Cancel',
+      isDanger: !nextState,
+      icon: nextState ? 'info' : 'warning',
     });
 
-    if (confirmResult.isConfirmed) {
+    if (confirmed) {
       try {
         const res = await api.customers.toggleInstallment(c.customer_id, {
           allow_installment: nextState,

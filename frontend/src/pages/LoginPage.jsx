@@ -8,7 +8,6 @@ import {
   FiCheck, FiClock, FiFileText, FiZap, FiCalendar, FiHeadphones
 } from 'react-icons/fi'
 import { showSuccess, showError, showLoading, closeLoading, showToast } from '../lib/swal'
-import Swal from 'sweetalert2'
 import { useAuth } from '../context/AuthContext'
 import { useTheme } from '../context/ThemeContext'
 import { Spinner, Pagination } from '../components/ui'
@@ -344,9 +343,7 @@ export default function LoginPage() {
     } else {
       const errMsg = res.message || 'Incorrect email or password. Please try again.'
       await showError('Login Failed', errMsg)
-      if (Swal.isVisible()) {
-        Swal.close()
-      }
+      closeLoading()
       setError(errMsg)
       setIsLoginModalOpen(true)
       setActiveTab('login')
@@ -578,7 +575,7 @@ export default function LoginPage() {
     setLoading(false)
 
     if (res.requires_otp) {
-      if (Swal.isVisible()) Swal.close()
+      closeLoading()
       setActiveTab('login')
       setLoginOtpPending(true)
       setLoginMaskedEmail(res.masked_email || signUpData.email)
@@ -592,7 +589,7 @@ export default function LoginPage() {
     }
 
     if (res.success && (res.user || res.token)) {
-      if (Swal.isVisible()) Swal.close()
+      closeLoading()
       setIsLoginModalOpen(false)
 
       try {
@@ -602,7 +599,7 @@ export default function LoginPage() {
       showToast('Account created and logged in successfully! Welcome to Z-LICZ.', 'success')
       navigate('/customer/dashboard', { replace: true })
     } else if (res.success) {
-      if (Swal.isVisible()) Swal.close()
+      closeLoading()
       setIsLoginModalOpen(false)
       navigate('/customer/dashboard', { replace: true })
     } else {

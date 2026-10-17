@@ -2004,66 +2004,26 @@ export default function SystemPage({ defaultTab = 'users' }) {
 
       {/* Delete User Confirmation */}
       {deleteUser && (
-        <Modal
-          isOpen={true}
+        <ConfirmDialog
           title="Delete User Account"
-          onClose={() => setDeleteUser(null)}
-          size="sm"
-        >
-          <div className="space-y-3.5 text-xs">
-            <p className="text-muted-foreground">
-              Are you sure you want to remove user <strong className="text-foreground">@{deleteUser.username}</strong>?
-            </p>
-            <div className="flex justify-end gap-2 pt-2 border-t border-border">
-              <button
-                type="button"
-                onClick={() => setDeleteUser(null)}
-                className="px-4 py-1.5 rounded-xl border border-border hover:bg-muted font-semibold cursor-pointer"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={handleDeleteUser}
-                className="px-4 py-1.5 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl cursor-pointer"
-              >
-                Delete User
-              </button>
-            </div>
-          </div>
-        </Modal>
+          message={`Are you sure you want to remove user @${deleteUser.username}? This action cannot be undone.`}
+          confirmLabel="Delete User"
+          danger={true}
+          onConfirm={handleDeleteUser}
+          onCancel={() => setDeleteUser(null)}
+        />
       )}
 
       {/* Restore Backup Confirmation */}
       {restoringItem && (
-        <Modal
-          isOpen={true}
+        <ConfirmDialog
           title="Restore Database Snapshot"
-          onClose={() => setRestoringItem(null)}
-          size="sm"
-        >
-          <div className="space-y-3.5 text-xs">
-            <p className="text-muted-foreground">
-              Are you sure you want to restore the database to <strong className="text-foreground">{restoringItem.backup_name}</strong>?
-            </p>
-            <div className="flex justify-end gap-2 pt-2 border-t border-border">
-              <button
-                type="button"
-                onClick={() => setRestoringItem(null)}
-                className="px-4 py-1.5 rounded-xl border border-border hover:bg-muted font-semibold cursor-pointer"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={handleRestoreBackup}
-                className="px-4 py-1.5 bg-primary text-primary-foreground font-bold rounded-xl cursor-pointer"
-              >
-                Confirm Restore
-              </button>
-            </div>
-          </div>
-        </Modal>
+          message={`Are you sure you want to restore the database to "${restoringItem.backup_name}"? Active records will be reverted.`}
+          confirmLabel="Confirm Restore"
+          danger={false}
+          onConfirm={handleRestoreBackup}
+          onCancel={() => setRestoringItem(null)}
+        />
       )}
     </div>
   )

@@ -1,8 +1,7 @@
 import { useState, useEffect } from 'react';
-import { PageHeader, Card } from '../components/ui';
+import { PageHeader, Card, showToast, showError, showWarning, confirmDelete } from '../components/ui';
 import { api } from '../lib/api';
 import { useRealtimeSync, triggerDataSync } from '../lib/realtimeSync';
-import Swal from 'sweetalert2';
 import { FiTrash2, FiPlus, FiImage } from 'react-icons/fi';
 
 export default function CarouselPage() {
@@ -18,7 +17,7 @@ export default function CarouselPage() {
       setImages(data || []);
     } catch (err) {
       console.error(err);
-      if (!isBg) Swal.fire('Error', 'Failed to load carousel images', 'error');
+      if (!isBg) showError('Carousel Error', 'Failed to load carousel images from server');
     } finally {
       if (!isBg) setLoading(false);
     }
@@ -32,7 +31,7 @@ export default function CarouselPage() {
 
   const handleFileChange = async (e) => {
     if (images.length >= 10) {
-      Swal.fire('Limit Reached', 'Maximum limit of 10 carousel images reached. Please delete an image first.', 'warning');
+      showWarning('Limit Reached', 'Maximum limit of 10 carousel images reached. Please delete an existing image first.');
       e.target.value = '';
       return;
     }
@@ -49,17 +48,10 @@ export default function CarouselPage() {
       await api.carouselImages.create(formData);
       await loadImages();
       triggerDataSync('carousel');
-      Swal.fire({
-        icon: 'success',
-        title: 'Image Added',
-        toast: true,
-        position: 'bottom-end',
-        showConfirmButton: false,
-        timer: 3000
-      });
+      showToast('Carousel image uploaded successfully', 'success');
     } catch (err) {
       console.error(err);
-      Swal.fire('Error', 'Failed to upload image', 'error');
+      showError('Upload Failed', err.message || 'Failed to upload carousel image');
     } finally {
       setUploading(false);
       e.target.value = '';
@@ -67,30 +59,20 @@ export default function CarouselPage() {
   };
 
   const handleDelete = async (id) => {
-    const res = await Swal.fire({
-      title: 'Are you sure?',
-      text: "This image will be removed from the carousel.",
-      icon: 'warning',
-      showCancelButton: true,
-      confirmButtonText: 'Yes, delete it',
-    });
+    const confirmed = await confirmDelete(
+      'this carousel image',
+      'This image will be permanently removed from the customer dashboard carousel.'
+    );
 
-    if (res.isConfirmed) {
+    if (confirmed) {
       try {
         await api.carouselImages.delete(id);
         setImages(images.filter(img => img.id !== id));
         triggerDataSync('carousel');
-        Swal.fire({
-          icon: 'success',
-          title: 'Deleted!',
-          toast: true,
-          position: 'bottom-end',
-          showConfirmButton: false,
-          timer: 3000
-        });
+        showToast('Carousel image deleted successfully', 'success');
       } catch (err) {
         console.error(err);
-        Swal.fire('Error', 'Failed to delete image', 'error');
+        showError('Deletion Failed', err.message || 'Failed to delete carousel image');
       }
     }
   };

@@ -10,7 +10,7 @@ import { QRCodeSVG } from 'qrcode.react';
 import { api } from '../../lib/api';
 import { triggerDataSync } from '../../lib/realtimeSync';
 import { fmt } from '../../lib/utils';
-import Swal from 'sweetalert2';
+import { showSuccess, showInfo, showWarning, showError, showToast } from '../ui';
 import SelectProductModal from './SelectProductModal';
 import instapayQrImg from '../../assets/instapay-qr.png';
 
@@ -299,19 +299,9 @@ export default function DepositModal({
       const res = await api.customerApp.requestInstallment({
         notes: `Customer requested installment authorization for ${orderItems.length} selected item(s) totalling ${fmt(totalCashPrice)}.`,
       });
-      Swal.fire({
-        icon: 'success',
-        title: 'Request Sent to Store Admin! 📩',
-        text: res.message || 'Your Store Administrator has been notified to review and allow your account for installment.',
-        confirmButtonColor: '#7c3aed',
-      });
+      showSuccess('Request Sent', res.message || 'Your Store Administrator has been notified to review and allow your account for installment.');
     } catch (err) {
-      Swal.fire({
-        icon: 'info',
-        title: 'Installment Request',
-        text: err.message || 'Please contact your store administrator to enable installment for your account.',
-        confirmButtonColor: '#7c3aed',
-      });
+      showInfo('Installment Request', err.message || 'Please contact your store administrator to enable installment for your account.');
     } finally {
       setRequestingApproval(false);
     }
@@ -381,21 +371,11 @@ export default function DepositModal({
     const file = e.target.files?.[0];
     if (!file) return;
     if (!file.type.startsWith('image/')) {
-      Swal.fire({
-        icon: 'warning',
-        title: 'Invalid File',
-        text: 'Please choose an image file (PNG, JPG, JPEG, WEBP).',
-        confirmButtonColor: '#7c3aed',
-      });
+      showWarning('Invalid File', 'Please choose an image file (PNG, JPG, JPEG, WEBP).');
       return;
     }
     if (file.size > 5 * 1024 * 1024) {
-      Swal.fire({
-        icon: 'warning',
-        title: 'File Too Large',
-        text: 'The image size exceeds 5MB. Please choose a smaller image.',
-        confirmButtonColor: '#7c3aed',
-      });
+      showWarning('File Too Large', 'The image size exceeds 5MB. Please choose a smaller image.');
       return;
     }
     setProofFile(file);
@@ -420,22 +400,12 @@ export default function DepositModal({
 
     const trimmedRef = (customerRef || '').trim();
     if (!trimmedRef) {
-      Swal.fire({
-        icon: 'warning',
-        title: 'Transaction Reference Required',
-        text: `Please enter the Transaction Reference number from your ${selectedMethod} payment receipt.`,
-        confirmButtonColor: '#059669',
-      });
+      showWarning('Transaction Reference Required', `Please enter the Transaction Reference number from your ${selectedMethod} payment receipt.`);
       return;
     }
 
     if (!proofFile && !checkoutData?.proof_of_payment) {
-      Swal.fire({
-        icon: 'warning',
-        title: 'Proof of Payment Required',
-        text: 'Please insert or upload a screenshot of your payment receipt before submitting.',
-        confirmButtonColor: '#059669',
-      });
+      showWarning('Proof of Payment Required', 'Please insert or upload a screenshot of your payment receipt before submitting.');
       return;
     }
 

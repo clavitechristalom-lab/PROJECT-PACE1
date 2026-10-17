@@ -9,7 +9,7 @@ import {
 import {
   Btn, Badge, StatusBadge, Input, Select, Textarea, Modal,
   Table, TR, TD, SearchBar, PageHeader, StatCard, Card, CardHeader, Pagination, showToast,
-  LoadingState, ErrorAlert, TableSkeleton, EmptyState, showLoading, closeLoading
+  LoadingState, ErrorAlert, TableSkeleton, EmptyState, showLoading, closeLoading, confirmDelete, unifiedAlert
 } from '../components/ui'
 import { fmt, fmtDate } from '../lib/utils'
 import { useAuth } from '../context/AuthContext'
@@ -17,7 +17,6 @@ import api, { downloadCsv } from '../lib/api'
 import { useRealtimeSync, triggerDataSync } from '../lib/realtimeSync'
 import { TbCurrencyPeso } from 'react-icons/tb'
 import { FiDownload } from 'react-icons/fi'
-import Swal from 'sweetalert2'
 
 export const formatProofUrl = (url) => {
   if (!url) return null;
@@ -225,20 +224,12 @@ export default function PaymentsPage() {
   }
 
   const handleDeletePayment = async (id) => {
-    const result = await Swal.fire({
-      title: 'Delete Payment?',
-      text: 'Are you sure you want to delete this payment? This action cannot be undone.',
-      icon: 'warning',
-      showCancelButton: true,
-      confirmButtonColor: '#ef4444',
-      cancelButtonColor: '#64748b',
-      confirmButtonText: 'Yes, delete it',
-      cancelButtonText: 'Cancel',
-      background: document.documentElement.classList.contains('dark') ? '#1e293b' : '#fff',
-      color: document.documentElement.classList.contains('dark') ? '#f8fafc' : '#0f172a',
-    });
+    const confirmed = await confirmDelete(
+      'this payment record',
+      'Are you sure you want to delete this payment record? This action cannot be undone.'
+    );
     
-    if (!result.isConfirmed) return;
+    if (!confirmed) return;
     
     showLoading('Deleting payment...')
     try {
@@ -259,20 +250,20 @@ export default function PaymentsPage() {
     if (!p) return;
     const proofUrl = formatProofUrl(p.proof_of_payment);
     const isDark = document.documentElement.classList.contains('dark');
-    const borderCol = isDark ? '#334155' : '#e2e8f0';
-    const bgBox = isDark ? '#0f172a' : '#f8fafc';
+    const borderCol = isDark ? 'rgba(52, 211, 153, 0.2)' : '#e2e8f0';
+    const bgBox = isDark ? '#061710' : '#f8fafc';
     const textMuted = isDark ? '#94a3b8' : '#64748b';
     const textMain = isDark ? '#f8fafc' : '#0f172a';
 
-    const result = await Swal.fire({
+    const result = await unifiedAlert({
       title: 'Receive & Confirm Payment?',
       html: `
         <div style="text-align: left; font-size: 13px; margin-top: 8px;">
-          <div style="background: ${isDark ? 'rgba(30, 41, 59, 0.6)' : 'rgba(241, 245, 249, 0.7)'}; border: 1px solid ${borderCol}; border-radius: 10px; padding: 12px; margin-bottom: 12px; line-height: 1.6;">
-            <div><strong style="color: ${textMuted};">Receipt #:</strong> <span style="font-family: monospace; font-weight: bold; color: ${textMain};">${p.receipt_no}</span></div>
-            <div><strong style="color: ${textMuted};">Account #:</strong> <span style="font-family: monospace; font-weight: bold; color: #3b82f6;">${p.account_no}</span> <span style="color: ${textMuted};">(${p.customer_name})</span></div>
-            <div><strong style="color: ${textMuted};">Amount:</strong> <span style="color: #10b981; font-family: monospace; font-weight: bold; font-size: 14px;">${fmt(p.amount)}</span> <span style="color: ${textMuted}; font-size: 12px;">via ${p.payment_method}</span></div>
-            ${p.reference_no ? `<div><strong style="color: ${textMuted};">Ref Code:</strong> <code style="font-family: monospace; font-weight: bold; background: ${isDark ? '#334155' : '#e2e8f0'}; padding: 1px 6px; border-radius: 4px; color: ${textMain};">${p.reference_no}</code></div>` : ''}
+          <div style="background: ${isDark ? 'rgba(6, 23, 16, 0.7)' : 'rgba(241, 245, 249, 0.7)'}; border: 1px solid ${borderCol}; border-radius: 12px; padding: 12px; margin-bottom: 12px; line-height: 1.6;">
+            <div><strong style="color: ${textMuted}; font-size: 11px;">Receipt #:</strong> <span style="font-family: monospace; font-weight: bold; color: ${textMain};">${p.receipt_no}</span></div>
+            <div><strong style="color: ${textMuted}; font-size: 11px;">Account #:</strong> <span style="font-family: monospace; font-weight: bold; color: #10b981;">${p.account_no}</span> <span style="color: ${textMuted};">(${p.customer_name})</span></div>
+            <div><strong style="color: ${textMuted}; font-size: 11px;">Amount:</strong> <span style="color: #10b981; font-family: monospace; font-weight: bold; font-size: 14px;">${fmt(p.amount)}</span> <span style="color: ${textMuted}; font-size: 12px;">via ${p.payment_method}</span></div>
+            ${p.reference_no ? `<div><strong style="color: ${textMuted}; font-size: 11px;">Ref Code:</strong> <code style="font-family: monospace; font-weight: bold; background: ${isDark ? '#0c2b1e' : '#e2e8f0'}; padding: 1px 6px; border-radius: 4px; color: ${textMain};">${p.reference_no}</code></div>` : ''}
           </div>
 
           <div style="margin-bottom: 12px;">
@@ -281,8 +272,8 @@ export default function PaymentsPage() {
               ${proofUrl ? `<a href="${proofUrl}" target="_blank" rel="noopener noreferrer" style="font-size: 11px; color: #10b981; font-weight: 600; text-decoration: underline; cursor: pointer;">View Full Image ↗</a>` : ''}
             </div>
             ${proofUrl ? `
-              <div style="border: 1px solid ${borderCol}; border-radius: 10px; overflow: hidden; background: ${bgBox}; padding: 6px; display: flex; align-items: center; justify-content: center; max-height: 220px; cursor: pointer;" onclick="window.open('${proofUrl}', '_blank')" title="Click to view full image">
-                <img src="${proofUrl}" alt="Proof of Payment" style="max-height: 205px; max-width: 100%; object-fit: contain; border-radius: 6px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);" />
+              <div style="border: 1px solid ${borderCol}; border-radius: 12px; overflow: hidden; background: ${bgBox}; padding: 6px; display: flex; align-items: center; justify-content: center; max-height: 220px; cursor: pointer;" onclick="window.open('${proofUrl}', '_blank')" title="Click to view full image">
+                <img src="${proofUrl}" alt="Proof of Payment" style="max-height: 205px; max-width: 100%; object-fit: contain; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);" />
               </div>
             ` : `
               <div style="border: 1px dashed ${borderCol}; border-radius: 8px; padding: 12px; text-align: center; color: ${textMuted}; font-size: 11px; background: ${bgBox};">
@@ -296,15 +287,12 @@ export default function PaymentsPage() {
           </p>
         </div>
       `,
-      icon: 'question',
       showCancelButton: true,
-      confirmButtonColor: '#10b981',
-      cancelButtonColor: '#64748b',
       confirmButtonText: 'Yes, Receive Payment',
       cancelButtonText: 'Cancel',
-      background: isDark ? '#1e293b' : '#fff',
-      color: textMain,
-      width: '480px',
+      reverseButtons: true,
+      icon: 'question',
+      width: '460px',
     });
 
     if (!result.isConfirmed) return;

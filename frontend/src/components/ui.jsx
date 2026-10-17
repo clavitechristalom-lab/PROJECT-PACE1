@@ -2,30 +2,36 @@ import React, { useState, useEffect, useRef, Component } from 'react'
 import { Link } from 'react-router-dom'
 import { TbCurrencyPeso } from 'react-icons/tb'
 import {
-  FiCheckCircle, FiAlertCircle, FiAlertTriangle, FiInfo, FiX,
+  FiCheckCircle, FiAlertCircle, FiAlertTriangle, FiInfo, FiX, FiTrash2,
   FiChevronLeft, FiChevronRight, FiSearch, FiBell, FiClock, FiCreditCard, FiPackage, FiUser, FiShield,
   FiActivity, FiInbox, FiSettings, FiShoppingCart, FiFileText, FiFilter, FiXCircle
 } from 'react-icons/fi'
 import {
+  showToast,
   showToast as swalToast,
   showSuccess,
   showError,
   showWarning,
+  showInfo,
   showLoading,
   closeLoading,
   confirmAction,
-  confirmDelete
+  confirmDelete,
+  unifiedAlert
 } from '../lib/swal'
 
 export {
+  showToast,
   swalToast,
   showSuccess,
   showError,
   showWarning,
+  showInfo,
   showLoading,
   closeLoading,
   confirmAction,
-  confirmDelete
+  confirmDelete,
+  unifiedAlert
 }
 
 // ─── Error Boundary ───────────────────────────────────────────────────────────
@@ -304,17 +310,41 @@ export function Modal({ title, onClose, children, footer, size = 'md' }) {
 // ─── Confirm Dialog ───────────────────────────────────────────────────────────
 export function ConfirmDialog({ title, message, onConfirm, onCancel, confirmLabel = 'Confirm', danger }) {
   return (
-    <Modal title={title} onClose={onCancel} size="sm">
-      <div className="space-y-4">
-        <p className="text-xs text-muted-foreground leading-relaxed">{message}</p>
-        <div className="flex justify-end gap-2 pt-2 border-t border-border">
-          <Btn variant="outline" size="sm" onClick={onCancel} icon={<FiX className="w-3.5 h-3.5" />}>Cancel</Btn>
-          <Btn variant={danger ? 'danger' : 'primary'} size="sm" onClick={onConfirm} icon={<FiCheckCircle className="w-3.5 h-3.5" />}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/45 dark:bg-black/75 backdrop-blur-sm animate-[fadeIn_0.15s_ease-out]">
+      <div className="relative w-full max-w-[420px] p-6 sm:p-8 bg-white dark:bg-[#0c1612] text-slate-900 dark:text-white border border-slate-200 dark:border-emerald-500/25 rounded-3xl shadow-2xl space-y-4">
+        <div className="flex flex-col items-center text-center">
+          <div className={`w-13 h-13 rounded-2xl flex items-center justify-center shadow-sm mx-auto mb-3.5 border ${
+            danger
+              ? 'bg-rose-50 dark:bg-rose-950/80 text-rose-600 dark:text-rose-400 border-rose-200 dark:border-rose-500/30'
+              : 'bg-emerald-50 dark:bg-emerald-950/80 text-emerald-600 dark:text-emerald-400 border-emerald-200 dark:border-emerald-500/30'
+          }`}>
+            {danger ? <FiTrash2 className="w-6 h-6" /> : <FiCheckCircle className="w-6 h-6" />}
+          </div>
+          <h3 className="font-bold text-xl tracking-tight text-slate-900 dark:text-white mb-1.5">{title}</h3>
+          <p className="text-xs sm:text-sm text-slate-600 dark:text-slate-300 leading-relaxed max-w-[340px]">{message}</p>
+        </div>
+        <div className="flex items-center justify-center gap-3 pt-3">
+          <button
+            type="button"
+            onClick={onCancel}
+            className="inline-flex items-center justify-center font-semibold rounded-xl cursor-pointer transition-all active:scale-95 px-5 py-2.5 text-sm bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 dark:text-slate-200 dark:border-slate-700"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={onConfirm}
+            className={`inline-flex items-center justify-center font-bold rounded-xl cursor-pointer transition-all active:scale-95 px-6 py-2.5 text-sm ${
+              danger
+                ? 'bg-rose-600 hover:bg-rose-700 text-white shadow-md shadow-rose-600/20'
+                : 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-md shadow-emerald-600/20'
+            }`}
+          >
             {confirmLabel}
-          </Btn>
+          </button>
         </div>
       </div>
-    </Modal>
+    </div>
   )
 }
 
@@ -609,14 +639,7 @@ export function StatSkeleton({ count = 4 }) {
   )
 }
 
-// ─── Toast ────────────────────────────────────────────────────────────────────
-let toastId = 0
-const toastListeners = []
-
-export function showToast(message, type = 'success') {
-  swalToast(message, type)
-}
-
+// ─── Toast Container Stub ─────────────────────────────────────────────────────
 export function ToastContainer() {
   return null
 }

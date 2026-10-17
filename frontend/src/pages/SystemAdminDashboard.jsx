@@ -7,12 +7,11 @@ import {
 import {
   PageHeader, Card, StatCard, Table, TR, TD, Badge, StatusBadge,
   Input, Select, LoadingState, ErrorAlert, TableSkeleton, EmptyState, TabBar, showToast,
-  Btn, Modal, Pagination
+  Btn, Modal, Pagination, showError, showWarning, confirmDelete
 } from '../components/ui'
 import { api } from '../lib/api'
 import { triggerDataSync, useRealtimeSync } from '../lib/realtimeSync'
 import { fmtDate } from '../lib/utils'
-import Swal from 'sweetalert2'
 
 export default function SystemAdminDashboard() {
   const [activeTab, setActiveTab] = useState('metrics')
@@ -134,7 +133,7 @@ export default function SystemAdminDashboard() {
       }
 
       if (limitReached) {
-        Swal.fire('Limit Reached', `Uploaded ${successCount} images. Maximum limit of 10 carousel images reached.`, 'warning');
+        showWarning('Limit Reached', `Uploaded ${successCount} images. Maximum limit of 10 carousel images reached.`);
       } else {
         showToast(`Successfully uploaded ${successCount} image(s)`, 'success');
       }
@@ -143,7 +142,7 @@ export default function SystemAdminDashboard() {
       triggerDataSync('carousel');
     } catch (err) {
       console.error(err);
-      Swal.fire('Error', err.message || 'Failed to upload image(s)', 'error');
+      showError('Upload Failed', err.message || 'Failed to upload image(s)');
     } finally {
       setUploadingCarousel(false);
     }
@@ -499,7 +498,7 @@ export default function SystemAdminDashboard() {
                           triggerDataSync('carousel');
                           loadData('carousel');
                         } catch (err) {
-                          Swal.fire('Error', err.message || 'Failed to replace image', 'error');
+                          showError('Replace Failed', err.message || 'Failed to replace image');
                         } finally {
                           setLoading(false);
                           e.target.value = '';
@@ -509,14 +508,11 @@ export default function SystemAdminDashboard() {
                   </label>
                   <button 
                     onClick={async () => {
-                      const res = await Swal.fire({
-                        title: 'Are you sure?',
-                        text: "This image will be removed from the carousel.",
-                        icon: 'warning',
-                        showCancelButton: true,
-                        confirmButtonText: 'Yes, delete it'
-                      });
-                      if (res.isConfirmed) {
+                      const confirmed = await confirmDelete(
+                        'this carousel image',
+                        'This image will be removed from the carousel.'
+                      );
+                      if (confirmed) {
                         try {
                           setLoading(true);
                           await api.carouselImages.delete(img.id);
@@ -524,7 +520,7 @@ export default function SystemAdminDashboard() {
                           triggerDataSync('carousel');
                           loadData('carousel');
                         } catch (err) {
-                          Swal.fire('Error', err.message || 'Failed to delete image', 'error');
+                          showError('Deletion Failed', err.message || 'Failed to delete image');
                         } finally {
                           setLoading(false);
                         }

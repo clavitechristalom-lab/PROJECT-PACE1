@@ -1,12 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { Modal, LoadingState, EmptyState, Badge, StatusBadge } from '../ui';
+import { Modal, LoadingState, EmptyState, Badge, StatusBadge, showToast, showSuccess, showError, showWarning, confirmDelete } from '../ui';
 import { api } from '../../lib/api';
 import { fmt } from '../../lib/utils';
 import { FiPackage, FiCalendar, FiClock, FiCreditCard, FiAlertCircle, FiCheckCircle, FiFileText, FiMessageCircle, FiChevronLeft, FiChevronRight, FiShoppingCart, FiX, FiTrash2 } from 'react-icons/fi';
 import { TbCurrencyPeso } from 'react-icons/tb';
 import { useAuth } from '../../context/AuthContext';
 import { triggerDataSync } from '../../lib/realtimeSync';
-import Swal from 'sweetalert2';
 
 export function ProductListModal({ isOpen, onClose, category, availableCategories = [], initialProductId = null, onBuyProduct }) {
   const [products, setProducts] = useState([]);
@@ -1095,24 +1094,12 @@ export function MakePaymentModal({ isOpen, onClose, installments, onPaymentSucce
     if (!file) return;
 
     if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
-      Swal.fire({
-        title: 'Invalid File',
-        text: 'Only JPG, PNG, or WEBP images are allowed.',
-        icon: 'error',
-        background: document.documentElement.classList.contains('dark') ? '#1e293b' : '#fff',
-        color: document.documentElement.classList.contains('dark') ? '#f8fafc' : '#0f172a',
-      });
+      showError('Invalid File', 'Only JPG, PNG, or WEBP images are allowed.');
       return;
     }
 
     if (file.size > 5 * 1024 * 1024) {
-      Swal.fire({
-        title: 'File Too Large',
-        text: 'Image size should be up to 5 MB.',
-        icon: 'error',
-        background: document.documentElement.classList.contains('dark') ? '#1e293b' : '#fff',
-        color: document.documentElement.classList.contains('dark') ? '#f8fafc' : '#0f172a',
-      });
+      showError('File Too Large', 'Image size should be up to 5 MB.');
       return;
     }
 
@@ -1124,7 +1111,7 @@ export function MakePaymentModal({ isOpen, onClose, installments, onPaymentSucce
     e.preventDefault();
     if (paymentType === 'Installment Payment' && !selectedSchedule) return;
     if (paymentType === 'Get Product' && !selectedProductId) {
-      Swal.fire({ icon: 'warning', title: 'Missing Product', text: 'Please select a product first.' });
+      showWarning('Missing Product', 'Please select a product first.');
       return;
     }
     if (!amount) return;
@@ -1134,13 +1121,7 @@ export function MakePaymentModal({ isOpen, onClose, installments, onPaymentSucce
       if (paymentType === 'Get Product') {
         const prod = products.find(p => p.product_id.toString() === selectedProductId);
         if (prod && prod.stock_quantity <= 0) {
-          Swal.fire({
-            icon: 'error',
-            title: 'Out of Stock',
-            text: 'OUT OF STOCK THIS PRODUCT',
-            background: document.documentElement.classList.contains('dark') ? '#1e293b' : '#fff',
-            color: document.documentElement.classList.contains('dark') ? '#f8fafc' : '#0f172a',
-          });
+          showError('Out of Stock', 'This product is currently out of stock.');
           setSubmitting(false);
           return;
         }
@@ -1171,27 +1152,17 @@ export function MakePaymentModal({ isOpen, onClose, installments, onPaymentSucce
         await api.customerApp.requestProduct(formData);
       }
 
-      Swal.fire({
-        icon: 'success',
-        title: paymentType === 'Get Product' ? 'Request Submitted' : 'Payment Submitted',
-        text: paymentType === 'Get Product' ? 'Your new product request has been successfully submitted.' : 'Your payment request has been received and applied.',
-        background: document.documentElement.classList.contains('dark') ? '#1e293b' : '#fff',
-        color: document.documentElement.classList.contains('dark') ? '#f8fafc' : '#0f172a',
-        confirmButtonColor: '#176B87'
-      });
+      showSuccess(
+        paymentType === 'Get Product' ? 'Request Submitted' : 'Payment Submitted',
+        paymentType === 'Get Product' ? 'Your new product request has been successfully submitted.' : 'Your payment request has been received and applied.'
+      );
       triggerDataSync('payments');
       triggerDataSync('installments');
       onClose();
       if (onPaymentSuccess) onPaymentSuccess();
     } catch (err) {
       console.error(err);
-      Swal.fire({
-        icon: 'error',
-        title: 'Payment Failed',
-        text: err.message || 'An error occurred while submitting your payment.',
-        background: document.documentElement.classList.contains('dark') ? '#1e293b' : '#fff',
-        color: document.documentElement.classList.contains('dark') ? '#f8fafc' : '#0f172a',
-      });
+      showError('Payment Failed', err.message || 'An error occurred while submitting your payment.');
     } finally {
       setSubmitting(false);
     }
@@ -1540,14 +1511,7 @@ export function SupportModal({ isOpen, onClose }) {
 
     try {
       await api.supportMessages.create({ topic, message });
-      Swal.fire({
-        icon: 'success',
-        title: 'Message Sent',
-        text: 'Our support team will get back to you within 24 hours.',
-        background: document.documentElement.classList.contains('dark') ? '#1e293b' : '#fff',
-        color: document.documentElement.classList.contains('dark') ? '#f8fafc' : '#0f172a',
-        confirmButtonColor: '#176B87'
-      });
+      showSuccess('Message Sent', 'Our support team will get back to you within 24 hours.');
       setTopic('');
       setMessage('');
       setActiveTab('history');
@@ -1555,56 +1519,26 @@ export function SupportModal({ isOpen, onClose }) {
       triggerDataSync('support');
     } catch (err) {
       console.error(err);
-      Swal.fire({
-        icon: 'error',
-        title: 'Error',
-        text: err.message || 'Failed to send message',
-        background: document.documentElement.classList.contains('dark') ? '#1e293b' : '#fff',
-        color: document.documentElement.classList.contains('dark') ? '#f8fafc' : '#0f172a',
-      });
+      showError('Error', err.message || 'Failed to send message');
     } finally {
       setSubmitting(false);
     }
   };
 
   const handleDeleteMessage = async (id) => {
-    const res = await Swal.fire({
-      title: 'Are you sure?',
-      text: 'This will permanently delete this feedback and all its history.',
-      icon: 'warning',
-      showCancelButton: true,
-      confirmButtonText: 'Yes, delete it!',
-      cancelButtonText: 'Cancel',
-      confirmButtonColor: '#ef4444',
-      cancelButtonColor: '#64748b',
-      background: document.documentElement.classList.contains('dark') ? '#1e293b' : '#fff',
-      color: document.documentElement.classList.contains('dark') ? '#f8fafc' : '#0f172a',
-    });
-    if (res.isConfirmed) {
+    const isConfirmed = await confirmDelete(
+      'Are you sure?',
+      'This will permanently delete this feedback and all its history.'
+    );
+    if (isConfirmed) {
       try {
         await api.supportMessages.delete(id);
         loadMyMessages(true);
         triggerDataSync('support');
-        Swal.fire({
-          icon: 'success',
-          title: 'Deleted!',
-          text: 'Your feedback has been deleted.',
-          toast: true,
-          position: 'bottom-end',
-          showConfirmButton: false,
-          timer: 3000,
-          background: document.documentElement.classList.contains('dark') ? '#1e293b' : '#fff',
-          color: document.documentElement.classList.contains('dark') ? '#f8fafc' : '#0f172a',
-        });
+        showToast('Your feedback has been deleted.', 'success');
       } catch (err) {
         console.error(err);
-        Swal.fire({
-          icon: 'error',
-          title: 'Error',
-          text: 'Failed to delete feedback.',
-          background: document.documentElement.classList.contains('dark') ? '#1e293b' : '#fff',
-          color: document.documentElement.classList.contains('dark') ? '#f8fafc' : '#0f172a',
-        });
+        showError('Error', 'Failed to delete feedback.');
       }
     }
   };
@@ -1827,7 +1761,7 @@ export function SupportModal({ isOpen, onClose }) {
                         e.target.reset();
                       } catch (err) {
                         console.error(err);
-                        alert('Failed to send reply: ' + (err.response?.data?.message || err.message));
+                        showError('Reply Failed', err.response?.data?.message || err.message || 'Failed to send reply');
                       } finally {
                         btn.disabled = false;
                         btn.innerText = 'Reply';
