@@ -4,7 +4,8 @@ import {
   FiUsers, FiUser, FiShield, FiActivity, FiDatabase,
   FiDownload, FiUpload, FiTrash2, FiLock, FiCheckCircle,
   FiAlertTriangle, FiSearch, FiPlus, FiEdit, FiEye,
-  FiX, FiSave, FiSettings, FiRotateCcw, FiBriefcase, FiKey, FiHome
+  FiX, FiSave, FiSettings, FiRotateCcw, FiBriefcase, FiKey, FiHome,
+  FiHardDrive
 } from 'react-icons/fi'
 import {
   Btn, Badge, StatusBadge, Input, Select, Textarea, Modal, ConfirmDialog,
@@ -16,6 +17,7 @@ import { fmtDate, filterBySearch } from '../lib/utils'
 import { useAuth } from '../context/AuthContext'
 import { api } from '../lib/api'
 import { useRealtimeSync, triggerDataSync } from '../lib/realtimeSync'
+import StorageManagementTab from '../components/system/StorageManagementTab'
 
 const MODULES = ['All', 'Auth', 'Customers', 'Products', 'Sales', 'Installments', 'Payroll', 'Attendance', 'System', 'Users', 'Employees']
 const ROLES = ['Administrator', 'Store Admin', 'Employee']
@@ -24,9 +26,16 @@ export default function SystemPage({ defaultTab = 'users' }) {
   const [searchParams] = useSearchParams()
   const { user } = useAuth()
   const isAdmin = user?.role === 'Administrator'
-  const [activeTab, setActiveTab] = useState(defaultTab)
+  const [activeTab, setActiveTab] = useState(searchParams.get('tab') || defaultTab)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+
+  useEffect(() => {
+    const tabParam = searchParams.get('tab')
+    if (tabParam && ['users', 'logs', 'backups', 'storage', 'settings'].includes(tabParam)) {
+      setActiveTab(tabParam)
+    }
+  }, [searchParams])
 
   // Users State
   const [users, setUsers] = useState([])
@@ -365,6 +374,7 @@ export default function SystemPage({ defaultTab = 'users' }) {
       setLogs([])
       showToast(res?.message || 'All system audit logs cleared successfully', 'success')
       triggerDataSync('system')
+      triggerDataSync('storage')
     } catch (err) {
       console.error('Failed to clear logs:', err)
       showToast(err.message || 'Failed to clear system audit logs', 'error')
@@ -383,6 +393,7 @@ export default function SystemPage({ defaultTab = 'users' }) {
       showToast(res.message || 'Manual backup completed successfully', 'success')
       loadTabData('backups', true)
       triggerDataSync('system')
+      triggerDataSync('storage')
     } catch (err) {
       showToast(err.message || 'Failed to create database backup', 'error')
     } finally {
@@ -400,6 +411,7 @@ export default function SystemPage({ defaultTab = 'users' }) {
       setRestoringItem(null)
       loadTabData('backups', true)
       triggerDataSync('system')
+      triggerDataSync('storage')
     } catch (err) {
       showToast(err.message || 'Failed to restore backup', 'error')
     } finally {
@@ -485,6 +497,7 @@ export default function SystemPage({ defaultTab = 'users' }) {
     { id: 'users', label: 'User Accounts & Verification', icon: <FiUsers className="w-3.5 h-3.5" /> },
     { id: 'logs', label: 'Audit & System Logs', icon: <FiActivity className="w-3.5 h-3.5" /> },
     { id: 'backups', label: 'Database Backup & Restore', icon: <FiDatabase className="w-3.5 h-3.5" /> },
+    { id: 'storage', label: 'System Storage Management', icon: <FiHardDrive className="w-3.5 h-3.5" /> },
     { id: 'settings', label: 'Company Configuration', icon: <FiSettings className="w-3.5 h-3.5" /> },
   ]
 
@@ -828,6 +841,11 @@ export default function SystemPage({ defaultTab = 'users' }) {
             )}
           </Card>
         </div>
+      )}
+
+      {/* ─── Storage Management Tab ─── */}
+      {activeTab === 'storage' && (
+        <StorageManagementTab onNavigateToBackups={() => setActiveTab('backups')} />
       )}
 
       {/* ─── Settings Tab ─── */}
@@ -2093,4 +2111,8 @@ export function BackupsPage() {
 
 export function SettingsPage() {
   return <SystemPage defaultTab="settings" />
+}
+
+export function StoragePage() {
+  return <SystemPage defaultTab="storage" />
 }

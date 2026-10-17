@@ -23,7 +23,7 @@ import QrScannerPage from './pages/QrScannerPage'
 import QrMonitoringPage from './pages/QrMonitoringPage'
 import QrRequestsPage from './pages/QrRequestsPage'
 import SupportPage from './pages/SupportPage'
-import { UsersPage, SystemLogsPage, BackupsPage, SettingsPage } from './pages/SystemPage'
+import { UsersPage, SystemLogsPage, BackupsPage, SettingsPage, StoragePage } from './pages/SystemPage'
 import SystemAdminDashboard from './pages/SystemAdminDashboard'
 import BranchesPage from './pages/BranchesPage'
 import CarouselPage from './pages/CarouselPage'
@@ -75,7 +75,7 @@ function canUserAccessPath(role, path) {
     if (cleanPath.startsWith('/customer') || cleanPath.startsWith('/employee')) return false
     const adminOnly = [
       '/branches', '/admin-dashboard', '/qr-monitoring', '/admin/qr-monitoring',
-      '/admin/qr-requests', '/users', '/system-logs', '/backups', '/settings', '/payroll'
+      '/admin/qr-requests', '/users', '/system-logs', '/backups', '/settings', '/storage', '/system', '/payroll'
     ]
     return !adminOnly.includes(cleanPath)
   }
@@ -300,6 +300,8 @@ function AppRoutes() {
           <Route path="/users" element={<RequireAuth roles={['Administrator']}><UsersPage /></RequireAuth>} />
           <Route path="/system-logs" element={<RequireAuth roles={['Administrator']}><SystemLogsPage /></RequireAuth>} />
           <Route path="/backups" element={<RequireAuth roles={['Administrator']}><BackupsPage /></RequireAuth>} />
+          <Route path="/storage" element={<RequireAuth roles={['Administrator']}><StoragePage /></RequireAuth>} />
+          <Route path="/system" element={<RequireAuth roles={['Administrator']}><UsersPage /></RequireAuth>} />
           <Route path="/settings" element={<RequireAuth roles={['Administrator']}><SettingsPage /></RequireAuth>} />
           <Route path="/settings/carousel" element={<RequireAuth roles={['Administrator']}><CarouselPage /></RequireAuth>} />
           

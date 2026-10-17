@@ -258,7 +258,8 @@ Route::middleware('auth:sanctum')->group(function () {
     // ─── Settings ──────────────────────────────────────────────────────────
     Route::get('/settings', [SystemController::class, 'settings']);
     Route::post('/settings', [SystemController::class, 'saveSettings'])->middleware('role:Administrator,Store Administrator,Store Admin');
-    Route::get('/system/storage', [SystemController::class, 'storage']);
+    Route::get('/system/storage', [SystemController::class, 'storage'])->middleware('role:Administrator');
+    Route::post('/system/storage/clean', [SystemController::class, 'cleanStorage'])->middleware('role:Administrator');
 
     // ─── Notifications ──────────────────────────────────────────────────────────
     Route::get('/notifications', [NotificationController::class, 'index']);

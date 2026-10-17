@@ -271,7 +271,7 @@ export default function SystemAdminDashboard() {
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           <StatCard title="Total Users" value={metrics?.total_users || 0} icon={<FiUsers className="text-blue-500" />} />
           <StatCard title="Active Sessions" value={metrics?.active_sessions || 0} icon={<FiMonitor className="text-emerald-500" />} />
-          <StatCard title="System Uptime" value={metrics?.uptime || '99.9%'} icon={<FiActivity className="text-purple-500" />} />
+          <StatCard title="System Uptime" value={metrics?.uptime || 'Active'} icon={<FiActivity className="text-purple-500" />} />
           <StatCard title="Database Size" value={metrics?.database_size || '0 MB'} icon={<FiDatabase className="text-amber-500" />} />
         </div>
         <Card className="p-6 flex flex-col items-center justify-center text-center text-muted-foreground min-h-[300px]">

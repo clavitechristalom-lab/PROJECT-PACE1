@@ -5,7 +5,7 @@ import {
   FiCalendar, FiUser, FiClock, FiFileText,
   FiBarChart2, FiSettings, FiShield, FiDatabase, FiActivity,
   FiSun, FiMoon, FiSearch, FiLogOut, FiMenu, FiChevronDown,
-  FiCheckCircle, FiX, FiBell, FiCamera, FiLayers, FiMessageSquare
+  FiCheckCircle, FiX, FiBell, FiCamera, FiLayers, FiMessageSquare, FiHardDrive
 } from 'react-icons/fi'
 import { useAuth } from '../../context/AuthContext'
 import { NotificationBell, showToast } from '../ui'
@@ -38,6 +38,7 @@ const icons = {
   payslip: <FiFileText className="w-4 h-4 flex-shrink-0" />,
   notifications: <FiBell className="w-4 h-4 flex-shrink-0" />,
   support: <FiMessageSquare className="w-4 h-4 flex-shrink-0" />,
+  storage: <FiHardDrive className="w-4 h-4 flex-shrink-0" />,
 }
 
 function navByRole(role, onOpenConfig) {
@@ -98,6 +99,7 @@ function navByRole(role, onOpenConfig) {
       { label: 'Carousel', path: '/settings/carousel', icon: icons.products },
       { label: 'System Logs', path: '/system-logs', icon: icons.logs },
       { label: 'Backup & Restore', path: '/backups', icon: icons.backup },
+      { label: 'Storage Management', path: '/storage', icon: icons.storage },
     ],
   }
 
@@ -300,17 +302,24 @@ function Sidebar({ collapsed, settings, mobileOpen, onCloseMobile, onOpenConfig 
 }
 
 function SystemStorageWidget({ collapsed, mobileOpen }) {
+  const { user } = useAuth()
+  const navigate = useNavigate()
   const [storage, setStorage] = useState(null)
   
-  useEffect(() => {
-    const fetchStorage = async () => {
-      try {
-        const data = await api.system.getStorage()
-        setStorage(data)
-      } catch (err) {
-        console.error('Failed to load storage data:', err)
-      }
+  const fetchStorage = async () => {
+    try {
+      const data = await api.system.getStorage()
+      setStorage(data)
+    } catch (err) {
+      console.error('Failed to load storage data:', err)
     }
+  }
+
+  useEffect(() => {
+    fetchStorage()
+  }, [])
+
+  useRealtimeSync(() => {
     fetchStorage()
   }, [])
 
@@ -318,11 +327,21 @@ function SystemStorageWidget({ collapsed, mobileOpen }) {
 
   const formatGB = (bytes) => (bytes / (1024 * 1024 * 1024)).toFixed(1)
   const percentage = storage.total > 0 ? ((storage.used / storage.total) * 100).toFixed(1) : 0
+  const isAdmin = user?.role === 'Administrator'
 
   return (
-    <div className={`mx-3 mb-4 mt-2 p-3.5 rounded-2xl bg-emerald-950/15 dark:bg-emerald-950/50 border border-emerald-500/20 backdrop-blur-md`}>
+    <div 
+      onClick={() => isAdmin && navigate('/system?tab=storage')}
+      title={isAdmin ? "Click to manage real-time system storage" : "System Storage"}
+      className={`mx-3 mb-4 mt-2 p-3.5 rounded-2xl bg-emerald-950/15 dark:bg-emerald-950/50 border border-emerald-500/20 backdrop-blur-md transition-all ${
+        isAdmin ? 'cursor-pointer hover:border-emerald-500/50 hover:bg-emerald-950/25' : ''
+      }`}
+    >
       <div className="flex items-center justify-between mb-2.5">
-        <span className="text-[11px] font-semibold text-emerald-800 dark:text-emerald-300 tracking-wide">System storage</span>
+        <span className="text-[11px] font-semibold text-emerald-800 dark:text-emerald-300 tracking-wide flex items-center gap-1.5">
+          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+          System storage
+        </span>
         <span className="text-xs font-bold text-emerald-950 dark:text-emerald-100 tracking-tight font-mono">{percentage}%</span>
       </div>
       
@@ -333,8 +352,9 @@ function SystemStorageWidget({ collapsed, mobileOpen }) {
         ></div>
       </div>
       
-      <div className="text-[10px] text-emerald-700/80 dark:text-emerald-300/70 font-mono">
-        {formatGB(storage.used)} GB of {formatGB(storage.total)} GB used
+      <div className="flex justify-between items-center text-[10px] text-emerald-700/80 dark:text-emerald-300/70 font-mono">
+        <span>{formatGB(storage.used)} GB of {formatGB(storage.total)} GB</span>
+        {isAdmin && <span className="text-[9px] font-sans font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider">Manage →</span>}
       </div>
     </div>
   )

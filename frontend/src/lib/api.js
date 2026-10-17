@@ -638,6 +638,11 @@ export const api = {
     },
     getSettings: () => request('/settings'),
     getStorage: () => request('/system/storage'),
+    cleanStorage: (action = 'cache') =>
+      request('/system/storage/clean', {
+        method: 'POST',
+        body: JSON.stringify({ action }),
+      }),
     getPublicSettings: () => request('/public/settings'),
     saveSettings: (data) => {
       const isFormData = data instanceof FormData;

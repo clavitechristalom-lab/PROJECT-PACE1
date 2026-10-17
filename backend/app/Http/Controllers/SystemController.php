@@ -1183,19 +1183,61 @@ class SystemController extends Controller
 
     public function storage(Request $request)
     {
-        $path = base_path();
-        $total = disk_total_space($path);
-        $free = disk_free_space($path);
+        $overview = \App\Services\StorageService::getStorageOverview();
         
-        $total = $total ?: 10 * 1024 * 1024 * 1024;
-        $free = $free ?: 3.2 * 1024 * 1024 * 1024;
-        $used = $total - $free;
-        
+        return response()->json(array_merge([
+            'total' => $overview['disk']['total'],
+            'used' => $overview['disk']['used'],
+            'free' => $overview['disk']['free'],
+            'percentage' => $overview['disk']['percentage'],
+        ], $overview));
+    }
+
+    public function cleanStorage(Request $request)
+    {
+        $user = $request->user();
+        if ($user && $user->role !== 'Administrator') {
+            return response()->json(['message' => 'Unauthorized. Storage maintenance is strictly restricted to Administrators.'], 403);
+        }
+
+        $action = $request->input('action', 'cache');
+        $result = match($action) {
+            'logs' => \App\Services\StorageService::purgeLogs(),
+            'temp' => \App\Services\StorageService::cleanTempFiles(),
+            default => \App\Services\StorageService::clearApplicationCache(),
+        };
+
+        $actingUserId = $this->resolveActingUserId($request);
+        SystemLog::create([
+            'user_id' => $actingUserId,
+            'action' => 'STORAGE_CLEAN',
+            'module' => 'System',
+            'description' => "Storage Maintenance ({$action}): {$result['message']} Reclaimed: {$result['reclaimed_formatted']}",
+            'ip_address' => $request->ip(),
+            'user_agent' => $request->userAgent(),
+        ]);
+
+        \App\Services\NotificationService::sendToAdmins([
+            'type' => 'storage_cleaned',
+            'title' => 'System Storage Maintenance',
+            'message' => "Completed storage cleanup ({$action}). Reclaimed {$result['reclaimed_formatted']} of disk space.",
+            'module' => 'System',
+            'action_url' => '/system?tab=storage',
+            'priority' => 'normal',
+        ]);
+
+        $overview = \App\Services\StorageService::getStorageOverview();
+
         return response()->json([
-            'total' => $total,
-            'used' => $used,
-            'free' => $free,
-            'percentage' => $total > 0 ? round(($used / $total) * 100) : 0
+            'success' => true,
+            'action' => $action,
+            'result' => $result,
+            'storage' => array_merge([
+                'total' => $overview['disk']['total'],
+                'used' => $overview['disk']['used'],
+                'free' => $overview['disk']['free'],
+                'percentage' => $overview['disk']['percentage'],
+            ], $overview),
         ]);
     }
 
@@ -1207,7 +1249,7 @@ class SystemController extends Controller
         // 2. Active Sessions (Users logged in within the last 24 hours)
         $activeSessions = User::where('last_login', '>=', now()->subDay())->count();
 
-        // 3. Database Size
+        // 3. Database Size from real tables
         $dbName = DB::connection()->getDatabaseName();
         $size = DB::select("SELECT ROUND(SUM(data_length + index_length) / 1024 / 1024, 2) AS size_mb FROM information_schema.tables WHERE table_schema = ?", [$dbName]);
         $dbSizeMB = $size[0]->size_mb ?? 0;
@@ -1218,8 +1260,18 @@ class SystemController extends Controller
             $dbSizeStr = $dbSizeMB . ' MB';
         }
 
-        // 4. System Uptime (Mocked for cross-platform compatibility)
-        $uptime = '99.9%';
+        // 4. Live Server / Database Uptime
+        $uptime = 'Active';
+        try {
+            $uptimeQuery = DB::select("SHOW GLOBAL STATUS LIKE 'Uptime'");
+            if (!empty($uptimeQuery[0]->Value)) {
+                $seconds = (int)$uptimeQuery[0]->Value;
+                $days = floor($seconds / 86400);
+                $hours = floor(($seconds % 86400) / 3600);
+                $mins = floor(($seconds % 3600) / 60);
+                $uptime = $days > 0 ? "{$days}d {$hours}h" : "{$hours}h {$mins}m";
+            }
+        } catch (\Throwable $e) {}
 
         return response()->json([
             'total_users' => $totalUsers,
