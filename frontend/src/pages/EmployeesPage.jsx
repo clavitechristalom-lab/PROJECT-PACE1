@@ -495,7 +495,7 @@ export default function EmployeesPage({ branchFilter, embedded }) {
           title="Employee Management"
           subtitle="Manage organizational personnel, permanent QR badges, attendance PINs, and payroll assignments"
           action={
-            isAdmin && (
+            (isAdmin || isStoreAdmin) && (
               <button
                 onClick={() => { setEditItem(null); setFormTab('personal'); setForm(emptyForm); setAddModal(true) }}
                 className="flex items-center gap-2 px-4 py-2 bg-primary hover:bg-primary/90 text-primary-foreground font-semibold text-xs rounded-xl shadow-xs transition-all cursor-pointer hover:shadow-md active:scale-98"
