@@ -120,7 +120,7 @@ export default function BranchDetailsView({ branchData, onBack }) {
   const tabs = [
     { id: 'products', label: 'Products', icon: <FiPackage className="w-4 h-4" /> },
     { id: 'customers', label: 'Customers', icon: <FiUsers className="w-4 h-4" /> },
-    { id: 'employees', label: 'Employees', icon: <FiUsers className="w-4 h-4 text-emerald-500" /> },
+    { id: 'employees', label: 'Employees', icon: <FiUsers className="w-4 h-4 text-blue-500" /> },
     { id: 'sales', label: 'Sales', icon: <FiShoppingCart className="w-4 h-4" /> },
     { id: 'installments', label: 'Installment', icon: <FiCalendar className="w-4 h-4" /> },
     { id: 'schedule', label: 'Payment Schedule', icon: <FiClock className="w-4 h-4" /> },
@@ -140,7 +140,7 @@ export default function BranchDetailsView({ branchData, onBack }) {
               onError={() => setHeroImage('')}
             />
           ) : (
-            <div className="w-full h-full flex items-center justify-center bg-gradient-to-r from-[#176B87]/30 via-slate-800/50 to-slate-900/80">
+            <div className="w-full h-full flex items-center justify-center bg-gradient-to-r from-blue-600/30 via-slate-800/50 to-slate-900/80">
               <FiMapPin className="w-16 h-16 text-muted-foreground/20" />
             </div>
           )}
@@ -203,7 +203,7 @@ export default function BranchDetailsView({ branchData, onBack }) {
         <div className="grid grid-cols-2 md:grid-cols-4 divide-x divide-y md:divide-y-0 divide-border bg-card/50 backdrop-blur-md">
           <div className="p-4 sm:p-5 flex flex-col gap-1">
             <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Total Sales</span>
-            <span className="text-xl sm:text-2xl font-mono font-black text-emerald-600 dark:text-emerald-500">
+            <span className="text-xl sm:text-2xl font-mono font-black text-blue-600 dark:text-blue-400">
               {fmt(branchData.sales || 0)}
             </span>
           </div>

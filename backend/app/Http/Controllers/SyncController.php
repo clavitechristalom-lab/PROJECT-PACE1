@@ -17,6 +17,8 @@ use App\Models\Payroll;
 use App\Models\SupportMessage;
 use App\Models\AttendanceScanLog;
 use App\Services\AutomationService;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
 use Laravel\Sanctum\PersonalAccessToken;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
@@ -24,36 +26,39 @@ class SyncController extends Controller
 {
     /**
      * Compute a unified version hash across all core database tables.
+     * Ultra-fast single aggregated query cached for 2 seconds (matching the 1 to 2 second target refresh).
      */
     public static function computeFingerprint(): int
     {
-        $maxLog = (int)(SystemLog::max('id') ?? 0);
-        $maxPayment = (int)(Payment::max('payment_id') ?? 0);
-        $maxSale = (int)(SaleTransaction::max('sale_id') ?? 0);
-        $maxProduct = (int)(Product::max('product_id') ?? 0);
-        $maxCustomer = (int)(Customer::max('customer_id') ?? 0);
-        $maxScan = (int)(AttendanceScanLog::max('id') ?? 0);
-        $maxQr = (int)(QrRequest::max('request_id') ?? 0);
-        $maxSupport = (int)(SupportMessage::max('id') ?? 0);
-        $maxPayroll = (int)(Payroll::max('payroll_id') ?? 0);
-
-        $latestProductUpdate = Product::max('updated_at') ? strtotime(Product::max('updated_at')) : 0;
-        $latestBranchUpdate = BranchProfile::max('updated_at') ? strtotime(BranchProfile::max('updated_at')) : 0;
-        $latestSupportUpdate = SupportMessage::max('updated_at') ? strtotime(SupportMessage::max('updated_at')) : 0;
-        $latestCarouselUpdate = CarouselImage::max('updated_at') ? strtotime(CarouselImage::max('updated_at')) : 0;
-
-        $maxEpoch = max($latestProductUpdate, $latestBranchUpdate, $latestSupportUpdate, $latestCarouselUpdate);
-
-        return $maxLog 
-            + ($maxPayment * 10) 
-            + ($maxSale * 100) 
-            + ($maxProduct * 1000) 
-            + ($maxCustomer * 10000) 
-            + ($maxScan * 3) 
-            + ($maxQr * 7) 
-            + ($maxSupport * 13) 
-            + ($maxPayroll * 17) 
-            + $maxEpoch;
+        return Cache::remember('pace_unified_fingerprint', 1, function () {
+            try {
+                $res = DB::selectOne("
+                    SELECT 
+                        (SELECT COALESCE(MAX(payment_id), 0) + COUNT(*) FROM payments) as p_sig,
+                        (SELECT COALESCE(MAX(sale_id), 0) + COUNT(*) FROM sale_transactions) as s_sig,
+                        (SELECT COALESCE(MAX(product_id), 0) + COUNT(*) FROM products) as pr_sig,
+                        (SELECT COALESCE(MAX(customer_id), 0) + COUNT(*) FROM customers) as c_sig,
+                        (SELECT COALESCE(MAX(id), 0) + COUNT(*) FROM attendance_scan_logs) as sc_sig,
+                        (SELECT COALESCE(MAX(attendance_id), 0) + COUNT(*) FROM attendance) as att_sig,
+                        (SELECT COALESCE(MAX(employee_id), 0) + COUNT(*) FROM employees) as emp_sig,
+                        (SELECT COALESCE(MAX(user_id), 0) + COUNT(*) FROM users) as u_sig,
+                        (SELECT COALESCE(MAX(request_id), 0) + COUNT(*) FROM qr_requests) as qr_sig,
+                        (SELECT COALESCE(MAX(id), 0) + COUNT(*) FROM support_messages) as sp_sig,
+                        (SELECT COALESCE(MAX(payroll_id), 0) + COUNT(*) FROM payroll) as py_sig,
+                        (SELECT COALESCE(UNIX_TIMESTAMP(MAX(updated_at)), 0) FROM products) as pr_upd,
+                        (SELECT COALESCE(UNIX_TIMESTAMP(MAX(updated_at)), 0) FROM branch_profiles) as br_upd,
+                        (SELECT COALESCE(UNIX_TIMESTAMP(MAX(updated_at)), 0) FROM support_messages) as sp_upd,
+                        (SELECT COALESCE(UNIX_TIMESTAMP(MAX(updated_at)), 0) FROM carousel_images) as cr_upd,
+                        (SELECT COALESCE(UNIX_TIMESTAMP(MAX(updated_at)), 0) FROM attendance) as att_upd,
+                        (SELECT COALESCE(UNIX_TIMESTAMP(MAX(updated_at)), 0) FROM employees) as emp_upd,
+                        (SELECT COALESCE(UNIX_TIMESTAMP(MAX(updated_at)), 0) FROM users) as u_upd,
+                        (SELECT COUNT(*) FROM carousel_images) as cr_cnt
+                ");
+                return (int)crc32(json_encode($res));
+            } catch (\Throwable $e) {
+                return (int)time();
+            }
+        });
     }
 
     /**
@@ -63,44 +68,55 @@ class SyncController extends Controller
     {
         $user = $this->resolveUser($request);
 
-        // Run automated tasks (throttled to at most once per 60s)
+        // Run automated tasks (throttled to at most once per 600s)
         $autoResults = AutomationService::runAllAutomations();
 
-        // 1. Unified mutation fingerprint
+        // 1. Unified mutation fingerprint (ultra-fast single aggregated query cached 1s)
         $latestLogId = self::computeFingerprint();
 
-        // 2. User specific notifications
-        $latestNotifId = 0;
-        $unreadNotifs = 0;
-        if ($user) {
-            $latestNotifId = (int)(Notification::forUser($user->user_id)->max('notification_id') ?? 0);
-            $unreadNotifs = (int)(Notification::forUser($user->user_id)->unread()->count());
-        }
+        $userId = $user ? $user->user_id : 0;
+        $role = $user ? $user->role : '';
+        $empId = $user ? ($user->employee_id ?? 0) : 0;
 
-        // 3. Pending Attendance Verifications
-        $pendingVerifications = 0;
-        if ($user && in_array($user->role, ['Employee', 'Store Administrator', 'Store Admin']) && $user->employee_id) {
-            $pendingVerifications = AttendanceScanLog::where('employee_id', $user->employee_id)
-                ->where('action_type', 'PENDING_VERIFICATION')
-                ->where('status', 'PENDING')
-                ->count();
-        }
+        $cacheKey = "pace_sync_status_{$userId}_{$latestLogId}";
+        $data = Cache::remember($cacheKey, 1, function () use ($user, $userId, $role, $empId, $latestLogId) {
+            $latestNotifId = 0;
+            $unreadNotifs = 0;
+            if ($user && $userId) {
+                $notifAgg = Notification::forUser($userId)
+                    ->selectRaw("COALESCE(MAX(notification_id), 0) as max_id, SUM(CASE WHEN is_read = 0 THEN 1 ELSE 0 END) as unread_cnt")
+                    ->first();
+                if ($notifAgg) {
+                    $latestNotifId = (int)$notifAgg->max_id;
+                    $unreadNotifs = (int)$notifAgg->unread_cnt;
+                }
+            }
 
-        // 4. Pending QR requests (for Administrator)
-        $pendingQrRequests = 0;
-        if ($user && $user->role === 'Administrator') {
-            $pendingQrRequests = (int)QrRequest::where('status', 'Pending')->count();
-        }
+            $pendingVerifications = 0;
+            if ($user && in_array($role, ['Employee', 'Store Administrator', 'Store Admin']) && $empId) {
+                $pendingVerifications = AttendanceScanLog::where('employee_id', $empId)
+                    ->where('status', 'PENDING')
+                    ->count();
+            }
 
-        return response()->json([
-            'latest_log_id' => (int)$latestLogId,
-            'latest_notif_id' => (int)$latestNotifId,
-            'unread_notifications' => (int)$unreadNotifs,
-            'pending_verifications' => (int)$pendingVerifications,
-            'pending_qr_requests' => (int)$pendingQrRequests,
-            'timestamp' => now()->toISOString(),
-            'automations' => $autoResults,
-        ]);
+            $pendingQrRequests = 0;
+            if ($user && $role === 'Administrator') {
+                $pendingQrRequests = (int)QrRequest::where('status', 'Pending')->count();
+            }
+
+            return [
+                'latest_log_id' => (int)$latestLogId,
+                'latest_notif_id' => (int)$latestNotifId,
+                'unread_notifications' => (int)$unreadNotifs,
+                'pending_verifications' => (int)$pendingVerifications,
+                'pending_qr_requests' => (int)$pendingQrRequests,
+            ];
+        });
+
+        $data['timestamp'] = now()->toISOString();
+        $data['automations'] = $autoResults;
+
+        return response()->json($data);
     }
 
     /**
@@ -118,29 +134,38 @@ class SyncController extends Controller
             }
 
             // Send initial connection event
+            echo "retry: 15000\n";
             echo "event: connected\n";
             echo "data: " . json_encode([
                 'status' => 'connected',
                 'timestamp' => now()->toIso8601String(),
                 'version' => $initialFingerprint,
+                'cli_server' => php_sapi_name() === 'cli-server',
             ]) . "\n\n";
             flush();
+
+            // CRITICAL: On single-threaded PHP CLI server (php artisan serve),
+            // a continuous while-loop holds the process hostage, preventing ANY other HTTP
+            // request from being handled. Exit immediately to keep server 100% responsive.
+            if (php_sapi_name() === 'cli-server') {
+                return;
+            }
 
             $lastFingerprint = $initialFingerprint;
             $lastUserNotifId = $user ? (int)(Notification::forUser($user->user_id)->max('notification_id') ?? 0) : 0;
             $lastUserUnread = $user ? (int)(Notification::forUser($user->user_id)->unread()->count()) : 0;
 
-            // Stream for up to 25 seconds (Vite and browsers auto-reconnect cleanly per SSE protocol)
+            // Stream for up to 6 seconds in multi-threaded production environments
             $startTime = time();
-            $heartbeatInterval = 5;
+            $heartbeatInterval = 3;
             $lastHeartbeat = time();
 
-            while (time() - $startTime < 25) {
+            while (time() - $startTime < 6) {
                 if (connection_aborted()) {
                     break;
                 }
 
-                // Run scheduled background automations
+                // Run scheduled background automations (throttled)
                 AutomationService::runAllAutomations();
 
                 $currentFingerprint = self::computeFingerprint();
@@ -173,14 +198,13 @@ class SyncController extends Controller
                     flush();
                 }
 
-                // Heartbeat to keep connection alive
                 if (time() - $lastHeartbeat >= $heartbeatInterval) {
                     echo ": ping\n\n";
                     flush();
                     $lastHeartbeat = time();
                 }
 
-                usleep(1000000); // Check every 1 second
+                usleep(1500000); // Check every 1.5s
             }
         });
 
@@ -210,6 +234,10 @@ class SyncController extends Controller
                 'user_agent' => $request->userAgent(),
             ]);
         }
+
+        Cache::forget('pace_unified_fingerprint');
+        Cache::forget('pace_dash_charts');
+        Cache::forget('pace_dash_branch_comparison');
 
         return response()->json([
             'success' => true,

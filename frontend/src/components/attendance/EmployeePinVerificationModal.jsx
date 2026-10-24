@@ -39,7 +39,7 @@ const playTone = (type) => {
   }
 }
 
-export default function EmployeePinVerificationModal({ request, onClose, onSuccess }) {
+export default function EmployeePinVerificationModal({ request, onClose, onSuccess, onSwitchToFace, onCancel }) {
   const [enteredPin, setEnteredPin] = useState('')
   const [showPin, setShowPin] = useState(false)
   const [verifying, setVerifying] = useState(false)
@@ -190,19 +190,48 @@ export default function EmployeePinVerificationModal({ request, onClose, onSucce
           </div>
         </div>
 
-        <div className="p-4 border-t border-border bg-muted/20 flex gap-3">
-          <Btn variant="outline" className="flex-1" onClick={onClose} disabled={verifying}>
-            Cancel
-          </Btn>
-          <Btn 
-            variant="primary" 
-            className="flex-1" 
-            onClick={handleVerify} 
-            disabled={enteredPin.length < 4 || verifying}
-            icon={verifying ? null : <FiCheck />}
-          >
-            {verifying ? 'Authorizing...' : 'Authorize'}
-          </Btn>
+        <div className="p-4 border-t border-border bg-muted/20 space-y-2">
+          <div className="flex gap-3">
+            <Btn
+              variant="outline"
+              className="flex-1"
+              onClick={() => {
+                if (typeof onCancel === 'function') {
+                  onCancel()
+                } else if (typeof onClose === 'function') {
+                  onClose()
+                }
+                if (typeof window !== 'undefined') {
+                  window.dispatchEvent(new CustomEvent('pace:return-to-qr-scan', {
+                    detail: { authorized: false, cancelled: true, requestId: request?.id }
+                  }))
+                }
+              }}
+              disabled={verifying}
+            >
+              Cancel
+            </Btn>
+            <Btn 
+              variant="primary" 
+              className="flex-1" 
+              onClick={handleVerify} 
+              disabled={enteredPin.length < 4 || verifying}
+              icon={verifying ? null : <FiCheck />}
+            >
+              {verifying ? 'Authorizing...' : 'Authorize'}
+            </Btn>
+          </div>
+          {onSwitchToFace && (
+            <div className="text-center pt-1">
+              <button
+                type="button"
+                onClick={onSwitchToFace}
+                className="text-xs text-primary hover:underline font-semibold flex items-center justify-center gap-1.5 mx-auto cursor-pointer"
+              >
+                Use Face Recognition instead
+              </button>
+            </div>
+          )}
         </div>
       </Card>
     </div>

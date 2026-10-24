@@ -5,6 +5,7 @@ let syncInterval = null
 let broadcastChannel = null
 let lastLogId = null
 let lastNotifId = null
+let lastUnreadCount = null
 let lastVerifCount = null
 let lastQrCount = null
 let isPolling = false
@@ -37,11 +38,19 @@ if (typeof window !== 'undefined') {
   })
 }
 
+let lastEventSourceAttempt = 0
+let sseSupported = true
+
 /**
  * Connect to live Server-Sent Events (SSE) stream
  */
 function connectEventSource() {
-  if (typeof window === 'undefined' || typeof EventSource === 'undefined') return
+  if (!sseSupported || typeof window === 'undefined' || typeof EventSource === 'undefined') return
+
+  // Prevent frantic reconnection loops (wait at least 15s between connection attempts)
+  const now = Date.now()
+  if (now - lastEventSourceAttempt < 15000) return
+  lastEventSourceAttempt = now
 
   try {
     const raw = sessionStorage.getItem('pace_session') || localStorage.getItem('pace_session')
@@ -62,6 +71,20 @@ function connectEventSource() {
 
     const streamUrl = `/api/sync/stream?token=${encodeURIComponent(token)}`
     eventSource = new EventSource(streamUrl)
+
+    eventSource.addEventListener('connected', (e) => {
+      try {
+        const data = JSON.parse(e.data)
+        if (data?.cli_server) {
+          // Single-threaded PHP CLI server immediately closes SSE streams; rely on pollStatus() instead of reconnecting every 15s
+          sseSupported = false
+          if (eventSource) {
+            eventSource.close()
+            eventSource = null
+          }
+        }
+      } catch (_) {}
+    })
 
     eventSource.addEventListener('sync', (e) => {
       try {
@@ -92,6 +115,9 @@ export function triggerDataSync(module = 'general', extra = {}) {
   
   // 1. Local window dispatch
   window.dispatchEvent(new CustomEvent('pace:data-sync', { detail }))
+  if (module === 'notifications') {
+    window.dispatchEvent(new CustomEvent('pace:notifications-sync', { detail }))
+  }
 
   // 2. Cross-tab broadcast
   try {
@@ -110,29 +136,46 @@ export function triggerDataSync(module = 'general', extra = {}) {
 /**
  * Poll sync status from backend (high-reliability fallback)
  */
+let pollAbortController = null
+
 async function pollStatus() {
   if (isPolling) return
   isPolling = true
+
+  // Cancel prior hung poll if any
+  if (pollAbortController) {
+    try { pollAbortController.abort() } catch (_) {}
+  }
+  pollAbortController = new AbortController()
+
   try {
     const raw = sessionStorage.getItem('pace_session') || localStorage.getItem('pace_session')
     if (!raw) return
 
-    const res = await api.sync.getStatus()
+    const res = await api.sync.getStatus({ signal: pollAbortController.signal })
     if (!res) return
 
     // 1. Database log changes
-    if (lastLogId !== null && res.latest_log_id > lastLogId) {
+    if (lastLogId !== null && res.latest_log_id !== lastLogId) {
       window.dispatchEvent(new CustomEvent('pace:data-sync', { 
         detail: { type: 'database', logId: res.latest_log_id, previousLogId: lastLogId } 
       }))
     }
     lastLogId = res.latest_log_id
 
-    // 2. Notifications changes
-    if (lastNotifId === null || res.latest_notif_id !== lastNotifId || res.unread_notifications !== lastNotifId) {
+    // 2. Notifications changes (ID changed or unread count changed)
+    const notifsChanged = (
+      lastNotifId !== null && (
+        res.latest_notif_id !== lastNotifId ||
+        res.unread_notifications !== lastUnreadCount
+      )
+    )
+
+    if (notifsChanged) {
       window.dispatchEvent(new CustomEvent('pace:notifications-sync', { detail: res }))
-      lastNotifId = res.latest_notif_id
     }
+    lastNotifId = res.latest_notif_id
+    lastUnreadCount = res.unread_notifications
 
     // 3. Attendance verifications
     if (lastVerifCount !== null && res.pending_verifications !== lastVerifCount) {
@@ -146,15 +189,19 @@ async function pollStatus() {
     }
     lastQrCount = res.pending_qr_requests
 
+    // 5. Centralized periodic tick (fires every 1.4s for synchronized 1-2s auto-refresh)
+    window.dispatchEvent(new CustomEvent('pace:periodic-tick', { detail: res }))
+
   } catch (err) {
-    // Silent fail on background poll (e.g. token expired, network momentary drop)
+    // Silent fail on background poll (aborted, token expired, network momentary drop)
   } finally {
     isPolling = false
+    pollAbortController = null
   }
 }
 
 /**
- * Start global real-time synchronization engine
+ * Start global real-time synchronization engine with strict 1.2s - 1.5s refresh cycle
  */
 export function startRealtimeEngine() {
   if (syncInterval) clearInterval(syncInterval)
@@ -163,7 +210,7 @@ export function startRealtimeEngine() {
   pollStatus()
   connectEventSource()
 
-  // 2. Periodic poll fallback (every 2.5s when tab is active)
+  // 2. Fast 1.4s background polling (target 1 to 2 seconds refresh)
   syncInterval = setInterval(() => {
     if (document.visibilityState === 'visible') {
       pollStatus()
@@ -171,16 +218,15 @@ export function startRealtimeEngine() {
         connectEventSource()
       }
     }
-  }, 2500)
+  }, 1400)
 
-  // 3. When tab becomes visible again, immediately re-verify
+  // 3. When tab becomes visible again, immediately check for updates
   const handleVisibility = () => {
     if (document.visibilityState === 'visible') {
       pollStatus()
       if (!eventSource) {
         connectEventSource()
       }
-      window.dispatchEvent(new CustomEvent('pace:data-sync', { detail: { type: 'tab_focus' } }))
     }
   }
   document.addEventListener('visibilitychange', handleVisibility)
@@ -191,20 +237,28 @@ export function startRealtimeEngine() {
       eventSource.close()
       eventSource = null
     }
+    if (pollAbortController) {
+      try { pollAbortController.abort() } catch (_) {}
+      pollAbortController = null
+    }
     document.removeEventListener('visibilitychange', handleVisibility)
   }
 }
 
 /**
- * React hook to automatically keep any page or component updated in real time.
- * @param {Function} refreshFn - The callback to execute when data should be refreshed
+ * React hook to automatically keep any page or component updated in real time
+ * with non-blocking execution, overlapping request cancellation, and strict 1-2s tick support.
+ * 
+ * @param {Function} refreshFn - The callback to execute when data should be refreshed (receives source, signal)
  * @param {Array} deps - Dependency array
- * @param {Object} options - { interval: ms (default 5000), enabled: boolean }
+ * @param {Object} options - { interval: ms, enabled: boolean, periodic: boolean }
  */
 export function useRealtimeSync(refreshFn, deps = [], options = {}) {
-  const { interval = 5000, enabled = true } = options
+  const { enabled = true, interval = 0, periodic = true } = options
   const isRefreshingRef = useRef(false)
+  const lastRefreshTimeRef = useRef(0)
   const refreshFnRef = useRef(refreshFn)
+  const activeAbortRef = useRef(null)
 
   useEffect(() => {
     refreshFnRef.current = refreshFn
@@ -214,40 +268,70 @@ export function useRealtimeSync(refreshFn, deps = [], options = {}) {
     if (!enabled) return
 
     const executeRefresh = async (source = 'auto') => {
+      // Async lock: prevent request pile-up
       if (isRefreshingRef.current) return
+      
+      const now = Date.now()
+      // Responsive debounce: allow smooth 1-2s refreshes while blocking redundant sub-second bursts
+      if (source !== 'mutation' && now - lastRefreshTimeRef.current < 750) return
+      
+      // Cancel previous in-flight request if still running
+      if (activeAbortRef.current) {
+        try { activeAbortRef.current.abort() } catch (_) {}
+      }
+      activeAbortRef.current = new AbortController()
+
       isRefreshingRef.current = true
+      lastRefreshTimeRef.current = now
+
       try {
-        await refreshFnRef.current(source)
+        await refreshFnRef.current(source, activeAbortRef.current.signal)
       } catch (err) {
-        console.warn(`[RealtimeSync] Auto-refresh (${source}) error:`, err)
+        if (err?.name !== 'AbortError') {
+          console.warn(`[RealtimeSync] Auto-refresh (${source}) error:`, err)
+        }
       } finally {
         isRefreshingRef.current = false
+        activeAbortRef.current = null
       }
     }
 
-    // 1. Listen for system-wide sync events
+    // 1. Listen for system-wide sync events (fired on actual data mutation or DB change)
     const handleSync = (e) => {
       executeRefresh(e.detail?.type || 'event')
     }
     window.addEventListener('pace:data-sync', handleSync)
 
-    // 2. Periodic background refresh
-    const timer = setInterval(() => {
+    // 2. Synchronized periodic tick (hooked into central 1.4s pulse)
+    const handlePeriodic = () => {
       if (document.visibilityState === 'visible') {
         executeRefresh('timer')
       }
-    }, interval)
-
-    // 3. Window focus / visibility
-    const handleFocus = () => {
-      executeRefresh('focus')
     }
-    window.addEventListener('focus', handleFocus)
+    if (periodic) {
+      window.addEventListener('pace:periodic-tick', handlePeriodic)
+    }
+
+    // 3. Fallback standalone timer if custom interval specified
+    let customTimer = null
+    if (interval > 0) {
+      customTimer = setInterval(() => {
+        if (document.visibilityState === 'visible') {
+          executeRefresh('timer')
+        }
+      }, interval)
+    }
 
     return () => {
       window.removeEventListener('pace:data-sync', handleSync)
-      window.removeEventListener('focus', handleFocus)
-      clearInterval(timer)
+      if (periodic) {
+        window.removeEventListener('pace:periodic-tick', handlePeriodic)
+      }
+      if (customTimer) clearInterval(customTimer)
+      if (activeAbortRef.current) {
+        try { activeAbortRef.current.abort() } catch (_) {}
+        activeAbortRef.current = null
+      }
     }
-  }, [enabled, interval, ...deps])
+  }, [enabled, interval, periodic, ...deps])
 }

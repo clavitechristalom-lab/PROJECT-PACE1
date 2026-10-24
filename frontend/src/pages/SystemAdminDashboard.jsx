@@ -269,9 +269,9 @@ export default function SystemAdminDashboard() {
       <div className="space-y-6">
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           <StatCard title="Total Users" value={metrics?.total_users || 0} icon={<FiUsers className="text-blue-500" />} />
-          <StatCard title="Active Sessions" value={metrics?.active_sessions || 0} icon={<FiMonitor className="text-emerald-500" />} />
-          <StatCard title="System Uptime" value={metrics?.uptime || 'Active'} icon={<FiActivity className="text-purple-500" />} />
-          <StatCard title="Database Size" value={metrics?.database_size || '0 MB'} icon={<FiDatabase className="text-amber-500" />} />
+          <StatCard title="Active Sessions" value={metrics?.active_sessions || 0} icon={<FiMonitor className="text-sky-500" />} />
+          <StatCard title="System Uptime" value={metrics?.uptime || 'Active'} icon={<FiActivity className="text-indigo-500" />} />
+          <StatCard title="Database Size" value={metrics?.database_size || '0 MB'} icon={<FiDatabase className="text-cyan-500" />} />
         </div>
         <Card className="p-6 flex flex-col items-center justify-center text-center text-muted-foreground min-h-[300px]">
           <FiBarChart2 className="w-16 h-16 opacity-20 mb-4" />
@@ -336,9 +336,9 @@ export default function SystemAdminDashboard() {
                   <td className="px-4 py-3"><Badge>{u.role}</Badge></td>
                   <td className="px-4 py-3">
                     {u.is_active ? (
-                      <span className="inline-flex items-center gap-1 text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded text-xs font-semibold"><FiCheckCircle /> Active</span>
+                      <span className="inline-flex items-center gap-1 text-blue-600 bg-blue-50 dark:bg-blue-950/40 dark:text-blue-300 border border-blue-200 dark:border-blue-800/60 px-2 py-0.5 rounded text-xs font-semibold"><FiCheckCircle /> Active</span>
                     ) : (
-                      <span className="inline-flex items-center gap-1 text-rose-600 bg-rose-50 px-2 py-0.5 rounded text-xs font-semibold"><FiLock /> Suspended</span>
+                      <span className="inline-flex items-center gap-1 text-rose-600 bg-rose-50 dark:bg-rose-950/40 dark:text-rose-300 border border-rose-200 dark:border-rose-800/60 px-2 py-0.5 rounded text-xs font-semibold"><FiLock /> Suspended</span>
                     )}
                   </td>
                   <td className="px-4 py-3 text-right">
@@ -347,8 +347,8 @@ export default function SystemAdminDashboard() {
                       disabled={togglingUser === u.user_id}
                       className={`inline-flex items-center px-3 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer border ${
                         u.is_active 
-                          ? 'bg-rose-50 text-rose-600 border-rose-200 hover:bg-rose-100' 
-                          : 'bg-emerald-50 text-emerald-600 border-emerald-200 hover:bg-emerald-100'
+                          ? 'bg-rose-50 text-rose-600 border-rose-200 hover:bg-rose-100 dark:bg-rose-950/40 dark:text-rose-300 dark:border-rose-800/60' 
+                          : 'bg-blue-50 text-blue-600 border-blue-200 hover:bg-blue-100 dark:bg-blue-950/40 dark:text-blue-300 dark:border-blue-800/60'
                       }`}
                     >
                       {togglingUser === u.user_id ? 'Wait...' : (u.is_active ? 'Suspend' : 'Activate')}
@@ -558,7 +558,7 @@ export default function SystemAdminDashboard() {
               disabled={savingSettings}
               className="text-3xl focus:outline-none transition-colors cursor-pointer disabled:opacity-50"
             >
-              {settings.maintenance_mode ? <FiToggleRight className="text-emerald-500" /> : <FiToggleLeft className="text-muted-foreground" />}
+              {settings.maintenance_mode ? <FiToggleRight className="text-blue-500" /> : <FiToggleLeft className="text-muted-foreground" />}
             </button>
           </div>
           

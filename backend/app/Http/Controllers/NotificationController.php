@@ -52,10 +52,13 @@ class NotificationController extends Controller
         $perPage = min((int)$request->query('per_page', 20), 100);
         $paginated = $query->orderByDesc('notification_id')->paginate($perPage);
 
-        // Unread Counts
-        $unreadCount = Notification::forUser($user->user_id)->unread()->count();
-        $criticalCount = Notification::forUser($user->user_id)->unread()->where('priority', 'critical')->count();
-        $highCount = Notification::forUser($user->user_id)->unread()->where('priority', 'high')->count();
+        // Unread Counts in a single aggregated query
+        $counts = Notification::forUser($user->user_id)->unread()
+            ->selectRaw("COUNT(*) as total, SUM(CASE WHEN priority = 'critical' THEN 1 ELSE 0 END) as critical, SUM(CASE WHEN priority = 'high' THEN 1 ELSE 0 END) as high")
+            ->first();
+        $unreadCount = (int)($counts->total ?? 0);
+        $criticalCount = (int)($counts->critical ?? 0);
+        $highCount = (int)($counts->high ?? 0);
 
         $notifications = collect($paginated->items())->map(function ($n) {
             return [
@@ -107,9 +110,13 @@ class NotificationController extends Controller
             ->limit($limit)
             ->get();
 
-        $unreadCount = Notification::forUser($user->user_id)->unread()->count();
-        $criticalCount = Notification::forUser($user->user_id)->unread()->where('priority', 'critical')->count();
-        $highCount = Notification::forUser($user->user_id)->unread()->where('priority', 'high')->count();
+        // Single aggregated query for unread counts
+        $counts = Notification::forUser($user->user_id)->unread()
+            ->selectRaw("COUNT(*) as total, SUM(CASE WHEN priority = 'critical' THEN 1 ELSE 0 END) as critical, SUM(CASE WHEN priority = 'high' THEN 1 ELSE 0 END) as high")
+            ->first();
+        $unreadCount = (int)($counts->total ?? 0);
+        $criticalCount = (int)($counts->critical ?? 0);
+        $highCount = (int)($counts->high ?? 0);
 
         $notifications = $items->map(function ($n) {
             return [
@@ -179,6 +186,7 @@ class NotificationController extends Controller
         $notification->save();
 
         $unreadCount = Notification::forUser($user->user_id)->unread()->count();
+        \Illuminate\Support\Facades\Cache::forget('pace_unified_fingerprint');
 
         return response()->json([
             'success' => true,
@@ -205,6 +213,7 @@ class NotificationController extends Controller
         $notification->save();
 
         $unreadCount = Notification::forUser($user->user_id)->unread()->count();
+        \Illuminate\Support\Facades\Cache::forget('pace_unified_fingerprint');
 
         return response()->json([
             'success' => true,
@@ -226,6 +235,7 @@ class NotificationController extends Controller
                 'is_read' => true,
                 'read_at' => now(),
             ]);
+        \Illuminate\Support\Facades\Cache::forget('pace_unified_fingerprint');
 
         return response()->json([
             'success' => true,
@@ -250,6 +260,7 @@ class NotificationController extends Controller
         $notification->delete();
 
         $unreadCount = Notification::forUser($user->user_id)->unread()->count();
+        \Illuminate\Support\Facades\Cache::forget('pace_unified_fingerprint');
 
         return response()->json([
             'success' => true,
@@ -265,6 +276,7 @@ class NotificationController extends Controller
     {
         $user = $request->user();
         $count = Notification::forUser($user->user_id)->read()->delete();
+        \Illuminate\Support\Facades\Cache::forget('pace_unified_fingerprint');
 
         return response()->json([
             'success' => true,
@@ -295,6 +307,12 @@ class NotificationController extends Controller
     private function syncSystemAlerts($user)
     {
         if (!$user) return;
+
+        // Throttle system alert evaluations to at most once per 30 seconds per user
+        $lockKey = 'sync_sys_alerts_user_' . $user->user_id;
+        if (!\Illuminate\Support\Facades\Cache::add($lockKey, true, 30)) {
+            return;
+        }
 
         // 1. Pending Account Verifications (Administrators)
         if ($user->role === 'Administrator') {

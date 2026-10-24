@@ -17,6 +17,7 @@ use Illuminate\Support\Str;
 use App\Services\NotificationService;
 use App\Models\Setting;
 use App\Models\BranchProfile;
+use Illuminate\Support\Facades\Cache;
 
 class SystemController extends Controller
 {
@@ -495,10 +496,13 @@ class SystemController extends Controller
                     $bp = $bId ? \App\Models\BranchProfile::find($bId) : null;
                     $empData['branch'] = $bp ? $bp->name : null;
                 }
-                if ($request->has('working_hours')) $empData['working_hours'] = $request->input('working_hours');
-                if ($request->has('basic_salary')) $empData['basic_salary'] = $request->input('basic_salary');
                 if ($request->has('pay_type')) $empData['pay_type'] = $request->input('pay_type');
-                if ($request->has('phone')) $empData['phone'] = $request->input('phone');
+                if ($request->has('phone')) {
+                    $normPhone = \App\Http\Controllers\AuthController::normalizePhPhone($request->input('phone')) ?: $request->input('phone');
+                    $empData['phone'] = $normPhone;
+                    $user->phone_number = $normPhone;
+                    $user->save();
+                }
                 if ($request->has('email')) $empData['email'] = $request->input('email');
                 if ($request->has('address')) $empData['address'] = $request->input('address');
                 if ($request->has('first_name')) $empData['first_name'] = $request->input('first_name');
@@ -518,7 +522,12 @@ class SystemController extends Controller
                     $custData['birth_date'] = $dob;
                 }
                 if ($request->has('marital_status')) $custData['marital_status'] = $request->input('marital_status');
-                if ($request->has('phone')) $custData['phone'] = $request->input('phone');
+                if ($request->has('phone')) {
+                    $normPhone = \App\Http\Controllers\AuthController::normalizePhPhone($request->input('phone')) ?: $request->input('phone');
+                    $custData['phone'] = $normPhone;
+                    $user->phone_number = $normPhone;
+                    $user->save();
+                }
                 if ($request->has('email')) $custData['email'] = $request->input('email');
                 if ($request->has('address')) $custData['address'] = $request->input('address');
                 if ($request->has('branch_id')) {
@@ -626,7 +635,7 @@ class SystemController extends Controller
     // ─── System Logs ────────────────────────────────────────────────────────────
     public function logs(Request $request)
     {
-        $query = SystemLog::with('user');
+        $query = SystemLog::with(['user.employee', 'user.customer']);
 
         if ($request->filled('user') && $request->query('user') !== 'All') {
             $u = $request->query('user');
@@ -643,15 +652,55 @@ class SystemController extends Controller
             $query->whereDate('created_at', $request->query('date'));
         }
 
-        $logs = $query->orderByDesc('id')->get()->map(function ($l) {
+        if ($request->filled('search')) {
+            $search = '%' . $request->query('search') . '%';
+            $query->where(function ($q) use ($search) {
+                $q->where('description', 'like', $search)
+                  ->orWhere('action', 'like', $search)
+                  ->orWhere('module', 'like', $search)
+                  ->orWhere('ip_address', 'like', $search)
+                  ->orWhereHas('user', function ($uq) use ($search) {
+                      $uq->where('username', 'like', $search)
+                         ->orWhereHas('employee', function ($eq) use ($search) {
+                             $eq->where('first_name', 'like', $search)
+                                ->orWhere('last_name', 'like', $search)
+                                ->orWhere('employee_code', 'like', $search);
+                         })
+                         ->orWhereHas('customer', function ($cq) use ($search) {
+                             $cq->where('first_name', 'like', $search)
+                                ->orWhere('last_name', 'like', $search)
+                                ->orWhere('customer_code', 'like', $search);
+                         });
+                  });
+            });
+        }
+
+        $limit = (int)$request->query('limit', 300);
+        $limit = max(20, min(500, $limit));
+
+        $logs = $query->orderByDesc('id')->limit($limit)->get()->map(function ($l) {
+            $userTitle = 'System';
+            $userRole = null;
+            if ($l->user) {
+                $userRole = $l->user->role;
+                if ($l->user->employee) {
+                    $userTitle = trim("{$l->user->employee->first_name} {$l->user->employee->last_name}") . " (@{$l->user->username})";
+                } elseif ($l->user->customer) {
+                    $userTitle = trim("{$l->user->customer->first_name} {$l->user->customer->last_name}") . " (@{$l->user->username})";
+                } else {
+                    $userTitle = "@{$l->user->username}";
+                }
+            }
+
             return [
                 'log_id' => $l->id,
-                'user' => $l->user ? $l->user->username : 'System',
+                'user' => $userTitle,
+                'user_role' => $userRole,
                 'action' => $l->action,
                 'module' => $l->module,
                 'description' => $l->description,
                 'ip_address' => $l->ip_address,
-                'datetime' => date('Y-m-d H:i:s', strtotime($l->created_at)),
+                'datetime' => $l->created_at ? date('Y-m-d H:i:s', strtotime($l->created_at)) : '',
             ];
         });
 
@@ -672,6 +721,7 @@ class SystemController extends Controller
         }
 
         SystemLog::query()->delete();
+        Cache::forget('pace_unified_fingerprint');
 
         return response()->json([
             'success' => true,

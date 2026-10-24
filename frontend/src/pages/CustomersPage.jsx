@@ -11,7 +11,7 @@ import {
   Table, TR, TD, SearchBar, PageHeader, StatCard, Card, Pagination, showToast,
   TabBar, LoadingState, ErrorAlert, StatSkeleton, TableSkeleton, EmptyState, confirmAction,
 } from '../components/ui'
-import { fmt, filterBySearch } from '../lib/utils'
+import { fmt, filterBySearch, fastDeepEqual } from '../lib/utils'
 import api, { downloadCsv } from '../lib/api'
 import { useRealtimeSync, triggerDataSync } from '../lib/realtimeSync'
 import { FiDownload } from 'react-icons/fi'
@@ -23,8 +23,15 @@ export default function CustomersPage({ branchFilter, embedded }) {
   const isAdmin = user?.role === 'Administrator'
   const isStoreAdmin = user?.role === 'Store Administrator' || user?.role === 'Store Admin'
   const [searchParams] = useSearchParams()
-  const [customers, setCustomers] = useState([])
-  const [loading, setLoading] = useState(true)
+  const [customers, setCustomers] = useState(() => {
+    try {
+      const saved = sessionStorage.getItem('pace_cached_customers')
+      return saved ? JSON.parse(saved) : []
+    } catch { return [] }
+  })
+  const [loading, setLoading] = useState(() => {
+    return !sessionStorage.getItem('pace_cached_customers')
+  })
   const [error, setError] = useState('')
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState('All')
@@ -149,7 +156,7 @@ export default function CustomersPage({ branchFilter, embedded }) {
   const [form, setForm] = useState(emptyForm)
 
   const loadCustomers = async (source) => {
-    const isBackground = source === 'timer' || source === 'database' || source === 'event' || source === 'focus' || source === 'mutation'
+    const isBackground = source === 'timer' || source === 'database' || source === 'event' || source === 'focus' || source === 'mutation' || customers.length > 0
     if (!isBackground) {
       setLoading(true)
     }
@@ -160,8 +167,15 @@ export default function CustomersPage({ branchFilter, embedded }) {
         status: statusFilter !== 'All' ? statusFilter : undefined,
         branch: branchFilter || undefined,
       })
-      setCustomers(data.customers || [])
+      const newCustomers = data?.customers || []
+      setCustomers(prev => fastDeepEqual(prev, newCustomers) ? prev : newCustomers)
+      try {
+        if (!search && statusFilter === 'All') {
+          sessionStorage.setItem('pace_cached_customers', JSON.stringify(newCustomers))
+        }
+      } catch (e) { }
     } catch (err) {
+      if (err?.name === 'AbortError') return
       if (!isBackground) {
         console.error('Failed to load customers:', err)
         setError(err.message || 'Failed to fetch customers')
@@ -178,7 +192,7 @@ export default function CustomersPage({ branchFilter, embedded }) {
   }, [statusFilter])
 
   // Real-time synchronization
-  useRealtimeSync(loadCustomers, [statusFilter, search, branchFilter])
+  useRealtimeSync(loadCustomers, [statusFilter, search, branchFilter], { periodic: true })
 
   useEffect(() => {
     const id = searchParams.get('id')
@@ -191,6 +205,11 @@ export default function CustomersPage({ branchFilter, embedded }) {
     e.preventDefault()
     if (!form.first_name || !form.last_name || !form.phone) {
       showToast('First name, last name, and phone are required', 'error')
+      return
+    }
+
+    if (form.phone.length !== 11) {
+      showToast('Phone number must be exactly 11 digits (e.g. 09123456789)', 'error')
       return
     }
 
@@ -576,10 +595,11 @@ export default function CustomersPage({ branchFilter, embedded }) {
                 <div className="relative">
                   <FiPhone className="absolute left-3 top-2.5 text-muted-foreground w-3.5 h-3.5" />
                   <input
-                    type="text"
+                    type="tel"
+                    maxLength={11}
                     value={form.phone}
-                    onChange={e => setForm(f => ({ ...f, phone: e.target.value }))}
-                    placeholder="0917XXXXXXX"
+                    onChange={e => setForm(f => ({ ...f, phone: e.target.value.replace(/\D/g, '').slice(0, 11) }))}
+                    placeholder="09XXXXXXXXX"
                     required
                     className="w-full pl-9 pr-3 py-2 rounded-xl border border-border bg-card text-foreground font-mono"
                   />

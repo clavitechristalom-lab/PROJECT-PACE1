@@ -10,6 +10,7 @@ use App\Models\SaleTransaction;
 use App\Models\SystemLog;
 use App\Models\EWalletDeposit;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Cache;
 use App\Services\NotificationService;
 
 class PaymentController extends Controller
@@ -20,6 +21,25 @@ class PaymentController extends Controller
     public function index(Request $request)
     {
         $user = $request->user();
+
+        // 1-2s Performance Cache: bypass if exporting CSV
+        if (!$request->boolean('export_csv')) {
+            $fp = SyncController::computeFingerprint();
+            $cacheKey = 'pace_pay_idx_' . md5(json_encode([
+                'u' => $user ? $user->user_id : 0,
+                'r' => $user ? $user->role : '',
+                'b' => $request->query('branch', ''),
+                's' => $request->query('search', ''),
+                'pm' => $request->query('payment_method', ''),
+                'df' => $request->query('date_from', ''),
+                'dt' => $request->query('date_to', ''),
+            ])) . '_' . $fp;
+
+            $cached = Cache::get($cacheKey);
+            if ($cached !== null) {
+                return response()->json($cached);
+            }
+        }
         $query = Payment::with(['installmentAccount.customer', 'installmentAccount.sale.processedBy.employee.branch', 'receivedBy.employee.branch']);
 
         // Scoping
@@ -163,24 +183,44 @@ class PaymentController extends Controller
             ];
         });
 
-        return response()->json([
+        $res = [
             'payments' => $payments,
             'total' => $payments->count(),
             'total_amount' => (float)$payments->sum('amount'),
-        ]);
+        ];
+
+        if (isset($cacheKey)) {
+            Cache::put($cacheKey, $res, 2);
+        }
+
+        return response()->json($res);
     }
 
     /**
      * Live Payment Monitoring endpoint (Today, Month, Cash, Digital, Overdue).
+     * Optimized with single-trip SQL aggregation and in-memory caching.
      */
     public function monitoring(Request $request)
     {
         $user = $request->user();
         $today = date('Y-m-d');
-        $currentMonth = date('m');
-        $currentYear = date('Y');
+        $currentMonth = (int)date('m');
+        $currentYear = (int)date('Y');
 
-        $query = Payment::with(['installmentAccount.sale.processedBy.employee']);
+        $fp = SyncController::computeFingerprint();
+        $cacheKey = 'pace_pay_mon_' . md5(json_encode([
+            'u' => $user ? $user->user_id : 0,
+            'r' => $user ? $user->role : '',
+            'b' => $request->query('branch', ''),
+            'd' => $today,
+        ])) . '_' . $fp;
+
+        $cached = Cache::get($cacheKey);
+        if ($cached !== null) {
+            return response()->json($cached);
+        }
+
+        $query = Payment::query();
 
         if ($user && in_array($user->role, ['Store Administrator', 'Store Admin'])) {
             $userBranch = $user->employee ? $user->employee->branch_id : null;
@@ -192,6 +232,8 @@ class PaymentController extends Controller
                         $sq->where('branch_id', $userBranch);
                     });
                 });
+            } else {
+                $query->where('payment_id', -1);
             }
         } elseif ($request->filled('branch') && $request->query('branch') !== 'All') {
             $branch = $request->query('branch');
@@ -204,30 +246,34 @@ class PaymentController extends Controller
             });
         }
 
-        $allPayments = $query->get();
+        // Fast SQL Aggregation in a single database roundtrip
+        $agg = (clone $query)->selectRaw("
+            COALESCE(SUM(CASE WHEN payment_date = ? THEN amount ELSE 0 END), 0) as today_total,
+            COUNT(CASE WHEN payment_date = ? THEN 1 END) as today_count,
+            COALESCE(SUM(CASE WHEN MONTH(payment_date) = ? AND YEAR(payment_date) = ? THEN amount ELSE 0 END), 0) as month_total,
+            COUNT(CASE WHEN MONTH(payment_date) = ? AND YEAR(payment_date) = ? THEN 1 END) as month_count,
+            COALESCE(SUM(amount), 0) as total_amount,
+            COUNT(*) as total_count,
+            COALESCE(SUM(CASE WHEN payment_method = 'Cash' THEN amount ELSE 0 END), 0) as cash_total,
+            COALESCE(SUM(CASE WHEN payment_method IN ('GCash', 'Maya', 'Bank Transfer', 'E-Wallet', 'BDO', 'BPI', 'Bank Transfer/InstaPay') THEN amount ELSE 0 END), 0) as digital_total,
+            COALESCE(SUM(CASE WHEN payment_date = ? AND notes LIKE '%Overdue%' THEN amount ELSE 0 END), 0) as overdue_collected
+        ", [$today, $today, $currentMonth, $currentYear, $currentMonth, $currentYear, $today])->first();
 
-        $todayPayments = $allPayments->where('payment_date', $today);
-        $monthPayments = $allPayments->filter(function ($p) use ($currentMonth, $currentYear) {
-            $t = strtotime($p->payment_date);
-            return date('m', $t) === $currentMonth && date('Y', $t) === $currentYear;
-        });
+        $todayTotal = (float)($agg->today_total ?? 0);
+        $todayCount = (int)($agg->today_count ?? 0);
+        $monthTotal = (float)($agg->month_total ?? 0);
+        $monthCount = (int)($agg->month_count ?? 0);
+        $totalCollected = (float)($agg->total_amount ?? 0);
+        $totalCount = (int)($agg->total_count ?? 0);
+        $cashTotal = (float)($agg->cash_total ?? 0);
+        $digitalTotal = (float)($agg->digital_total ?? 0);
+        $overdueCollected = (float)($agg->overdue_collected ?? 0);
 
-        $todayTotal = (float)$todayPayments->sum('amount');
-        $todayCount = $todayPayments->count();
-
-        $monthTotal = (float)$monthPayments->sum('amount');
-        $monthCount = $monthPayments->count();
-
-        $cashTotal = (float)$allPayments->where('payment_method', 'Cash')->sum('amount');
-        $digitalTotal = (float)$allPayments->whereIn('payment_method', ['GCash', 'Maya', 'Bank Transfer', 'E-Wallet', 'BDO', 'BPI', 'Bank Transfer/InstaPay'])->sum('amount');
-
-        // Overdue collected: payments on accounts with overdue schedules
-        $overdueCollected = (float)$todayPayments->where('notes', 'like', '%Overdue%')->sum('amount');
         if ($overdueCollected == 0 && $todayTotal > 0) {
-            $overdueCollected = round($todayTotal * 0.25, 2); // Derived portion
+            $overdueCollected = round($todayTotal * 0.25, 2);
         }
 
-        return response()->json([
+        $res = [
             'today' => [
                 'collected' => $todayTotal,
                 'count' => $todayCount,
@@ -238,18 +284,22 @@ class PaymentController extends Controller
                 'count' => $monthCount,
             ],
             'total' => [
-                'collected' => (float)$allPayments->sum('amount'),
-                'count' => $allPayments->count(),
+                'collected' => $totalCollected,
+                'count' => $totalCount,
                 'cash' => $cashTotal,
                 'digital' => $digitalTotal,
             ]
-        ]);
+        ];
+
+        Cache::put($cacheKey, $res, 2);
+
+        return response()->json($res);
     }
 
     /**
      * Show single payment details.
      */
-    public function show($id)
+    public function show(int $id)
     {
         $p = Payment::with([
             'installmentAccount.customer',
@@ -585,7 +635,7 @@ class PaymentController extends Controller
     /**
      * Store Admin receives and confirms a pending payment.
      */
-    public function receivePayment(Request $request, $id)
+    public function receivePayment(Request $request, int$id)
     {
         $user = $request->user();
         if ($user && !in_array($user->role, ['Store Administrator', 'Store Admin', 'Administrator', 'Admin', 'Manager'])) {
@@ -729,7 +779,7 @@ class PaymentController extends Controller
     /**
      * Store Admin rejects a pending payment.
      */
-    public function rejectPayment(Request $request, $id)
+    public function rejectPayment(Request $request, int $id)
     {
         $user = $request->user();
         if ($user && !in_array($user->role, ['Store Administrator', 'Store Admin', 'Administrator', 'Admin', 'Manager'])) {
@@ -851,7 +901,7 @@ class PaymentController extends Controller
     /**
      * Delete a payment and reverse balances.
      */
-    public function destroy(Request $request, $id)
+    public function destroy(Request $request, int $id)
     {
         $user = $request->user();
         if ($user && !in_array($user->role, ['Administrator', 'Store Administrator', 'Store Admin'])) {

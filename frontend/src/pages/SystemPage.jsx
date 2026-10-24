@@ -150,6 +150,14 @@ export default function SystemPage({ defaultTab = 'users' }) {
   }, [activeTab, logModule])
 
   useEffect(() => {
+    if (activeTab !== 'logs') return
+    const timer = setInterval(() => {
+      loadTabData('logs', true)
+    }, 10000)
+    return () => clearInterval(timer)
+  }, [activeTab, logModule])
+
+  useEffect(() => {
     const id = searchParams.get('id')
     const search = searchParams.get('search')
     if (activeTab === 'users' && id && users.length > 0) {
@@ -191,11 +199,22 @@ export default function SystemPage({ defaultTab = 'users' }) {
           showToast('Attendance PINs do not match', 'error')
           return
         }
-        if (['Store Administrator', 'Employee'].includes(role) && !userForm.branch_id) {
-          showToast('Please select a branch for this staff account', 'error')
-          return
+        if (['Store Administrator', 'Employee'].includes(role)) {
+          if (!userForm.branch_id) {
+            showToast('Please select a branch for this staff account', 'error')
+            return
+          }
+          if (!userForm.basic_salary || isNaN(Number(userForm.basic_salary)) || Number(userForm.basic_salary) <= 0) {
+            showToast('Please enter a valid salary for this account', 'error')
+            return
+          }
         }
       }
+    }
+
+    if (userForm.phone && userForm.phone.length !== 11) {
+      showToast('Phone number must be exactly 11 digits (e.g. 09123456789)', 'error')
+      return
     }
 
     showLoading(editUser ? 'Updating user...' : 'Creating user...')
@@ -209,6 +228,7 @@ export default function SystemPage({ defaultTab = 'users' }) {
           customer_id: userForm.role === 'Customer' ? (userForm.customer_id || null) : null,
           auth_user_id: user?.user_id || 1,
         }
+        delete payload.basic_salary // Salary is fixed and cannot be edited via user account edit
         const res = await api.system.updateUser(editUser.user_id, payload)
         setUsers(prev => prev.map(u => u.user_id === editUser.user_id ? (res.user || { ...u, ...payload }) : u))
         showToast('User account updated successfully', 'success')
@@ -217,12 +237,14 @@ export default function SystemPage({ defaultTab = 'users' }) {
         const payload = {
           ...userForm,
           role: rolePayload,
+          basic_salary: Number(userForm.basic_salary) || 0,
           from_admin: true,
         }
         if (rolePayload === 'Administrator') {
           delete payload.branch_id
           delete payload.attendance_pin
           delete payload.confirm_attendance_pin
+          delete payload.basic_salary
         }
         const res = await api.auth.createUser(payload)
         showToast(res.message || `${rolePayload} account created successfully! Welcome email sent to ${userForm.email}.`, 'success')
@@ -476,7 +498,7 @@ export default function SystemPage({ defaultTab = 'users' }) {
   }, [filteredUsers, userPage, userPageSize])
 
   const filteredLogs = useMemo(() => {
-    return filterBySearch(logs, logSearch, ['user', 'action', 'module', 'description'])
+    return filterBySearch(logs, logSearch, ['user', 'action', 'module', 'description', 'ip_address', 'user_role'])
   }, [logs, logSearch])
 
   const paginatedLogs = useMemo(() => {
@@ -746,7 +768,12 @@ export default function SystemPage({ defaultTab = 'users' }) {
                     {paginatedLogs.map((l, i) => (
                       <tr key={l.log_id || i} className={`hover:bg-muted/40 transition-colors ${i % 2 === 1 ? 'bg-muted/10' : ''}`}>
                         <td className="py-3 px-4 font-mono text-muted-foreground">{l.datetime}</td>
-                        <td className="py-3 px-4 font-bold text-foreground">{l.user}</td>
+                        <td className="py-3 px-4">
+                          <div className="font-bold text-foreground">{l.user}</div>
+                          {l.user_role && (
+                            <span className="text-[10px] text-muted-foreground font-semibold uppercase tracking-wider">{l.user_role}</span>
+                          )}
+                        </td>
                         <td className="py-3 px-4"><Badge text={l.module} variant="neutral" /></td>
                         <td className="py-3 px-4">
                           <Badge
@@ -1668,11 +1695,12 @@ export default function SystemPage({ defaultTab = 'users' }) {
                             Contact Phone
                           </label>
                           <input
-                            type="text"
+                            type="tel"
+                            maxLength={11}
                             value={userForm.phone || ''}
-                            onChange={e => setUserForm(f => ({ ...f, phone: e.target.value }))}
-                            placeholder="Phone number"
-                            className="w-full border border-border rounded-xl px-3 py-2 bg-card text-foreground text-xs font-medium"
+                            onChange={e => setUserForm(f => ({ ...f, phone: e.target.value.replace(/\D/g, '').slice(0, 11) }))}
+                            placeholder="09XXXXXXXXX"
+                            className="w-full border border-border rounded-xl px-3 py-2 bg-card text-foreground text-xs font-medium font-mono"
                           />
                         </div>
                         <div>
@@ -1751,18 +1779,17 @@ export default function SystemPage({ defaultTab = 'users' }) {
                         </div>
                         <div>
                           <label className="text-[10px] text-muted-foreground uppercase tracking-wider font-bold mb-1 block">
-                            Salary
+                            Salary (Fixed)
                           </label>
                           <div className="relative">
                             <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground font-semibold text-xs">₱</span>
                             <input
-                              type="number"
-                              min="0"
-                              step="0.01"
-                              value={userForm.basic_salary || ''}
-                              onChange={e => setUserForm(f => ({ ...f, basic_salary: e.target.value }))}
-                              placeholder="0.00"
-                              className="w-full pl-7 pr-3 py-2 border border-border rounded-xl bg-card text-foreground text-xs font-medium"
+                              type="text"
+                              value={userForm.basic_salary ? Number(userForm.basic_salary).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '0.00'}
+                              readOnly
+                              disabled
+                              title="Salary is set upon user account creation and cannot be edited here."
+                              className="w-full pl-7 pr-3 py-2 border border-border/50 rounded-xl bg-muted/40 text-muted-foreground text-xs font-mono font-medium cursor-not-allowed select-none opacity-80"
                             />
                           </div>
                         </div>
@@ -1817,7 +1844,11 @@ export default function SystemPage({ defaultTab = 'users' }) {
                       <button
                         key={value}
                         type="button"
-                        onClick={() => setUserForm(f => ({ ...f, role: value }))}
+                        onClick={() => setUserForm(f => ({
+                          ...f,
+                          role: value,
+                          basic_salary: f.basic_salary || (value === 'Store Admin' ? '15600.00' : value === 'Employee' ? '13000.00' : '')
+                        }))}
                         className={`w-full flex items-center gap-3 rounded-xl border p-3 text-left transition-all ${userForm.role === value
                           ? 'border-[#176B87] bg-[#176B87]/10 dark:border-[#64ccc5] dark:bg-[#64ccc5]/10'
                           : 'border-border bg-card hover:border-slate-400 dark:hover:border-slate-500'
@@ -1879,7 +1910,7 @@ export default function SystemPage({ defaultTab = 'users' }) {
 
                 <div>
                   <label className="block font-bold text-muted-foreground mb-1">Phone Number *</label>
-                  <input type="tel" value={userForm.phone} onChange={e => setUserForm(f => ({ ...f, phone: e.target.value.replace(/\D/g, '') }))} placeholder="e.g. 09123456789" required className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground" />
+                  <input type="tel" maxLength={11} value={userForm.phone} onChange={e => setUserForm(f => ({ ...f, phone: e.target.value.replace(/\D/g, '').slice(0, 11) }))} placeholder="e.g. 09123456789" required className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground font-mono" />
                 </div>
 
                 <div>
@@ -1949,6 +1980,25 @@ export default function SystemPage({ defaultTab = 'users' }) {
                           <option key={b.id} value={b.id} className="bg-[#0f172a] text-white">{b.name}</option>
                         ))}
                       </select>
+                    </div>
+
+                    <div>
+                      <label className="block font-bold text-muted-foreground mb-1">
+                        Salary *
+                      </label>
+                      <div className="relative">
+                        <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-primary font-bold text-sm select-none">₱</span>
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          value={userForm.basic_salary || ''}
+                          onChange={e => setUserForm(f => ({ ...f, basic_salary: e.target.value }))}
+                          placeholder="0.00"
+                          required
+                          className="w-full pl-8 pr-3 py-2 rounded-xl border border-border bg-card text-foreground font-mono font-medium focus:outline-none focus:border-primary"
+                        />
+                      </div>
                     </div>
 
                     <div className="grid grid-cols-2 gap-3">

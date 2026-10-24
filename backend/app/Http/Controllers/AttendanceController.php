@@ -8,8 +8,10 @@ use App\Models\AttendanceScanLog;
 use App\Models\Employee;
 use App\Models\SystemLog;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Storage;
 use App\Services\NotificationService;
 use App\Services\AttendanceSchedule;
+use Illuminate\Support\Facades\Cache;
 
 class AttendanceController extends Controller
 {
@@ -27,7 +29,30 @@ class AttendanceController extends Controller
     public function index(Request $request)
     {
         $user = $request->user();
-        $query = Attendance::with(['employee', 'scannedBy.employee']);
+
+        // 1-2s Performance Cache: bypass if exporting CSV
+        if (!$request->boolean('export_csv')) {
+            $fp = SyncController::computeFingerprint();
+            $cacheKey = 'pace_att_idx_' . md5(json_encode([
+                'u' => $user ? $user->user_id : 0,
+                'r' => $user ? $user->role : '',
+                'b' => $request->query('branch', ''),
+                'e' => $request->query('employee_id', ''),
+                'd' => $request->query('date', ''),
+                'df' => $request->query('date_from', ''),
+                'dt' => $request->query('date_to', ''),
+                's' => $request->query('search', ''),
+                'dept' => $request->query('department', ''),
+                'st' => $request->query('status', ''),
+            ])) . '_' . $fp;
+
+            $cached = Cache::get($cacheKey);
+            if ($cached !== null) {
+                return response()->json($cached);
+            }
+        }
+
+        $query = Attendance::with(['employee.branch', 'scannedBy.employee']);
 
         // Role-based scoping
         if ($user && $user->role === 'Employee') {
@@ -148,11 +173,17 @@ class AttendanceController extends Controller
             ], AttendanceSchedule::present($a));
         });
 
-        return response()->json([
+        $res = [
             'attendance' => $records,
             'total' => $records->count(),
             'schedule' => AttendanceSchedule::toArray(),
-        ]);
+        ];
+
+        if (isset($cacheKey)) {
+            Cache::put($cacheKey, $res, 2);
+        }
+
+        return response()->json($res);
     }
 
     /**
@@ -288,6 +319,13 @@ class AttendanceController extends Controller
         ]);
 
         try {
+            if (!function_exists('imagecreatefromstring')) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'PHP GD extension is not enabled on the server. Please enable extension=gd in php.ini.',
+                ], 422);
+            }
+
             $options = new \chillerlan\QRCode\QROptions([
                 'readerUseImagickIfAvailable' => false,
             ]);
@@ -310,7 +348,7 @@ class AttendanceController extends Controller
             
             return $response;
             
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {
             return response()->json([
                 'success' => false,
                 'message' => 'Could not find a valid QR code in this image. Please try another.',
@@ -477,6 +515,9 @@ class AttendanceController extends Controller
 
         // Auto-determine next action for Employee based on schedule
         $action = AttendanceSchedule::nextAction($record, now());
+        if ($action === 'COMPLETED') {
+            $action = 'TIME_OUT';
+        }
 
         return response()->json([
             'success' => true,
@@ -597,8 +638,7 @@ class AttendanceController extends Controller
         // Auto-determine next action for Employee based on schedule
         $action = AttendanceSchedule::nextAction($record, $scanTime);
         if ($action === 'COMPLETED') {
-            $log->update(['status' => 'FAILED', 'failure_reason' => 'Attendance already completed today.']);
-            return response()->json(['success' => false, 'message' => 'Attendance already completed for today (Time Out recorded).'], 400);
+            $action = 'TIME_OUT';
         }
         
         \Illuminate\Support\Facades\DB::beginTransaction();
@@ -624,6 +664,17 @@ class AttendanceController extends Controller
                 'action_type' => 'ATTENDANCE_' . $action,
                 'pin_verified' => true
             ]);
+
+            // Real-time Audit Trail in SystemLog
+            SystemLog::create([
+                'user_id'     => $user->user_id,
+                'action'      => 'ATTENDANCE_' . strtoupper($action),
+                'module'      => 'Attendance',
+                'description' => "Attendance recorded: {$employee->first_name} {$employee->last_name} ({$employee->employee_code}) - " . str_replace('_', ' ', $action) . " at {$timeStr}",
+                'ip_address'  => $request->ip(),
+                'user_agent'  => $request->userAgent(),
+            ]);
+            \Illuminate\Support\Facades\Cache::forget('pace_unified_fingerprint');
             
             \Illuminate\Support\Facades\DB::commit();
 
@@ -744,14 +795,74 @@ class AttendanceController extends Controller
             return response()->json(['pending' => []]);
         }
 
+        $faceBiometricUrl = null;
+        $faceBiometricBase64 = null;
+        if ($user->face_biometric_image) {
+            $faceBiometricUrl = str_starts_with($user->face_biometric_image, 'http')
+                ? $user->face_biometric_image
+                : url(Storage::url($user->face_biometric_image));
+
+            if (Storage::disk('public')->exists($user->face_biometric_image)) {
+                $raw = Storage::disk('public')->get($user->face_biometric_image);
+                $mime = Storage::disk('public')->mimeType($user->face_biometric_image) ?: 'image/jpeg';
+                $faceBiometricBase64 = 'data:' . $mime . ';base64,' . base64_encode($raw);
+            }
+        }
+
         $pending = AttendanceScanLog::with('scannedBy.employee')
             ->where('employee_id', $user->employee_id)
             ->where('status', 'PENDING')
             ->where('created_at', '>=', now()->subMinutes(5)) // Only look at recent ones
             ->orderBy('created_at', 'desc')
-            ->get();
+            ->get()
+            ->map(function ($item) use ($faceBiometricUrl, $faceBiometricBase64, $user) {
+                $item->face_biometric_image = $faceBiometricUrl;
+                $item->face_biometric_base64 = $faceBiometricBase64;
+                $item->has_registered_face = !empty($faceBiometricUrl);
+                $item->employee_code = $user->employee ? $user->employee->employee_code : null;
+                $item->employee_name = $user->employee ? trim("{$user->employee->first_name} {$user->employee->last_name}") : $user->name;
+                return $item;
+            });
 
-        return response()->json(['pending' => $pending]);
+        return response()->json([
+            'pending' => $pending,
+            'face_biometric_image' => $faceBiometricUrl,
+            'face_biometric_base64' => $faceBiometricBase64,
+            'has_registered_face' => !empty($faceBiometricUrl)
+        ]);
+    }
+
+    public function getMyFaceTemplate(Request $request)
+    {
+        $user = $request->user();
+        if (!$user) {
+            return response()->json(['success' => false, 'message' => 'Unauthorized'], 401);
+        }
+
+        $employee = $user->employee;
+        $faceBiometricUrl = null;
+        $faceBiometricBase64 = null;
+        if ($user->face_biometric_image) {
+            $faceBiometricUrl = str_starts_with($user->face_biometric_image, 'http')
+                ? $user->face_biometric_image
+                : url(Storage::url($user->face_biometric_image));
+
+            if (Storage::disk('public')->exists($user->face_biometric_image)) {
+                $raw = Storage::disk('public')->get($user->face_biometric_image);
+                $mime = Storage::disk('public')->mimeType($user->face_biometric_image) ?: 'image/jpeg';
+                $faceBiometricBase64 = 'data:' . $mime . ';base64,' . base64_encode($raw);
+            }
+        }
+
+        return response()->json([
+            'success' => true,
+            'employee_id' => $employee ? $employee->employee_id : null,
+            'employee_code' => $employee ? $employee->employee_code : 'EMP-016',
+            'name' => $employee ? trim("{$employee->first_name} {$employee->last_name}") : $user->name,
+            'face_biometric_image' => $faceBiometricUrl,
+            'face_biometric_base64' => $faceBiometricBase64,
+            'has_registered_face' => !empty($faceBiometricUrl),
+        ]);
     }
 
     public function approveVerification(Request $request)
@@ -763,11 +874,16 @@ class AttendanceController extends Controller
 
         $validated = $request->validate([
             'scan_log_id' => 'required|integer',
-            'pin' => 'required|string',
+            'pin' => 'nullable|string',
+            'verification_type' => 'nullable|string',
+            'face_verified' => 'nullable|boolean',
+            'face_matched' => 'nullable|boolean',
+            'confidence' => 'nullable|numeric',
         ]);
 
+        $targetEmployeeId = $user->employee_id ?: ($user->employee ? $user->employee->employee_id : null);
         $log = AttendanceScanLog::where('id', $validated['scan_log_id'])
-            ->where('employee_id', $user->employee_id)
+            ->where('employee_id', $targetEmployeeId)
             ->where('status', 'PENDING')
             ->first();
 
@@ -776,38 +892,58 @@ class AttendanceController extends Controller
         }
 
         $employee = $user->employee;
+        $isFace = $request->boolean('face_verified') || $request->input('verification_type') === 'FACE_RECOGNITION';
 
-        // Check Lockout
-        if ($employee->pin_locked_until && $employee->pin_locked_until > now()) {
-            return response()->json([
-                'success' => false,
-                'is_locked' => true,
-                'message' => 'Account is currently locked due to too many failed attempts.',
-            ], 423);
-        }
-
-        if (empty($employee->attendance_pin)) {
-            return response()->json(['success' => false, 'message' => 'Your secure Attendance PIN has not been set. Please update it in your profile settings.'], 422);
-        }
-
-        // Verify PIN
-        if (!\Illuminate\Support\Facades\Hash::check($validated['pin'], $employee->attendance_pin)) {
-            $employee->pin_failed_attempts = ($employee->pin_failed_attempts ?? 0) + 1;
-            if ($employee->pin_failed_attempts >= 5) {
-                $employee->pin_locked_until = now()->addMinutes(15);
-                $employee->save();
-                
-                $log->update(['status' => 'FAILED', 'failure_reason' => 'PIN lockout']);
-                return response()->json(['success' => false, 'is_locked' => true, 'message' => 'Too many failed attempts. Account locked.'], 423);
+        if ($isFace) {
+            // Strict Face ID match check: If explicitly marked false or face not registered, reject
+            $isFaceMatched = $request->has('face_matched') ? $request->boolean('face_matched') : true;
+            if (!$isFaceMatched || empty($user->face_biometric_image)) {
+                $log->update(['status' => 'FAILED', 'failure_reason' => 'Face does not match registered Face ID. Access denied.']);
+                return response()->json([
+                    'success' => false,
+                    'face_matched' => false,
+                    'message' => 'Face does not match registered Face ID. Access denied.'
+                ], 403);
             }
-            $employee->save();
-            return response()->json(['success' => false, 'message' => 'Incorrect PIN.'], 422);
         }
 
-        // PIN is valid!
-        $employee->pin_failed_attempts = 0;
-        $employee->pin_locked_until = null;
-        $employee->save();
+        if (!$isFace) {
+            if (empty($validated['pin'])) {
+                return response()->json(['success' => false, 'message' => 'PIN is required when not using facial recognition.'], 422);
+            }
+
+            // Check Lockout
+            if ($employee->pin_locked_until && $employee->pin_locked_until > now()) {
+                return response()->json([
+                    'success' => false,
+                    'is_locked' => true,
+                    'message' => 'Account is currently locked due to too many failed attempts.',
+                ], 423);
+            }
+
+            if (empty($employee->attendance_pin)) {
+                return response()->json(['success' => false, 'message' => 'Your secure Attendance PIN has not been set. Please update it in your profile settings.'], 422);
+            }
+
+            // Verify PIN
+            if (!\Illuminate\Support\Facades\Hash::check($validated['pin'], $employee->attendance_pin)) {
+                $employee->pin_failed_attempts = ($employee->pin_failed_attempts ?? 0) + 1;
+                if ($employee->pin_failed_attempts >= 5) {
+                    $employee->pin_locked_until = now()->addMinutes(15);
+                    $employee->save();
+                    
+                    $log->update(['status' => 'FAILED', 'failure_reason' => 'PIN lockout']);
+                    return response()->json(['success' => false, 'is_locked' => true, 'message' => 'Too many failed attempts. Account locked.'], 423);
+                }
+                $employee->save();
+                return response()->json(['success' => false, 'message' => 'Incorrect PIN.'], 422);
+            }
+
+            // PIN is valid!
+            $employee->pin_failed_attempts = 0;
+            $employee->pin_locked_until = null;
+            $employee->save();
+        }
 
         // ─── ATTENDANCE BELONGS TO THE SCANNED EMPLOYEE ───
         $storeAdminUser = \App\Models\User::with('employee')->find($log->scanned_by);
@@ -824,21 +960,24 @@ class AttendanceController extends Controller
         // Auto-determine next action for Employee based on schedule
         $action = AttendanceSchedule::nextAction($record, $scanTime);
         if ($action === 'COMPLETED') {
-            $log->update(['status' => 'FAILED', 'failure_reason' => 'Attendance already completed today.']);
-            return response()->json(['success' => false, 'message' => 'Attendance already completed for today.'], 400);
+            $action = 'TIME_OUT';
         }
+
+        $methodLabel = $isFace ? 'QR + Face Recognition (Authorized by Employee)' : 'QR + PIN (Authorized by Employee)';
+        $scanStatus = $isFace ? 'QR_FACE_VERIFIED' : 'QR_PIN_VERIFIED';
 
         if ($action === 'TIME_IN') {
             $record = new \App\Models\Attendance();
             $record->employee_id = $employee->employee_id;
             $record->scanned_by = $log->scanned_by;
-            $record->qr_scan_in = 'QR_PIN_VERIFIED';
-            $record->verification_method = 'QR + PIN (Authorized by Employee)';
+            $record->qr_scan_in = $scanStatus;
+            $record->verification_method = $methodLabel;
             $record->verified_by_name = "{$employee->first_name} {$employee->last_name}";
             $record->device_info = $log->device_info;
             $record->ip_address = $log->ip_address;
         } elseif ($action === 'TIME_OUT') {
-            $record->qr_scan_out = 'QR_PIN_VERIFIED';
+            $record->qr_scan_out = $scanStatus;
+            $record->verification_method = $methodLabel;
             $record->verified_by_name = "{$employee->first_name} {$employee->last_name}";
         }
         AttendanceSchedule::applyAction($record, $action, $scanTime);
@@ -850,9 +989,76 @@ class AttendanceController extends Controller
             'pin_verified' => true
         ]);
 
+        // Real-time Audit Trail in SystemLog
+        SystemLog::create([
+            'user_id'     => $user->user_id,
+            'action'      => 'ATTENDANCE_' . strtoupper($action),
+            'module'      => 'Attendance',
+            'description' => "Attendance self-authorized: {$employee->first_name} {$employee->last_name} ({$employee->employee_code}) - " . str_replace('_', ' ', $action) . " at {$timeStr}",
+            'ip_address'  => $request->ip(),
+            'user_agent'  => $request->userAgent(),
+        ]);
+        \Illuminate\Support\Facades\Cache::forget('pace_unified_fingerprint');
+
         return response()->json([
             'success' => true,
             'message' => 'Attendance authorized successfully.'
+        ]);
+    }
+
+    public function rejectVerification(Request $request)
+    {
+        $user = $request->user();
+        if (!$user) {
+            return response()->json(['success' => false, 'message' => 'Unauthorized'], 401);
+        }
+
+        $validated = $request->validate([
+            'scan_log_id' => 'required|integer',
+            'reason' => 'nullable|string'
+        ]);
+
+        $logId = $validated['scan_log_id'];
+        $reason = $validated['reason'] ?? 'Attendance authorization cancelled by employee.';
+
+        $isStoreAdmin = in_array($user->role, ['Store Administrator', 'Store Admin', 'Administrator']);
+        $query = AttendanceScanLog::where('id', $logId);
+
+        if (!$isStoreAdmin && $user->employee_id) {
+            $query->where('employee_id', $user->employee_id);
+        }
+
+        $log = $query->first();
+
+        if ($log) {
+            $log->update([
+                'status' => 'FAILED',
+                'failure_reason' => $reason
+            ]);
+
+            \Illuminate\Support\Facades\Cache::forget('pace_unified_fingerprint');
+
+            try {
+                SystemLog::create([
+                    'user_id'     => $user->user_id,
+                    'action'      => 'ATTENDANCE_CANCELLED',
+                    'module'      => 'Attendance',
+                    'description' => "Attendance authorization cancelled: {$reason}",
+                    'ip_address'  => $request->ip(),
+                    'user_agent'  => $request->userAgent(),
+                ]);
+            } catch (\Throwable $e) {}
+
+            return response()->json([
+                'success' => true,
+                'status' => 'FAILED',
+                'message' => 'Attendance authorization cancelled successfully.'
+            ]);
+        }
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Pending verification log already cleared or not found.'
         ]);
     }
 }

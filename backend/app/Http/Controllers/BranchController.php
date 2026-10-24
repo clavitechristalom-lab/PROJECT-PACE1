@@ -14,15 +14,14 @@ class BranchController extends Controller
      */
     public function index()
     {
-        $branches = BranchProfile::all()->map(function ($branch) {
-            // Find the Store Administrator assigned to this branch
-            $manager = \App\Models\User::where('role', 'Store Administrator')
-                ->whereHas('employee', function ($q) use ($branch) {
-                    $q->where('branch_id', $branch->id);
-                })->first();
-            
-            // Append the manager name dynamically
-            $branch->manager = $manager ? $manager->username : null;
+        $managers = \App\Models\User::where('role', 'Store Administrator')
+            ->with('employee:employee_id,branch_id')
+            ->get()
+            ->filter(fn($u) => $u->employee && $u->employee->branch_id)
+            ->keyBy(fn($u) => $u->employee->branch_id);
+
+        $branches = BranchProfile::all()->map(function ($branch) use ($managers) {
+            $branch->manager = $managers->get($branch->id)?->username;
             return $branch;
         });
         

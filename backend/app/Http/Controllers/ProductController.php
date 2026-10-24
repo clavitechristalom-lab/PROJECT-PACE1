@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use Illuminate\Http\Request;
 use App\Models\Product;
 use App\Models\SystemLog;
+use Illuminate\Support\Facades\Cache;
 
 class ProductController extends Controller
 {
@@ -20,8 +21,27 @@ class ProductController extends Controller
 
     public function index(Request $request)
     {
-        $query = Product::with('branch');
         $user = $request->user();
+
+        // 1-2s Performance Cache: bypass if exporting CSV
+        if (!$request->boolean('export_csv')) {
+            $fp = SyncController::computeFingerprint();
+            $cacheKey = 'pace_prod_idx_' . md5(json_encode([
+                'u' => $user ? $user->user_id : 0,
+                'r' => $user ? $user->role : '',
+                's' => $request->query('search', ''),
+                'c' => $request->query('category', ''),
+                'st' => $request->query('status', ''),
+                'ss' => $request->query('stock_status', ''),
+            ])) . '_' . $fp;
+
+            $cached = Cache::get($cacheKey);
+            if ($cached !== null) {
+                return response()->json($cached);
+            }
+        }
+
+        $query = Product::with('branch');
 
         if ($user) {
             if ($user->role === 'Customer') {
@@ -38,17 +58,17 @@ class ProductController extends Controller
                     $branchId = $cust ? $cust->branch_id : null;
                 }
                 if ($branchId) {
-                    $branchCount = Product::where('branch_id', $branchId)->count();
-                    if ($branchCount > 0) {
-                        $query->where('branch_id', $branchId);
-                    }
+                    $query->where(function ($q) use ($branchId) {
+                        $q->where('branch_id', $branchId)->orWhereNull('branch_id');
+                    });
                 }
-            } elseif (in_array($user->role, ['Store Administrator', 'Store Admin'])) {
+            } elseif (in_array($user->role, ['Store Administrator', 'Store Admin', 'Employee'])) {
                 $branchId = $user->employee ? $user->employee->branch_id : null;
-                if (!$branchId) {
-                    return response()->json(['products' => [], 'total' => 0]);
+                if ($branchId) {
+                    $query->where(function ($q) use ($branchId) {
+                        $q->where('branch_id', $branchId)->orWhereNull('branch_id');
+                    });
                 }
-                $query->where('branch_id', $branchId);
             }
             // Administrators see all products
         }
@@ -125,15 +145,24 @@ class ProductController extends Controller
 
         $products = $query->orderBy('product_name')->get();
 
-        return response()->json([
+        $res = [
             'products' => $products,
             'total' => $products->count(),
-        ]);
+        ];
+
+        if (isset($cacheKey)) {
+            Cache::put($cacheKey, $res, 2);
+        }
+
+        return response()->json($res);
     }
 
     public function show($id)
     {
-        $product = Product::findOrFail($id);
+        $product = Product::with('branch')->find($id);
+        if (!$product) {
+            return response()->json(['message' => 'The requested product was not found or has been removed.'], 404);
+        }
         return response()->json(['product' => $product]);
     }
 
@@ -227,7 +256,7 @@ class ProductController extends Controller
         $product->load('branch');
 
         SystemLog::create([
-            'user_id' => $request->input('user_id', 1),
+            'user_id' => $user ? $user->user_id : $request->input('user_id'),
             'action' => 'CREATE',
             'module' => 'Products',
             'description' => "Created new product: {$product->product_name} ({$product->product_code})",
@@ -258,7 +287,10 @@ class ProductController extends Controller
 
     public function update(Request $request, $id)
     {
-        $product = Product::findOrFail($id);
+        $product = Product::find($id);
+        if (!$product) {
+            return response()->json(['message' => 'The requested product was not found or has been removed.'], 404);
+        }
         $user = $request->user();
 
         if ($user && in_array($user->role, ['Store Administrator', 'Store Admin'])) {
@@ -341,7 +373,7 @@ class ProductController extends Controller
         $product->load('branch');
 
         SystemLog::create([
-            'user_id' => $request->input('user_id', 1),
+            'user_id' => $user ? $user->user_id : $request->input('user_id'),
             'action' => 'UPDATE',
             'module' => 'Products',
             'description' => "Updated product: {$product->product_name} ({$product->product_code})",
@@ -357,7 +389,10 @@ class ProductController extends Controller
 
     public function destroy(Request $request, $id)
     {
-        $product = Product::findOrFail($id);
+        $product = Product::find($id);
+        if (!$product) {
+            return response()->json(['message' => 'The requested product was not found or already deleted.'], 404);
+        }
         $user = $request->user();
 
         if ($user && in_array($user->role, ['Store Administrator', 'Store Admin'])) {
@@ -372,7 +407,7 @@ class ProductController extends Controller
         $product->delete();
 
         SystemLog::create([
-            'user_id' => $request->input('user_id', 1),
+            'user_id' => $user ? $user->user_id : $request->input('user_id'),
             'action' => 'DELETE',
             'module' => 'Products',
             'description' => "Deleted product: {$name} ({$code})",

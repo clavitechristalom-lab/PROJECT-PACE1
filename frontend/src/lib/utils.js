@@ -34,3 +34,6 @@ export function exportCSV(filename, headers, rows) {
   a.click()
   URL.revokeObjectURL(url)
 }
+
+export { fastDeepEqual, setIfChanged } from './diff'
+

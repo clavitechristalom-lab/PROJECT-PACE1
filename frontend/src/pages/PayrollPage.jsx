@@ -10,7 +10,7 @@ import {
   Table, TR, TD, PageHeader, StatCard, Card, Pagination, showToast, confirmAction, showLoading, closeLoading,
   TabBar, LoadingState, ErrorAlert, TableSkeleton, EmptyState,
 } from '../components/ui'
-import { fmt } from '../lib/utils'
+import { fmt, fastDeepEqual } from '../lib/utils'
 import { useAuth } from '../context/AuthContext'
 import { api } from '../lib/api'
 import { useRealtimeSync, triggerDataSync } from '../lib/realtimeSync'
@@ -21,11 +21,29 @@ import EmployeePayslipModal from '../components/payslip/EmployeePayslipModal'
 export default function PayrollPage() {
   const [searchParams] = useSearchParams()
   const { user } = useAuth()
-  const [payroll, setPayroll] = useState([])
-  const [periods, setPeriods] = useState([])
+  const isStoreAdmin = user?.role === 'Store Administrator' || user?.role === 'Store Admin'
+  const userBranchName = user?.employee?.branch?.name || (typeof user?.employee?.branch === 'string' ? user.employee.branch : '') || user?.branch?.name || (typeof user?.branch === 'string' ? user.branch : '') || ''
+
+  const [branches, setBranches] = useState([])
+  const [branchFilter, setBranchFilter] = useState(isStoreAdmin ? (userBranchName || 'All') : 'All')
+
+  const [payroll, setPayroll] = useState(() => {
+    try {
+      const saved = sessionStorage.getItem('pace_cached_payroll')
+      return saved ? JSON.parse(saved) : []
+    } catch { return [] }
+  })
+  const [periods, setPeriods] = useState(() => {
+    try {
+      const saved = sessionStorage.getItem('pace_cached_periods')
+      return saved ? JSON.parse(saved) : []
+    } catch { return [] }
+  })
   const [selectedPeriodId, setSelectedPeriodId] = useState('')
   const [search, setSearch] = useState('')
-  const [loading, setLoading] = useState(true)
+  const [loading, setLoading] = useState(() => {
+    return !sessionStorage.getItem('pace_cached_payroll')
+  })
   const [error, setError] = useState('')
   const [page, setPage] = useState(1)
   const pageSize = 10
@@ -36,56 +54,140 @@ export default function PayrollPage() {
   const [generating, setGenerating] = useState(false)
   const [saving, setSaving] = useState(false)
 
+  // Generate Payroll Modal State
+  const [generateModal, setGenerateModal] = useState(false)
+  const [generatePeriodId, setGeneratePeriodId] = useState('')
+  const [generateScope, setGenerateScope] = useState('all') // 'all' | 'single'
+  const [modalBranch, setModalBranch] = useState(isStoreAdmin ? (userBranchName || 'All') : 'All')
+  const [generateEmployeeId, setGenerateEmployeeId] = useState('')
+  const [recalculateExisting, setRecalculateExisting] = useState(true)
+  const [requireAttendance, setRequireAttendance] = useState(false)
+  const [employeeList, setEmployeeList] = useState([])
+  const [unprocessedEmployees, setUnprocessedEmployees] = useState([])
+  const [eligibleCount, setEligibleCount] = useState(0)
+
+  const selectedEmp = useMemo(
+    () => employeeList.find(e => String(e.employee_id) === String(generateEmployeeId)),
+    [employeeList, generateEmployeeId]
+  )
+
   // New Period Form
   const [periodName, setPeriodName] = useState('')
   const [startDate, setStartDate] = useState('')
   const [endDate, setEndDate] = useState('')
   const [payDate, setPayDate] = useState('')
 
+  // Common Filters
+  const [fromDate, setFromDate] = useState('')
+  const [toDate, setToDate] = useState('')
+  const [filterStatus, setFilterStatus] = useState('')
+
+  // Fetch branches on mount
+  useEffect(() => {
+    let mounted = true
+    api.branches.getAll()
+      .then(res => {
+        if (!mounted) return
+        const bList = Array.isArray(res) ? res : (res?.branches || [])
+        setBranches(bList)
+      })
+      .catch(err => {
+        console.warn('Could not fetch branches for payroll:', err)
+      })
+    return () => { mounted = false }
+  }, [])
+
+  // Auto-sync branchFilter and modalBranch for Store Admin when user profile loads
+  useEffect(() => {
+    if (isStoreAdmin && userBranchName) {
+      setBranchFilter(userBranchName)
+      setModalBranch(userBranchName)
+    }
+  }, [isStoreAdmin, userBranchName])
+
   const loadData = async (targetPeriodId, customParams = {}, silent = false) => {
-    if (!silent) setLoading(true)
-    if (!silent) setError('')
+    const isBg = silent || payroll.length > 0
+    if (!isBg) setLoading(true)
+    if (!isBg) setError('')
     try {
+      const activeBranch = customParams.branch !== undefined ? customParams.branch : branchFilter
+      const branchParam = (activeBranch && activeBranch !== 'All') ? activeBranch : undefined
+
       if (user?.role === 'Employee') {
         const data = await api.payroll.getMePayroll({
           period_id: targetPeriodId !== undefined ? (targetPeriodId || undefined) : (selectedPeriodId || undefined),
-          from_date: customParams.fromDate || undefined,
-          to_date: customParams.toDate || undefined,
-          status: customParams.status || undefined,
+          from_date: customParams.fromDate !== undefined ? (customParams.fromDate || undefined) : (fromDate || undefined),
+          to_date: customParams.toDate !== undefined ? (customParams.toDate || undefined) : (toDate || undefined),
+          status: customParams.status !== undefined ? (customParams.status || undefined) : (filterStatus || undefined),
         })
-        setPayroll(data.payroll || [])
+        const newPay = data?.payroll || []
+        setPayroll(prev => fastDeepEqual(prev, newPay) ? prev : newPay)
         if (periods.length === 0) {
           const periodsData = await api.payroll.getPeriods().catch(() => ({ periods: [] }))
-          setPeriods(periodsData.periods || [])
+          const newPer = periodsData?.periods || []
+          setPeriods(prev => fastDeepEqual(prev, newPer) ? prev : newPer)
         }
+        try {
+          sessionStorage.setItem('pace_cached_payroll', JSON.stringify(newPay))
+        } catch (e) { }
       } else {
         const data = await api.payroll.getAll({
           period_id: targetPeriodId !== undefined ? (targetPeriodId || undefined) : (selectedPeriodId || undefined),
-          from_date: customParams.fromDate || undefined,
-          to_date: customParams.toDate || undefined,
-          status: customParams.status || undefined,
+          from_date: customParams.fromDate !== undefined ? (customParams.fromDate || undefined) : (fromDate || undefined),
+          to_date: customParams.toDate !== undefined ? (customParams.toDate || undefined) : (toDate || undefined),
+          status: customParams.status !== undefined ? (customParams.status || undefined) : (filterStatus || undefined),
+          branch: branchParam,
         })
-        setPayroll(data.payroll || [])
-        setPeriods(data.periods || [])
-        if (!selectedPeriodId && data.periods?.length > 0 && targetPeriodId === undefined) {
+        const newPay = data?.payroll || []
+        const newPer = data?.periods || []
+        const newUnp = data?.unprocessed_employees || []
+        setPayroll(prev => fastDeepEqual(prev, newPay) ? prev : newPay)
+        setPeriods(prev => fastDeepEqual(prev, newPer) ? prev : newPer)
+        setUnprocessedEmployees(prev => fastDeepEqual(prev, newUnp) ? prev : newUnp)
+        setEligibleCount(data?.eligible_count || 0)
+        try {
+          sessionStorage.setItem('pace_cached_payroll', JSON.stringify(newPay))
+          sessionStorage.setItem('pace_cached_periods', JSON.stringify(newPer))
+        } catch (e) { }
+        if (!selectedPeriodId && data?.periods?.length > 0 && targetPeriodId === undefined) {
           setSelectedPeriodId(data.periods[0].period_id.toString())
         }
       }
     } catch (err) {
+      if (err?.name === 'AbortError') return
       console.error('Failed to load payroll:', err)
-      if (!silent) setError(err.message || 'Failed to fetch payroll records')
+      if (!isBg) setError(err.message || 'Failed to fetch payroll records')
     } finally {
-      if (!silent) setLoading(false)
+      if (!isBg) setLoading(false)
+    }
+  }
+
+  const loadEmployees = async (targetBranch) => {
+    try {
+      const activeBranch = targetBranch !== undefined
+        ? targetBranch
+        : (isStoreAdmin ? userBranchName : (branchFilter !== 'All' ? branchFilter : undefined))
+      const branchParam = (activeBranch && activeBranch !== 'All') ? activeBranch : undefined
+      const res = await api.payroll.getEligibleEmployees({
+        branch: branchParam,
+      })
+      const employees = res?.employees || []
+      setEmployeeList(employees)
+    } catch (e) {
+      console.error('Failed to load active employees:', e)
     }
   }
 
   useEffect(() => {
     loadData()
+    if (user?.role !== 'Employee') {
+      loadEmployees()
+    }
   }, [])
 
   useRealtimeSync(() => {
-    loadData(selectedPeriodId, {}, true)
-  }, [selectedPeriodId, user?.role])
+    loadData(selectedPeriodId, { branch: branchFilter, fromDate, toDate, status: filterStatus }, true)
+  }, [selectedPeriodId, branchFilter, fromDate, toDate, filterStatus, user?.role], { periodic: true })
 
   useEffect(() => {
     const id = searchParams.get('id')
@@ -96,19 +198,52 @@ export default function PayrollPage() {
 
   const handlePeriodChange = (id) => {
     setSelectedPeriodId(id)
-    loadData(id)
+    loadData(id, { branch: branchFilter, fromDate, toDate, status: filterStatus })
   }
 
-  const handleGenerate = async () => {
-    const confirmed = await confirmAction('Generate Payroll', 'Are you sure you want to generate payroll for the selected period? This will process all attendance and deductions.', 'Yes, Generate')
-    if (!confirmed) return
+  const handleOpenGenerateModal = () => {
+    setGeneratePeriodId(selectedPeriodId || '')
+    setGenerateScope('all')
+    setGenerateEmployeeId('')
+    const initBranch = isStoreAdmin ? (userBranchName || 'All') : (branchFilter !== 'All' ? branchFilter : 'All')
+    setModalBranch(initBranch)
+    setRecalculateExisting(true)
+    setRequireAttendance(false)
+    setGenerateModal(true)
+    loadEmployees(initBranch)
+  }
+
+  const handleGenerateSubmit = async (e) => {
+    if (e) e.preventDefault()
 
     setGenerating(true)
-    showLoading('Generating payroll...')
+    showLoading('Calculating and generating payroll for employees...')
     try {
-      const res = await api.payroll.generate(user?.user_id || 1, selectedPeriodId ? parseInt(selectedPeriodId) : undefined)
-      showToast(res.message || 'Payroll generated successfully', 'success')
-      loadData(selectedPeriodId, {}, true)
+      const targetBranch = modalBranch !== 'All' ? modalBranch : (branchFilter !== 'All' ? branchFilter : undefined)
+      const res = await api.payroll.generate(
+        user?.user_id || 1,
+        generatePeriodId || undefined,
+        {
+          branch: targetBranch,
+          employee_id: generateScope === 'all' ? undefined : generateEmployeeId,
+          recalculate: recalculateExisting,
+          require_attendance: requireAttendance,
+        }
+      )
+      showToast(res.message || 'Payroll generated successfully for employees', 'success')
+      setGenerateModal(false)
+
+      // Refresh periods in case a new period was auto-created by backend
+      const periodsData = await api.payroll.getPeriods().catch(() => ({ periods: [] }))
+      if (periodsData.periods?.length > 0) {
+        setPeriods(periodsData.periods)
+        const targetId = res.period?.period_id ? res.period.period_id.toString() : periodsData.periods[0].period_id.toString()
+        setSelectedPeriodId(targetId)
+        await loadData(targetId, { branch: targetBranch }, true)
+      } else {
+        await loadData(selectedPeriodId, { branch: targetBranch }, true)
+      }
+
       triggerDataSync('payroll')
     } catch (err) {
       showToast(err.message || 'Failed to generate payroll', 'error')
@@ -118,6 +253,10 @@ export default function PayrollPage() {
     }
   }
 
+  const handleGenerate = async () => {
+    handleOpenGenerateModal()
+  }
+
   const handleGenerate13thMonth = async () => {
     const confirmed = await confirmAction('Generate 13th Month Pay', 'Are you sure you want to generate 13th Month Pay? This is typically done at the end of the year.', 'Yes, Generate')
     if (!confirmed) return
@@ -125,9 +264,11 @@ export default function PayrollPage() {
     setGenerating(true)
     showLoading('Processing 13th Month Pay...')
     try {
-      const res = await api.payroll.generate13thMonth(user?.user_id || 1)
+      const res = await api.payroll.generate13thMonth(user?.user_id || 1, {
+        branch: branchFilter !== 'All' ? branchFilter : undefined,
+      })
       showToast(res.message || '13th Month Pay generated successfully', 'success')
-      loadData(undefined, {}, true)
+      loadData(undefined, { branch: branchFilter }, true)
       triggerDataSync('payroll')
     } catch (err) {
       showToast(err.message || 'Failed to generate 13th month pay', 'error')
@@ -195,7 +336,7 @@ export default function PayrollPage() {
       setStartDate('')
       setEndDate('')
       setPayDate('')
-      loadData(res.period?.period_id ? res.period.period_id.toString() : undefined, {}, true)
+      loadData(res.period?.period_id ? res.period.period_id.toString() : undefined, { branch: branchFilter }, true)
       triggerDataSync('payroll')
     } catch (err) {
       showToast(err.message || 'Failed to create period', 'error')
@@ -223,20 +364,18 @@ export default function PayrollPage() {
     }
   }
 
-  // Common Filters
-  const [fromDate, setFromDate] = useState('')
-  const [toDate, setToDate] = useState('')
-  const [filterStatus, setFilterStatus] = useState('')
-
   const handleSearchFilters = () => {
     setPage(1)
-    loadData(selectedPeriodId, { fromDate, toDate, status: filterStatus })
+    loadData(selectedPeriodId, { fromDate, toDate, status: filterStatus, branch: branchFilter })
   }
 
   const displayed = useMemo(() => {
     let list = selectedPeriodId
       ? payroll.filter(p => p.period_id?.toString() === selectedPeriodId)
       : payroll
+    if (branchFilter && branchFilter !== 'All') {
+      list = list.filter(p => (p.branch || '').toLowerCase() === branchFilter.toLowerCase())
+    }
     if (search.trim()) {
       const q = search.toLowerCase().trim()
       list = list.filter(p => {
@@ -244,11 +383,14 @@ export default function PayrollPage() {
         const code = (p.employee_code || '').toLowerCase()
         const dept = (p.department || '').toLowerCase()
         const pos = (p.position || '').toLowerCase()
-        return name.includes(q) || code.includes(q) || dept.includes(q) || pos.includes(q)
+        const br = (p.branch || '').toLowerCase()
+        return name.includes(q) || code.includes(q) || dept.includes(q) || pos.includes(q) || br.includes(q)
       })
     }
     return list
-  }, [payroll, selectedPeriodId, search])
+  }, [payroll, selectedPeriodId, branchFilter, search])
+
+  const isManager = ['Administrator', 'Admin', 'Store Administrator', 'Store Admin'].includes(user?.role)
 
   const total = displayed.length
   const paginated = displayed.slice((page - 1) * pageSize, page * pageSize)
@@ -277,9 +419,20 @@ export default function PayrollPage() {
           title="Payroll & Compensation"
           subtitle="Manage salary generation, statutory deductions, approval, and payslips"
           action={
-            ['Store Administrator', 'Store Admin'].includes(user?.role) ? (
-              <div className="flex gap-2">
+            isManager ? (
+              <div className="flex flex-wrap items-center gap-2">
                 <button
+                  type="button"
+                  onClick={handleOpenGenerateModal}
+                  disabled={generating}
+                  className="flex items-center gap-2 px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs cursor-pointer shadow-md transition-all active:scale-95 disabled:opacity-50"
+                  title="Generate payroll for every employee in open period"
+                >
+                  <FiZap className="w-4 h-4 text-amber-300" />
+                  <span>{generating ? 'Calculating...' : 'Generate Payroll'}</span>
+                </button>
+                <button
+                  type="button"
                   onClick={() => setNewPeriodModal(true)}
                   className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-border bg-card hover:bg-muted font-semibold text-xs text-foreground cursor-pointer shadow-2xs transition-colors"
                 >
@@ -287,6 +440,7 @@ export default function PayrollPage() {
                   <span>New Period</span>
                 </button>
                 <button
+                  type="button"
                   onClick={handleGenerate13thMonth}
                   disabled={generating}
                   className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-white font-semibold text-xs cursor-pointer shadow-2xs transition-colors disabled:opacity-50"
@@ -341,15 +495,15 @@ export default function PayrollPage() {
 
       {/* Filters */}
       <Card noPad className="p-3.5 border border-border">
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-3 items-end">
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-7 gap-3 items-end">
           {user?.role !== 'Employee' && (
-            <div className="lg:col-span-2">
+            <div className="sm:col-span-2 lg:col-span-2">
               <label className="text-[11px] font-bold text-muted-foreground uppercase mb-1 block">Employee Search</label>
               <div className="relative">
                 <FiSearch className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
                 <input
                   type="text"
-                  placeholder="Search name, code, dept..."
+                  placeholder="Search name, code, branch, dept..."
                   value={search}
                   onChange={e => { setSearch(e.target.value); setPage(1); }}
                   className="w-full pl-9 pr-8 py-1.5 text-xs border border-border rounded-lg bg-card text-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all placeholder:text-muted-foreground/70"
@@ -362,6 +516,31 @@ export default function PayrollPage() {
               </div>
             </div>
           )}
+          {user?.role !== 'Employee' && (
+            <div>
+              <label className="text-[11px] font-bold text-muted-foreground uppercase mb-1 block">
+                Branch {isStoreAdmin ? '(Assigned)' : ''}
+              </label>
+              <select
+                value={branchFilter}
+                disabled={isStoreAdmin}
+                onChange={e => {
+                  const val = e.target.value
+                  setBranchFilter(val)
+                  setPage(1)
+                  loadData(selectedPeriodId, { fromDate, toDate, status: filterStatus, branch: val })
+                  loadEmployees(val)
+                }}
+                className="w-full px-3 py-1.5 text-xs border border-border rounded-lg bg-card text-foreground cursor-pointer disabled:opacity-75 focus:outline-none focus:ring-2 focus:ring-primary/20"
+                title={isStoreAdmin ? `Locked to ${userBranchName || 'assigned branch'}` : 'Filter by branch'}
+              >
+                <option value="All">All Branches</option>
+                {branches.map(b => (
+                  <option key={b.id || b.branch_id || b.name} value={b.name}>{b.name}</option>
+                ))}
+              </select>
+            </div>
+          )}
           <div>
             <label className="text-[11px] font-bold text-muted-foreground uppercase mb-1 block">From Date</label>
             <input type="date" value={fromDate} onChange={e => setFromDate(e.target.value)} className="w-full px-3 py-1.5 text-xs border border-border rounded-lg bg-card text-foreground" />
@@ -372,7 +551,7 @@ export default function PayrollPage() {
           </div>
           <div>
             <label className="text-[11px] font-bold text-muted-foreground uppercase mb-1 block">Payroll Period</label>
-            <select value={selectedPeriodId} onChange={e => setSelectedPeriodId(e.target.value)} className="w-full px-3 py-1.5 text-xs border border-border rounded-lg bg-card text-foreground">
+            <select value={selectedPeriodId} onChange={e => handlePeriodChange(e.target.value)} className="w-full px-3 py-1.5 text-xs border border-border rounded-lg bg-card text-foreground">
               <option value="">All Periods</option>
               {periods.map(prd => <option key={prd.period_id} value={prd.period_id}>{prd.period_name}</option>)}
             </select>
@@ -387,7 +566,7 @@ export default function PayrollPage() {
               <option value="Pending">Pending</option>
             </select>
           </div>
-          <div>
+          <div className={user?.role === 'Employee' ? '' : 'sm:col-span-1'}>
             <button onClick={handleSearchFilters} className="w-full flex items-center justify-center gap-1.5 px-3 py-1.5 bg-primary text-primary-foreground font-semibold text-xs rounded-lg hover:bg-primary/90 transition-all cursor-pointer shadow-sm">
               <FiSearch className="w-3.5 h-3.5" />
               <span>Search</span>
@@ -396,23 +575,49 @@ export default function PayrollPage() {
         </div>
       </Card>
 
+      {/* Unprocessed Eligible Employees Alert Banner */}
+      {user?.role !== 'Employee' && unprocessedEmployees.length > 0 && selectedPeriodId && (
+        <div className="p-3.5 rounded-xl border border-amber-500/30 bg-amber-500/10 text-amber-900 dark:text-amber-200 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-2xs">
+          <div className="flex items-start gap-2.5">
+            <FiAlertCircle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+            <div>
+              <div className="font-bold text-xs">
+                {unprocessedEmployees.length} Eligible Employee{unprocessedEmployees.length > 1 ? 's' : ''} not yet generated for this period{branchFilter !== 'All' ? ` (${branchFilter})` : ''}
+              </div>
+              <div className="text-[11px] opacity-80 mt-0.5">
+                Missing from period: <span className="font-medium">{unprocessedEmployees.map(e => `${e.employee_name}${e.branch ? ` • ${e.branch}` : ''}`).join(', ')}</span>
+              </div>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={handleOpenGenerateModal}
+            className="px-3.5 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs shrink-0 cursor-pointer shadow-sm transition-all active:scale-95 flex items-center gap-1.5"
+          >
+            <FiZap className="w-3.5 h-3.5" />
+            <span>Generate Payroll Now</span>
+          </button>
+        </div>
+      )}
+
       {/* Table */}
       <Card noPad className="border border-border overflow-hidden">
         {loading ? (
-          <TableSkeleton rows={6} cols={9} />
+          <TableSkeleton rows={6} cols={12} />
         ) : paginated.length === 0 ? (
           <EmptyState
             icon={<TbCurrencyPeso className="w-12 h-12 text-muted-foreground/30 mx-auto" />}
             title="No payroll entries found for this period"
             description="Click 'Generate Payroll' to automatically compute salaries and deductions for active employees."
             action={
-              ['Store Administrator', 'Store Admin'].includes(user?.role) ? (
+              isManager ? (
                 <button
-                  onClick={handleGenerate}
+                  type="button"
+                  onClick={handleOpenGenerateModal}
                   disabled={generating}
-                  className="flex items-center gap-1.5 px-3.5 py-1.5 bg-primary text-primary-foreground font-bold text-xs rounded-xl cursor-pointer disabled:opacity-50"
+                  className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl cursor-pointer shadow-md transition-all active:scale-95 disabled:opacity-50"
                 >
-                  <FiZap className="w-4 h-4" />
+                  <FiZap className="w-4 h-4 text-amber-300" />
                   <span>{generating ? 'Generating...' : 'Generate Payroll Now'}</span>
                 </button>
               ) : null
@@ -421,11 +626,13 @@ export default function PayrollPage() {
         ) : (
           <>
             <div className="overflow-x-auto">
-              <table className="w-full text-xs min-w-[850px]">
+              <table className="w-full text-xs min-w-[1040px]">
                 <thead>
                   <tr className="border-b border-border bg-muted/50 text-muted-foreground uppercase font-semibold text-[11px]">
                     <th className="py-3 px-4 text-left">Code</th>
                     <th className="py-3 px-4 text-left">Employee Name</th>
+                    <th className="py-3 px-4 text-left">Branch</th>
+                    <th className="py-3 px-4 text-right">Reg. Hours</th>
                     <th className="py-3 px-4 text-right">Basic Pay</th>
                     <th className="py-3 px-4 text-right">OT Hours</th>
                     <th className="py-3 px-4 text-right">Overtime Pay</th>
@@ -440,7 +647,19 @@ export default function PayrollPage() {
                   {paginated.map((p, i) => (
                     <tr key={p.payroll_id || i} className={`hover:bg-muted/40 transition-colors ${i % 2 === 1 ? 'bg-muted/10' : ''}`}>
                       <td className="py-3 px-4 font-mono font-bold text-foreground">{p.employee_code}</td>
-                      <td className="py-3 px-4 font-semibold text-foreground">{p.employee_name}</td>
+                      <td className="py-3 px-4 font-semibold text-foreground">
+                        <div>{p.employee_name}</div>
+                        <div className="text-[10px] text-muted-foreground font-normal">
+                          {p.position || 'Staff'}{p.department ? ` • ${p.department}` : ''}
+                        </div>
+                      </td>
+                      <td className="py-3 px-4 text-left">
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 max-w-[190px] truncate" title={p.branch || 'Unassigned'}>
+                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0"></span>
+                          <span className="truncate">{p.branch || 'Unassigned'}</span>
+                        </span>
+                      </td>
+                      <td className="py-3 px-4 text-right font-mono text-muted-foreground">{p.regular_hours > 0 ? `${p.regular_hours}h` : '0h'}</td>
                       <td className="py-3 px-4 text-right font-mono">{fmt(p.basic_salary)}</td>
                       <td className="py-3 px-4 text-right font-mono text-muted-foreground">{p.overtime_hours > 0 ? `${p.overtime_hours}h` : '—'}</td>
                       <td className="py-3 px-4 text-right font-mono text-amber-600 font-semibold">{fmt(p.overtime_pay || 0)}</td>
@@ -458,7 +677,7 @@ export default function PayrollPage() {
                             <FiFileText className="w-3.5 h-3.5" />
                             <span>Slip</span>
                           </button>
-                          {['Store Administrator', 'Store Admin'].includes(user?.role) && p.status === 'Draft' && (
+                          {isManager && p.status === 'Draft' && (
                             <button
                               onClick={() => handleApprove(p.payroll_id)}
                               title="Approve payroll"
@@ -468,7 +687,7 @@ export default function PayrollPage() {
                               <span>Approve</span>
                             </button>
                           )}
-                          {['Store Administrator', 'Store Admin'].includes(user?.role) && p.status === 'Approved' && (
+                          {isManager && p.status === 'Approved' && (
                             <button
                               onClick={() => handleMarkPaid(p.payroll_id)}
                               title="Mark as Paid"
@@ -491,86 +710,8 @@ export default function PayrollPage() {
       </Card>
 
       {/* Payslip Modal */}
-      {payslip && (user?.role === 'Employee' || ['Administrator', 'Admin'].includes(user?.role)) && (
+      {payslip && (
         <EmployeePayslipModal payslip={payslip} onClose={() => setPayslip(null)} />
-      )}
-
-      {payslip && ['Store Administrator', 'Store Admin'].includes(user?.role) && (
-        <Modal
-          isOpen={true}
-          title={`Payslip: ${payslip.employee_name} (${payslip.period_name})`}
-          onClose={() => setPayslip(null)}
-          size="lg"
-        >
-          <div className="space-y-4 text-xs">
-            <div className="text-center border-b border-border pb-2">
-              <h3 className="font-bold text-sm text-foreground">Z-LICZ STORE</h3>
-              <p className="text-[11px] text-muted-foreground">Official Employee Pay Advice · Period: {payslip.period_name}</p>
-            </div>
-
-            <div className="grid grid-cols-2 gap-2 p-3 bg-muted/20 rounded-xl border border-border">
-              <div><span className="text-muted-foreground">Employee:</span> <span className="font-bold text-foreground">{payslip.employee_name} ({payslip.employee_code})</span></div>
-              <div><span className="text-muted-foreground">Department:</span> <span className="text-foreground">{payslip.department}</span></div>
-              <div><span className="text-muted-foreground">Position:</span> <span className="text-foreground">{payslip.position}</span></div>
-              <div><span className="text-muted-foreground">Status:</span> <span><StatusBadge status={payslip.status} /></span></div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-3 pt-1">
-              {/* Earnings */}
-              <div className="border border-border rounded-xl p-3 bg-card space-y-1.5">
-                <span className="font-bold text-emerald-600 uppercase tracking-wide block border-b border-border pb-1 text-[11px]">Earnings</span>
-                <div className="flex justify-between"><span>Basic Pay</span><span className="font-mono">{fmt(payslip.basic_salary)}</span></div>
-                <div className="flex justify-between"><span>Overtime Pay ({payslip.overtime_hours}h)</span><span className="font-mono">{fmt(payslip.overtime_pay)}</span></div>
-                <div className="flex justify-between"><span>Allowance</span><span className="font-mono">{fmt(payslip.allowance)}</span></div>
-                <div className="flex justify-between font-bold border-t border-border pt-1 text-foreground">
-                  <span>Total Gross</span>
-                  <span className="font-mono text-emerald-600">{fmt(payslip.gross_pay)}</span>
-                </div>
-              </div>
-
-              {/* Deductions */}
-              <div className="border border-border rounded-xl p-3 bg-card space-y-1.5">
-                <span className="font-bold text-rose-600 uppercase tracking-wide block border-b border-border pb-1 text-[11px]">Statutory Deductions</span>
-                {payslip.deductions?.length > 0 ? payslip.deductions.map(d => (
-                  <div key={d.deduction_id} className="flex justify-between items-center p-0.5 rounded">
-                    <span className="font-medium">{d.description || d.deduction_type}</span>
-                    <span className="font-mono text-rose-600 font-bold">{fmt(d.amount)}</span>
-                  </div>
-                )) : (
-                  <div className="text-muted-foreground italic text-center py-2">No deductions</div>
-                )}
-                <div className="flex justify-between font-bold border-t border-border pt-1 text-foreground">
-                  <span>Total Deductions</span>
-                  <span className="font-mono text-rose-600">{fmt(payslip.total_deductions)}</span>
-                </div>
-              </div>
-            </div>
-
-            <div className="border border-border p-3.5 rounded-xl flex justify-between items-center bg-muted/20">
-              <span className="font-bold text-sm text-foreground">NET TAKE-HOME PAY</span>
-              <span className="text-xl font-bold font-mono text-emerald-600">{fmt(payslip.net_pay)}</span>
-            </div>
-
-            <div className="flex justify-between items-center pt-2 border-t border-border">
-              <button
-                type="button"
-                onClick={() => window.print()}
-                className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl border border-border hover:bg-muted font-semibold cursor-pointer"
-              >
-                <FiPrinter className="w-3.5 h-3.5" />
-                <span>Print Payslip</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setPayslip(null)}
-                className="flex items-center gap-1 px-4 py-1.5 rounded-xl border border-border hover:bg-muted font-semibold cursor-pointer"
-              >
-                <FiX className="w-3.5 h-3.5" />
-                <span>Close</span>
-              </button>
-            </div>
-          </div>
-        </Modal>
       )}
 
       {/* New Period Modal */}
@@ -643,6 +784,263 @@ export default function PayrollPage() {
               >
                 <FiCheckCircle className="w-3.5 h-3.5" />
                 <span>{saving ? 'Creating...' : 'Create Period'}</span>
+              </button>
+            </div>
+          </form>
+        </Modal>
+      )}
+
+      {/* Generate Payroll Modal */}
+      {generateModal && (
+        <Modal
+          isOpen={true}
+          title="Generate Employee Payroll"
+          onClose={() => !generating && setGenerateModal(false)}
+          size="md"
+        >
+          <form onSubmit={handleGenerateSubmit} className="space-y-4 text-xs">
+            {/* Info Notice */}
+            <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-800 dark:text-emerald-300 flex items-start gap-2.5">
+              <FiZap className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+              <div className="text-[11px] leading-relaxed">
+                <span className="font-bold">Automated Calculation:</span> Generates payroll for employees by processing attendance records, regular &amp; overtime hours, statutory contributions (SSS, PhilHealth, Pag-IBIG), active loans, and allowances.
+              </div>
+            </div>
+
+            {/* Target Period */}
+            <div>
+              <label className="block font-bold text-muted-foreground uppercase text-[10px] tracking-wider mb-1.5">
+                Target Payroll Period *
+              </label>
+              <select
+                value={generatePeriodId}
+                onChange={e => setGeneratePeriodId(e.target.value)}
+                className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground text-xs focus:ring-2 focus:ring-emerald-500/20"
+              >
+                <option value="">⚡ Auto-Detect / Current Semi-Monthly Period</option>
+                {periods.map(prd => (
+                  <option key={prd.period_id} value={prd.period_id}>
+                    {prd.period_name} ({prd.start_date} to {prd.end_date}) [{prd.status}]
+                  </option>
+                ))}
+              </select>
+              <p className="text-[10px] text-muted-foreground mt-1">
+                If no period is chosen, the system automatically uses the open period or creates the current cycle.
+              </p>
+            </div>
+
+            {/* Target Branch */}
+            {user?.role !== 'Employee' && (
+              <div>
+                <label className="block font-bold text-muted-foreground uppercase text-[10px] tracking-wider mb-1.5">
+                  Target Branch {isStoreAdmin ? '(Assigned)' : ''}
+                </label>
+                <select
+                  value={modalBranch}
+                  disabled={isStoreAdmin}
+                  onChange={e => {
+                    const b = e.target.value
+                    setModalBranch(b)
+                    setGenerateEmployeeId('')
+                    loadEmployees(b)
+                  }}
+                  className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground text-xs focus:ring-2 focus:ring-emerald-500/20 disabled:opacity-75"
+                >
+                  <option value="All">All Branches</option>
+                  {branches.map(b => (
+                    <option key={b.id || b.branch_id || b.name} value={b.name}>{b.name}</option>
+                  ))}
+                </select>
+                <p className="text-[10px] text-muted-foreground mt-1">
+                  {isStoreAdmin
+                    ? `Generating exclusively for staff assigned to ${userBranchName || 'your branch'}.`
+                    : modalBranch === 'All'
+                    ? 'Generates payroll across all active branches.'
+                    : `Generates payroll exclusively for employees assigned to ${modalBranch}.`}
+                </p>
+              </div>
+            )}
+
+            {/* Target Scope: All or Single */}
+            <div>
+              <label className="block font-bold text-muted-foreground uppercase text-[10px] tracking-wider mb-1.5">
+                Target Scope *
+              </label>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setGenerateScope('all')}
+                  className={`flex items-center justify-between p-3 rounded-xl border text-left cursor-pointer transition-all ${
+                    generateScope === 'all'
+                      ? 'border-emerald-600 bg-emerald-500/10 text-emerald-950 dark:text-emerald-200 ring-2 ring-emerald-500/20 font-bold'
+                      : 'border-border bg-card hover:bg-muted/50 text-foreground'
+                  }`}
+                >
+                  <div>
+                    <div className="font-bold text-xs">All Active Employees</div>
+                    <div className="text-[10px] text-muted-foreground mt-0.5">Generate for everyone</div>
+                  </div>
+                  <span className="px-2 py-0.5 text-[10px] font-bold rounded-full bg-emerald-600 text-white">
+                    {employeeList.length || 'All'}
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setGenerateScope('single')}
+                  className={`flex items-center justify-between p-3 rounded-xl border text-left cursor-pointer transition-all ${
+                    generateScope === 'single'
+                      ? 'border-emerald-600 bg-emerald-500/10 text-emerald-950 dark:text-emerald-200 ring-2 ring-emerald-500/20 font-bold'
+                      : 'border-border bg-card hover:bg-muted/50 text-foreground'
+                  }`}
+                >
+                  <div>
+                    <div className="font-bold text-xs">Single Employee</div>
+                    <div className="text-[10px] text-muted-foreground mt-0.5">Pick one employee</div>
+                  </div>
+                  <FiUsers className="w-4 h-4 text-muted-foreground" />
+                </button>
+              </div>
+            </div>
+
+            {/* Single Employee Selection */}
+            {generateScope === 'single' && (
+              <div className="p-3 rounded-xl border border-border bg-muted/20 space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <label className="block font-bold text-muted-foreground uppercase text-[10px] tracking-wider">
+                    Select Active Employee *
+                  </label>
+                  <span className="text-[10px] text-muted-foreground font-semibold">
+                    {employeeList.length} Active Staff Account{employeeList.length === 1 ? '' : 's'}
+                  </span>
+                </div>
+                <select
+                  value={generateEmployeeId}
+                  onChange={e => setGenerateEmployeeId(e.target.value)}
+                  required={generateScope === 'single'}
+                  className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground text-xs font-medium focus:ring-2 focus:ring-emerald-500/20"
+                >
+                  <option value="">-- Choose an active employee ({employeeList.length} staff users) --</option>
+                  {employeeList.map(emp => (
+                    <option key={emp.employee_id} value={emp.employee_id}>
+                      {emp.employee_code}: {emp.full_name} {emp.username ? `(@${emp.username})` : ''} — {emp.role || emp.position} [{emp.branch_name}] (₱{Number(emp.basic_salary || 0).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })})
+                    </option>
+                  ))}
+                </select>
+
+                {/* Selected Employee Live Preview Card */}
+                {selectedEmp && (
+                  <div className="p-3 rounded-xl bg-card border border-emerald-500/30 shadow-xs flex flex-col gap-2">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        <div className="w-8 h-8 rounded-lg bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-bold flex items-center justify-center text-xs uppercase border border-emerald-500/20">
+                          {selectedEmp.first_name?.[0] || 'E'}{selectedEmp.last_name?.[0] || 'M'}
+                        </div>
+                        <div>
+                          <div className="font-bold text-xs text-foreground flex items-center gap-1.5">
+                            <span>{selectedEmp.full_name}</span>
+                            {selectedEmp.username && (
+                              <span className="font-mono text-[11px] font-normal text-emerald-600 dark:text-emerald-400">
+                                @{selectedEmp.username}
+                              </span>
+                            )}
+                          </div>
+                          <div className="text-[10px] text-muted-foreground">
+                            {selectedEmp.employee_code} • {selectedEmp.role || selectedEmp.position} ({selectedEmp.department || 'Operations'})
+                          </div>
+                        </div>
+                      </div>
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30">
+                        Active User
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-3 gap-2 pt-2 border-t border-border/60 text-[11px]">
+                      <div>
+                        <span className="block text-[9px] uppercase tracking-wider text-muted-foreground font-semibold">Branch</span>
+                        <span className="font-semibold text-foreground truncate block">{selectedEmp.branch_name}</span>
+                      </div>
+                      <div>
+                        <span className="block text-[9px] uppercase tracking-wider text-muted-foreground font-semibold">Basic Salary</span>
+                        <span className="font-bold font-mono text-emerald-600 dark:text-emerald-400">
+                          ₱{Number(selectedEmp.basic_salary || 0).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="block text-[9px] uppercase tracking-wider text-muted-foreground font-semibold">Pay Type</span>
+                        <span className="font-semibold text-foreground">{selectedEmp.pay_type || 'Cash'}</span>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Options */}
+            <div className="pt-2 border-t border-border space-y-3">
+              <div className="p-2.5 rounded-xl border border-border bg-muted/20">
+                <label className="flex items-start gap-2.5 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={requireAttendance}
+                    onChange={e => setRequireAttendance(e.target.checked)}
+                    className="rounded text-emerald-600 focus:ring-emerald-500 w-4 h-4 mt-0.5"
+                  />
+                  <div>
+                    <span className="text-xs text-foreground font-semibold">
+                      Strict Attendance-Only (&ldquo;No Work, No Pay&rdquo;)
+                    </span>
+                    <p className="text-[10px] text-muted-foreground mt-0.5 leading-relaxed">
+                      {requireAttendance
+                        ? '⚠️ Active: Employees with 0 attendance logs in this period will be SKIPPED and will not appear in payroll.'
+                        : '✅ Standard: Computes salary for ALL eligible employees (uses attendance logs if available; standard semi-monthly rate if attendance is not yet encoded).'}
+                    </p>
+                  </div>
+                </label>
+              </div>
+              <div>
+                <label className="flex items-center gap-2 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={recalculateExisting}
+                    onChange={e => setRecalculateExisting(e.target.checked)}
+                    className="rounded text-emerald-600 focus:ring-emerald-500 w-4 h-4"
+                  />
+                  <span className="text-xs text-foreground font-medium">
+                    Recalculate &amp; update existing draft payrolls (recommended)
+                  </span>
+                </label>
+                <p className="text-[10px] text-muted-foreground ml-6 mt-0.5">
+                  Overwrites unapproved draft entries with fresh calculations. Approved and Paid records will remain protected.
+                </p>
+              </div>
+            </div>
+
+            {/* Action Buttons */}
+            <div className="flex justify-end gap-2 pt-3 border-t border-border">
+              <button
+                type="button"
+                onClick={() => setGenerateModal(false)}
+                disabled={generating}
+                className="px-4 py-2 rounded-xl border border-border hover:bg-muted font-semibold cursor-pointer disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={generating || (generateScope === 'single' && !generateEmployeeId)}
+                className="flex items-center gap-2 px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold cursor-pointer shadow-md transition-all active:scale-95 disabled:opacity-50"
+              >
+                <FiZap className="w-4 h-4 text-amber-300" />
+                <span>
+                  {generating
+                    ? 'Processing Payroll...'
+                    : generateScope === 'all'
+                    ? `Generate for Active Staff (${employeeList.length})${modalBranch !== 'All' ? ` • ${modalBranch}` : ''}`
+                    : selectedEmp
+                    ? `Generate for ${selectedEmp.full_name} (${selectedEmp.employee_code})`
+                    : 'Generate for Selected Employee'}
+                </span>
               </button>
             </div>
           </form>

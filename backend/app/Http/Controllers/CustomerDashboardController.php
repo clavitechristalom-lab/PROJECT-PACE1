@@ -215,7 +215,12 @@ class CustomerDashboardController extends Controller
             'proof_of_payment' => 'nullable|file|mimes:jpeg,png,webp|max:5120',
         ]);
 
-        $product = Product::findOrFail($validated['product_id']);
+        $product = Product::find($validated['product_id']);
+        if (!$product) {
+            return response()->json([
+                'message' => 'The selected product is unavailable or no longer exists.'
+            ], 404);
+        }
         
         if ($product->stock_quantity <= 0) {
             return response()->json([

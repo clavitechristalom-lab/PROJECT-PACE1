@@ -17,5 +17,11 @@ return Application::configure(basePath: dirname(__DIR__))
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
-        //
+        $exceptions->render(function (\Illuminate\Database\Eloquent\ModelNotFoundException $e, \Illuminate\Http\Request $request) {
+            $modelName = class_basename($e->getModel());
+            return response()->json([
+                'message' => "The requested {$modelName} was not found or has been removed.",
+                'error' => 'not_found'
+            ], 404);
+        });
     })->create();

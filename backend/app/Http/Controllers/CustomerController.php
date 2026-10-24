@@ -9,14 +9,32 @@ use App\Models\SystemLog;
 use App\Models\Notification;
 use App\Models\User;
 use App\Models\PaymentSchedule;
+use Illuminate\Support\Facades\Cache;
 
 class CustomerController extends Controller
 {
     public function index(Request $request)
     {
-        $query = Customer::with(['installmentAccounts.payments', 'saleTransactions', 'branch', 'user', 'installmentAllowedByUser']);
-
         $user = auth()->user();
+
+        // 1-2s Performance Cache: bypass if exporting CSV
+        if (!$request->boolean('export_csv')) {
+            $fp = SyncController::computeFingerprint();
+            $cacheKey = 'pace_cust_idx_' . md5(json_encode([
+                'u' => $user ? $user->user_id : 0,
+                'r' => $user ? $user->role : '',
+                's' => $request->query('search', ''),
+                'st' => $request->query('status', ''),
+                'b' => $request->query('branch', ''),
+            ])) . '_' . $fp;
+
+            $cached = Cache::get($cacheKey);
+            if ($cached !== null) {
+                return response()->json($cached);
+            }
+        }
+
+        $query = Customer::with(['installmentAccounts.payments', 'branch', 'user', 'installmentAllowedByUser']);
 
         if ($user && $user->role === 'Store Administrator') {
             // Store Admin sees only their branch customers + unassigned (NULL branch) customers
@@ -133,10 +151,16 @@ class CustomerController extends Controller
             ];
         });
 
-        return response()->json([
+        $res = [
             'customers' => $customers,
             'total'     => $customers->count(),
-        ]);
+        ];
+
+        if (isset($cacheKey)) {
+            Cache::put($cacheKey, $res, 2);
+        }
+
+        return response()->json($res);
     }
 
     public function show($id)
@@ -283,7 +307,7 @@ class CustomerController extends Controller
             'first_name'    => 'required|string|max:255',
             'middle_name'   => 'nullable|string|max:255',
             'last_name'     => 'required|string|max:255',
-            'phone'         => 'required|string|max:50',
+            'phone'         => ['required', 'string', 'regex:/^(09\d{9}|639\d{9})$/'],
             'email'         => 'nullable|email|max:255',
             'address'       => 'nullable|string',
             'gender'        => 'nullable|string',
@@ -310,7 +334,7 @@ class CustomerController extends Controller
         $customer = Customer::create($validated);
 
         SystemLog::create([
-            'user_id'     => $request->input('user_id', 1),
+            'user_id'     => $request->user()?->user_id ?? $request->input('user_id'),
             'action'      => 'CREATE',
             'module'      => 'Customers',
             'description' => "Created new customer: {$customer->first_name} {$customer->last_name} ({$customer->customer_code})",
@@ -337,7 +361,7 @@ class CustomerController extends Controller
             'first_name'    => 'required|string|max:255',
             'middle_name'   => 'nullable|string|max:255',
             'last_name'     => 'required|string|max:255',
-            'phone'         => 'required|string|max:50',
+            'phone'         => ['required', 'string', 'regex:/^(09\d{9}|639\d{9})$/'],
             'email'         => 'nullable|email|max:255',
             'address'       => 'nullable|string',
             'gender'        => 'nullable|string',
@@ -358,7 +382,7 @@ class CustomerController extends Controller
         $customer->update($validated);
 
         SystemLog::create([
-            'user_id'     => $request->input('user_id', 1),
+            'user_id'     => $request->user()?->user_id ?? $request->input('user_id'),
             'action'      => 'UPDATE',
             'module'      => 'Customers',
             'description' => "Updated customer: {$customer->first_name} {$customer->last_name} ({$customer->customer_code})",
@@ -385,7 +409,7 @@ class CustomerController extends Controller
         $customer->delete();
 
         SystemLog::create([
-            'user_id'     => $request->input('user_id', 1),
+            'user_id'     => $request->user()?->user_id ?? $request->input('user_id'),
             'action'      => 'DELETE',
             'module'      => 'Customers',
             'description' => "Deleted customer: {$name} ({$code})",

@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import {
   FiSmartphone, FiCreditCard, FiFileText,
@@ -10,7 +10,7 @@ import {
   Table, TR, TD, SearchBar, PageHeader, StatCard, Card, Pagination, showToast,
   LoadingState, ErrorAlert, TableSkeleton, EmptyState,
 } from '../components/ui'
-import { fmt, fmtDate, filterBySearch } from '../lib/utils'
+import { fmt, fmtDate, filterBySearch, fastDeepEqual } from '../lib/utils'
 import { useAuth } from '../context/AuthContext'
 import { api } from '../lib/api'
 import { useRealtimeSync } from '../lib/realtimeSync'
@@ -87,9 +87,23 @@ export default function TransactionsPage() {
   // Modal State
   const [selectedTx, setSelectedTx] = useState(null)
 
+  const inFlightRef = useRef(false)
+  const isMountedRef = useRef(true)
+
+  useEffect(() => {
+    isMountedRef.current = true
+    return () => {
+      isMountedRef.current = false
+    }
+  }, [])
+
   const loadData = async (silent = false) => {
-    if (!silent) setLoading(true)
-    if (!silent) setError('')
+    if (inFlightRef.current) return
+    inFlightRef.current = true
+
+    const isBg = silent || transactions.length > 0
+    if (!isBg) setLoading(true)
+    if (!isBg) setError('')
     try {
       let from = dateFrom || undefined
       let to = dateTo || undefined
@@ -111,17 +125,25 @@ export default function TransactionsPage() {
         date_to: to,
       })
 
-      setTransactions(res.transactions || [])
-      setSummary(res.summary || null)
+      if (!isMountedRef.current) return
+
+      const newTx = res.transactions || []
+      const newSummary = res.summary || null
+      setTransactions(prev => (fastDeepEqual(prev, newTx) ? prev : newTx))
+      setSummary(prev => (fastDeepEqual(prev, newSummary) ? prev : newSummary))
 
       if (!settings && api.system?.getSettings) {
-        api.system.getSettings().then(s => setSettings(s)).catch(() => { })
+        api.system.getSettings().then(s => {
+          if (isMountedRef.current) setSettings(s)
+        }).catch(() => { })
       }
     } catch (err) {
+      if (!isMountedRef.current) return
       console.error('Failed to load transaction history:', err)
-      if (!silent) setError(err.message || 'Failed to fetch transaction history')
+      if (!isBg) setError(err.message || 'Failed to fetch transaction history')
     } finally {
-      if (!silent) setLoading(false)
+      inFlightRef.current = false
+      if (!isBg && isMountedRef.current) setLoading(false)
     }
   }
 
@@ -133,7 +155,7 @@ export default function TransactionsPage() {
 
   useRealtimeSync(() => {
     loadData(true)
-  }, [activeChannelTab, typeFilter, providerFilter, dateRange, dateFrom, dateTo, search])
+  }, [activeChannelTab, typeFilter, providerFilter, dateRange, dateFrom, dateTo, search], { periodic: true })
 
   useEffect(() => {
     const id = searchParams.get('id')
@@ -560,7 +582,7 @@ export default function TransactionsPage() {
               {/* Company Info Left */}
               <div className="text-xs space-y-1">
                 <p className="font-bold text-sm text-gray-800 uppercase">{settings?.company_name || 'Z-LICZ COMPANY'}</p>
-                <p className="text-gray-600 uppercase">{user?.employee?.branch?.name || user?.customer?.branch_name || 'Main Branch / Headquarters'}</p>
+                <p className="text-gray-600 uppercase">{user?.employee?.branch?.name || user?.customer?.branch_name || 'Headquarters'}</p>
                 <p className="text-gray-600">Z-LICZ • System Generated Report</p>
               </div>
 

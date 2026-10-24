@@ -516,6 +516,8 @@ export default function LoginPage() {
     }
     if (!signUpData.phone.trim()) {
       errors.phone = 'Phone number is required'
+    } else if (!/^09\d{9}$/.test(signUpData.phone.trim())) {
+      errors.phone = 'Phone number must be exactly 11 digits starting with 09 (e.g. 09123456789)'
     }
     if (!signUpData.address.trim()) {
       errors.address = 'Complete address is required'
@@ -1640,16 +1642,18 @@ export default function LoginPage() {
                     </div>
 
                     <div>
-                      <label className="block text-xs font-semibold text-slate-300 mb-1">Phone Number</label>
+                      <label className="block text-xs font-semibold text-slate-300 mb-1">Phone Number (11 digits)</label>
                       <input
                         type="tel"
+                        maxLength={11}
                         value={signUpData.phone}
                         onChange={(e) => {
-                          setSignUpData({ ...signUpData, phone: e.target.value.replace(/\D/g, '') })
+                          const val = e.target.value.replace(/\D/g, '').slice(0, 11)
+                          setSignUpData({ ...signUpData, phone: val })
                           if (signUpErrors.phone) setSignUpErrors({ ...signUpErrors, phone: '' })
                         }}
                         placeholder="e.g. 09123456789"
-                        className={`w-full bg-white/5 border rounded-xl px-4 py-2.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 transition-all ${signUpErrors.phone ? 'border-rose-500/80 focus:ring-rose-500/30' : 'border-slate-800 focus:border-blue-500 focus:ring-blue-500/20'}`}
+                        className={`w-full bg-white/5 border rounded-xl px-4 py-2.5 text-sm text-white placeholder-slate-500 font-mono focus:outline-none focus:ring-2 transition-all ${signUpErrors.phone ? 'border-rose-500/80 focus:ring-rose-500/30' : 'border-slate-800 focus:border-blue-500 focus:ring-blue-500/20'}`}
                       />
                       {signUpErrors.phone && <p className="text-[11px] text-rose-400 mt-1">{signUpErrors.phone}</p>}
                     </div>

@@ -10,7 +10,7 @@ import {
   Table, TR, TD, SearchBar, PageHeader, StatCard, Card, Pagination, showToast,
   LoadingState, ErrorAlert, StatSkeleton, TableSkeleton, EmptyState, confirmAction
 } from '../components/ui'
-import { fmt, filterBySearch } from '../lib/utils'
+import { fmt, filterBySearch, fastDeepEqual } from '../lib/utils'
 import api, { downloadCsv } from '../lib/api'
 import { useRealtimeSync, triggerDataSync } from '../lib/realtimeSync'
 import { FiDownload } from 'react-icons/fi'
@@ -26,7 +26,12 @@ export default function ProductsPage({ branchFilter, embedded }) {
   const isAdmin = user?.role === 'Administrator'
   const canManage = isAdmin || user?.role === 'Store Administrator' || user?.role === 'Store Admin'
   const [searchParams] = useSearchParams()
-  const [products, setProducts] = useState([])
+  const [products, setProducts] = useState(() => {
+    try {
+      const saved = sessionStorage.getItem('pace_cached_products')
+      return saved ? JSON.parse(saved) : []
+    } catch { return [] }
+  })
 
   const dynamicCategories = useMemo(() => {
     const cats = new Set(products.map(p => p.category).filter(Boolean));
@@ -36,7 +41,9 @@ export default function ProductsPage({ branchFilter, embedded }) {
   }, [products]);
 
   const [branches, setBranches] = useState([])
-  const [loading, setLoading] = useState(true)
+  const [loading, setLoading] = useState(() => {
+    return !sessionStorage.getItem('pace_cached_products')
+  })
   const [error, setError] = useState('')
   const [search, setSearch] = useState('')
   const [category, setCategory] = useState('All')
@@ -86,7 +93,7 @@ export default function ProductsPage({ branchFilter, embedded }) {
   const [removeImages, setRemoveImages] = useState([false, false, false, false])
 
   const loadProducts = async (source) => {
-    const isBackground = source === 'timer' || source === 'database' || source === 'event' || source === 'focus' || source === 'mutation'
+    const isBackground = source === 'timer' || source === 'database' || source === 'event' || source === 'focus' || source === 'mutation' || products.length > 0
     if (!isBackground) {
       setLoading(true)
     }
@@ -101,9 +108,19 @@ export default function ProductsPage({ branchFilter, embedded }) {
         }),
         isAdmin ? api.branches.getAll() : Promise.resolve({ branches: [] })
       ])
-      setProducts(data.products || [])
-      if (isAdmin) setBranches(branchesData.branches || [])
+      const newProducts = data?.products || []
+      setProducts(prev => fastDeepEqual(prev, newProducts) ? prev : newProducts)
+      if (isAdmin) {
+        const newBranches = branchesData?.branches || []
+        setBranches(prev => fastDeepEqual(prev, newBranches) ? prev : newBranches)
+      }
+      try {
+        if (!search && category === 'All' && stockStatus === 'All') {
+          sessionStorage.setItem('pace_cached_products', JSON.stringify(newProducts))
+        }
+      } catch (e) { }
     } catch (err) {
+      if (err?.name === 'AbortError') return
       if (!isBackground) {
         console.error('Failed to load products:', err)
         setError(err.message || 'Failed to fetch products')
@@ -120,7 +137,7 @@ export default function ProductsPage({ branchFilter, embedded }) {
   }, [category, stockStatus])
 
   // Real-time synchronization
-  useRealtimeSync(loadProducts, [category, stockStatus, search])
+  useRealtimeSync(loadProducts, [category, stockStatus, search], { periodic: true })
 
   useEffect(() => {
     const id = searchParams.get('id')
@@ -160,6 +177,9 @@ export default function ProductsPage({ branchFilter, embedded }) {
       }
       payload.set('stock_quantity', parseInt(form.stock_quantity) || 0);
       payload.set('reorder_level', parseInt(form.reorder_level) || 0);
+      if (user?.user_id) {
+        payload.set('user_id', user.user_id);
+      }
 
       // Append images
       imageFiles.forEach((file, index) => {
@@ -277,6 +297,9 @@ export default function ProductsPage({ branchFilter, embedded }) {
         payload.append('discount_price', parseFloat(discountForm.discount_price));
       } else {
         payload.append('discount_price', '');
+      }
+      if (user?.user_id) {
+        payload.append('user_id', user.user_id);
       }
 
       const res = await api.products.update(discountModal.product_id, payload)

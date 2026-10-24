@@ -59,7 +59,7 @@ export default function CreateBranchModal({ isOpen, onClose, onCreate }) {
             name="name"
             value={formData.name}
             onChange={handleChange}
-            placeholder="e.g. Main Branch"
+            placeholder="e.g. Cagayan de Oro Branch"
             className="w-full px-3 py-2 bg-muted/40 border border-border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
           />
         </div>

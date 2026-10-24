@@ -11,12 +11,13 @@ import {
   Btn, Badge, StatusBadge, Input, Select, Card, PageHeader, StatCard, Table, TR, TD,
   SearchBar, Pagination, TabBar, showToast, LoadingState, ErrorAlert, TableSkeleton, EmptyState, Modal,
 } from '../components/ui'
-import { fmtDate, filterBySearch } from '../lib/utils'
+import { fmtDate, filterBySearch, fastDeepEqual } from '../lib/utils'
 import { api, downloadCsv } from '../lib/api'
 import { useRealtimeSync, triggerDataSync } from '../lib/realtimeSync'
 import { Html5Qrcode } from 'html5-qrcode'
 import { QRCodeSVG } from 'qrcode.react'
 import QrMonitoringModal from '../components/attendance/QrMonitoringModal'
+import FaceRecognitionAttendanceModal from '../components/attendance/FaceRecognitionAttendanceModal'
 
 const DEPARTMENTS = ['All', 'Operations', 'Sales', 'Finance']
 const STATUSES = ['All', 'Present', 'Late', 'Absent', 'Half Day']
@@ -63,19 +64,32 @@ export default function AttendancePage() {
   const isAdmin = user?.role === 'Administrator'
   const isEmployee = user?.role === 'Employee'
   const isStoreAdmin = user?.role === 'Store Administrator' || user?.role === 'Store Admin'
-  const userBranch = user?.employee?.branch?.name || 'Main Branch'
+  const userBranch = user?.employee?.branch?.name || (typeof user?.employee?.branch === 'string' ? user.employee.branch : '') || 'All Branches'
 
   const location = useLocation()
   const [searchParams] = useSearchParams()
   const [qrMonitoringOpen, setQrMonitoringOpen] = useState(false)
-  
+  const [faceAuthModalOpen, setFaceAuthModalOpen] = useState(false)
+
   // Default tab based on role
   const [activeTab, setActiveTab] = useState(
     isEmployee ? 'my-qr' : isStoreAdmin ? 'punch' : 'log'
   )
-  const [records, setRecords] = useState([])
-  const [summary, setSummary] = useState(null)
-  const [loading, setLoading] = useState(true)
+  const [records, setRecords] = useState(() => {
+    try {
+      const saved = sessionStorage.getItem('pace_cached_attendance_records')
+      return saved ? JSON.parse(saved) : []
+    } catch { return [] }
+  })
+  const [summary, setSummary] = useState(() => {
+    try {
+      const saved = sessionStorage.getItem('pace_cached_attendance_summary')
+      return saved ? JSON.parse(saved) : null
+    } catch { return null }
+  })
+  const [loading, setLoading] = useState(() => {
+    return !sessionStorage.getItem('pace_cached_attendance_records')
+  })
   const [error, setError] = useState('')
   const [schedule, setSchedule] = useState({
     labels: { time_in: '08:00 AM', cutoff: '08:05 AM', lunch_out: '12:00 PM', lunch_in: '01:00 PM', time_out: '05:00 PM' },
@@ -136,24 +150,52 @@ export default function AttendancePage() {
   const isScannerRunningRef = useRef(false)
   const isProcessingScan = useRef(false) // Debouncing lock
   const fileInputRef = useRef(null)
+  const inFlightRef = useRef(false)
+  const isMountedRef = useRef(true)
+
+  useEffect(() => {
+    isMountedRef.current = true
+    return () => {
+      isMountedRef.current = false
+    }
+  }, [])
 
   const loadData = async (silent = false) => {
-    if (!silent) setLoading(true)
-    if (!silent) setError('')
+    if (inFlightRef.current) return
+    inFlightRef.current = true
+
+    const isBg = silent || records.length > 0
+    if (!isBg) setLoading(true)
+    if (!isBg) setError('')
     try {
       const data = await api.attendance.getDaily({
         date: selectedDate || undefined,
         department: deptFilter !== 'All' ? deptFilter : undefined,
         status: statusFilter !== 'All' ? statusFilter : undefined,
       })
-      setRecords(data.records || data.attendance || [])
-      setSummary(data.summary || data.stats || null)
-      if (data.schedule?.labels) setSchedule(data.schedule)
+      if (!isMountedRef.current) return
+      const newRecords = data.records || data.attendance || []
+      const newSummary = data.summary || data.stats || null
+      setRecords(prev => (fastDeepEqual(prev, newRecords) ? prev : newRecords))
+      setSummary(prev => (fastDeepEqual(prev, newSummary) ? prev : newSummary))
+      if (data.schedule?.labels) {
+        setSchedule(prev => (fastDeepEqual(prev, data.schedule) ? prev : data.schedule))
+      }
+      try {
+        if (!selectedDate && deptFilter === 'All' && statusFilter === 'All') {
+          sessionStorage.setItem('pace_cached_attendance_records', JSON.stringify(newRecords))
+          if (newSummary) {
+            sessionStorage.setItem('pace_cached_attendance_summary', JSON.stringify(newSummary))
+          }
+        }
+      } catch (e) { }
     } catch (err) {
+      if (!isMountedRef.current) return
       console.error('Failed to load attendance:', err)
-      if (!silent) setError(err.message || 'Failed to fetch attendance records')
+      if (!isBg) setError(err.message || 'Failed to fetch attendance records')
     } finally {
-      if (!silent) setLoading(false)
+      inFlightRef.current = false
+      if (!isBg && isMountedRef.current) setLoading(false)
     }
   }
 
@@ -165,7 +207,8 @@ export default function AttendancePage() {
         status: scanLogsStatusFilter !== 'All' ? scanLogsStatusFilter : undefined,
         action_type: scanLogsActionFilter !== 'All' ? scanLogsActionFilter : undefined,
       })
-      setScanLogs(res.logs || [])
+      const newLogs = res.logs || []
+      setScanLogs(prev => (fastDeepEqual(prev, newLogs) ? prev : newLogs))
       setScanLogsTotal(res.total || 0)
     } catch (err) {
       console.error('Failed to load scan logs:', err)
@@ -180,7 +223,7 @@ export default function AttendancePage() {
     try {
       const res = await api.employees.getMe()
       if (res?.employee) {
-        setMyProfile(res.employee)
+        setMyProfile(prev => (fastDeepEqual(prev, res.employee) ? prev : res.employee))
       }
     } catch (err) {
       console.error('Failed to load employee profile:', err)
@@ -231,7 +274,7 @@ export default function AttendancePage() {
     if (isEmployee || isStoreAdmin) {
       loadMyProfile(true)
     }
-  }, [activeTab, selectedDate, deptFilter, statusFilter, scanLogsPage, scanLogsStatusFilter, scanLogsActionFilter, isEmployee, isStoreAdmin])
+  }, [activeTab, selectedDate, deptFilter, statusFilter, scanLogsPage, scanLogsStatusFilter, scanLogsActionFilter, isEmployee, isStoreAdmin], { periodic: true })
 
   useEffect(() => {
     const searchParam = searchParams.get('search')
@@ -240,6 +283,14 @@ export default function AttendancePage() {
     const tabParam = searchParams.get('tab')
     if (tabParam) {
       setActiveTab(tabParam)
+      if (tabParam === 'punch') {
+        setStationStep('scan')
+        setPunchResult(null)
+        setScannedQrToken('')
+        setIdentifiedEmployee(null)
+        setCameraActive(true)
+        isProcessingScan.current = false
+      }
     } else if (idParam || searchParam || dateParam) {
       setActiveTab('log')
       if (searchParam) setSearch(searchParam)
@@ -259,6 +310,29 @@ export default function AttendancePage() {
       stopCamera()
     }
   }, [activeTab, stationStep, cameraActive, selectedCameraId, isStoreAdmin])
+
+  // Return to Scan Employee QR Code screen on Cancel (Rule 6)
+  useEffect(() => {
+    const handleReturnToQr = async () => {
+      setFaceAuthModalOpen(false)
+      setQrMonitoringOpen(false)
+      setStationStep('scan')
+      if (isStoreAdmin) setActiveTab('punch')
+      setPunchResult(null)
+      setScannedQrToken('')
+      setIdentifiedEmployee(null)
+      setCameraActive(true)
+      isProcessingScan.current = false
+      try {
+        await stopCamera()
+      } catch (_) {}
+      setTimeout(() => {
+        startCamera()
+      }, 80)
+    }
+    window.addEventListener('pace:return-to-qr-scan', handleReturnToQr)
+    return () => window.removeEventListener('pace:return-to-qr-scan', handleReturnToQr)
+  }, [isStoreAdmin])
 
   const checkCameraPermission = async () => {
     // Check if getUserMedia is supported
@@ -294,16 +368,16 @@ export default function AttendancePage() {
     setCameraError('')
     try {
       if (isScannerRunningRef.current) return;
-      
+
       const hasPermission = await checkCameraPermission()
       if (!hasPermission) return // Error state is already set by checkCameraPermission
 
       const devices = await Html5Qrcode.getCameras()
       if (devices && devices.length > 0) {
         setCameras(devices)
-        const backCam = devices.find(d => 
-          d.label.toLowerCase().includes('back') || 
-          d.label.toLowerCase().includes('rear') || 
+        const backCam = devices.find(d =>
+          d.label.toLowerCase().includes('back') ||
+          d.label.toLowerCase().includes('rear') ||
           d.label.toLowerCase().includes('environment')
         )
         const cameraId = selectedCameraId || (backCam ? backCam.id : devices[0].id)
@@ -321,7 +395,7 @@ export default function AttendancePage() {
               aspectRatio: 1.0,
             },
             onQrCodeScanned,
-            () => {} // Ignore continuous frame errors
+            () => { } // Ignore continuous frame errors
           )
           isScannerRunningRef.current = true
         }
@@ -351,13 +425,13 @@ export default function AttendancePage() {
 
   const onQrCodeScanned = async (decodedText) => {
     if (!decodedText || verifyingQr || isProcessingScan.current) return
-    
+
     // Lock the scanner immediately
     isProcessingScan.current = true
-    
+
     playTone('beep')
     await handleVerifyQr(decodedText.trim())
-    
+
     // Release the lock after the backend responds
     isProcessingScan.current = false
   }
@@ -420,8 +494,9 @@ export default function AttendancePage() {
           } else if (res.status === 'FAILED') {
             clearInterval(interval)
             playTone('error')
-            setPinError(res.log.failure_reason || 'Verification failed')
-            showToast('Employee verification failed or rejected.', 'error')
+            const reason = res.log?.failure_reason || 'Employee verification failed or rejected.'
+            setPinError(reason)
+            showToast(reason, 'error')
             setStationStep('scan')
             startCamera()
           }
@@ -432,6 +507,36 @@ export default function AttendancePage() {
     }
     return () => clearInterval(interval)
   }, [stationStep, punchResult?.log_id])
+
+  const handleCancelWaiting = async () => {
+    const logId = punchResult?.log_id
+    if (logId) {
+      try {
+        await api.attendance.rejectVerification({
+          scan_log_id: logId,
+          reason: 'Attendance authorization cancelled by Store Administrator.'
+        })
+      } catch (_) {}
+    }
+    setStationStep('scan')
+    setPunchResult(null)
+    setScannedQrToken('')
+    setIdentifiedEmployee(null)
+    setCameraActive(true)
+    isProcessingScan.current = false
+    try {
+      await stopCamera()
+    } catch (_) {}
+    setTimeout(() => {
+      startCamera()
+    }, 80)
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('pace:return-to-qr-scan', {
+        detail: { authorized: false, cancelled: true, requestId: logId }
+      }))
+      window.dispatchEvent(new CustomEvent('pace:verifications-sync'))
+    }
+  }
 
   const handleManualTokenSubmit = (e) => {
     e?.preventDefault()
@@ -445,14 +550,14 @@ export default function AttendancePage() {
 
     setVerifyingQr(true)
     setCameraError('')
-    
+
     try {
       const formData = new FormData()
       formData.append('qr_image', file)
       formData.append('device_info', `${navigator.platform} (${navigator.userAgent})`)
 
       const res = await api.attendance.scanImage(formData)
-      
+
       if (res.success && res.status === 'PENDING') {
         setScannedQrToken(res.qr_token || 'IMAGE_SCANNED')
         setIdentifiedEmployee(res.employee)
@@ -655,18 +760,18 @@ export default function AttendancePage() {
   // Determine Tab Options
   const tabList = isEmployee
     ? [
-        { id: 'my-qr', label: 'My Permanent QR Badge', icon: <FiSmartphone className="w-3.5 h-3.5" /> },
-        { id: 'log', label: 'My Attendance Logs', icon: <FiClock className="w-3.5 h-3.5" /> },
-        { id: 'timesheet', label: 'My Timesheet Summary', icon: <FiBarChart2 className="w-3.5 h-3.5" /> },
-      ]
+      { id: 'my-qr', label: 'My Permanent QR Badge', icon: <FiSmartphone className="w-3.5 h-3.5" /> },
+      { id: 'log', label: 'My Attendance Logs', icon: <FiClock className="w-3.5 h-3.5" /> },
+      { id: 'timesheet', label: 'My Timesheet Summary', icon: <FiBarChart2 className="w-3.5 h-3.5" /> },
+    ]
     : isStoreAdmin
-    ? [
+      ? [
         { id: 'punch', label: 'QR Attendance Terminal', icon: <FiCamera className="w-3.5 h-3.5 text-primary" /> },
         { id: 'log', label: 'Branch Attendance Daily Logs', icon: <FiClock className="w-3.5 h-3.5" /> },
         { id: 'timesheet', label: 'Timesheet & Summary', icon: <FiBarChart2 className="w-3.5 h-3.5" /> },
         { id: 'audit', label: 'Security Scan Logs', icon: <FiShield className="w-3.5 h-3.5" /> },
       ]
-    : [
+      : [
         { id: 'log', label: 'Attendance Daily Logs', icon: <FiClock className="w-3.5 h-3.5" /> },
         { id: 'timesheet', label: 'Timesheet & Weekly Summary', icon: <FiBarChart2 className="w-3.5 h-3.5" /> },
         { id: 'audit', label: 'Security Scan Logs', icon: <FiShield className="w-3.5 h-3.5" /> },
@@ -679,15 +784,15 @@ export default function AttendancePage() {
           isEmployee
             ? "My Attendance & Permanent QR Badge"
             : isStoreAdmin
-            ? "QR Attendance Terminal & Branch Logs"
-            : "Attendance Logs & Verification Records"
+              ? "QR Attendance Terminal & Branch Logs"
+              : "Attendance Logs & Verification Records"
         }
         subtitle={
           isEmployee
             ? "View your permanent QR attendance badge, punch records, and monthly timesheet summary"
             : isStoreAdmin
-            ? `Store Administrator Scanner Terminal • Authorized Branch: ${userBranch}`
-            : "Monitor organization-wide attendance records, QR + PIN verification methods, and work hours"
+              ? `Store Administrator Scanner Terminal • Authorized Branch: ${userBranch}`
+              : "Monitor organization-wide attendance records, QR + PIN verification methods, and work hours"
         }
         action={
           <div className="flex gap-2 flex-wrap">
@@ -711,6 +816,15 @@ export default function AttendancePage() {
                 QR Monitoring
               </Btn>
             )}
+            <Btn
+              variant="outline"
+              size="sm"
+              onClick={() => setFaceAuthModalOpen(true)}
+              icon={<FiCamera className="w-4 h-4 text-emerald-400" />}
+              className="border-emerald-500/40 text-emerald-400 hover:bg-emerald-500/10"
+            >
+              Face Authorization
+            </Btn>
             {isStoreAdmin && activeTab !== 'punch' && (
               <Btn
                 variant="primary"
@@ -763,29 +877,29 @@ export default function AttendancePage() {
                 <div className="p-4 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-500 text-xs font-semibold text-center mx-auto max-w-sm mb-4 space-y-3">
                   <div className="whitespace-pre-line">{cameraError}</div>
                   <div className="flex items-center justify-center gap-3">
-                    <button 
-                      type="button" 
-                      onClick={startCamera} 
+                    <button
+                      type="button"
+                      onClick={startCamera}
                       className="px-4 py-2 bg-amber-500/20 hover:bg-amber-500/30 text-amber-600 rounded-lg transition-colors flex items-center gap-2"
                     >
                       <FiRefreshCw className="w-3.5 h-3.5" />
                       Retry Camera
                     </button>
-                    <button 
-                      type="button" 
-                      onClick={() => fileInputRef.current?.click()} 
+                    <button
+                      type="button"
+                      onClick={() => fileInputRef.current?.click()}
                       className="px-4 py-2 bg-primary/20 hover:bg-primary/30 text-primary rounded-lg transition-colors flex items-center gap-2"
                     >
                       <FiUpload className="w-3.5 h-3.5" />
                       Upload Image
                     </button>
-                    <input 
-                      type="file" 
+                    <input
+                      type="file"
                       ref={fileInputRef}
-                      className="hidden" 
-                      accept="image/*" 
+                      className="hidden"
+                      accept="image/*"
                       capture="environment"
-                      onChange={handleFileUpload} 
+                      onChange={handleFileUpload}
                     />
                   </div>
                 </div>
@@ -842,14 +956,14 @@ export default function AttendancePage() {
                   <Btn type="submit" size="sm" variant="primary" disabled={verifyingQr || !manualTokenInput.trim()}>
                     Scan
                   </Btn>
-                  
+
                   {/* File Upload Button Fallback */}
                   <label className="flex items-center justify-center px-3 py-1.5 rounded-xl bg-muted hover:bg-muted/80 text-foreground cursor-pointer transition-colors border border-border shadow-xs">
-                    <input 
-                      type="file" 
-                      accept="image/*" 
-                      className="hidden" 
-                      onChange={handleFileUpload} 
+                    <input
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={handleFileUpload}
                       disabled={verifyingQr}
                     />
                     <FiCamera className="w-4 h-4 text-muted-foreground" />
@@ -875,9 +989,9 @@ export default function AttendancePage() {
                   Employee {punchResult.employee?.name} must enter their PIN on their own device to complete the attendance.
                 </p>
               </div>
-              
+
               <div className="pt-2">
-                <Btn variant="outline" size="lg" className="w-full" onClick={() => { setStationStep('scan'); startCamera(); }} icon={<FiCamera />}>
+                <Btn variant="outline" size="lg" className="w-full" onClick={handleCancelWaiting} icon={<FiCamera />}>
                   Cancel & Scan Next Employee
                 </Btn>
               </div>
@@ -896,8 +1010,8 @@ export default function AttendancePage() {
                   {punchResult.action === 'TIME_IN'
                     ? '✓ TIME IN SUCCESSFUL'
                     : punchResult.action === 'TIME_OUT'
-                    ? '✓ TIME OUT SUCCESSFUL'
-                    : '✓ ATTENDANCE VERIFIED'}
+                      ? '✓ TIME OUT SUCCESSFUL'
+                      : '✓ ATTENDANCE VERIFIED'}
                 </h2>
                 <p className="text-xs text-muted-foreground mt-1">
                   {punchResult.message}
@@ -983,7 +1097,7 @@ export default function AttendancePage() {
                   {myProfile.first_name} {myProfile.last_name}
                 </h3>
                 <p className="text-xs text-primary font-semibold mt-0.5">{myProfile.position}</p>
-                <p className="text-[11px] text-slate-400">{myProfile.department} · {myProfile.branch?.name || (typeof myProfile.branch === 'string' ? myProfile.branch : 'Main Branch')}</p>
+                <p className="text-[11px] text-slate-400">{myProfile.department}{myProfile.branch?.name || (typeof myProfile.branch === 'string' ? myProfile.branch : '') ? ` · ${myProfile.branch?.name || (typeof myProfile.branch === 'string' ? myProfile.branch : '')}` : ''}</p>
 
                 <div className="mt-2 font-mono text-xs font-bold text-slate-200 bg-slate-800/80 px-3 py-1 rounded-full border border-slate-700">
                   {myProfile.employee_code}
@@ -1443,7 +1557,7 @@ export default function AttendancePage() {
                             <div className="font-semibold text-foreground">{l.employee_name}</div>
                             <div className="text-[11px] font-mono text-muted-foreground">{l.employee_code}</div>
                           </td>
-                          <td className="py-3 px-4 font-medium text-foreground">{l.branch?.name || (typeof l.branch === 'string' ? l.branch : 'Main Branch')}</td>
+                          <td className="py-3 px-4 font-medium text-foreground">{l.branch?.name || (typeof l.branch === 'string' ? l.branch : '') || '—'}</td>
                           <td className="py-3 px-4 font-mono font-bold text-primary">{l.action_type}</td>
                           <td className="py-3 px-4 text-center">
                             {l.qr_verified ? (
@@ -1467,8 +1581,8 @@ export default function AttendancePage() {
                                 l.status === 'SUCCESS'
                                   ? 'success'
                                   : l.status === 'FAILED'
-                                  ? 'danger'
-                                  : 'warning'
+                                    ? 'danger'
+                                    : 'warning'
                               }
                             >
                               {l.status}
@@ -1492,6 +1606,57 @@ export default function AttendancePage() {
         open={qrMonitoringOpen}
         isOpen={qrMonitoringOpen}
         onClose={() => setQrMonitoringOpen(false)}
+      />
+
+      {/* FACE RECOGNITION ATTENDANCE AUTHORIZATION MODAL */}
+      <FaceRecognitionAttendanceModal
+        isOpen={faceAuthModalOpen}
+        employee={user?.employee || user}
+        onClose={() => {
+          setFaceAuthModalOpen(false)
+          setStationStep('scan')
+          setActiveTab('punch')
+          setPunchResult(null)
+          setScannedQrToken('')
+          setIdentifiedEmployee(null)
+          setCameraActive(true)
+          isProcessingScan.current = false
+          setTimeout(() => startCamera(), 80)
+        }}
+        onCancel={() => {
+          setFaceAuthModalOpen(false)
+          setStationStep('scan')
+          setActiveTab('punch')
+          setPunchResult(null)
+          setScannedQrToken('')
+          setIdentifiedEmployee(null)
+          setCameraActive(true)
+          isProcessingScan.current = false
+          setTimeout(() => startCamera(), 80)
+        }}
+        onAuthorize={() => {
+          setFaceAuthModalOpen(false)
+          setStationStep('scan')
+          setActiveTab('punch')
+          setPunchResult(null)
+          setScannedQrToken('')
+          setIdentifiedEmployee(null)
+          setCameraActive(true)
+          isProcessingScan.current = false
+          setTimeout(() => startCamera(), 80)
+        }}
+        onSuccess={() => {
+          setFaceAuthModalOpen(false)
+          setStationStep('scan')
+          setActiveTab('punch')
+          setPunchResult(null)
+          setScannedQrToken('')
+          setIdentifiedEmployee(null)
+          setCameraActive(true)
+          isProcessingScan.current = false
+          setTimeout(() => startCamera(), 80)
+        }}
+        adminName={user?.name || "talom clavite"}
       />
     </div>
   )

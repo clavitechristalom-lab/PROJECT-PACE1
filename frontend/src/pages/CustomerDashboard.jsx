@@ -24,9 +24,21 @@ export default function CustomerDashboard() {
   const { user } = useAuth();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const [loading, setLoading] = useState(true);
-  const [stats, setStats] = useState(null);
-  const [installments, setInstallments] = useState([]);
+  const [stats, setStats] = useState(() => {
+    try {
+      const saved = sessionStorage.getItem('pace_cached_cust_stats');
+      return saved ? JSON.parse(saved) : null;
+    } catch { return null; }
+  });
+  const [installments, setInstallments] = useState(() => {
+    try {
+      const saved = sessionStorage.getItem('pace_cached_cust_inst');
+      return saved ? JSON.parse(saved) : [];
+    } catch { return []; }
+  });
+  const [loading, setLoading] = useState(() => {
+    return !sessionStorage.getItem('pace_cached_cust_stats');
+  });
 
   // Modals state
   const [activeModal, setActiveModal] = useState(null);
@@ -43,7 +55,7 @@ export default function CustomerDashboard() {
   };
 
   const fetchDashboardData = async (source) => {
-    const isBg = source === 'timer' || source === 'database' || source === 'event' || source === 'focus' || source === 'mutation' || source === 'sync';
+    const isBg = source === 'timer' || source === 'database' || source === 'event' || source === 'focus' || source === 'mutation' || source === 'sync' || !!stats;
     try {
       if (!isBg) setLoading(true);
       const [dashResult, instResult] = await Promise.allSettled([
@@ -52,9 +64,11 @@ export default function CustomerDashboard() {
       ]);
       if (dashResult.status === 'fulfilled' && dashResult.value?.metrics) {
         setStats(dashResult.value.metrics);
+        try { sessionStorage.setItem('pace_cached_cust_stats', JSON.stringify(dashResult.value.metrics)); } catch(e){}
       }
       if (instResult.status === 'fulfilled' && instResult.value?.installments) {
         setInstallments(instResult.value.installments);
+        try { sessionStorage.setItem('pace_cached_cust_inst', JSON.stringify(instResult.value.installments)); } catch(e){}
       }
     } catch (error) {
       if (!isBg) console.error('Failed to load dashboard', error);
@@ -111,7 +125,7 @@ export default function CustomerDashboard() {
     return (
       <div className="flex items-center justify-center min-h-[50vh]">
         <div className="text-center">
-          <Spinner className="w-12 h-12 text-[#176B87] mx-auto mb-4" />
+          <Spinner className="w-12 h-12 text-blue-600 dark:text-blue-400 mx-auto mb-4" />
           <p className="text-muted-foreground font-medium animate-pulse">Loading your dashboard...</p>
         </div>
       </div>
@@ -126,7 +140,7 @@ export default function CustomerDashboard() {
         {/* Welcome Section */}
         <div className="mb-8">
           <div>
-            <h2 className="text-3xl font-extrabold text-[#176B87] dark:text-[#64ccc5] tracking-tight flex items-center gap-2">
+            <h2 className="text-3xl font-extrabold text-blue-700 dark:text-blue-400 tracking-tight flex items-center gap-2">
               <FiUser className="w-8 h-8" /> My Account
             </h2>
             <p className="text-muted-foreground mt-1">
@@ -152,7 +166,7 @@ export default function CustomerDashboard() {
             title="Total Products"
             value={stats?.total_products || 0}
             icon={<FiPackage size={24} />}
-            colorClass="bg-[#176B87]"
+            colorClass="bg-blue-600"
             subtitle="Available in store"
             onClick={() => openModal('productList')}
           />
@@ -160,7 +174,7 @@ export default function CustomerDashboard() {
             title="Monthly Payment"
             value={fmt(stats?.monthly_payment || 0)}
             icon={<FiCreditCard size={24} />}
-            colorClass="bg-blue-600"
+            colorClass="bg-blue-500"
             subtitle="Next due amounts"
             onClick={() => openModal('paymentDetails')}
           />
@@ -168,7 +182,7 @@ export default function CustomerDashboard() {
             title="Total Credit Balance"
             value={fmt(stats?.total_credit_balance || 0)}
             icon={<BiWallet size={24} />}
-            colorClass="bg-emerald-600"
+            colorClass="bg-indigo-600"
             subtitle="Remaining to pay"
             onClick={() => openModal('creditDetails')}
           />
@@ -191,7 +205,7 @@ export default function CustomerDashboard() {
               title={cat.category}
               value={cat.count || 0}
               icon={<FiMonitor size={20} />}
-              colorClass={index % 2 === 0 ? "bg-indigo-500" : "bg-purple-500"}
+              colorClass={index % 2 === 0 ? "bg-indigo-500" : "bg-sky-600"}
               onClick={() => openModal('productList', { category: cat.category })}
             />
           ))}
@@ -215,7 +229,7 @@ export default function CustomerDashboard() {
             <QuickActions onAction={handleQuickAction} />
 
             {/* Promo / Banner Card */}
-            <div className="bg-gradient-to-br from-[#176B87] to-blue-800 rounded-xl p-6 text-white shadow-md relative overflow-hidden">
+            <div className="bg-gradient-to-br from-blue-700 via-blue-800 to-indigo-950 rounded-2xl p-6 text-white shadow-lg border border-blue-500/20 relative overflow-hidden">
               <div className="absolute top-0 right-0 -mt-4 -mr-4 w-24 h-24 bg-white opacity-10 rounded-full blur-xl"></div>
               <h3 className="text-xl font-bold mb-2 relative z-10">New Appliance & Furniture?</h3>
               <p className="text-blue-100 text-sm mb-4 relative z-10">
@@ -223,7 +237,7 @@ export default function CustomerDashboard() {
               </p>
               <button
                 onClick={() => openModal('productList')}
-                className="bg-white text-[#176B87] px-4 py-2 rounded-lg text-sm font-bold shadow hover:bg-slate-100 transition-colors relative z-10 cursor-pointer"
+                className="bg-white text-blue-900 px-4 py-2 rounded-xl text-sm font-bold shadow hover:bg-blue-50 transition-colors relative z-10 cursor-pointer"
               >
                 Browse Products
               </button>

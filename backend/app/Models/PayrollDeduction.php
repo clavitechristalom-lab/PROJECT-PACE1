@@ -6,11 +6,18 @@ class PayrollDeduction extends Model
 {
     protected $primaryKey = 'deduction_id';
     protected $table = 'payroll_deductions';
-    public $timestamps = false; // As per your SQL, this table only has a "created_at" timestamp
+    public $timestamps = true;
 
     protected $fillable = [
-        'payroll_id', 'deduction_type', 'description', 'amount'
+        'payroll_id', 'deduction_type', 'amount', 'notes'
     ];
+
+    protected $appends = ['description'];
+
+    public function getDescriptionAttribute()
+    {
+        return $this->notes ?: "{$this->deduction_type} Contribution";
+    }
 
     // Relationships
     public function payroll()

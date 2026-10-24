@@ -10,7 +10,7 @@ import {
   Btn, Badge, Card, SearchBar, PageHeader, StatCard,
   Pagination, TabBar, showToast, LoadingState, ErrorAlert, EmptyState, TableSkeleton
 } from '../components/ui'
-import { fmtDate } from '../lib/utils'
+import { fmtDate, fastDeepEqual } from '../lib/utils'
 import { api } from '../lib/api'
 import { useAuth } from '../context/AuthContext'
 import { useRealtimeSync, triggerDataSync } from '../lib/realtimeSync'
@@ -72,7 +72,8 @@ export default function NotificationsPage() {
       })
 
       if (res) {
-        setNotifications(res.notifications || [])
+        const newNotifs = res.notifications || []
+        setNotifications(prev => fastDeepEqual(prev, newNotifs) ? prev : newNotifs)
         setTotal(res.total || 0)
         setLastPage(res.last_page || 1)
         setUnreadCount(res.unread_count || 0)
@@ -80,6 +81,7 @@ export default function NotificationsPage() {
         setHighCount(res.high_count || 0)
       }
     } catch (err) {
+      if (err?.name === 'AbortError') return
       console.error('Failed to load notifications:', err)
       if (!silent) setError(err.message || 'Failed to load notifications')
     } finally {
@@ -97,7 +99,7 @@ export default function NotificationsPage() {
 
   useRealtimeSync(() => {
     loadNotifications(page, true)
-  }, [page, statusFilter, moduleFilter, priorityFilter, search])
+  }, [page, statusFilter, moduleFilter, priorityFilter, search], { periodic: true })
 
   // Mark single read/unread
   const handleToggleRead = async (n) => {

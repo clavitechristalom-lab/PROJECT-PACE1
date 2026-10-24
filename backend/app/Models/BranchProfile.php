@@ -45,4 +45,29 @@ class BranchProfile extends Model
     {
         return $this->hasMany(Report::class, 'branch_id', 'id');
     }
+
+    public static function getNameById($id)
+    {
+        if (empty($id)) return null;
+        static $memoryCache = [];
+        if (isset($memoryCache[$id])) {
+            return $memoryCache[$id];
+        }
+        $name = \Illuminate\Support\Facades\Cache::remember("branch_name_{$id}", 3600, function () use ($id) {
+            $bp = self::find($id);
+            return $bp ? $bp->name : null;
+        });
+        $memoryCache[$id] = $name;
+        return $name;
+    }
+
+    protected static function booted()
+    {
+        static::saved(function ($branch) {
+            \Illuminate\Support\Facades\Cache::forget("branch_name_{$branch->id}");
+        });
+        static::deleted(function ($branch) {
+            \Illuminate\Support\Facades\Cache::forget("branch_name_{$branch->id}");
+        });
+    }
 }

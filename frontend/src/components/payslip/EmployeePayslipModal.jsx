@@ -13,8 +13,6 @@ export default function EmployeePayslipModal({ payslip, onClose }) {
   }
 
   const handleDownload = () => {
-    // In absence of a backend PDF generator, we trigger print dialog which allows "Save as PDF"
-    // Instruct the user to save as PDF.
     window.print()
   }
 
@@ -30,12 +28,11 @@ export default function EmployeePayslipModal({ payslip, onClose }) {
         {/* Header Section */}
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center border-b-[3px] border-teal-800 p-6 bg-slate-50">
           <div className="flex items-center gap-4">
-            {/* If there's a logo in public directory, it can be loaded here. Falling back to text if not. */}
             <div className="w-14 h-14 bg-teal-800 rounded flex items-center justify-center text-white font-bold text-xl print:bg-teal-800 print-exact">
               Z
             </div>
             <div>
-              <h2 className="text-xl font-black text-teal-900 m-0 tracking-tight">Z-LICS FURNITURE & APPLIANCES</h2>
+              <h2 className="text-xl font-black text-teal-900 m-0 tracking-tight">Z-LICS FURNITURE &amp; APPLIANCES</h2>
               <p className="text-slate-500 text-xs mt-0.5">123 Main Street, Business District</p>
               <p className="text-slate-500 text-xs">info@zlics.com | +63 900 123 4567</p>
             </div>
@@ -55,15 +52,28 @@ export default function EmployeePayslipModal({ payslip, onClose }) {
               <div><span className="text-slate-500 font-semibold text-xs uppercase tracking-wider block">Employee ID</span><span className="font-semibold text-slate-700">{payslip.employee_code}</span></div>
               <div><span className="text-slate-500 font-semibold text-xs uppercase tracking-wider block">Department</span><span className="font-semibold text-slate-700">{payslip.department}</span></div>
               <div><span className="text-slate-500 font-semibold text-xs uppercase tracking-wider block">Position</span><span className="font-semibold text-slate-700">{payslip.position}</span></div>
+              {payslip.branch && (
+                <div className="col-span-2"><span className="text-slate-500 font-semibold text-xs uppercase tracking-wider block">Branch / Location</span><span className="font-semibold text-emerald-800">{payslip.branch}</span></div>
+              )}
             </div>
-            <div className="border-t sm:border-t-0 sm:border-l border-sky-200 pt-4 sm:pt-0 sm:pl-6 min-w-[200px]">
-              <div className="mb-3"><span className="text-slate-500 font-semibold text-xs uppercase tracking-wider block">Payroll Period</span><span className="font-bold text-slate-800">{payslip.period_name}</span></div>
-              <div><span className="text-slate-500 font-semibold text-xs uppercase tracking-wider block">Pay Date</span><span className="font-bold text-slate-800">{payslip.pay_date || 'N/A'}</span></div>
+            <div className="border-t sm:border-t-0 sm:border-l border-sky-200 pt-4 sm:pt-0 sm:pl-6 min-w-[210px]">
+              <div className="mb-2"><span className="text-slate-500 font-semibold text-xs uppercase tracking-wider block">Payroll Period</span><span className="font-bold text-slate-800">{payslip.period_name}</span></div>
+              <div className="mb-2"><span className="text-slate-500 font-semibold text-xs uppercase tracking-wider block">Pay Date</span><span className="font-bold text-slate-800">{payslip.pay_date || 'N/A'}</span></div>
+              {payslip.daily_rate > 0 && (
+                <div><span className="text-slate-500 font-semibold text-xs uppercase tracking-wider block">Daily / Hourly Rate</span><span className="font-mono font-bold text-slate-700">{fmt(payslip.daily_rate)}/d · {fmt(payslip.hourly_rate)}/h</span></div>
+              )}
             </div>
           </div>
 
+          {payslip.notes && (
+            <div className="mt-3 px-3.5 py-2 bg-slate-100 border border-slate-200 rounded-lg text-xs text-slate-600 font-mono flex items-center justify-between">
+              <span><strong>Attendance Summary:</strong> {payslip.notes}</span>
+              {payslip.pay_type && <span><strong>Payout Mode:</strong> {payslip.pay_type}</span>}
+            </div>
+          )}
+
           {/* Tables Section */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-5">
             
             {/* Earnings Table */}
             <div className="border border-slate-200 rounded-lg overflow-hidden">
@@ -76,18 +86,20 @@ export default function EmployeePayslipModal({ payslip, onClose }) {
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   <tr>
-                    <td className="py-3 px-4 text-slate-700">Basic Pay</td>
+                    <td className="py-3 px-4 text-slate-700">
+                      Basic Pay {payslip.regular_hours > 0 ? <span className="text-xs text-slate-500 font-mono">({payslip.regular_hours}h rendered)</span> : ''}
+                    </td>
                     <td className="py-3 px-4 text-right font-mono font-medium text-slate-900">{fmt(payslip.basic_salary)}</td>
                   </tr>
                   {payslip.overtime_hours > 0 && (
                     <tr>
-                      <td className="py-3 px-4 text-slate-700">Overtime Pay ({payslip.overtime_hours}h)</td>
+                      <td className="py-3 px-4 text-slate-700">Overtime Pay ({payslip.overtime_hours}h @ 125%)</td>
                       <td className="py-3 px-4 text-right font-mono font-medium text-slate-900">{fmt(payslip.overtime_pay)}</td>
                     </tr>
                   )}
                   {payslip.allowance > 0 && (
                     <tr>
-                      <td className="py-3 px-4 text-slate-700">Allowance</td>
+                      <td className="py-3 px-4 text-slate-700">Allowances &amp; Bonuses</td>
                       <td className="py-3 px-4 text-right font-mono font-medium text-slate-900">{fmt(payslip.allowance)}</td>
                     </tr>
                   )}
@@ -134,10 +146,15 @@ export default function EmployeePayslipModal({ payslip, onClose }) {
             
             {/* Status & Notice */}
             <div className="w-full md:w-auto">
-              <div className="mb-4">
+              <div className="mb-2">
                 <span className="text-slate-500 font-semibold text-xs uppercase tracking-wider mr-3">Status:</span>
                 <StatusBadge status={payslip.status} />
               </div>
+              {payslip.approved_by && payslip.approved_by !== 'System' && (
+                <p className="text-xs text-slate-500 mb-2">
+                  <strong>Approved By:</strong> {payslip.approved_by}
+                </p>
+              )}
               <p className="text-xs text-slate-400 italic">
                 This is a system generated payslip. No signature is required.
               </p>
@@ -190,7 +207,7 @@ export default function EmployeePayslipModal({ payslip, onClose }) {
           onClick={onClose}
           className="flex items-center gap-1.5 px-4 py-2 border border-slate-300 bg-white text-slate-700 rounded-lg hover:bg-slate-50 font-semibold cursor-pointer shadow-sm transition-colors"
         >
-          <FiX className="w-4 h-4" />
+          <FiX className="w-3.5 h-3.5" />
           <span>Close</span>
         </button>
       </div>

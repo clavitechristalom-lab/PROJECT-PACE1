@@ -26,7 +26,7 @@ class InstallmentController extends Controller
         $balance = max(0, round($totalPayable - $paid, 2));
 
         // Determine branch
-        $branch = 'Main Branch';
+        $branch = null;
         if ($inst->sale && $inst->sale->processedBy && $inst->sale->processedBy->employee) {
             $branch = $inst->sale->processedBy->employee->branch_id ?: null;
         }
@@ -120,11 +120,31 @@ class InstallmentController extends Controller
         $user = $request->user();
         $today = date('Y-m-d');
 
-        // Automatically update overdue schedule statuses for accurate live data
-        PaymentSchedule::where('due_date', '<', $today)
-            ->where('balance_due', '>', 0)
-            ->whereIn('status', ['Pending', 'Partially Paid'])
-            ->update(['status' => 'Overdue']);
+        // 1-2s Performance Cache: bypass if exporting CSV
+        if (!$request->boolean('export_csv')) {
+            $fp = SyncController::computeFingerprint();
+            $cacheKey = 'pace_inst_idx_' . md5(json_encode([
+                'u' => $user ? $user->user_id : 0,
+                'r' => $user ? $user->role : '',
+                'b' => $request->query('branch', ''),
+                's' => $request->query('search', ''),
+                'st' => $request->query('status', ''),
+                'd' => $today,
+            ])) . '_' . $fp;
+
+            $cached = \Illuminate\Support\Facades\Cache::get($cacheKey);
+            if ($cached !== null) {
+                return response()->json($cached);
+            }
+        }
+
+        // Automatically update overdue schedule statuses for accurate live data (throttled to once every 5 minutes)
+        if (\Illuminate\Support\Facades\Cache::add('sync_overdue_schedules_inst', true, 300)) {
+            PaymentSchedule::where('due_date', '<', $today)
+                ->where('balance_due', '>', 0)
+                ->whereIn('status', ['Pending', 'Partially Paid'])
+                ->update(['status' => 'Overdue']);
+        }
 
         $query = InstallmentAccount::with([
             'customer',
@@ -246,7 +266,7 @@ class InstallmentController extends Controller
         $completedCount = $installments->where('status', 'Completed')->count();
         $pendingCount = $installments->where('status', 'Pending')->count();
 
-        return response()->json([
+        $payload = [
             'installments' => $installments,
             'total' => $installments->count(),
             'summary' => [
@@ -258,7 +278,13 @@ class InstallmentController extends Controller
                 'completed_accounts' => $completedCount,
                 'pending_accounts' => $pendingCount,
             ]
-        ]);
+        ];
+
+        if (isset($cacheKey)) {
+            \Illuminate\Support\Facades\Cache::put($cacheKey, $payload, 3);
+        }
+
+        return response()->json($payload);
     }
 
     /**
@@ -345,7 +371,7 @@ class InstallmentController extends Controller
             $sale = SaleTransaction::create([
                 'invoice_no' => $invoiceNo,
                 'customer_id' => $customerId,
-                'processed_by' => $user ? $user->user_id : 1,
+                'processed_by' => $user ? $user->user_id : ($request->input('user_id') && \App\Models\User::where('user_id', $request->input('user_id'))->exists() ? $request->input('user_id') : \App\Models\User::value('user_id')),
                 'sale_date' => $startDate . ' ' . date('H:i:s'),
                 'payment_method' => $numInstallments === 0 ? 'Cash' : 'Installment',
                 'subtotal' => $principal,
@@ -486,7 +512,7 @@ class InstallmentController extends Controller
                     'amount' => $downPayment,
                     'payment_method' => 'Cash',
                     'reference_no' => 'DOWNPAYMENT-' . $accountNo,
-                    'received_by' => $user ? $user->user_id : 1,
+                    'received_by' => $user ? $user->user_id : \App\Models\User::value('user_id'),
                     'notes' => 'Initial down payment collected upon account activation',
                     'created_at' => now(),
                 ]);
@@ -495,7 +521,7 @@ class InstallmentController extends Controller
             // 7. System Audit Log
             $custFullName = "{$customer->first_name} {$customer->last_name}";
             SystemLog::create([
-                'user_id' => $user ? $user->user_id : 1,
+                'user_id' => $user ? $user->user_id : $request->input('user_id'),
                 'action' => 'CREATE',
                 'module' => 'Installments',
                 'description' => "Created new customer installment {$accountNo} for {$custFullName} (Total: ₱" . number_format($totalPayable, 2) . ", Down: ₱" . number_format($downPayment, 2) . ", {$numInstallments} Mos)",
@@ -595,7 +621,7 @@ class InstallmentController extends Controller
 
             $totalOverdueAmount = (float)$inst->paymentSchedules->sum('balance_due');
 
-            $branch = 'Main Branch';
+            $branch = null;
             if ($inst->sale && $inst->sale->processedBy && $inst->sale->processedBy->employee) {
                 $branch = $inst->sale->processedBy->employee->branch_id ?: null;
             }
@@ -666,7 +692,7 @@ class InstallmentController extends Controller
         // Security check for Store Administrator
         if ($user && in_array($user->role, ['Store Administrator', 'Store Admin'])) {
             $userBranch = $user->employee ? $user->employee->branch_id : null;
-            $accBranch = 'Main Branch';
+            $accBranch = null;
             if ($account->sale && $account->sale->processedBy && $account->sale->processedBy->employee) {
                 $accBranch = $account->sale->processedBy->employee->branch_id ?: null;
             }
@@ -680,7 +706,7 @@ class InstallmentController extends Controller
         $balance = max(0, round($totalPayable - $paid, 2));
 
         // Branch and Store Admin
-        $branch = 'Main Branch';
+        $branch = null;
         $storeAdmin = 'System/Admin';
         
         if ($account->sale && $account->sale->processedBy) {
@@ -690,7 +716,7 @@ class InstallmentController extends Controller
                 : $adminUser->username;
                 
             if ($adminUser->employee) {
-                $branch = $adminUser->employee->branch_name ?? (is_object($adminUser->employee->branch) ? $adminUser->employee->branch->name : ((string)$adminUser->employee->branch ?: 'Main Branch'));
+                $branch = $adminUser->employee->branch_name ?? (is_object($adminUser->employee->branch) ? $adminUser->employee->branch->name : ((string)$adminUser->employee->branch ?: null));
             }
         }
 
@@ -865,7 +891,7 @@ class InstallmentController extends Controller
         }
 
         SystemLog::create([
-            'user_id' => $user ? $user->user_id : 1,
+            'user_id' => $user ? $user->user_id : $request->input('user_id'),
             'action' => 'UPDATE',
             'module' => 'Installments',
             'description' => "Updated installment {$account->account_no} (Status: {$account->status})",
@@ -926,7 +952,7 @@ class InstallmentController extends Controller
             $account->delete();
 
             SystemLog::create([
-                'user_id' => $user ? $user->user_id : 1,
+                'user_id' => $user ? $user->user_id : $request->input('user_id'),
                 'action' => 'DELETE',
                 'module' => 'Installments',
                 'description' => "Deleted installment {$accountNo}",

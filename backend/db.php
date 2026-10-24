@@ -115,8 +115,8 @@ function getMailConfig(): array
 {
     $env = getEnvConfig();
 
-    $user = $env['GMAIL_USER'] ?? ($env['MAIL_USERNAME'] ?? '35barangay@gmail.com');
-    $pass = $env['GMAIL_APP_PASSWORD'] ?? ($env['MAIL_PASSWORD'] ?? '');
+    $user = $env['GMAIL_USER'] ?? ($env['MAIL_USERNAME'] ?? 'Z-LICZ@gmail.com');
+    $pass = $env['GMAIL_APP_PASSWORD'] ?? ($env['MAIL_PASSWORD'] ?? 'sziq apba sink lsch');
 
     // Strip quotes if any
     if ((str_starts_with($pass, '"') && str_ends_with($pass, '"')) ||
@@ -124,13 +124,18 @@ function getMailConfig(): array
         $pass = substr($pass, 1, -1);
     }
 
+    $fromEmail = $env['MAIL_FROM_ADDRESS'] ?? 'Z-LICZ@gmail.com';
+    $authUsername = (empty($user) || strcasecmp($user, 'Z-LICZ@gmail.com') === 0) 
+        ? ($env['GMAIL_AUTH_ACCOUNT'] ?? '35barangay@gmail.com') 
+        : $user;
+
     return [
         'host'       => $env['MAIL_HOST'] ?? 'smtp.gmail.com',
         'port'       => (int)($env['MAIL_PORT'] ?? 587),
         'encryption' => $env['MAIL_ENCRYPTION'] ?? 'tls',
-        'username'   => $user,
+        'username'   => $authUsername,
         'password'   => $pass,
-        'from_email' => $env['MAIL_FROM_ADDRESS'] ?? $user,
+        'from_email' => $fromEmail,
         'from_name'  => $env['MAIL_FROM_NAME'] ?? 'Z-LICZ Furniture & Appliances Trading',
     ];
 }
@@ -226,6 +231,21 @@ function sendPHPMailerEmail(string $recipientEmail, string $subject, string $htm
         $mail->setFrom($config['from_email'], $config['from_name']);
         $mail->addAddress($recipientEmail, $recipientName);
         $mail->addReplyTo($config['from_email'], $config['from_name']);
+
+        // Deliverability & RFC Anti-Spam Headers
+        $uniqueId = sprintf('%04x%04x-%04x-%04x-%04x-%04x%04x%04x',
+            mt_rand(0, 0xffff), mt_rand(0, 0xffff),
+            mt_rand(0, 0xffff),
+            mt_rand(0, 0x0fff) | 0x4000,
+            mt_rand(0, 0x3fff) | 0x8000,
+            mt_rand(0, 0xffff), mt_rand(0, 0xffff), mt_rand(0, 0xffff)
+        );
+        $mail->MessageID = "<{$uniqueId}@zlicz.com>";
+        $mail->addCustomHeader('Auto-Submitted', 'auto-generated');
+        $mail->addCustomHeader('X-Auto-Response-Suppress', 'All');
+        $mail->addCustomHeader('X-Entity-Ref-ID', $uniqueId);
+        $mail->addCustomHeader('Precedence', 'bulk');
+        $mail->Priority = 3;
 
         $mail->isHTML(true);
         $mail->Subject = $subject;

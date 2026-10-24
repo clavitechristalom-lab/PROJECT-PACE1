@@ -32,6 +32,8 @@ class User extends Authenticatable
         'otp_code',
         'otp_expires_at',
         'otp_created_at',
+        'profile_image',
+        'face_biometric_image',
         'user_id',
     ];
 

@@ -16,7 +16,13 @@ export function AuthProvider({ children }) {
   })
   const [checkingAuth, setCheckingAuth] = useState(() => {
     const raw = sessionStorage.getItem('pace_session')
-    return !!raw
+    if (!raw) return false
+    try {
+      const parsed = JSON.parse(raw)
+      return !parsed?.cached_user
+    } catch {
+      return false
+    }
   })
   const skipNextVerifyRef = useRef(false)
 

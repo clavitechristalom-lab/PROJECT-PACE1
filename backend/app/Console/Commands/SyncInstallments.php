@@ -41,7 +41,7 @@ class SyncInstallments extends Command
             $inst = $sched->installmentAccount;
             if (!$inst || !$inst->customer_id) continue;
             
-            $accBranch = 'Main Branch';
+            $accBranch = null;
             if ($inst->sale && $inst->sale->processedBy && $inst->sale->processedBy->employee) {
                 $accBranch = $inst->sale->processedBy->employee->branch_id ?: null;
             }

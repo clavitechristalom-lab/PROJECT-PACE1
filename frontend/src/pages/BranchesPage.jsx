@@ -424,7 +424,7 @@ export default function BranchesPage() {
               <Input
                 value={form.name}
                 onChange={e => setForm({ ...form, name: e?.target ? e.target.value : e })}
-                placeholder="e.g. Main Branch"
+                placeholder="e.g. Cagayan de Oro Branch"
                 error={formErrors.name}
               />
             </div>

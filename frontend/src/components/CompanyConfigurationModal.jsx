@@ -328,12 +328,13 @@ export default function CompanyConfigurationModal({ isOpen, onClose, onSave, cur
               <div className="space-y-1.5">
                 <label className="text-xs font-semibold text-foreground">Phone</label>
                 <input
-                  type="text"
+                  type="tel"
+                  maxLength={11}
                   name="phone"
                   value={formData.phone || ''}
-                  onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-                  className="w-full px-4 py-2.5 rounded-xl border border-border bg-card text-foreground focus:ring-2 focus:ring-primary/20 outline-none transition-all text-sm placeholder:text-muted-foreground/60"
-                  placeholder="+63 900 000 0000"
+                  onChange={(e) => setFormData({ ...formData, phone: e.target.value.replace(/\D/g, '').slice(0, 11) })}
+                  className="w-full px-4 py-2.5 rounded-xl border border-border bg-card text-foreground focus:ring-2 focus:ring-primary/20 outline-none transition-all text-sm font-mono placeholder:text-muted-foreground/60"
+                  placeholder="09XXXXXXXXX"
                 />
               </div>
 

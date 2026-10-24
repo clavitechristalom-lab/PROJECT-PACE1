@@ -12,59 +12,141 @@ const cleanParams = (params) => {
   return cleaned;
 };
 
+const inFlightGets = new Map();
+const inFlightControllers = new Map();
+const responseCache = new Map();
+const CACHE_TTL_MS = 800; // 800ms TTL for sub-second de-duplication while ensuring fresh 1-2s auto-refresh
+
+export function clearApiCache() {
+  responseCache.clear();
+}
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('pace:data-sync', () => {
+    responseCache.clear();
+  });
+}
+
 async function request(endpoint, options = {}) {
-  const url = `${API_BASE}${endpoint}`;
+  const method = (options.method || 'GET').toUpperCase();
+  const isGet = method === 'GET';
+  const bypassCache = options.fresh === true || options.cache === 'no-cache';
 
-  let token = null;
-  try {
-    const raw = sessionStorage.getItem('pace_session');
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      token = parsed.token;
-    }
-  } catch (e) { }
-
-  const headers = {
-    'Accept': 'application/json',
-    ...(options.body && !(options.body instanceof FormData) ? { 'Content-Type': 'application/json' } : {}),
-    ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
-    ...options.headers,
-  };
-
-  try {
-    const response = await fetch(url, {
-      ...options,
-      headers,
-    });
-
-    const data = await response.json().catch(() => null);
-
-    if (!response.ok) {
-      if (response.status === 401 && !endpoint.startsWith('/login') && !endpoint.startsWith('/register')) {
-        sessionStorage.removeItem('pace_session');
-        window.dispatchEvent(new CustomEvent('auth:expired'));
-      }
-      let errorMsg = data?.message || `Request failed with status ${response.status}`;
-      if (response.status === 401 && !endpoint.startsWith('/login') && !endpoint.startsWith('/register')) {
-        errorMsg = 'Your session has expired. Please log in again.';
-      }
-      if (data?.errors) {
-        const errorList = Object.values(data.errors).flat().join(', ');
-        if (errorList) errorMsg = `${errorMsg}: ${errorList}`;
-      }
-      const err = new Error(errorMsg);
-      err.status = response.status;
-      err.data = data;
-      throw err;
-    }
-
-    return data;
-  } catch (error) {
-    if (error.name === 'TypeError' && error.message.includes('fetch')) {
-      throw new Error(`Unable to connect to backend server at ${API_BASE}. Please ensure Laravel is running.`);
-    }
-    throw error;
+  // Invalidate cache on all mutations
+  if (!isGet) {
+    responseCache.clear();
   }
+
+  // Return from high-speed cache if still warm
+  if (isGet && !bypassCache && responseCache.has(endpoint)) {
+    const cached = responseCache.get(endpoint);
+    if (Date.now() - cached.timestamp < CACHE_TTL_MS) {
+      return Promise.resolve(cached.data);
+    } else {
+      responseCache.delete(endpoint);
+    }
+  }
+
+  // Deduplicate identical in-flight GET requests
+  if (isGet && inFlightGets.has(endpoint) && !options.fresh) {
+    return inFlightGets.get(endpoint);
+  }
+
+  // Cancel prior in-flight GET for the same endpoint if requested or during background refreshes
+  if (isGet && options.cancelPrevious && inFlightControllers.has(endpoint)) {
+    try {
+      inFlightControllers.get(endpoint).abort();
+    } catch (_) { }
+    inFlightControllers.delete(endpoint);
+  }
+
+  const controller = new AbortController();
+  if (isGet) {
+    inFlightControllers.set(endpoint, controller);
+  }
+
+  if (options.signal) {
+    if (options.signal.aborted) {
+      controller.abort();
+    } else {
+      options.signal.addEventListener('abort', () => controller.abort(), { once: true });
+    }
+  }
+
+  const promise = (async () => {
+    const url = `${API_BASE}${endpoint}`;
+
+    let token = null;
+    try {
+      const raw = sessionStorage.getItem('pace_session');
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        token = parsed.token;
+      }
+    } catch (e) { }
+
+    const headers = {
+      'Accept': 'application/json',
+      ...(options.body && !(options.body instanceof FormData) ? { 'Content-Type': 'application/json' } : {}),
+      ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+      ...options.headers,
+    };
+
+    try {
+      const response = await fetch(url, {
+        ...options,
+        headers,
+        signal: controller.signal,
+      });
+
+      const data = await response.json().catch(() => null);
+
+      if (!response.ok) {
+        if (response.status === 401 && !endpoint.startsWith('/login') && !endpoint.startsWith('/register')) {
+          sessionStorage.removeItem('pace_session');
+          window.dispatchEvent(new CustomEvent('auth:expired'));
+        }
+        let errorMsg = data?.message || `Request failed with status ${response.status}`;
+        if (response.status === 401 && !endpoint.startsWith('/login') && !endpoint.startsWith('/register')) {
+          errorMsg = 'Your session has expired. Please log in again.';
+        }
+        if (data?.errors) {
+          const errorList = Object.values(data.errors).flat().join(', ');
+          if (errorList) errorMsg = `${errorMsg}: ${errorList}`;
+        }
+        const err = new Error(errorMsg);
+        err.status = response.status;
+        err.data = data;
+        throw err;
+      }
+
+      if (isGet && !bypassCache && data) {
+        responseCache.set(endpoint, { data, timestamp: Date.now() });
+      }
+
+      return data;
+    } catch (error) {
+      if (error.name === 'AbortError') {
+        // Cleanly handle aborted request without throwing unhandled exceptions
+        return null;
+      }
+      if (error.name === 'TypeError' && error.message.includes('fetch')) {
+        throw new Error(`Unable to connect to backend server at ${API_BASE}. Please ensure Laravel is running.`);
+      }
+      throw error;
+    } finally {
+      if (isGet) {
+        inFlightControllers.delete(endpoint);
+      }
+    }
+  })();
+
+  if (isGet) {
+    inFlightGets.set(endpoint, promise);
+    promise.finally(() => inFlightGets.delete(endpoint));
+  }
+
+  return promise;
 }
 
 export const api = {
@@ -138,6 +220,15 @@ export const api = {
       request('/user/profile-image', {
         method: 'POST',
         body: formData,
+      }),
+    uploadFaceBiometricImage: (formData) =>
+      request('/user/face-biometric-image', {
+        method: 'POST',
+        body: formData,
+      }),
+    deleteFaceBiometricImage: () =>
+      request('/user/face-biometric-image', {
+        method: 'DELETE',
       }),
     sendOtp: (targetOrType, maybeTarget) => {
       const target = maybeTarget !== undefined ? maybeTarget : targetOrType;
@@ -501,6 +592,7 @@ export const api = {
       }),
     checkVerification: (id) => request(`/attendance/check-verification/${id}`),
     pendingVerifications: () => request('/employee/me/pending-verifications'),
+    getMyFaceTemplate: () => request('/employee/me/face-template'),
     updateMyPin: (data) =>
       request('/employee/me/pin', {
         method: 'PUT',
@@ -508,6 +600,11 @@ export const api = {
       }),
     approveVerification: (data) =>
       request('/employee/me/verify-attendance-pin', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+    rejectVerification: (data) =>
+      request('/employee/me/cancel-attendance-verification', {
         method: 'POST',
         body: JSON.stringify(data),
       }),
@@ -539,15 +636,26 @@ export const api = {
       return request(`/payroll${qs ? `?${qs}` : ''}`);
     },
     getPayslip: (id) => request(`/payroll/${id}/payslip`),
-    generate: (userId, periodId) =>
+    getEligibleEmployees: (params = {}) => {
+      const qs = new URLSearchParams(cleanParams(params)).toString();
+      return request(`/payroll/eligible-employees${qs ? `?${qs}` : ''}`);
+    },
+    generate: (userId, periodId, options = {}) =>
       request('/payroll/generate', {
         method: 'POST',
-        body: JSON.stringify({ user_id: userId, period_id: periodId }),
+        body: JSON.stringify({
+          user_id: userId,
+          period_id: periodId,
+          ...(typeof options === 'object' ? options : {}),
+        }),
       }),
-    generate13thMonth: (userId) =>
+    generate13thMonth: (userId, options = {}) =>
       request('/payroll/generate-13th-month', {
         method: 'POST',
-        body: JSON.stringify({ user_id: userId }),
+        body: JSON.stringify({
+          user_id: userId,
+          ...(typeof options === 'object' ? options : {}),
+        }),
       }),
     approve: (id, userId) =>
       request(`/payroll/${id}/approve`, {

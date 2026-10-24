@@ -5,6 +5,7 @@ namespace App\Services;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\Cache;
 use App\Models\SystemLog;
 
 class StorageService
@@ -12,7 +13,18 @@ class StorageService
     /**
      * Get a comprehensive real-time audit of system storage across disk, database, and files.
      */
-    public static function getStorageOverview(): array
+    public static function getStorageOverview(bool $forceRefresh = false): array
+    {
+        if ($forceRefresh) {
+            Cache::forget('pace_storage_overview');
+        }
+
+        return Cache::remember('pace_storage_overview', 15, function () {
+            return self::computeStorageOverview();
+        });
+    }
+
+    private static function computeStorageOverview(): array
     {
         $disk = self::getDiskSpace();
         $db = self::getDatabaseStorage();
@@ -382,6 +394,7 @@ class StorageService
 
         $after = self::getCacheStorage();
         $reclaimed = max(0, $before['size_bytes'] - $after['size_bytes']);
+        Cache::forget('pace_storage_overview');
 
         return [
             'success' => true,
@@ -413,6 +426,7 @@ class StorageService
 
         $after = self::scanDirectory($logsPath);
         $reclaimed = max(0, $before['bytes'] - $after['bytes']);
+        Cache::forget('pace_storage_overview');
 
         return [
             'success' => true,
@@ -446,6 +460,7 @@ class StorageService
 
         $after = self::scanDirectory($sessionsPath);
         $reclaimed = max(0, $before['bytes'] - $after['bytes']);
+        Cache::forget('pace_storage_overview');
 
         return [
             'success' => true,

@@ -13,6 +13,7 @@ use App\Models\User;
 use App\Models\SystemLog;
 use App\Models\Notification;
 use App\Services\OtpService;
+use Illuminate\Support\Facades\Cache;
 
 class AuthController extends Controller
 {
@@ -47,7 +48,7 @@ class AuthController extends Controller
             'first_name' => 'required|string|max:255',
             'middle_name' => 'nullable|string|max:255',
             'last_name' => 'required|string|max:255',
-            'phone' => 'required|string|max:50',
+            'phone' => ['required', 'string', 'regex:/^(09\d{9}|639\d{9})$/'],
             'address' => 'required|string',
             'email' => 'required|string|email|max:255',
             'password' => 'required|string|min:4|same:confirmPassword',
@@ -74,6 +75,7 @@ class AuthController extends Controller
                 $rules['branch_id'] = 'required_if:role,Store Administrator,Employee|nullable|exists:branch_profiles,id';
                 $rules['attendance_pin'] = 'nullable|string|min:4|max:6|regex:/^[0-9]+$/|same:confirm_attendance_pin';
                 $rules['confirm_attendance_pin'] = 'nullable|string';
+                $rules['basic_salary'] = 'nullable|numeric|min:0';
             }
         }
 
@@ -195,6 +197,13 @@ class AuthController extends Controller
             $defaultPosition = $role === 'Store Administrator' ? 'Store Administrator' : ($role === 'Administrator' ? 'System Administrator' : 'Staff');
             $defaultDept = $role === 'Administrator' ? 'Administration' : ($role === 'Store Administrator' ? 'Store Management' : 'Sales & Operations');
 
+            $defaultSalary = $role === 'Store Administrator' ? 15600.00 : ($role === 'Employee' ? 13000.00 : 0.00);
+            $inputSalary = ($request->filled('basic_salary') && (float)$request->input('basic_salary') > 0)
+                ? (float)$request->input('basic_salary')
+                : $defaultSalary;
+            $dailyRate = $inputSalary > 0 ? round($inputSalary / 26, 2) : 0.00;
+            $hourlyRate = $dailyRate > 0 ? round($dailyRate / 8, 2) : 0.00;
+
             $employee = \App\Models\Employee::where('email', $normalizedEmail)->first();
             if (!$employee) {
                 $employee = \App\Models\Employee::create([
@@ -211,8 +220,10 @@ class AuthController extends Controller
                     'marital_status' => $maritalStatus,
                     'position' => $request->input('position') ?: $defaultPosition,
                     'status' => 'Active',
-                    'pay_type' => $request->input('pay_type') ?: 'Monthly',
-                    'basic_salary' => $request->filled('basic_salary') ? (float)$request->input('basic_salary') : 0,
+                    'pay_type' => $request->input('pay_type') ?: 'Cash',
+                    'basic_salary' => $inputSalary,
+                    'daily_rate' => $dailyRate,
+                    'hourly_rate' => $hourlyRate,
                     'branch_id' => $branchId,
                     'branch' => $branchName,
                     'department' => $request->input('department') ?: $defaultDept,
@@ -235,6 +246,9 @@ class AuthController extends Controller
                     'branch_id' => $branchId ?: $employee->branch_id,
                     'branch' => $branchName ?: $employee->branch,
                     'department' => $request->input('department') ?: ($employee->department ?: $defaultDept),
+                    'basic_salary' => $inputSalary,
+                    'daily_rate' => $dailyRate,
+                    'hourly_rate' => $hourlyRate,
                     'attendance_pin' => $pin ? Hash::make($pin) : $employee->attendance_pin,
                 ]);
             }
@@ -249,7 +263,7 @@ class AuthController extends Controller
                 'employee_id' => $employee->employee_id,
                 'account_verified' => true,
                 'account_verified_at' => now(),
-                'account_verified_by' => $authUser ? $authUser->user_id : 1,
+                'account_verified_by' => $authUser ? $authUser->user_id : (User::where('role', 'Administrator')->value('user_id') ?: null),
             ]);
         }
 
@@ -297,6 +311,17 @@ class AuthController extends Controller
                 ]);
             }
         }
+
+        // Real-time Audit Trail in SystemLog
+        SystemLog::create([
+            'user_id'     => $user->user_id,
+            'action'      => 'REGISTER',
+            'module'      => 'Auth',
+            'description' => "New account registered: {$displayName} (@{$user->username}) as {$user->role}",
+            'ip_address'  => $request->ip(),
+            'user_agent'  => $request->userAgent(),
+        ]);
+        Cache::forget('pace_unified_fingerprint');
 
         $maskedEmail = self::maskEmail($normalizedEmail);
 
@@ -365,7 +390,8 @@ class AuthController extends Controller
             'is_active'    => (bool)$user->is_active,
             'name'         => $name,
             'last_login'   => $lastLogin,
-            'profile_image' => $user->profile_image ? url(Storage::url($user->profile_image)) : null,
+            'profile_image' => $user->profile_image ? (str_starts_with($user->profile_image, 'http') ? $user->profile_image : url(Storage::url($user->profile_image))) : null,
+            'face_biometric_image' => $user->face_biometric_image ? (str_starts_with($user->face_biometric_image, 'http') ? $user->face_biometric_image : url(Storage::url($user->face_biometric_image))) : null,
         ];
 
         if ($user->employee) {
@@ -385,6 +411,8 @@ class AuthController extends Controller
                 'department'    => $user->employee->department,
                 'branch_id'     => $user->employee->branch_id,
                 'branch'        => $empBranchName,
+                'profile_image' => $user->profile_image ? (str_starts_with($user->profile_image, 'http') ? $user->profile_image : url(Storage::url($user->profile_image))) : null,
+                'face_biometric_image' => $user->face_biometric_image ? (str_starts_with($user->face_biometric_image, 'http') ? $user->face_biometric_image : url(Storage::url($user->face_biometric_image))) : null,
             ];
             $data['branch_id']   = $user->employee->branch_id;
             $data['branch_name'] = $empBranchName;
@@ -493,7 +521,7 @@ class AuthController extends Controller
             // Mandatory Login 2FA OTP verification for ALL users (Administrator, Store Administrator, Employee, Customer)
             $recipientEmail = self::resolveUserEmail($user, $loginInput) ?: ($user->email ?: null);
             if (empty($recipientEmail) && in_array(strtolower($user->username), ['admin', 'administrator'])) {
-                $recipientEmail = OtpService::getEnvValue('MAIL_USERNAME', 'mail.mailers.smtp.username', '35barangay@gmail.com');
+                $recipientEmail = OtpService::getEnvValue('MAIL_USERNAME', 'mail.mailers.smtp.username', 'Z-LICZ@gmail.com');
             }
 
             if (empty($recipientEmail) || !filter_var($recipientEmail, FILTER_VALIDATE_EMAIL)) {
@@ -502,26 +530,22 @@ class AuthController extends Controller
                 ], 422);
             }
 
-            // Generate secure 6-digit cryptographic OTP code
-            $otp = (string) random_int(100000, 999999);
+            // Deliverability & Anti-Abuse Rate Limiting
+            $rateCheck = OtpService::checkRateLimit($recipientEmail, $request->ip());
+            if (!$rateCheck['allowed']) {
+                return response()->json([
+                    'success'           => false,
+                    'message'           => $rateCheck['message'],
+                    'remaining_seconds' => $rateCheck['remaining_seconds'] ?? 60,
+                ], 429);
+            }
+
+            // Reuse active OTP code within 2 minutes to prevent spam flags from code churn
+            $otp = OtpService::getOrCreateActiveOtp($user->user_id, $recipientEmail, 'login', $request->ip(), $request->userAgent());
             $user->otp_code = $otp;
             $user->otp_expires_at = now()->addMinutes(15);
             $user->otp_created_at = now();
             $user->save();
-
-            // Store in otps table with used = 0 and strict 15-minute expiry_time
-            DB::table('otps')->insert([
-                'user_id'     => $user->user_id,
-                'email'       => $recipientEmail,
-                'otp_code'    => $otp,
-                'type'        => 'login',
-                'used'        => 0,
-                'expiry_time' => now()->addMinutes(15),
-                'ip_address'  => $request->ip(),
-                'user_agent'  => $request->userAgent(),
-                'created_at'  => now(),
-                'updated_at'  => now(),
-            ]);
 
             // Resolve friendly display name
             $name = $user->username;
@@ -531,29 +555,39 @@ class AuthController extends Controller
                 $name = trim($user->employee->first_name . ' ' . $user->employee->last_name);
             }
 
-            // Real live dispatch via Gmail SMTP - NO MOCK OR DUMMY CODES!
+            // Dispatch via deliverability-optimized service
             $sendResult = OtpService::sendEmailOTP($recipientEmail, $otp, $name, 'login');
             if (!$sendResult['success']) {
                 Log::error("[LOGIN OTP FAILED] User ID: {$user->user_id} ({$user->username}) | Email: {$recipientEmail} | Error: " . ($sendResult['message'] ?? 'Unknown error'));
                 return response()->json([
-                    'message' => 'Unable to send login verification email via Gmail SMTP. Please try again.'
+                    'message' => 'Unable to deliver verification code. Please try again shortly.'
                 ], 500);
             }
 
+            // Record rate limit usage
+            OtpService::hitRateLimit($recipientEmail, $request->ip());
+
             $maskedEmail = self::maskEmail($recipientEmail);
 
-            // Strict Security: Sanctum bearer token is NEVER generated or returned here!
-            return response()->json([
+            $responsePayload = [
                 'success'            => true,
                 'requires_otp'       => true,
                 'user_id'            => $user->user_id,
                 'username'           => $user->username,
                 'role'               => $user->role,
                 'masked_email'       => $maskedEmail,
-                'message'            => "A 6-digit verification code has been dispatched to {$maskedEmail} via Gmail.",
+                'message'            => "A 6-digit verification code has been dispatched to {$maskedEmail}.",
                 'expires_in_seconds' => 900,
                 'cooldown_seconds'   => 60,
-            ], 200);
+            ];
+
+            if (!empty($sendResult['dev_otp']) && (config('app.debug') || app()->environment('local'))) {
+                $responsePayload['debug_otp'] = $sendResult['dev_otp'];
+                $responsePayload['message'] = "Verification code generated: {$sendResult['dev_otp']} (Local dev fallback)";
+            }
+
+            // Strict Security: Sanctum bearer token is NEVER generated or returned here!
+            return response()->json($responsePayload, 200);
         }
 
         return response()->json([
@@ -731,40 +765,39 @@ class AuthController extends Controller
             ], 404);
         }
 
-        // Rate limiting: 60-second cooldown
-        if ($user->otp_created_at) {
-            $elapsed = now()->timestamp - $user->otp_created_at->timestamp;
-            if ($elapsed < 60) {
-                $remaining = max(1, 60 - $elapsed);
-                return response()->json([
-                    'success'           => false,
-                    'message'           => "Please wait {$remaining} seconds before requesting a new verification code.",
-                    'remaining_seconds' => $remaining,
-                ], 429);
-            }
-        }
-
-        $recipientEmail = self::resolveUserEmail($user) ?: ($user->email ?: null);
-        if (empty($recipientEmail) && $user->username === 'admin') {
-            $recipientEmail = OtpService::getEnvValue('MAIL_USERNAME', 'mail.mailers.smtp.username', '35barangay@gmail.com');
+        // Resolve recipient email address
+        $recipientEmail = self::resolveUserEmail($user, $target) ?: ($user->email ?: null);
+        if (empty($recipientEmail) && in_array(strtolower($user->username), ['admin', 'administrator'])) {
+            $recipientEmail = OtpService::getEnvValue('MAIL_USERNAME', 'mail.mailers.smtp.username', 'Z-LICZ@gmail.com');
         }
 
         if (empty($recipientEmail) || !filter_var($recipientEmail, FILTER_VALIDATE_EMAIL)) {
             return response()->json([
                 'success' => false,
-                'message' => 'No registered email address found for this user account.'
+                'message' => 'No valid email registered for this account to receive verification code. Please contact the administrator.'
             ], 422);
         }
 
-        $otp = (string) random_int(100000, 999999);
+        // Multi-tier Rate Limiting (email cooldown, hourly cap, and IP flood protection)
+        $rateCheck = OtpService::checkRateLimit($recipientEmail, $request->ip());
+        if (!$rateCheck['allowed']) {
+            return response()->json([
+                'success'           => false,
+                'message'           => $rateCheck['message'],
+                'remaining_seconds' => $rateCheck['remaining_seconds'] ?? 60,
+            ], 429);
+        }
+
+        // Reuse recent active OTP or create new
+        $otp = OtpService::getOrCreateActiveOtp($user->user_id, $recipientEmail, 'login', $request->ip(), $request->userAgent());
         $user->otp_code = $otp;
         $user->otp_expires_at = now()->addMinutes(15);
         $user->otp_created_at = now();
         $user->save();
 
         $name = $user->customer 
-            ? ($user->customer->first_name . ' ' . $user->customer->last_name) 
-            : ($user->employee ? ($user->employee->first_name . ' ' . $user->employee->last_name) : $user->username);
+            ? trim($user->customer->first_name . ' ' . $user->customer->last_name) 
+            : ($user->employee ? trim($user->employee->first_name . ' ' . $user->employee->last_name) : $user->username);
 
         $sendResult = OtpService::sendEmailOTP($recipientEmail, $otp, $name, 'login');
         $maskedEmail = self::maskEmail($recipientEmail);
@@ -773,20 +806,29 @@ class AuthController extends Controller
             Log::error("[LOGIN RESEND OTP FAILED] User ID: {$user->user_id} | Email: {$recipientEmail} | Error: " . ($sendResult['message'] ?? 'Unknown error'));
             return response()->json([
                 'success' => false,
-                'message' => 'Unable to send login verification email via Gmail SMTP. Please try again.',
+                'message' => 'Unable to deliver verification code. Please try again shortly.',
             ], 422);
         }
 
-        return response()->json([
+        OtpService::hitRateLimit($recipientEmail, $request->ip());
+
+        $responsePayload = [
             'success'            => true,
-            'message'            => "A new 6-digit verification code has been dispatched to {$maskedEmail} via Gmail.",
+            'message'            => "A new 6-digit verification code has been dispatched to {$maskedEmail}.",
             'email'              => $recipientEmail,
             'masked_email'       => $maskedEmail,
             'recipient_email'    => $maskedEmail,
             'masked_target'      => $maskedEmail,
             'expires_in_seconds' => 900,
             'cooldown_seconds'   => 60,
-        ], 200);
+        ];
+
+        if (!empty($sendResult['dev_otp']) && (config('app.debug') || app()->environment('local'))) {
+            $responsePayload['debug_otp'] = $sendResult['dev_otp'];
+            $responsePayload['message'] = "Verification code generated: {$sendResult['dev_otp']} (Local dev fallback)";
+        }
+
+        return response()->json($responsePayload, 200);
     }
 
     public function me(Request $request)
@@ -869,6 +911,59 @@ class AuthController extends Controller
         }
 
         return response()->json(['message' => 'No image provided'], 400);
+    }
+
+    public function uploadFaceBiometricImage(Request $request)
+    {
+        $request->validate([
+            'image' => 'required|image|mimes:jpeg,png,jpg,gif,webp|max:5120'
+        ]);
+
+        $user = $request->user();
+        if (!$user) {
+            return response()->json(['message' => 'Unauthenticated'], 401);
+        }
+
+        if ($request->hasFile('image')) {
+            // Delete old face biometric image if it exists
+            if ($user->face_biometric_image && Storage::disk('public')->exists($user->face_biometric_image)) {
+                Storage::disk('public')->delete($user->face_biometric_image);
+            }
+
+            $path = $request->file('image')->store('face_biometrics', 'public');
+            $user->face_biometric_image = $path;
+            $user->save();
+
+            $url = url(Storage::url($path));
+
+            return response()->json([
+                'success'              => true,
+                'message'              => 'Face biometric template registered successfully',
+                'face_biometric_image' => $url,
+                'imageUrl'             => $url
+            ]);
+        }
+
+        return response()->json(['message' => 'No image provided'], 400);
+    }
+
+    public function deleteFaceBiometricImage(Request $request)
+    {
+        $user = $request->user();
+        if (!$user) {
+            return response()->json(['message' => 'Unauthenticated'], 401);
+        }
+
+        if ($user->face_biometric_image && Storage::disk('public')->exists($user->face_biometric_image)) {
+            Storage::disk('public')->delete($user->face_biometric_image);
+        }
+        $user->face_biometric_image = null;
+        $user->save();
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Face biometric profile cleared successfully'
+        ]);
     }
 
     /**
@@ -1079,26 +1174,6 @@ class AuthController extends Controller
             ], 404);
         }
 
-        // Rate Limiting: 60-second cooldown
-        if ($user->otp_created_at) {
-            $elapsed = now()->timestamp - $user->otp_created_at->timestamp;
-            if ($elapsed < 60) {
-                $remaining = max(1, 60 - $elapsed);
-                return response()->json([
-                    'success' => false,
-                    'message' => "Please wait {$remaining} seconds before requesting a new OTP code.",
-                    'remaining_seconds' => $remaining,
-                ], 429);
-            }
-        }
-
-        // Secure 6-digit OTP generation (100000 - 999999)
-        $otp = (string) random_int(100000, 999999);
-        $user->otp_code = $otp;
-        $user->otp_expires_at = now()->addMinutes(15);
-        $user->otp_created_at = now();
-        $user->save();
-
         $recipientEmail = self::resolveUserEmail($user, $target) ?: ($user->email ?: $target);
 
         if (empty($recipientEmail) || !filter_var($recipientEmail, FILTER_VALIDATE_EMAIL)) {
@@ -1113,13 +1188,30 @@ class AuthController extends Controller
             $user->save();
         }
 
+        // Multi-tier Rate Limiting (email cooldown, hourly cap, and IP flood protection)
+        $rateCheck = OtpService::checkRateLimit($recipientEmail, $request->ip());
+        if (!$rateCheck['allowed']) {
+            return response()->json([
+                'success'           => false,
+                'message'           => $rateCheck['message'],
+                'remaining_seconds' => $rateCheck['remaining_seconds'] ?? 60,
+            ], 429);
+        }
+
+        // Reuse recent active OTP or create new
+        $otp = OtpService::getOrCreateActiveOtp($user->user_id, $recipientEmail, 'password_reset', $request->ip(), $request->userAgent());
+        $user->otp_code = $otp;
+        $user->otp_expires_at = now()->addMinutes(15);
+        $user->otp_created_at = now();
+        $user->save();
+
         // Resolve recipient name
         $name = $user->customer 
-            ? ($user->customer->first_name . ' ' . $user->customer->last_name) 
-            : ($user->employee ? ($user->employee->first_name . ' ' . $user->employee->last_name) : $user->username);
+            ? trim($user->customer->first_name . ' ' . $user->customer->last_name) 
+            : ($user->employee ? trim($user->employee->first_name . ' ' . $user->employee->last_name) : $user->username);
 
-        // Dispatch strictly via Gmail SMTP (Nodemailer / Symfony Mailer)
-        $sendResult = OtpService::sendEmailOTP($recipientEmail, $otp, $name, 'reset');
+        // Dispatch strictly via deliverability-optimized email service
+        $sendResult = OtpService::sendEmailOTP($recipientEmail, $otp, $name, 'password_reset');
 
         $maskedEmail = self::maskEmail($recipientEmail);
 
@@ -1127,23 +1219,32 @@ class AuthController extends Controller
             Log::error("[OTP DISPATCH FAILED] User ID: {$user->user_id} | Email: {$recipientEmail} | Error: " . ($sendResult['message'] ?? 'Unknown error'));
             return response()->json([
                 'success' => false,
-                'message' => $sendResult['message'] ?? 'Unable to send verification email via Gmail SMTP. Please verify your email address.',
+                'message' => $sendResult['message'] ?? 'Unable to send verification email. Please verify your email address.',
             ], 422);
         }
 
+        OtpService::hitRateLimit($recipientEmail, $request->ip());
+
         Log::info("[FORGOT PASSWORD OTP GENERATED & SENT] User ID: {$user->user_id} ({$user->username}) | Sent To Email: {$recipientEmail}");
 
-        return response()->json([
+        $responsePayload = [
             'success'            => true,
             'delivery_type'      => 'email',
-            'message'            => "A 6-digit verification code has been dispatched to {$maskedEmail} via Gmail.",
+            'message'            => "A 6-digit verification code has been dispatched to {$maskedEmail}.",
             'email'              => $recipientEmail,
             'masked_email'       => $maskedEmail,
             'recipient_email'    => $maskedEmail,
             'masked_target'      => $maskedEmail,
             'expires_in_seconds' => 900,
             'cooldown_seconds'   => 60,
-        ], 200);
+        ];
+
+        if (!empty($sendResult['dev_otp']) && (config('app.debug') || app()->environment('local'))) {
+            $responsePayload['debug_otp'] = $sendResult['dev_otp'];
+            $responsePayload['message'] = "Verification code generated: {$sendResult['dev_otp']} (Local dev fallback)";
+        }
+
+        return response()->json($responsePayload, 200);
     }
 
     /**

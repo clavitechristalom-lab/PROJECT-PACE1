@@ -57,8 +57,7 @@ class Customer extends Model
             return (string)$this->attributes['branch'];
         }
         if (!empty($this->branch_id)) {
-            $bp = BranchProfile::find($this->branch_id);
-            return $bp ? $bp->name : null;
+            return BranchProfile::getNameById($this->branch_id);
         }
         return null;
     }

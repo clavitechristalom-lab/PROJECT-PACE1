@@ -649,7 +649,7 @@ class EWalletController extends Controller
         $sale = SaleTransaction::create([
             'invoice_no'      => $invoiceNo,
             'customer_id'     => $deposit->customer_id,
-            'processed_by'    => $deposit->user_id ?? 1,
+            'processed_by'    => ($deposit->user_id && \App\Models\User::where('user_id', $deposit->user_id)->exists()) ? $deposit->user_id : \App\Models\User::value('user_id'),
             'branch_id'       => null,
             'sale_date'       => now(),
             'payment_method'  => $deposit->payment_method,

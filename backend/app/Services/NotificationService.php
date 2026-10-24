@@ -19,7 +19,7 @@ class NotificationService
         if (!$user) return null;
         if (isset($user->is_active) && $user->is_active === false) return null;
 
-        return Notification::create([
+        $notif = Notification::create([
             'user_id' => $userId,
             'type' => $data['type'] ?? 'system_alert',
             'title' => $data['title'] ?? 'Notification',
@@ -32,6 +32,10 @@ class NotificationService
             'is_read' => false,
             'read_at' => null,
         ]);
+
+        \Illuminate\Support\Facades\Cache::forget('pace_unified_fingerprint');
+
+        return $notif;
     }
 
     /**
@@ -63,7 +67,7 @@ class NotificationService
             ->whereIn('role', ['Store Administrator', 'Store Admin'])
             ->where('is_active', true);
 
-        if ($branch && $branch !== 'All' && $branch !== 'Main Branch') {
+        if ($branch && $branch !== 'All') {
             $query->whereHas('employee', function ($q) use ($branch) {
                 $q->where('branch_id', $branch);
             });
@@ -123,7 +127,7 @@ class NotificationService
             ->where('role', 'Customer')
             ->where('is_active', true);
 
-        if ($branchId && $branchId !== 'All' && $branchId !== 'Main Branch') {
+        if ($branchId && $branchId !== 'All') {
             $query->whereHas('customer', function ($q) use ($branchId) {
                 $q->where('branch_id', $branchId);
             });

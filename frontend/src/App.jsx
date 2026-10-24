@@ -1,33 +1,70 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, lazy, Suspense } from 'react'
 import { HashRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import { AuthProvider, useAuth } from './context/AuthContext'
 import { ToastContainer, ErrorBoundary, Spinner } from './components/ui'
-import { startRealtimeEngine } from './lib/realtimeSync'
+import { startRealtimeEngine, triggerDataSync } from './lib/realtimeSync'
 import AppShell from './components/layout/AppShell'
 import LoginPage from './pages/LoginPage'
-import DashboardPage, { EmployeeDashboard } from './pages/DashboardPage'
-import CustomerDashboard from './pages/CustomerDashboard'
-import ProductsPage from './pages/ProductsPage'
-import CustomersPage from './pages/CustomersPage'
-import SalesPage from './pages/SalesPage'
-import InstallmentsPage from './pages/InstallmentsPage'
-import PaymentsPage from './pages/PaymentsPage'
-import PaymentSchedulePage from './pages/PaymentSchedulePage'
-import EmployeesPage from './pages/EmployeesPage'
-import AttendancePage from './pages/AttendancePage'
-import PayrollPage from './pages/PayrollPage'
-import ReportsPage from './pages/ReportsPage'
-import TransactionsPage from './pages/TransactionsPage'
-import NotificationsPage from './pages/NotificationsPage'
-import QrScannerPage from './pages/QrScannerPage'
-import QrMonitoringPage from './pages/QrMonitoringPage'
-import QrRequestsPage from './pages/QrRequestsPage'
-import SupportPage from './pages/SupportPage'
-import { UsersPage, SystemLogsPage, BackupsPage, SettingsPage, StoragePage } from './pages/SystemPage'
-import SystemAdminDashboard from './pages/SystemAdminDashboard'
-import BranchesPage from './pages/BranchesPage'
-import CarouselPage from './pages/CarouselPage'
-import StoreSettingsPage from './pages/StoreSettingsPage'
+
+// Resilient dynamic import with auto-retry and cache-recovery for Vite HMR/bundle shifts
+const lazyRetry = (factory, retries = 2, delay = 400) => {
+  return lazy(() =>
+    new Promise((resolve, reject) => {
+      const attempt = (attemptsLeft) => {
+        factory()
+          .then(resolve)
+          .catch((err) => {
+            console.warn(`Dynamic import retry (${attemptsLeft} remaining):`, err)
+            if (attemptsLeft > 0) {
+              setTimeout(() => {
+                attempt(attemptsLeft - 1)
+              }, delay)
+            } else {
+              const reloadKey = 'pace_chunk_failed_reload'
+              const lastReload = sessionStorage.getItem(reloadKey)
+              const now = Date.now()
+              if (!lastReload || now - parseInt(lastReload, 10) > 8000) {
+                sessionStorage.setItem(reloadKey, now.toString())
+                window.location.reload()
+                return
+              }
+              reject(err)
+            }
+          })
+      }
+      attempt(retries)
+    })
+  )
+}
+
+const DashboardPage = lazyRetry(() => import('./pages/DashboardPage'))
+const EmployeeDashboard = lazyRetry(() => import('./pages/DashboardPage').then(m => ({ default: m.EmployeeDashboard })))
+const CustomerDashboard = lazyRetry(() => import('./pages/CustomerDashboard'))
+const ProductsPage = lazyRetry(() => import('./pages/ProductsPage'))
+const CustomersPage = lazyRetry(() => import('./pages/CustomersPage'))
+const SalesPage = lazyRetry(() => import('./pages/SalesPage'))
+const InstallmentsPage = lazyRetry(() => import('./pages/InstallmentsPage'))
+const PaymentsPage = lazyRetry(() => import('./pages/PaymentsPage'))
+const PaymentSchedulePage = lazyRetry(() => import('./pages/PaymentSchedulePage'))
+const EmployeesPage = lazyRetry(() => import('./pages/EmployeesPage'))
+const AttendancePage = lazyRetry(() => import('./pages/AttendancePage'))
+const PayrollPage = lazyRetry(() => import('./pages/PayrollPage'))
+const ReportsPage = lazyRetry(() => import('./pages/ReportsPage'))
+const TransactionsPage = lazyRetry(() => import('./pages/TransactionsPage'))
+const NotificationsPage = lazyRetry(() => import('./pages/NotificationsPage'))
+const QrScannerPage = lazyRetry(() => import('./pages/QrScannerPage'))
+const QrMonitoringPage = lazyRetry(() => import('./pages/QrMonitoringPage'))
+const QrRequestsPage = lazyRetry(() => import('./pages/QrRequestsPage'))
+const SupportPage = lazyRetry(() => import('./pages/SupportPage'))
+const UsersPage = lazyRetry(() => import('./pages/SystemPage').then(m => ({ default: m.UsersPage })))
+const SystemLogsPage = lazyRetry(() => import('./pages/SystemPage').then(m => ({ default: m.SystemLogsPage })))
+const BackupsPage = lazyRetry(() => import('./pages/SystemPage').then(m => ({ default: m.BackupsPage })))
+const SettingsPage = lazyRetry(() => import('./pages/SystemPage').then(m => ({ default: m.SettingsPage })))
+const StoragePage = lazyRetry(() => import('./pages/SystemPage').then(m => ({ default: m.StoragePage })))
+const SystemAdminDashboard = lazyRetry(() => import('./pages/SystemAdminDashboard'))
+const BranchesPage = lazyRetry(() => import('./pages/BranchesPage'))
+const CarouselPage = lazyRetry(() => import('./pages/CarouselPage'))
+const StoreSettingsPage = lazyRetry(() => import('./pages/StoreSettingsPage'))
 
 // Synchronize initial URL hash with browser pathname or saved route if needed
 if (typeof window !== 'undefined') {
@@ -91,11 +128,11 @@ function FullPageLoader() {
 
   useEffect(() => {
     const timer = setTimeout(() => {
-      // If still loading after 5s, clear stale session and show login
+      // If still loading after 12s, clear stale session and show login
       sessionStorage.removeItem('pace_session')
       window.dispatchEvent(new CustomEvent('auth:expired'))
       setTimedOut(true)
-    }, 5000)
+    }, 12000)
     return () => clearTimeout(timer)
   }, [])
 
@@ -218,6 +255,7 @@ function AppRoutes() {
   return (
     <>
       <RoutePersistenceTracker />
+      <Suspense fallback={<FullPageLoader />}>
       <Routes>
         <Route
           path="/login"
@@ -312,6 +350,7 @@ function AppRoutes() {
         <Route path="/" element={<RootRedirect />} />
         <Route path="*" element={<RootRedirect />} />
       </Routes>
+      </Suspense>
     </>
   )
 }

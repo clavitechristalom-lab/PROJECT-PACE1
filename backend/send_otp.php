@@ -17,81 +17,109 @@ use PHPMailer\PHPMailer\Exception;
 
 date_default_timezone_set('Asia/Manila');
 
-function sendOTPEmail($email, $otp, $name) {
+function sendOTPEmail($email, $otp, $name, $type = 'login') {
     $mail = new PHPMailer(true);
     $mailConfig = getMailConfig();
 
     try {
-        // Real Gmail SMTP Server Settings
         $mail->isSMTP();
         $mail->Host       = $mailConfig['host'];
         $mail->SMTPAuth   = true;
         $mail->Username   = $mailConfig['username'];
         $mail->Password   = $mailConfig['password'];
-        $mail->SMTPSecure = PHPMailer::ENCRYPTION_STARTTLS;
-        $mail->Port       = $mailConfig['port'];
+        $mail->SMTPSecure = ($mailConfig['encryption'] === 'ssl' || (int)$mailConfig['port'] === 465)
+            ? PHPMailer::ENCRYPTION_SMTPS
+            : PHPMailer::ENCRYPTION_STARTTLS;
+        $mail->Port       = (int) $mailConfig['port'];
         $mail->Timeout    = 20;
         $mail->CharSet    = 'UTF-8';
 
-        // Recipients
+        // Consistent sender information
         $mail->setFrom($mailConfig['from_email'], $mailConfig['from_name']);
         $mail->addAddress($email, $name);
         $mail->addReplyTo($mailConfig['from_email'], $mailConfig['from_name']);
 
-        // Email Content
-        $mail->isHTML(true);
-        $mail->Subject = 'PROJECT: PACE Z-LICZ - Security Verification OTP';
+        // Deliverability & RFC Anti-Spam Headers
+        $uniqueId = sprintf('%04x%04x-%04x-%04x-%04x-%04x%04x%04x',
+            mt_rand(0, 0xffff), mt_rand(0, 0xffff),
+            mt_rand(0, 0xffff),
+            mt_rand(0, 0x0fff) | 0x4000,
+            mt_rand(0, 0x3fff) | 0x8000,
+            mt_rand(0, 0xffff), mt_rand(0, 0xffff), mt_rand(0, 0xffff)
+        );
+        $mail->MessageID = "<{$uniqueId}@zlicz.com>";
+        $mail->addCustomHeader('Auto-Submitted', 'auto-generated');
+        $mail->addCustomHeader('X-Auto-Response-Suppress', 'All');
+        $mail->addCustomHeader('X-Entity-Ref-ID', $uniqueId);
+        $mail->addCustomHeader('Precedence', 'bulk');
+        $mail->Priority = 3; // Normal Priority
 
+        $subject = 'Your Z-LICZ verification code';
         $year = date('Y');
-        $mail->Body = "
-        <html>
-        <head>
-            <title>PROJECT: PACE Z-LICZ OTP Verification</title>
-            <style>
-                body { font-family: Arial, sans-serif; background-color: #f4f4f4; padding: 20px; }
-                .container { max-width: 600px; margin: 0 auto; background: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 10px rgba(0,0,0,0.1); }
-                .header { background: #0f1f3d; color: #ffffff; padding: 25px; text-align: center; }
-                .header h2 { margin: 0; color: #22c55e; letter-spacing: 1px; font-size: 24px; }
-                .content { padding: 30px; color: #333333; }
-                .otp-code { 
-                    font-size: 36px; 
-                    font-weight: bold; 
-                    text-align: center; 
-                    color: #1a3a6b;
-                    background: #f8fafc;
-                    padding: 15px;
-                    border-radius: 6px;
-                    margin: 25px 0;
-                    letter-spacing: 8px;
-                    border: 1px dashed #cbd5e1;
-                }
-                .footer { background: #f1f5f9; padding: 15px; text-align: center; color: #64748b; font-size: 12px; }
-            </style>
-        </head>
-        <body>
-            <div class='container'>
-                <div class='header'>
-                    <h2>PROJECT: PACE &bull; Z-LICZ</h2>
-                    <p style='margin: 6px 0 0; color: #94a3b8; font-size: 13px; text-transform: uppercase; letter-spacing: 1px;'>Furniture & Appliances Trading</p>
-                </div>
-                <div class='content'>
-                    <h3>Authentication OTP Code</h3>
-                    <p>Hello <b>" . htmlspecialchars($name) . "</b>,</p>
-                    <p>Your requested verification code for Z-LICZ account access is:</p>
-                    
-                    <div class='otp-code'>{$otp}</div>
-                    
-                    <p>This OTP code will expire in <b>15 minutes</b>.</p>
-                    <p>If you did not initiate this request, please ignore this email.</p>
-                </div>
-                <div class='footer'>
-                    <p>&copy; {$year} Z-LICZ Furniture & Appliances Trading. All rights reserved.</p>
-                </div>
+        $preheader = "Your single-use security code is {$otp}. It will expire in 15 minutes.";
+
+        $htmlBody = <<<HTML
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{$subject}</title>
+  <style>
+    body { margin: 0; padding: 0; background-color: #f8fafc; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; }
+    .email-container { max-width: 560px; margin: 30px auto; background-color: #ffffff; border-radius: 12px; border: 1px solid #e2e8f0; overflow: hidden; }
+    .email-header { background-color: #064e3b; padding: 26px 32px; text-align: left; }
+    .brand-title { color: #ffffff; font-size: 20px; font-weight: 700; margin: 0; }
+    .brand-sub { color: #a7f3d0; font-size: 12px; margin: 4px 0 0 0; text-transform: uppercase; letter-spacing: 1px; }
+    .email-body { padding: 34px 32px; }
+    .greeting { font-size: 16px; font-weight: 600; color: #0f172a; margin: 0 0 14px 0; }
+    .description { font-size: 14px; line-height: 1.6; color: #334155; margin: 0 0 24px 0; }
+    .otp-card { background-color: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 10px; padding: 22px; text-align: center; margin: 24px 0; }
+    .otp-label { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: #166534; margin: 0 0 8px 0; }
+    .otp-code { font-family: 'SFMono-Regular', Consolas, Menlo, monospace; font-size: 36px; font-weight: 700; color: #065f46; letter-spacing: 8px; margin: 0; }
+    .otp-expiration { font-size: 12px; color: #64748b; margin: 8px 0 0 0; }
+    .notice { font-size: 12px; line-height: 1.6; color: #64748b; margin: 24px 0 0 0; border-top: 1px solid #f1f5f9; padding-top: 16px; }
+    .email-footer { background-color: #f8fafc; padding: 20px 32px; border-top: 1px solid #e2e8f0; text-align: center; font-size: 11px; color: #94a3b8; }
+  </style>
+</head>
+<body>
+  <div style="display:none;font-size:1px;color:#ffffff;line-height:1px;max-height:0px;max-width:0px;opacity:0;overflow:hidden;">
+    {$preheader}
+  </div>
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color: #f8fafc; padding: 20px 0;">
+    <tr>
+      <td align="center">
+        <div class="email-container">
+          <div class="email-header">
+            <h1 class="brand-title">Z-LICZ</h1>
+            <p class="brand-sub">Furniture &amp; Appliances Trading</p>
+          </div>
+          <div class="email-body">
+            <p class="greeting">Hello {$name},</p>
+            <p class="description">A verification code was requested for your Z-LICZ account. Please enter this code to complete verification:</p>
+            <div class="otp-card">
+              <p class="otp-label">Security Verification Code</p>
+              <h2 class="otp-code">{$otp}</h2>
+              <p class="otp-expiration">Valid for 15 minutes</p>
             </div>
-        </body>
-        </html>
-        ";
-        $mail->AltBody = "Z-LICZ Furniture & Appliances Trading\n\nHello {$name},\nYour requested OTP verification code is: {$otp}\nValid for 15 minutes only.\nDo not share this code.";
+            <p class="notice">If you did not request this verification code, please ignore this email. Never disclose this code to anyone.</p>
+          </div>
+          <div class="email-footer">
+            <p style="margin:0 0 4px 0;">&copy; {$year} Z-LICZ Furniture &amp; Appliances Trading. All rights reserved.</p>
+            <p style="margin:0;">Automated operational notification sent from an unmonitored mailbox.</p>
+          </div>
+        </div>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>
+HTML;
+
+        $mail->isHTML(true);
+        $mail->Subject = $subject;
+        $mail->Body    = $htmlBody;
+        $mail->AltBody = "Z-LICZ Furniture & Appliances Trading\n\nHello {$name},\n\nYour security verification code is: {$otp}\nValid for 15 minutes.\n\nIf you did not request this code, please ignore this email.";
 
         $mail->send();
         return true;
@@ -195,49 +223,120 @@ try {
         }
     }
 
-    // Paghimo og 6-digit OTP ug 15-minutos nga expiration
-    $otp_code = sprintf("%06d", mt_rand(1, 999999));
+    $clientIp = $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1';
+
+    // 1. Rate Limiting Check: 60-second cooldown per email
+    try {
+        $stmtCooldown = $pdo->prepare("SELECT created_at FROM otps WHERE email = ? ORDER BY id DESC LIMIT 1");
+        $stmtCooldown->execute([$user_email]);
+        $lastOtp = $stmtCooldown->fetch(PDO::FETCH_ASSOC);
+        if ($lastOtp && !empty($lastOtp['created_at'])) {
+            $lastTime = strtotime($lastOtp['created_at']);
+            $elapsed = time() - $lastTime;
+            if ($elapsed < 60) {
+                $rem = 60 - $elapsed;
+                http_response_code(429);
+                echo json_encode([
+                    "success"           => false,
+                    "message"           => "Please wait {$rem} seconds before requesting another verification code.",
+                    "remaining_seconds" => $rem
+                ]);
+                exit();
+            }
+        }
+    } catch (\Throwable $e) {}
+
+    // 2. Rate Limiting Check: Max 5 OTPs per hour per email
+    try {
+        $stmtHourly = $pdo->prepare("SELECT COUNT(*) as cnt FROM otps WHERE email = ? AND created_at >= (NOW() - INTERVAL 1 HOUR)");
+        $stmtHourly->execute([$user_email]);
+        $hourly = $stmtHourly->fetch(PDO::FETCH_ASSOC);
+        if ($hourly && (int)$hourly['cnt'] >= 5) {
+            http_response_code(429);
+            echo json_encode([
+                "success"           => false,
+                "message"           => "Too many verification requests for this email address. Please try again in 1 hour.",
+                "remaining_seconds" => 300
+            ]);
+            exit();
+        }
+    } catch (\Throwable $e) {}
+
+    // 3. Rate Limiting Check: Max 10 requests per 15 minutes per IP
+    try {
+        $stmtIp = $pdo->prepare("SELECT COUNT(*) as cnt FROM otps WHERE ip_address = ? AND created_at >= (NOW() - INTERVAL 15 MINUTE)");
+        $stmtIp->execute([$clientIp]);
+        $ipRow = $stmtIp->fetch(PDO::FETCH_ASSOC);
+        if ($ipRow && (int)$ipRow['cnt'] >= 10) {
+            http_response_code(429);
+            echo json_encode([
+                "success"           => false,
+                "message"           => "Too many verification requests from this network. Please wait a few minutes before trying again.",
+                "remaining_seconds" => 600
+            ]);
+            exit();
+        }
+    } catch (\Throwable $e) {}
+
+    // 4. Reuse active unexpired OTP if generated within the last 2 minutes
+    $otp_code = null;
     $expiry_time = date("Y-m-d H:i:s", time() + (15 * 60));
 
-    // Pagtangtang sa daang OTP para sa maong email sa password_reset_otp ug otps
     try {
-        $delete_sql = "DELETE FROM password_reset_otp WHERE email = ?";
-        $delete_stmt = $pdo->prepare($delete_sql);
-        $delete_stmt->execute([$user_email]);
-    } catch (\Throwable $e) {}
-
-    // Pagsulod sa bag-ong OTP sa password_reset_otp
-    try {
-        $insert_sql = "INSERT INTO password_reset_otp (email, otp_code, expiry_time, used, created_at, updated_at) VALUES (?, ?, ?, 0, NOW(), NOW())";
-        $insert_stmt = $pdo->prepare($insert_sql);
-        $insert_stmt->execute([$user_email, $otp_code, $expiry_time]);
-    } catch (\Throwable $e) {}
-
-    // Pagsulod usab sa otps table
-    try {
-        $stmtOtps = $pdo->prepare("
-            INSERT INTO otps (user_id, email, otp_code, type, used, expiry_time, ip_address, user_agent, created_at, updated_at)
-            VALUES (?, ?, ?, 'login', 0, ?, ?, ?, NOW(), NOW())
+        $stmtRecent = $pdo->prepare("
+            SELECT otp_code, expiry_time FROM otps 
+            WHERE email = ? AND used = 0 AND expiry_time > NOW() AND created_at >= (NOW() - INTERVAL 2 MINUTE) 
+            ORDER BY id DESC LIMIT 1
         ");
-        $stmtOtps->execute([
-            $userId,
-            $user_email,
-            $otp_code,
-            $expiry_time,
-            $_SERVER['REMOTE_ADDR'] ?? null,
-            $_SERVER['HTTP_USER_AGENT'] ?? null,
-        ]);
+        $stmtRecent->execute([$user_email]);
+        $recentRow = $stmtRecent->fetch(PDO::FETCH_ASSOC);
+        if ($recentRow && !empty($recentRow['otp_code'])) {
+            $otp_code = (string) $recentRow['otp_code'];
+            $expiry_time = $recentRow['expiry_time'];
+        }
     } catch (\Throwable $e) {}
 
-    // Update usab sa users table para sa 100% synchronization
-    if ($userId) {
+    // Generate fresh code if no recent active code found
+    if (!$otp_code) {
+        $otp_code = sprintf("%06d", mt_rand(1, 999999));
+
+        // Pagsulod sa bag-ong OTP sa password_reset_otp
         try {
-            $stmtSync = $pdo->prepare("UPDATE users SET otp_code = ?, otp_expires_at = ?, otp_created_at = NOW() WHERE user_id = ?");
-            $stmtSync->execute([$otp_code, $expiry_time, $userId]);
+            $delete_sql = "DELETE FROM password_reset_otp WHERE email = ?";
+            $delete_stmt = $pdo->prepare($delete_sql);
+            $delete_stmt->execute([$user_email]);
+
+            $insert_sql = "INSERT INTO password_reset_otp (email, otp_code, expiry_time, used, created_at, updated_at) VALUES (?, ?, ?, 0, NOW(), NOW())";
+            $insert_stmt = $pdo->prepare($insert_sql);
+            $insert_stmt->execute([$user_email, $otp_code, $expiry_time]);
         } catch (\Throwable $e) {}
+
+        // Pagsulod usab sa otps table
+        try {
+            $stmtOtps = $pdo->prepare("
+                INSERT INTO otps (user_id, email, otp_code, type, used, expiry_time, ip_address, user_agent, created_at, updated_at)
+                VALUES (?, ?, ?, 'login', 0, ?, ?, ?, NOW(), NOW())
+            ");
+            $stmtOtps->execute([
+                $userId,
+                $user_email,
+                $otp_code,
+                $expiry_time,
+                $clientIp,
+                $_SERVER['HTTP_USER_AGENT'] ?? null,
+            ]);
+        } catch (\Throwable $e) {}
+
+        // Update usab sa users table para sa 100% synchronization
+        if ($userId) {
+            try {
+                $stmtSync = $pdo->prepare("UPDATE users SET otp_code = ?, otp_expires_at = ?, otp_created_at = NOW() WHERE user_id = ?");
+                $stmtSync->execute([$otp_code, $expiry_time, $userId]);
+            } catch (\Throwable $e) {}
+        }
     }
 
-    // Send OTP strictly via live Gmail SMTP
+    // Send OTP strictly via deliverability-optimized PHPMailer
     $email_sent = sendOTPEmail($user_email, $otp_code, $recipientName);
 
     $parts = explode('@', $user_email, 2);

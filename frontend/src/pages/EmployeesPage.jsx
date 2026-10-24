@@ -12,7 +12,7 @@ import {
   PageHeader, StatCard, Card, Pagination, showToast, StatusBadge,
   TabBar, LoadingState, ErrorAlert, TableSkeleton, EmptyState, confirmAction,
 } from '../components/ui'
-import { fmt, fmtDate, filterBySearch } from '../lib/utils'
+import { fmt, fmtDate, filterBySearch, fastDeepEqual } from '../lib/utils'
 import { api } from '../lib/api'
 import { useRealtimeSync, triggerDataSync } from '../lib/realtimeSync'
 import { QRCodeSVG } from 'qrcode.react'
@@ -30,9 +30,16 @@ export default function EmployeesPage({ branchFilter, embedded }) {
     return <Navigate to="/employee/dashboard" replace />
   }
   const [searchParams] = useSearchParams()
-  const [employees, setEmployees] = useState([])
+  const [employees, setEmployees] = useState(() => {
+    try {
+      const saved = sessionStorage.getItem('pace_cached_employees')
+      return saved ? JSON.parse(saved) : []
+    } catch { return [] }
+  })
   const [branchesList, setBranchesList] = useState([])
-  const [loading, setLoading] = useState(true)
+  const [loading, setLoading] = useState(() => {
+    return !sessionStorage.getItem('pace_cached_employees')
+  })
 
   useEffect(() => {
     api.branches.getAll()
@@ -85,7 +92,7 @@ export default function EmployeesPage({ branchFilter, embedded }) {
 
   const loadEmployees = async (source) => {
     // Only show full loading spinner on initial manual change, not background auto-syncs
-    const isBackground = source === 'timer' || source === 'database' || source === 'event' || source === 'focus' || source === 'mutation'
+    const isBackground = source === 'timer' || source === 'database' || source === 'event' || source === 'focus' || source === 'mutation' || employees.length > 0
     if (!isBackground) {
       setLoading(true)
     }
@@ -97,8 +104,15 @@ export default function EmployeesPage({ branchFilter, embedded }) {
         branch_id: branchFilter || (branchSelectFilter !== 'All' ? branchSelectFilter : undefined),
         department: deptFilter !== 'All' ? deptFilter : undefined,
       })
-      setEmployees(data.employees || [])
+      const newEmps = data?.employees || []
+      setEmployees(prev => fastDeepEqual(prev, newEmps) ? prev : newEmps)
+      try {
+        if (!search && statusFilter === 'All' && deptFilter === 'All' && branchSelectFilter === 'All') {
+          sessionStorage.setItem('pace_cached_employees', JSON.stringify(newEmps))
+        }
+      } catch (e) { }
     } catch (err) {
+      if (err?.name === 'AbortError') return
       if (!isBackground) {
         console.error('Failed to load employees:', err)
         setError(err.message || 'Failed to fetch employees')
@@ -115,7 +129,7 @@ export default function EmployeesPage({ branchFilter, embedded }) {
   }, [search, deptFilter, branchSelectFilter, statusFilter, branchFilter])
 
   // Real-time synchronization across all tabs and multi-user activities
-  useRealtimeSync(loadEmployees, [search, deptFilter, branchSelectFilter, statusFilter, branchFilter])
+  useRealtimeSync(loadEmployees, [search, deptFilter, branchSelectFilter, statusFilter, branchFilter], { periodic: true })
 
   useEffect(() => {
     const id = searchParams.get('id')
@@ -133,6 +147,16 @@ export default function EmployeesPage({ branchFilter, embedded }) {
 
     if (form.attendance_pin && !/^\d{4,6}$/.test(form.attendance_pin)) {
       showToast('Attendance PIN must be 4 to 6 digits', 'error')
+      return
+    }
+
+    if (form.phone && form.phone.length !== 11) {
+      showToast('Phone number must be exactly 11 digits (e.g. 09123456789)', 'error')
+      return
+    }
+
+    if (form.emergency_contact_phone && form.emergency_contact_phone.length !== 11) {
+      showToast('Emergency contact phone must be exactly 11 digits (e.g. 09123456789)', 'error')
       return
     }
 
@@ -965,12 +989,13 @@ export default function EmployeesPage({ branchFilter, embedded }) {
 
                 <div className="grid grid-cols-2 gap-2.5">
                   <div>
-                    <label className="block font-bold text-muted-foreground mb-1">Phone Number</label>
+                    <label className="block font-bold text-muted-foreground mb-1">Phone Number (11 digits)</label>
                     <input
-                      type="text"
+                      type="tel"
+                      maxLength={11}
                       value={form.phone}
-                      onChange={e => setForm(f => ({ ...f, phone: e.target.value }))}
-                      placeholder="0917XXXXXXX"
+                      onChange={e => setForm(f => ({ ...f, phone: e.target.value.replace(/\D/g, '').slice(0, 11) }))}
+                      placeholder="09XXXXXXXXX"
                       className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground font-mono"
                     />
                   </div>
@@ -1091,7 +1116,9 @@ export default function EmployeesPage({ branchFilter, embedded }) {
                     </select>
                   </div>
                   <div>
-                    <label className="block font-bold text-muted-foreground mb-1">Basic Monthly Salary (PHP) *</label>
+                    <label className="block font-bold text-muted-foreground mb-1">
+                      Basic Monthly Salary (PHP) {editingId ? '(Fixed)' : '*'}
+                    </label>
                     <input
                       type="number"
                       step="0.01"
@@ -1099,7 +1126,9 @@ export default function EmployeesPage({ branchFilter, embedded }) {
                       onChange={e => setForm(f => ({ ...f, basic_salary: e.target.value }))}
                       placeholder="0.00"
                       required
-                      className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground font-mono font-bold"
+                      disabled={Boolean(editingId)}
+                      title={editingId ? 'Salary is fixed upon account creation and cannot be edited.' : ''}
+                      className={`w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground font-mono font-bold ${editingId ? 'opacity-60 cursor-not-allowed bg-muted/40' : ''}`}
                     />
                   </div>
                   <div>
@@ -1228,12 +1257,13 @@ export default function EmployeesPage({ branchFilter, embedded }) {
                   </div>
                 </div>
                 <div>
-                  <label className="block font-bold text-muted-foreground mb-1">Emergency Phone Number</label>
+                  <label className="block font-bold text-muted-foreground mb-1">Emergency Phone Number (11 digits)</label>
                   <input
-                    type="text"
+                    type="tel"
+                    maxLength={11}
                     value={form.emergency_contact_phone}
-                    onChange={e => setForm(f => ({ ...f, emergency_contact_phone: e.target.value }))}
-                    placeholder="0918XXXXXXX"
+                    onChange={e => setForm(f => ({ ...f, emergency_contact_phone: e.target.value.replace(/\D/g, '').slice(0, 11) }))}
+                    placeholder="09XXXXXXXXX"
                     className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground font-mono"
                   />
                 </div>

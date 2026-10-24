@@ -47,26 +47,58 @@ export class ErrorBoundary extends Component {
 
   componentDidCatch(error, errorInfo) {
     console.error('UI Runtime Error caught by ErrorBoundary:', error, errorInfo)
+    const isChunkError =
+      error?.message?.includes('Failed to fetch dynamically imported module') ||
+      error?.message?.includes('dynamically imported module') ||
+      error?.message?.includes('Loading chunk')
+    if (isChunkError && typeof window !== 'undefined') {
+      const reloadKey = 'pace_errorboundary_chunk_reload'
+      const lastReload = sessionStorage.getItem(reloadKey)
+      const now = Date.now()
+      if (!lastReload || now - parseInt(lastReload, 10) > 8000) {
+        sessionStorage.setItem(reloadKey, now.toString())
+        window.location.reload()
+      }
+    }
   }
 
   render() {
     if (this.state.hasError) {
+      const isChunkError =
+        this.state.error?.message?.includes('Failed to fetch dynamically imported module') ||
+        this.state.error?.message?.includes('dynamically imported module') ||
+        this.state.error?.message?.includes('Loading chunk')
+
       return (
         <div className="p-8 max-w-2xl mx-auto my-12 bg-card border border-rose-200 dark:border-rose-900 rounded-2xl shadow-lg text-center space-y-4">
           <FiAlertTriangle className="w-12 h-12 text-rose-500 mx-auto" />
-          <h2 className="text-lg font-bold text-foreground">An error occurred in this view</h2>
+          <h2 className="text-lg font-bold text-foreground">
+            {isChunkError ? 'Application Update in Progress' : 'An error occurred in this view'}
+          </h2>
           <p className="text-xs font-mono text-rose-600 bg-rose-50 dark:bg-rose-950/40 p-3 rounded-xl border border-rose-100 dark:border-rose-900 text-left overflow-x-auto">
-            {this.state.error?.message || 'Unexpected rendering error'}
+            {isChunkError
+              ? 'A fresh module build is available. Click below to reload and connect to the latest version.'
+              : this.state.error?.message || 'Unexpected rendering error'}
           </p>
           <div className="flex justify-center gap-3 pt-2">
             <button
-              onClick={() => { this.setState({ hasError: false, error: null }) }}
+              onClick={() => {
+                if (isChunkError) {
+                  window.location.reload()
+                } else {
+                  this.setState({ hasError: false, error: null })
+                }
+              }}
               className="px-4 py-2 bg-primary hover:opacity-90 text-primary-foreground text-xs font-semibold rounded-xl cursor-pointer transition-all shadow-xs"
             >
-              Retry View
+              {isChunkError ? 'Reload Application' : 'Retry View'}
             </button>
             <button
-              onClick={() => { this.setState({ hasError: false, error: null }); window.location.hash = '#/dashboard' }}
+              onClick={() => {
+                this.setState({ hasError: false, error: null })
+                window.location.hash = '#/dashboard'
+                if (isChunkError) window.location.reload()
+              }}
               className="px-4 py-2 bg-muted hover:bg-muted/80 text-foreground text-xs font-semibold rounded-xl cursor-pointer transition-all"
             >
               Go to Dashboard
@@ -311,12 +343,12 @@ export function Modal({ title, onClose, children, footer, size = 'md' }) {
 export function ConfirmDialog({ title, message, onConfirm, onCancel, confirmLabel = 'Confirm', danger }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/45 dark:bg-black/75 backdrop-blur-sm animate-[fadeIn_0.15s_ease-out]">
-      <div className="relative w-full max-w-[420px] p-6 sm:p-8 bg-white dark:bg-[#0c1612] text-slate-900 dark:text-white border border-slate-200 dark:border-emerald-500/25 rounded-3xl shadow-2xl space-y-4">
+      <div className="relative w-full max-w-[420px] p-6 sm:p-8 bg-white dark:bg-[#081329] text-slate-900 dark:text-white border border-slate-200 dark:border-blue-500/30 rounded-3xl shadow-2xl space-y-4">
         <div className="flex flex-col items-center text-center">
           <div className={`w-13 h-13 rounded-2xl flex items-center justify-center shadow-sm mx-auto mb-3.5 border ${
             danger
               ? 'bg-rose-50 dark:bg-rose-950/80 text-rose-600 dark:text-rose-400 border-rose-200 dark:border-rose-500/30'
-              : 'bg-emerald-50 dark:bg-emerald-950/80 text-emerald-600 dark:text-emerald-400 border-emerald-200 dark:border-emerald-500/30'
+              : 'bg-blue-50 dark:bg-blue-950/80 text-blue-600 dark:text-blue-400 border-blue-200 dark:border-blue-500/30'
           }`}>
             {danger ? <FiTrash2 className="w-6 h-6" /> : <FiCheckCircle className="w-6 h-6" />}
           </div>
@@ -337,7 +369,7 @@ export function ConfirmDialog({ title, message, onConfirm, onCancel, confirmLabe
             className={`inline-flex items-center justify-center font-bold rounded-xl cursor-pointer transition-all active:scale-95 px-6 py-2.5 text-sm ${
               danger
                 ? 'bg-rose-600 hover:bg-rose-700 text-white shadow-md shadow-rose-600/20'
-                : 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-md shadow-emerald-600/20'
+                : 'bg-blue-600 hover:bg-blue-700 text-white shadow-md shadow-blue-600/20'
             }`}
           >
             {confirmLabel}
@@ -438,23 +470,25 @@ export function PageHeader({ title, subtitle, action }) {
 // ─── Stat Card ────────────────────────────────────────────────────────────────
 export function StatCard({ title, value, sub, icon, color = 'blue' }) {
   const colors = {
-    blue: 'bg-teal-500/15 text-teal-700 border-teal-300/80 dark:bg-teal-500/20 dark:text-teal-300 dark:border-teal-500/40 dark:shadow-[0_0_12px_rgba(20,184,166,0.25)]',
+    blue: 'bg-blue-500/15 text-blue-700 border-blue-300/80 dark:bg-blue-500/20 dark:text-blue-300 dark:border-blue-500/40 dark:shadow-[0_0_12px_rgba(59,130,246,0.25)]',
+    navy: 'bg-indigo-950/40 text-blue-300 border-blue-800/40 dark:bg-blue-950/60 dark:text-sky-300 dark:border-blue-600/40 dark:shadow-[0_0_12px_rgba(30,58,138,0.3)]',
+    cyan: 'bg-sky-500/15 text-sky-700 border-sky-300/80 dark:bg-sky-500/20 dark:text-sky-300 dark:border-sky-500/40 dark:shadow-[0_0_12px_rgba(14,165,233,0.25)]',
+    indigo: 'bg-indigo-500/15 text-indigo-700 border-indigo-300/80 dark:bg-indigo-500/20 dark:text-indigo-300 dark:border-indigo-500/40 dark:shadow-[0_0_12px_rgba(99,102,241,0.25)]',
     green: 'bg-emerald-500/15 text-emerald-700 border-emerald-300/80 dark:bg-emerald-500/20 dark:text-emerald-300 dark:border-emerald-500/40 dark:shadow-[0_0_12px_rgba(16,185,129,0.25)]',
     red: 'bg-rose-500/15 text-rose-700 border-rose-300/80 dark:bg-rose-900/30 dark:text-rose-300 dark:border-rose-500/40 dark:shadow-[0_0_12px_rgba(244,63,94,0.25)]',
     yellow: 'bg-amber-500/15 text-amber-700 border-amber-300/80 dark:bg-amber-500/20 dark:text-amber-300 dark:border-amber-500/40 dark:shadow-[0_0_12px_rgba(245,158,11,0.25)]',
-    purple: 'bg-rose-700/15 text-rose-800 border-rose-300/80 dark:bg-rose-950/40 dark:text-rose-300 dark:border-rose-400/40 dark:shadow-[0_0_12px_rgba(190,18,60,0.25)]',
-    indigo: 'bg-emerald-600/15 text-emerald-700 border-emerald-300/80 dark:bg-emerald-500/20 dark:text-emerald-300 dark:border-emerald-400/40 dark:shadow-[0_0_12px_rgba(16,185,129,0.25)]',
+    purple: 'bg-purple-500/15 text-purple-700 border-purple-300/80 dark:bg-purple-500/20 dark:text-purple-300 dark:border-purple-500/40 dark:shadow-[0_0_12px_rgba(168,85,247,0.25)]',
   }
   return (
     <div className="bg-card rounded-2xl border border-border p-4 hover:shadow-lg transition-all duration-300 hover:scale-[1.02] backdrop-blur-md">
       <div className="flex items-start justify-between mb-2.5">
-        <span className="text-[11px] font-bold text-emerald-900/75 dark:text-emerald-200/80 uppercase tracking-wider leading-tight">{title}</span>
-        <span className={`w-8 h-8 rounded-xl flex items-center justify-center text-sm flex-shrink-0 border shadow-2xs ${colors[color] || colors.green}`}>
+        <span className="text-[11px] font-bold text-slate-700 dark:text-blue-200/80 uppercase tracking-wider leading-tight">{title}</span>
+        <span className={`w-8 h-8 rounded-xl flex items-center justify-center text-sm flex-shrink-0 border shadow-2xs ${colors[color] || colors.blue}`}>
           {icon}
         </span>
       </div>
-      <div className="text-xl md:text-2xl font-black text-emerald-950 dark:text-white tracking-tight font-mono">{value !== undefined ? value : '—'}</div>
-      {sub && <div className="text-[11px] text-emerald-800/70 dark:text-emerald-300/60 mt-1 font-mono">{sub}</div>}
+      <div className="text-xl md:text-2xl font-black text-slate-900 dark:text-white tracking-tight font-mono">{value !== undefined ? value : '—'}</div>
+      {sub && <div className="text-[11px] text-slate-600 dark:text-slate-400 mt-1 font-mono">{sub}</div>}
     </div>
   )
 }
@@ -675,12 +709,12 @@ export function TabBar({ tabs = [], activeTab, active, onChange }) {
             key={id}
             onClick={() => onChange(id)}
             className={`flex items-center gap-2 px-4 py-2.5 text-xs font-bold cursor-pointer transition-all border-b-2 -mb-px whitespace-nowrap ${isActive
-                ? 'border-emerald-400 text-white drop-shadow-sm font-extrabold'
-                : 'border-transparent text-white/85 hover:text-white drop-shadow-2xs font-semibold hover:border-white/40'
+                ? 'border-blue-500 text-blue-600 dark:text-blue-400 drop-shadow-sm font-extrabold'
+                : 'border-transparent text-muted-foreground hover:text-foreground drop-shadow-2xs font-semibold hover:border-blue-500/30'
               }`}
           >
-            {icon && <span className={`shrink-0 ${isActive ? 'text-emerald-300 drop-shadow-sm' : 'text-white/85'}`}>{icon}</span>}
-            <span className="text-white drop-shadow-sm">{label}</span>
+            {icon && <span className={`shrink-0 ${isActive ? 'text-blue-600 dark:text-blue-400 drop-shadow-sm' : 'text-muted-foreground'}`}>{icon}</span>}
+            <span className={isActive ? 'text-blue-600 dark:text-blue-400 drop-shadow-sm' : 'text-foreground'}>{label}</span>
             {badge && (
               <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-rose-600 text-white font-mono font-bold shadow-xs">
                 {badge}
@@ -703,12 +737,18 @@ export function NotificationBell({
   onRefresh,
 }) {
   const [open, setOpen] = useState(false)
+  const [filter, setFilter] = useState('all')
   const ref = useRef(null)
 
   useEffect(() => {
     const fn = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false) }
+    const handleOpen = () => setOpen(true)
     document.addEventListener('mousedown', fn)
-    return () => document.removeEventListener('mousedown', fn)
+    window.addEventListener('open:notifications', handleOpen)
+    return () => {
+      document.removeEventListener('mousedown', fn)
+      window.removeEventListener('open:notifications', handleOpen)
+    }
   }, [])
 
   const getPriorityBadge = (p) => {
@@ -737,6 +777,8 @@ export function NotificationBell({
     return <FiBell className="w-4 h-4 text-primary" />
   }
 
+  const displayList = filter === 'unread' ? notifications.filter(n => !n.is_read) : notifications
+
   return (
     <div className="relative" ref={ref}>
       <button
@@ -744,9 +786,9 @@ export function NotificationBell({
           setOpen(o => !o)
           if (!open && onRefresh) onRefresh()
         }}
-        className="w-9 h-9 rounded-xl border border-emerald-500/25 bg-emerald-50/50 dark:bg-emerald-950/40 hover:bg-emerald-500/20 flex items-center justify-center text-emerald-800 dark:text-emerald-200 hover:text-emerald-950 dark:hover:text-white transition-colors cursor-pointer relative shadow-2xs"
+        className="w-9 h-9 rounded-xl border border-blue-500/25 bg-blue-50/50 dark:bg-blue-950/40 hover:bg-blue-500/20 flex items-center justify-center text-blue-800 dark:text-blue-200 hover:text-blue-950 dark:hover:text-white transition-colors cursor-pointer relative shadow-2xs"
         aria-label="Notifications"
-        title="Notification Center"
+        title="Notifications"
       >
         <FiBell className="w-4 h-4" />
         {unreadCount > 0 && (
@@ -757,53 +799,87 @@ export function NotificationBell({
       </button>
 
       {open && (
-        <div className="absolute right-0 mt-2 w-88 sm:w-[420px] !bg-white/95 dark:!bg-[#071d14]/95 backdrop-blur-xl rounded-2xl shadow-2xl border border-emerald-500/30 z-50 animate-[slideUp_0.15s_ease] overflow-hidden flex flex-col max-h-[500px]">
-          <div className="flex items-center justify-between px-4 py-3 border-b border-emerald-500/20 !bg-emerald-50/70 dark:!bg-emerald-950/70 shrink-0">
-            <div className="flex items-center gap-2">
-              <span className="text-xs font-bold uppercase tracking-wider text-emerald-950 dark:text-emerald-100">Notification Bar</span>
-              {unreadCount > 0 && (
-                <span className="text-[10px] font-bold font-mono bg-rose-100 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300 border border-rose-300 dark:border-rose-800 px-1.5 py-0.2 rounded-full">
-                  {unreadCount} unread
-                </span>
-              )}
-            </div>
-            <div className="flex items-center gap-3">
-              {unreadCount > 0 && onMarkAllRead && (
+        <div className="absolute right-0 mt-2 w-88 sm:w-[420px] !bg-white/95 dark:!bg-[#081329]/95 backdrop-blur-xl rounded-2xl shadow-2xl border border-blue-500/30 z-50 animate-[slideUp_0.15s_ease] overflow-hidden flex flex-col max-h-[520px]">
+          {/* Header */}
+          <div className="px-4 py-3 border-b border-blue-500/20 !bg-blue-50/70 dark:!bg-blue-950/70 shrink-0 space-y-2">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-bold uppercase tracking-wider text-blue-950 dark:text-blue-100">Notifications</span>
+                {unreadCount > 0 && (
+                  <span className="text-[10px] font-bold font-mono bg-rose-100 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300 border border-rose-300 dark:border-rose-800 px-1.5 py-0.2 rounded-full">
+                    {unreadCount} unread
+                  </span>
+                )}
+              </div>
+              <div className="flex items-center gap-2">
+                {unreadCount > 0 && onMarkAllRead && (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      onMarkAllRead()
+                    }}
+                    className="text-[11px] font-semibold text-primary hover:underline cursor-pointer flex items-center gap-1"
+                  >
+                    <FiCheckCircle className="w-3.5 h-3.5" />
+                    <span>Mark all read</span>
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={(e) => {
                     e.stopPropagation()
-                    onMarkAllRead()
+                    setOpen(false)
                   }}
-                  className="text-[11px] font-semibold text-primary hover:underline cursor-pointer flex items-center gap-1"
+                  className="text-muted-foreground hover:text-foreground cursor-pointer p-1 rounded-lg hover:bg-blue-500/10"
+                  aria-label="Close"
                 >
-                  <FiCheckCircle className="w-3.5 h-3.5" />
-                  <span>Mark all read</span>
+                  <FiX className="w-4 h-4" />
                 </button>
-              )}
+              </div>
+            </div>
+
+            {/* Filter Tabs */}
+            <div className="flex items-center gap-1.5 pt-1">
               <button
                 type="button"
-                onClick={(e) => {
-                  e.stopPropagation()
-                  setOpen(false)
-                }}
-                className="text-muted-foreground hover:text-foreground cursor-pointer"
-                aria-label="Close"
+                onClick={() => setFilter('all')}
+                className={`text-[11px] font-semibold px-2.5 py-1 rounded-lg transition-colors cursor-pointer ${
+                  filter === 'all'
+                    ? 'bg-blue-600 text-white shadow-xs'
+                    : 'bg-blue-500/10 text-blue-900 dark:text-blue-200 hover:bg-blue-500/20'
+                }`}
               >
-                <FiX className="w-4 h-4" />
+                All ({notifications.length})
+              </button>
+              <button
+                type="button"
+                onClick={() => setFilter('unread')}
+                className={`text-[11px] font-semibold px-2.5 py-1 rounded-lg transition-colors cursor-pointer ${
+                  filter === 'unread'
+                    ? 'bg-blue-600 text-white shadow-xs'
+                    : 'bg-blue-500/10 text-blue-900 dark:text-blue-200 hover:bg-blue-500/20'
+                }`}
+              >
+                Unread ({unreadCount})
               </button>
             </div>
           </div>
 
-          <div className="overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800 flex-1 !bg-white dark:!bg-[#0f172a]">
-            {notifications.length === 0 ? (
-              <div className="px-4 py-12 text-center text-xs text-muted-foreground space-y-2 !bg-white dark:!bg-[#0f172a]">
+          {/* Notifications List */}
+          <div className="overflow-y-auto divide-y divide-slate-100 dark:divide-blue-900/30 flex-1 !bg-white dark:!bg-[#081329]">
+            {displayList.length === 0 ? (
+              <div className="px-4 py-12 text-center text-xs text-muted-foreground space-y-2 !bg-white dark:!bg-[#081329]">
                 <FiBell className="w-9 h-9 text-muted-foreground/30 mx-auto" />
-                <p className="font-bold text-foreground text-sm">No new notifications</p>
-                <p className="text-[11px] text-muted-foreground">All operational and account updates are up to date.</p>
+                <p className="font-bold text-foreground text-sm">
+                  {filter === 'unread' ? 'No unread notifications' : 'No notifications'}
+                </p>
+                <p className="text-[11px] text-muted-foreground">
+                  {filter === 'unread' ? 'You have caught up with all updates.' : 'All operational and account updates are up to date.'}
+                </p>
               </div>
             ) : (
-              notifications.map(n => {
+              displayList.map(n => {
                 const pInfo = getPriorityBadge(n.priority)
                 const isUnread = !n.is_read
                 return (
@@ -813,8 +889,9 @@ export function NotificationBell({
                       if (onNotificationClick) onNotificationClick(n)
                       setOpen(false)
                     }}
-                    className={`p-3.5 hover:!bg-slate-50 dark:hover:!bg-[#1e293b]/70 transition-colors flex gap-3 cursor-pointer relative group ${isUnread ? '!bg-blue-50/70 dark:!bg-[#162032]' : '!bg-white dark:!bg-[#0f172a]'
-                      }`}
+                    className={`p-3.5 hover:!bg-slate-50 dark:hover:!bg-[#13274c]/70 transition-colors flex gap-3 cursor-pointer relative group ${
+                      isUnread ? '!bg-blue-50/70 dark:!bg-[#0f1f3d]' : '!bg-white dark:!bg-[#081329]'
+                    }`}
                   >
                     <span className="w-9 h-9 rounded-xl bg-muted/80 border border-border flex items-center justify-center text-sm shrink-0 mt-0.5 shadow-2xs">
                       {getModuleIcon(n.module)}
@@ -836,7 +913,7 @@ export function NotificationBell({
                         )}
                       </div>
 
-                      {/* Full Message Details (No Truncation) */}
+                      {/* Full Message Details */}
                       <p className="text-xs text-foreground/90 leading-relaxed break-words font-normal">
                         {n.message}
                       </p>
@@ -868,17 +945,18 @@ export function NotificationBell({
             )}
           </div>
 
-          <div className="p-2.5 border-t border-slate-200 dark:border-slate-800 !bg-slate-50 dark:!bg-[#1e293b] text-center shrink-0">
-            <button
-              type="button"
-              onClick={() => {
-                setOpen(false)
-                if (onViewAll) onViewAll()
-              }}
-              className="text-xs font-bold text-primary hover:underline cursor-pointer py-1 block w-full"
-            >
-              Open Full Notification Center →
-            </button>
+          {/* Clean Footer */}
+          <div className="px-4 py-2 border-t border-slate-200 dark:border-slate-800 !bg-slate-50 dark:!bg-[#1e293b] flex items-center justify-between text-[11px] text-muted-foreground shrink-0">
+            <span>{displayList.length} notification{displayList.length === 1 ? '' : 's'}</span>
+            {onRefresh && (
+              <button
+                type="button"
+                onClick={() => onRefresh()}
+                className="font-semibold text-primary hover:underline cursor-pointer flex items-center gap-1"
+              >
+                <span>Refresh</span>
+              </button>
+            )}
           </div>
         </div>
       )}

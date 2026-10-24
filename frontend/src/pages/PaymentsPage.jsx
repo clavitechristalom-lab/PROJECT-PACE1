@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import {
   FiCreditCard, FiTrendingUp, FiSmartphone,
@@ -11,7 +11,7 @@ import {
   Table, TR, TD, SearchBar, PageHeader, StatCard, Card, CardHeader, Pagination, showToast,
   LoadingState, ErrorAlert, TableSkeleton, EmptyState, showLoading, closeLoading, confirmDelete, unifiedAlert
 } from '../components/ui'
-import { fmt, fmtDate } from '../lib/utils'
+import { fmt, fmtDate, fastDeepEqual } from '../lib/utils'
 import { useAuth } from '../context/AuthContext'
 import api, { downloadCsv } from '../lib/api'
 import { useRealtimeSync, triggerDataSync } from '../lib/realtimeSync'
@@ -88,7 +88,7 @@ export default function PaymentsPage() {
   // Filters
   const [search, setSearch] = useState('')
   const [methodFilter, setMethodFilter] = useState('All')
-  const [branchFilter, setBranchFilter] = useState(isStoreAdmin ? (user?.employee?.branch?.name || 'Main Branch') : 'All')
+  const [branchFilter, setBranchFilter] = useState(isStoreAdmin ? (user?.employee?.branch?.name || (typeof user?.employee?.branch === 'string' ? user.employee.branch : '')) : 'All')
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
   const [page, setPage] = useState(1)
@@ -111,11 +111,29 @@ export default function PaymentsPage() {
   const [payDate, setPayDate] = useState(new Date().toISOString().slice(0, 10))
   const [payNotes, setPayNotes] = useState('')
 
+  const inFlightRef = useRef(false)
+  const isMountedRef = useRef(true)
+
+  useEffect(() => {
+    isMountedRef.current = true
+    return () => {
+      isMountedRef.current = false
+    }
+  }, [])
+
   const loadData = async (silent = false) => {
-    if (!silent) setLoading(true)
-    if (!silent) setError('')
+    // 1-2s Overlap Guard: Skip if previous cycle is still in flight
+    if (inFlightRef.current) return
+    inFlightRef.current = true
+
+    const isBg = silent || payments.length > 0
+    if (!isBg) setLoading(true)
+    if (!isBg) setError('')
     try {
-      const [paymentsRes, instRes, monRes, branchRes, settingsRes] = await Promise.all([
+      const needStatic = branches.length === 0 || !settings
+      const needInstallments = installments.length === 0 || newPayModal || !silent
+
+      const promises = [
         api.payments.getAll({
           search: search || undefined,
           payment_method: methodFilter !== 'All' ? methodFilter : undefined,
@@ -123,22 +141,63 @@ export default function PaymentsPage() {
           date_from: dateFrom || undefined,
           date_to: dateTo || undefined,
         }),
-        api.installments.getAll({ status: 'Active', branch: branchFilter !== 'All' ? branchFilter : undefined }),
         api.payments.getMonitoring({ branch: branchFilter !== 'All' ? branchFilter : undefined }).catch(() => null),
-        api.branches.getAll().catch(() => []),
-        api.system.getSettings().catch(() => null),
-      ])
+      ]
 
-      setPayments(paymentsRes.payments || [])
-      setInstallments(instRes.installments || [])
-      setMonitoring(monRes)
-      setBranches(Array.isArray(branchRes) ? branchRes : (branchRes.branches || []))
-      if (settingsRes) setSettings(settingsRes)
+      if (needInstallments) {
+        promises.push(api.installments.getAll({ status: 'Active', branch: branchFilter !== 'All' ? branchFilter : undefined }).catch(() => ({ installments: [] })))
+      }
+
+      if (needStatic) {
+        promises.push(
+          api.branches.getAll().catch(() => []),
+          api.system.getSettings().catch(() => null)
+        )
+      }
+
+      const results = await Promise.all(promises)
+      if (!isMountedRef.current) return
+
+      const paymentsRes = results[0]
+      const monRes = results[1]
+      let idx = 2
+
+      let newInst = null
+      if (needInstallments) {
+        newInst = results[idx]?.installments || []
+        idx++
+      }
+
+      let newBranches = null
+      let settingsRes = null
+      if (needStatic) {
+        newBranches = Array.isArray(results[idx]) ? results[idx] : (results[idx]?.branches || [])
+        idx++
+        settingsRes = results[idx]
+      }
+
+      const newPayments = paymentsRes?.payments || []
+
+      setPayments(prev => fastDeepEqual(prev, newPayments) ? prev : newPayments)
+      setMonitoring(prev => fastDeepEqual(prev, monRes) ? prev : monRes)
+
+      if (newInst !== null) {
+        setInstallments(prev => fastDeepEqual(prev, newInst) ? prev : newInst)
+      }
+      if (newBranches !== null) {
+        setBranches(prev => fastDeepEqual(prev, newBranches) ? prev : newBranches)
+      }
+      if (settingsRes) {
+        setSettings(prev => fastDeepEqual(prev, settingsRes) ? prev : settingsRes)
+      }
     } catch (err) {
+      if (!isMountedRef.current) return
+      if (err?.name === 'AbortError') return
       console.error('Failed to load payments:', err)
-      if (!silent) setError(err.message || 'Failed to fetch payment collections')
+      if (!isBg) setError(err.message || 'Failed to fetch payment collections')
     } finally {
-      if (!silent) setLoading(false)
+      inFlightRef.current = false
+      if (!isBg && isMountedRef.current) setLoading(false)
     }
   }
 
@@ -148,7 +207,7 @@ export default function PaymentsPage() {
 
   useRealtimeSync(() => {
     loadData(true)
-  }, [methodFilter, branchFilter, search, dateFrom, dateTo])
+  }, [methodFilter, branchFilter, search, dateFrom, dateTo], { periodic: true })
 
   useEffect(() => {
     const id = searchParams.get('id')
@@ -406,7 +465,7 @@ export default function PaymentsPage() {
         title="Payment Collections & Receipts"
         subtitle={
           isStoreAdmin 
-            ? `Store Branch Collections (${user?.employee?.branch?.name || 'Main Branch'})` 
+            ? `Store Branch Collections (${user?.employee?.branch?.name || (typeof user?.employee?.branch === 'string' ? user.employee.branch : 'Assigned Branch')})` 
             : 'Track official payment receipts, cash vs digital collection breakdown, and installments paid'
         }
         action={
@@ -645,7 +704,7 @@ export default function PaymentsPage() {
           <div className="space-y-4 text-xs">
             <div className="text-center pb-3 border-b border-border space-y-0.5">
               <div className="text-base font-black tracking-wider text-foreground">Z-LICZ APPLIANCES & FURNITURE</div>
-              <div className="text-[11px] text-muted-foreground">{viewReceipt.branch || 'Main Branch'} · Official Collection Receipt</div>
+              <div className="text-[11px] text-muted-foreground">{viewReceipt.branch || 'Headquarters'} · Official Collection Receipt</div>
               <div className="text-xs font-mono font-bold text-primary pt-1">Receipt #{viewReceipt.receipt_no}</div>
             </div>
 
@@ -1094,7 +1153,7 @@ export default function PaymentsPage() {
             <div className="flex justify-between items-start">
               <div>
                 <h1 className="text-2xl font-black uppercase tracking-wider">{settings?.company_name || 'PROJECT: PACE Z-LICZ'}</h1>
-                <p className="text-sm font-semibold uppercase text-gray-800">{user?.employee?.branch?.name || settings?.branch_name || 'Main Branch'}</p>
+                <p className="text-sm font-semibold uppercase text-gray-800">{user?.employee?.branch?.name || settings?.branch_name || 'Headquarters'}</p>
                 <h2 className="text-lg font-bold text-gray-700 mt-2">PAYMENT COLLECTIONS & RECEIPTS REPORT</h2>
               </div>
               <div className="text-right text-xs">

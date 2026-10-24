@@ -5,6 +5,7 @@ import {
   FiFilter, FiLayers, FiCalendar, FiMapPin, FiKey, FiX
 } from 'react-icons/fi'
 import { api } from '../../lib/api'
+import { useRealtimeSync } from '../../lib/realtimeSync'
 import {
   Card, StatCard, Badge, StatusBadge, SearchBar,
   Table, TR, TD, TableSkeleton, EmptyState, Btn, Modal, showToast
@@ -29,8 +30,8 @@ export default function QrMonitoringModal({ open, isOpen, onClose }) {
   const [statusFilter, setStatusFilter] = useState('All')
   const [actionFilter, setActionFilter] = useState('All')
 
-  const loadData = async () => {
-    setLoading(true)
+  const loadData = async (silent = false) => {
+    if (!silent) setLoading(true)
     try {
       const res = await api.system.getQrMonitoring()
       if (res.success) {
@@ -39,17 +40,21 @@ export default function QrMonitoringModal({ open, isOpen, onClose }) {
       }
     } catch (err) {
       console.error('Failed to load QR monitoring stats:', err)
-      showToast(err.message || 'Failed to load QR monitoring data', 'error')
+      if (!silent) showToast(err.message || 'Failed to load QR monitoring data', 'error')
     } finally {
-      setLoading(false)
+      if (!silent) setLoading(false)
     }
   }
 
   useEffect(() => {
     if (isVisible) {
       loadData()
-      const interval = setInterval(loadData, 15000)
-      return () => clearInterval(interval)
+    }
+  }, [isVisible])
+
+  useRealtimeSync(() => {
+    if (isVisible) {
+      loadData(true)
     }
   }, [isVisible])
 

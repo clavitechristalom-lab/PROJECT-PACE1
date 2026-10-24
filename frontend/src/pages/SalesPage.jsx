@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import {
   FiShoppingCart, FiPlus, FiDownload, FiCreditCard,
   FiEye, FiTrash2, FiPrinter, FiSearch, FiCalendar, FiUser,
@@ -10,7 +10,7 @@ import {
   Table, TR, TD, SearchBar, PageHeader, StatCard, Card, CardHeader, Pagination, showToast,
   LoadingState, ErrorAlert, TableSkeleton, EmptyState, TabBar, showLoading, closeLoading
 } from '../components/ui'
-import { fmt, fmtDate, filterBySearch } from '../lib/utils'
+import { fmt, fmtDate, filterBySearch, fastDeepEqual } from '../lib/utils'
 import { useAuth } from '../context/AuthContext'
 import api, { downloadCsv } from '../lib/api'
 import { useRealtimeSync, triggerDataSync } from '../lib/realtimeSync'
@@ -21,10 +21,20 @@ export default function SalesPage({ branchFilter, embedded }) {
   const { user } = useAuth()
   const isAdmin = user?.role === 'Administrator'
   const canCreateSale = !isAdmin
-  const [sales, setSales] = useState([])
+  const inFlightRef = useRef(false)
+  const isMountedRef = useRef(true)
+
+  const [sales, setSales] = useState(() => {
+    try {
+      const saved = sessionStorage.getItem('pace_cached_sales')
+      return saved ? JSON.parse(saved) : []
+    } catch { return [] }
+  })
   const [products, setProducts] = useState([])
   const [customers, setCustomers] = useState([])
-  const [loading, setLoading] = useState(true)
+  const [loading, setLoading] = useState(() => {
+    return !sessionStorage.getItem('pace_cached_sales')
+  })
   const [error, setError] = useState('')
   const [search, setSearch] = useState('')
   const [methodFilter, setMethodFilter] = useState('All')
@@ -47,28 +57,66 @@ export default function SalesPage({ branchFilter, embedded }) {
   const [frequency, setFrequency] = useState('Monthly')
   const [notes, setNotes] = useState('')
 
+  useEffect(() => {
+    isMountedRef.current = true
+    return () => {
+      isMountedRef.current = false
+    }
+  }, [])
+
   const loadData = async (silent = false) => {
-    if (!silent) setLoading(true)
-    if (!silent) setError('')
+    // 1-2s Overlap Guard: Skip if previous request is still in-flight
+    if (inFlightRef.current) return
+    inFlightRef.current = true
+
+    const isBg = silent || sales.length > 0
+    if (!isBg) setLoading(true)
+    if (!isBg) setError('')
     try {
-      const [salesRes, productsRes, customersRes] = await Promise.all([
+      const needCatalog = products.length === 0 || customers.length === 0 || !silent
+
+      const promises = [
         api.sales.getAll({
           search: search || undefined,
           payment_method: methodFilter !== 'All' ? methodFilter : undefined,
           status: statusFilter !== 'All' ? statusFilter : undefined,
           branch: branchFilter || undefined,
-        }),
-        api.products.getAll({ branch: branchFilter || undefined }),
-        api.customers.getAll({ status: 'Active', branch: branchFilter || undefined }),
-      ])
-      setSales(salesRes.sales || [])
-      setProducts(productsRes.products || [])
-      setCustomers(customersRes.customers || [])
+        })
+      ]
+
+      if (needCatalog) {
+        promises.push(
+          api.products.getAll({ branch: branchFilter || undefined }).catch(() => ({ products: [] })),
+          api.customers.getAll({ status: 'Active', branch: branchFilter || undefined }).catch(() => ({ customers: [] }))
+        )
+      }
+
+      const [salesRes, productsRes, customersRes] = await Promise.all(promises)
+
+      if (!isMountedRef.current) return
+
+      const newSales = salesRes?.sales || []
+      setSales(prev => (fastDeepEqual(prev, newSales) ? prev : newSales))
+
+      if (productsRes && productsRes.products) {
+        setProducts(prev => (fastDeepEqual(prev, productsRes.products) ? prev : productsRes.products))
+      }
+      if (customersRes && customersRes.customers) {
+        setCustomers(prev => (fastDeepEqual(prev, customersRes.customers) ? prev : customersRes.customers))
+      }
+
+      try {
+        if (!search && methodFilter === 'All' && statusFilter === 'All') {
+          sessionStorage.setItem('pace_cached_sales', JSON.stringify(newSales))
+        }
+      } catch (e) { }
     } catch (err) {
+      if (!isMountedRef.current) return
       console.error('Failed to load sales data:', err)
-      if (!silent) setError(err.message || 'Failed to fetch sales transactions')
+      if (!isBg) setError(err.message || 'Failed to fetch sales transactions')
     } finally {
-      if (!silent) setLoading(false)
+      inFlightRef.current = false
+      if (!isBg && isMountedRef.current) setLoading(false)
     }
   }
 
@@ -76,8 +124,8 @@ export default function SalesPage({ branchFilter, embedded }) {
     loadData()
   }, [methodFilter, statusFilter, branchFilter, search])
 
-  // Real-time synchronization across multi-user accounts
-  useRealtimeSync(() => loadData(true), [methodFilter, statusFilter, branchFilter, search])
+  // Real-time synchronization across multi-user accounts (1-2s target)
+  useRealtimeSync(() => loadData(true), [methodFilter, statusFilter, branchFilter, search], { periodic: true })
 
   const openViewSale = async (s) => {
     try {

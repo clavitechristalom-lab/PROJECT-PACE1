@@ -9,12 +9,31 @@ use App\Models\AttendanceScanLog;
 use App\Models\Attendance;
 use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Cache;
 
 class EmployeeController extends Controller
 {
     public function index(Request $request)
     {
         $user = $request->user();
+
+        // 1-2s Performance Cache
+        $fp = SyncController::computeFingerprint();
+        $cacheKey = 'pace_emp_idx_' . md5(json_encode([
+            'u' => $user ? $user->user_id : 0,
+            'r' => $user ? $user->role : '',
+            's' => $request->query('search', ''),
+            'd' => $request->query('department', ''),
+            'st' => $request->query('status', ''),
+            'b' => $request->query('branch_id', ''),
+            'td' => date('Y-m-d'),
+        ])) . '_' . $fp;
+
+        $cached = Cache::get($cacheKey);
+        if ($cached !== null) {
+            return response()->json($cached);
+        }
+
         $query = Employee::with('branch');
 
         // Role-based Access Control
@@ -47,14 +66,29 @@ class EmployeeController extends Controller
         }
 
         $today = date('Y-m-d');
-        $employees = $query->orderBy('employee_id')->get()->map(function ($emp) use ($today) {
-            $latestScan = AttendanceScanLog::where('employee_id', $emp->employee_id)
-                ->orderByDesc('id')
-                ->first();
-            
-            $todayAtt = Attendance::where('employee_id', $emp->employee_id)
-                ->where('attendance_date', $today)
-                ->first();
+        $employeeModels = $query->orderBy('employee_id')->get();
+        $employeeIds = $employeeModels->pluck('employee_id')->filter()->all();
+
+        // Batch load today's attendance for all employees in 1 query
+        $todayAttendances = !empty($employeeIds) 
+            ? Attendance::whereIn('employee_id', $employeeIds)->where('attendance_date', $today)->get()->keyBy('employee_id')
+            : collect();
+
+        // Batch load latest scan log for all employees in 2 queries instead of 2 * N
+        $latestScanLogs = collect();
+        if (!empty($employeeIds)) {
+            $latestScanIds = AttendanceScanLog::whereIn('employee_id', $employeeIds)
+                ->selectRaw('MAX(id) as max_id, employee_id')
+                ->groupBy('employee_id')
+                ->pluck('max_id');
+            if ($latestScanIds->isNotEmpty()) {
+                $latestScanLogs = AttendanceScanLog::whereIn('id', $latestScanIds)->get()->keyBy('employee_id');
+            }
+        }
+
+        $employees = $employeeModels->map(function ($emp) use ($todayAttendances, $latestScanLogs) {
+            $latestScan = $latestScanLogs->get($emp->employee_id);
+            $todayAtt = $todayAttendances->get($emp->employee_id);
 
             $qrStatus = empty($emp->qr_token) 
                 ? 'NOT GENERATED' 
@@ -63,7 +97,7 @@ class EmployeeController extends Controller
             $emp->qr_status = $qrStatus;
             $emp->has_qr = !empty($emp->qr_token);
             $emp->has_pin = !empty($emp->attendance_pin);
-            $emp->last_scan = $latestScan ? $latestScan->scan_time->format('M d, Y h:i A') : 'Never';
+            $emp->last_scan = ($latestScan && $latestScan->scan_time) ? $latestScan->scan_time->format('M d, Y h:i A') : 'Never';
             $emp->issued_date = $emp->qr_generated_at ? $emp->qr_generated_at->format('M d, Y h:i A') : '—';
             $emp->issued_by = $emp->has_qr ? 'Administrator' : '—';
             $emp->attendance_status = $todayAtt ? $todayAtt->status : 'No Attendance';
@@ -73,10 +107,14 @@ class EmployeeController extends Controller
             return $emp;
         });
 
-        return response()->json([
+        $res = [
             'employees' => $employees,
             'total' => $employees->count(),
-        ]);
+        ];
+
+        Cache::put($cacheKey, $res, 2);
+
+        return response()->json($res);
     }
 
     public function show(Request $request, $id)
@@ -142,10 +180,6 @@ class EmployeeController extends Controller
 
     public function store(Request $request)
     {
-        if ($request->user() && $request->user()->role === 'Administrator') {
-            return response()->json(['success' => false, 'message' => 'Admin is not authorized to create employees.'], 403);
-        }
-
         $validated = $request->validate([
             'employee_code' => 'nullable|string|unique:employees,employee_code',
             'first_name' => 'required|string|max:255',
@@ -164,14 +198,14 @@ class EmployeeController extends Controller
             'branch_id' => 'nullable|integer|exists:branch_profiles,id',
             'pay_type' => 'required|string',
             'basic_salary' => 'required|numeric|min:0',
-            'phone' => 'nullable|string|max:50',
+            'phone' => ['nullable', 'string', 'regex:/^(09\d{9}|639\d{9})$/'],
             'email' => 'nullable|email|max:255',
             'address' => 'nullable|string',
             'hire_date' => 'nullable|date',
             'working_hours' => 'nullable|string',
             'emergency_contact_name' => 'nullable|string',
             'emergency_contact_relation' => 'nullable|string',
-            'emergency_contact_phone' => 'nullable|string',
+            'emergency_contact_phone' => ['nullable', 'string', 'regex:/^(09\d{9}|639\d{9})$/'],
             'documents' => 'nullable|array',
             'status' => 'required|string|in:Active,Inactive',
             'notes' => 'nullable|string',
@@ -220,7 +254,7 @@ class EmployeeController extends Controller
         $employee->qr_status = 'NOT GENERATED';
 
         SystemLog::create([
-            'user_id' => $request->user() ? $request->user()->user_id : 1,
+            'user_id' => $request->user() ? $request->user()->user_id : $request->input('user_id'),
             'action' => 'CREATE',
             'module' => 'Employees',
             'description' => "Created new employee: {$employee->first_name} {$employee->last_name} ({$employee->employee_code})",
@@ -255,15 +289,15 @@ class EmployeeController extends Controller
             'department' => 'nullable|string|max:255',
             'branch_id' => 'nullable|integer|exists:branch_profiles,id',
             'pay_type' => 'required|string',
-            'basic_salary' => 'required|numeric|min:0',
-            'phone' => 'nullable|string|max:50',
+            'basic_salary' => 'nullable|numeric|min:0',
+            'phone' => ['nullable', 'string', 'regex:/^(09\d{9}|639\d{9})$/'],
             'email' => 'nullable|email|max:255',
             'address' => 'nullable|string',
             'hire_date' => 'nullable|date',
             'working_hours' => 'nullable|string',
             'emergency_contact_name' => 'nullable|string',
             'emergency_contact_relation' => 'nullable|string',
-            'emergency_contact_phone' => 'nullable|string',
+            'emergency_contact_phone' => ['nullable', 'string', 'regex:/^(09\d{9}|639\d{9})$/'],
             'documents' => 'nullable|array',
             'status' => 'required|string|in:Active,Inactive',
             'notes' => 'nullable|string',
@@ -300,10 +334,8 @@ class EmployeeController extends Controller
             $validated['working_hours'] = '8 AM to 5 PM';
         }
 
-        $salary = (float)$validated['basic_salary'];
-        // Assume basic_salary is always Monthly as per UI
-        $validated['daily_rate'] = round($salary / 26, 2);
-        $validated['hourly_rate'] = round($validated['daily_rate'] / 8, 2);
+        // Salary is fixed upon account creation - remove from update payload to prevent editing
+        unset($validated['basic_salary'], $validated['daily_rate'], $validated['hourly_rate']);
 
         if (!empty($validated['attendance_pin'])) {
             $validated['attendance_pin'] = Hash::make($validated['attendance_pin']);
@@ -321,7 +353,7 @@ class EmployeeController extends Controller
         $employee->update($validated);
 
         SystemLog::create([
-            'user_id' => $request->user() ? $request->user()->user_id : 1,
+            'user_id' => $request->user() ? $request->user()->user_id : $request->input('user_id'),
             'action' => 'UPDATE',
             'module' => 'Employees',
             'description' => "Updated employee: {$employee->first_name} {$employee->last_name} ({$employee->employee_code})",
@@ -349,7 +381,7 @@ class EmployeeController extends Controller
         $employee->delete();
 
         SystemLog::create([
-            'user_id' => $request->user() ? $request->user()->user_id : 1,
+            'user_id' => $request->user() ? $request->user()->user_id : $request->input('user_id'),
             'action' => 'DELETE',
             'module' => 'Employees',
             'description' => "Deleted employee: {$name} ({$code})",
@@ -677,7 +709,7 @@ class EmployeeController extends Controller
         $employee->save();
 
         SystemLog::create([
-            'user_id' => $request->user() ? $request->user()->user_id : 1,
+            'user_id' => $request->user() ? $request->user()->user_id : $request->input('user_id'),
             'action' => 'UPDATE',
             'module' => 'Employees',
             'description' => "Updated secure attendance PIN for {$employee->first_name} {$employee->last_name} ({$employee->employee_code})",
@@ -721,6 +753,7 @@ class EmployeeController extends Controller
             $nameParts = explode('@', $user->username)[0];
             $cleanName = ucfirst(preg_replace('/[^a-zA-Z0-9]/', ' ', $nameParts));
 
+            $defaultBranch = \App\Models\BranchProfile::first();
             $employee = Employee::create([
                 'employee_code' => 'EMP-' . str_pad($count, 3, '0', STR_PAD_LEFT),
                 'first_name' => $cleanName ?: 'Staff',
@@ -728,7 +761,8 @@ class EmployeeController extends Controller
                 'email' => str_contains($user->username, '@') ? $user->username : "{$user->username}@zlicz.com",
                 'position' => $user->role === 'Store Administrator' || $user->role === 'Store Admin' ? 'Store Manager' : ($user->role === 'Administrator' ? 'System Administrator' : 'Sales Associate'),
                 'department' => $user->role === 'Store Administrator' || $user->role === 'Store Admin' ? 'Operations' : ($user->role === 'Administrator' ? 'Administration' : 'Sales'),
-                'branch' => 'Main Branch',
+                'branch' => $defaultBranch?->name ?? 'Headquarters',
+                'branch_id' => $defaultBranch?->id ?? null,
                 'pay_type' => 'Monthly',
                 'basic_salary' => $user->role === 'Administrator' ? 50000 : 25000,
                 'daily_rate' => round(($user->role === 'Administrator' ? 50000 : 25000) / 26, 2),
@@ -839,6 +873,11 @@ class EmployeeController extends Controller
                     ? (str_starts_with($user->profile_image, 'http')
                         ? $user->profile_image
                         : url('storage/' . $user->profile_image))
+                    : null,
+                'face_biometric_image' => $user->face_biometric_image
+                    ? (str_starts_with($user->face_biometric_image, 'http')
+                        ? $user->face_biometric_image
+                        : url('storage/' . $user->face_biometric_image))
                     : null,
             ],
         ]);

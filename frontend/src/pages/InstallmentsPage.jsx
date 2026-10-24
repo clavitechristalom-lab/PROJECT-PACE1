@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import {
   FiPlus, FiSearch, FiEye, FiEdit, FiTrash2,
@@ -11,7 +11,7 @@ import {
   CardHeader, ProgressBar, Pagination, showToast, TabBar,
   LoadingState, ErrorAlert, TableSkeleton, EmptyState, confirmAction
 } from '../components/ui'
-import { fmt, fmtDate } from '../lib/utils'
+import { fmt, fmtDate, fastDeepEqual } from '../lib/utils'
 import { useAuth } from '../context/AuthContext'
 import api, { downloadCsv } from '../lib/api'
 import { useRealtimeSync, triggerDataSync } from '../lib/realtimeSync'
@@ -25,17 +25,24 @@ export default function InstallmentsPage({ branchFilter: propBranchFilter, embed
   const isAdmin = user?.role === 'Administrator'
 
   const [activeTab, setActiveTab] = useState(searchParams.get('tab') || 'all')
-  const [installments, setInstallments] = useState([])
+  const [installments, setInstallments] = useState(() => {
+    try {
+      const saved = sessionStorage.getItem('pace_cached_installments')
+      return saved ? JSON.parse(saved) : []
+    } catch { return [] }
+  })
   const [customers, setCustomers] = useState([])
   const [products, setProducts] = useState([])
   const [branches, setBranches] = useState([])
-  const [loading, setLoading] = useState(true)
+  const [loading, setLoading] = useState(() => {
+    return !sessionStorage.getItem('pace_cached_installments')
+  })
   const [error, setError] = useState('')
 
   // Filters (Immediate reactive search & status)
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState('All')
-  const [localBranchFilter, setLocalBranchFilter] = useState(isStoreAdmin ? (user?.employee?.branch?.name || 'Main Branch') : 'All')
+  const [localBranchFilter, setLocalBranchFilter] = useState(isStoreAdmin ? (user?.employee?.branch?.name || (typeof user?.employee?.branch === 'string' ? user.employee.branch : '')) : 'All')
   const branchFilter = propBranchFilter || localBranchFilter
   const [page, setPage] = useState(1)
   const pageSize = 10
@@ -90,29 +97,76 @@ export default function InstallmentsPage({ branchFilter: propBranchFilter, embed
   const [payDate, setPayDate] = useState(new Date().toISOString().slice(0, 10))
   const [payNotes, setPayNotes] = useState('')
 
+  const inFlightRef = useRef(false)
+  const isMountedRef = useRef(true)
+
+  useEffect(() => {
+    isMountedRef.current = true
+    return () => {
+      isMountedRef.current = false
+    }
+  }, [])
+
   // ─── INITIAL DATA LOAD ──────────────────────────────────────────────────────
   const loadInitialData = async (silent = false) => {
-    if (!silent) setLoading(true)
-    if (!silent) setError('')
+    // 1-2s Overlap Guard: Skip if previous request is in-flight
+    if (inFlightRef.current) return
+    inFlightRef.current = true
+
+    const isBg = silent || installments.length > 0
+    if (!isBg) setLoading(true)
+    if (!isBg) setError('')
     try {
-      const [instRes, custRes, prodRes, branchRes] = await Promise.all([
+      const needCatalog = customers.length === 0 || products.length === 0 || branches.length === 0 || addModalOpen || !silent
+
+      const promises = [
         api.installments.getAll({
           branch: branchFilter !== 'All' ? branchFilter : undefined,
-        }),
-        api.customers.getAll().catch(() => ({ customers: [] })),
-        api.products.getAll().catch(() => ({ products: [] })),
-        api.branches.getAll().catch(() => []),
-      ])
+        })
+      ]
 
-      setInstallments(instRes.installments || [])
-      setCustomers(custRes.customers || [])
-      setProducts(prodRes.products || [])
-      setBranches(Array.isArray(branchRes) ? branchRes : (branchRes.branches || []))
+      if (needCatalog) {
+        promises.push(
+          api.customers.getAll().catch(() => ({ customers: [] })),
+          api.products.getAll().catch(() => ({ products: [] })),
+          api.branches.getAll().catch(() => [])
+        )
+      }
+
+      const results = await Promise.all(promises)
+      if (!isMountedRef.current) return
+
+      const instRes = results[0]
+      const newInst = instRes?.installments || []
+      setInstallments(prev => fastDeepEqual(prev, newInst) ? prev : newInst)
+
+      if (needCatalog && results.length >= 4) {
+        const custRes = results[1]
+        const prodRes = results[2]
+        const branchRes = results[3]
+
+        const newCust = custRes?.customers || []
+        const newProd = prodRes?.products || []
+        const newBranches = Array.isArray(branchRes) ? branchRes : (branchRes?.branches || [])
+
+        setCustomers(prev => fastDeepEqual(prev, newCust) ? prev : newCust)
+        setProducts(prev => fastDeepEqual(prev, newProd) ? prev : newProd)
+        setBranches(prev => fastDeepEqual(prev, newBranches) ? prev : newBranches)
+      }
+
+      try {
+        if (branchFilter === 'All') {
+          sessionStorage.setItem('pace_cached_installments', JSON.stringify(newInst))
+        }
+      } catch (e) { }
     } catch (err) {
+      if (!isMountedRef.current) return
+      if (err?.name === 'AbortError') return
       console.error('Failed to load installment data:', err)
-      if (!silent) setError(err.message || 'Failed to fetch customer installment records')
+      if (!isBg) setError(err.message || 'Failed to fetch customer installment records')
     } finally {
-      if (!silent) setLoading(false)
+      inFlightRef.current = false
+      if (!isBg && isMountedRef.current) setLoading(false)
     }
   }
 
@@ -120,7 +174,7 @@ export default function InstallmentsPage({ branchFilter: propBranchFilter, embed
     loadInitialData()
   }, [branchFilter, search, statusFilter, activeTab])
 
-  useRealtimeSync(() => loadInitialData(true), [branchFilter, search, statusFilter, activeTab])
+  useRealtimeSync(() => loadInitialData(true), [branchFilter, search, statusFilter, activeTab], { periodic: true })
 
   useEffect(() => {
     const id = searchParams.get('id')
@@ -487,7 +541,7 @@ export default function InstallmentsPage({ branchFilter: propBranchFilter, embed
           title="Customer Installment"
           subtitle={
             isStoreAdmin
-              ? `Store Branch Ledger (${user?.employee?.branch?.name || 'Main Branch'})`
+              ? `Store Branch Ledger (${user?.employee?.branch?.name || (typeof user?.employee?.branch === 'string' ? user.employee.branch : 'Assigned Branch')})`
               : 'Manage customer credit contracts, payment amortization schedules, and receivables'
           }
           action={
@@ -845,10 +899,11 @@ export default function InstallmentsPage({ branchFilter: propBranchFilter, embed
                   <div className="relative">
                     <FiPhone className="absolute left-3 top-2.5 text-muted-foreground w-3.5 h-3.5" />
                     <input
-                      type="text"
-                      placeholder="0917XXXXXXX"
+                      type="tel"
+                      maxLength={11}
+                      placeholder="09XXXXXXXXX"
                       value={addForm.phone}
-                      onChange={e => setAddForm(p => ({ ...p, phone: e.target.value }))}
+                      onChange={e => setAddForm(p => ({ ...p, phone: e.target.value.replace(/\D/g, '').slice(0, 11) }))}
                       className="w-full pl-9 pr-3 py-2 rounded-xl border border-border bg-card text-foreground font-mono"
                     />
                   </div>
@@ -1099,9 +1154,11 @@ export default function InstallmentsPage({ branchFilter: propBranchFilter, embed
               <div>
                 <label className="block font-bold text-muted-foreground mb-1">Contact Phone</label>
                 <input
-                  type="text"
+                  type="tel"
+                  maxLength={11}
+                  placeholder="09XXXXXXXXX"
                   value={editForm.phone}
-                  onChange={e => setEditForm(p => ({ ...p, phone: e.target.value }))}
+                  onChange={e => setEditForm(p => ({ ...p, phone: e.target.value.replace(/\D/g, '').slice(0, 11) }))}
                   className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground font-mono"
                 />
               </div>

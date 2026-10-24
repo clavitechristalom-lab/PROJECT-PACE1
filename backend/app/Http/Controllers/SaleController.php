@@ -12,15 +12,36 @@ use App\Models\PaymentSchedule;
 use App\Models\Payment;
 use App\Models\SystemLog;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Cache;
 use App\Services\NotificationService;
 
 class SaleController extends Controller
 {
     public function index(Request $request)
     {
-        $query = SaleTransaction::with(['customer', 'processedBy', 'items.product']);
-
         $user = $request->user();
+
+        // 1-2s Performance Cache: bypass if exporting CSV
+        if (!$request->boolean('export_csv')) {
+            $fp = SyncController::computeFingerprint();
+            $cacheKey = 'pace_sales_idx_' . md5(json_encode([
+                'u' => $user ? $user->user_id : 0,
+                'r' => $user ? $user->role : '',
+                'b' => $request->query('branch', ''),
+                's' => $request->query('search', ''),
+                'st' => $request->query('status', ''),
+                'pm' => $request->query('payment_method', ''),
+                'df' => $request->query('date_from', ''),
+                'dt' => $request->query('date_to', ''),
+            ])) . '_' . $fp;
+
+            $cached = Cache::get($cacheKey);
+            if ($cached !== null) {
+                return response()->json($cached);
+            }
+        }
+
+        $query = SaleTransaction::with(['customer', 'processedBy.employee']);
 
         // Branch scoping for Store Administrator — use branch_id directly on sale_transactions
         if ($user && in_array($user->role, ['Store Administrator', 'Store Admin'])) {
@@ -128,10 +149,16 @@ class SaleController extends Controller
             ];
         });
 
-        return response()->json([
+        $payload = [
             'sales' => $sales,
             'total' => $sales->count(),
-        ]);
+        ];
+
+        if (isset($cacheKey)) {
+            Cache::put($cacheKey, $payload, 3);
+        }
+
+        return response()->json($payload);
     }
 
     public function show($id)
@@ -239,7 +266,7 @@ class SaleController extends Controller
             $sale = SaleTransaction::create([
                 'invoice_no'      => $invoiceNo,
                 'customer_id'     => $validated['customer_id'],
-                'processed_by'    => $user ? $user->user_id : $request->input('user_id', 1),
+                'processed_by'    => $user ? $user->user_id : ($request->input('user_id') && \App\Models\User::where('user_id', $request->input('user_id'))->exists() ? $request->input('user_id') : \App\Models\User::value('user_id')),
                 'branch_id'       => $userBranch,
                 'sale_date'       => now(),
                 'payment_method'  => $payMethod,
@@ -254,7 +281,12 @@ class SaleController extends Controller
 
             // Create items and reduce stock
             foreach ($validated['items'] as $itemData) {
-                $product = Product::findOrFail($itemData['product_id']);
+                $product = Product::find($itemData['product_id']);
+                if (!$product) {
+                    return response()->json([
+                        'message' => "Product (ID: {$itemData['product_id']}) not found or has been removed."
+                    ], 404);
+                }
                 $itemDisc = $itemData['discount'] ?? 0;
                 $effectivePrice = !empty($product->discount_price) ? $product->discount_price : $product->unit_price;
                 $lineTotal = ($effectivePrice * $itemData['quantity']) - $itemDisc;
@@ -372,7 +404,7 @@ class SaleController extends Controller
             $custName = $customer ? "{$customer->first_name} {$customer->last_name}" : 'Customer';
 
             SystemLog::create([
-                'user_id' => $request->input('user_id', 1),
+                'user_id' => $user ? $user->user_id : $request->input('user_id'),
                 'action' => 'CREATE',
                 'module' => 'Sales',
                 'description' => "Created invoice {$sale->invoice_no} for {$custName} — ₱" . number_format($totalAmount, 2),

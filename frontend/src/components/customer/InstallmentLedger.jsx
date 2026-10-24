@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Badge, Pagination } from '../ui';
 import { fmt } from '../../lib/utils';
-import { FileText, Eye, AlertCircle, Trash2, ShoppingBag, CreditCard } from 'lucide-react';
+import { FileText, Eye, AlertCircle, Trash2, ShoppingBag, CreditCard } from '../../lib/customIcons';
 
 const CASH_METHODS = ['Cash', 'GCash', 'Maya', 'Bank Account'];
 

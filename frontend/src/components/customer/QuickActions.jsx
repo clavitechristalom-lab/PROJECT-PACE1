@@ -1,5 +1,5 @@
 import React from 'react';
-import { ShoppingCart, FileText, CreditCard, HelpCircle, ChevronRight, Wallet, Bell } from 'lucide-react';
+import { ShoppingCart, FileText, CreditCard, HelpCircle, ChevronRight, Wallet, Bell } from '../../lib/customIcons';
 
 export default function QuickActions({ onAction }) {
   const actions = [

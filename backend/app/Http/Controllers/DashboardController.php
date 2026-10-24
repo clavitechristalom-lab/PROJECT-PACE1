@@ -16,6 +16,7 @@ use App\Models\Attendance;
 use App\Models\SystemLog;
 use App\Models\User;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Cache;
 
 class DashboardController extends Controller
 {
@@ -35,17 +36,23 @@ class DashboardController extends Controller
         $currentMonth = date('m');
         $currentYear = date('Y');
 
-        // Automatically sync overdue schedules in database
-        PaymentSchedule::where('due_date', '<', $today)
-            ->where('balance_due', '>', 0)
-            ->whereIn('status', ['Pending', 'Partially Paid'])
-            ->update(['status' => 'Overdue']);
+        $fingerprint = SyncController::computeFingerprint();
+        $cacheKey = "dash_stats_{$role}_{$branch}_{$employeeId}_{$fingerprint}";
 
-        // 1. Sales Queries
-        $salesQuery = SaleTransaction::query();
-        if ($isStoreAdmin || ($branch !== 'All' && !empty($branch))) {
-            $b = $isStoreAdmin ? ($user->employee ? $user->employee->branch_id : null) : $branch;
-            if ($b) {
+        $result = Cache::remember($cacheKey, 2, function () use ($user, $role, $employeeId, $isStoreAdmin, $branch, $today, $currentMonth, $currentYear) {
+            // Automatically sync overdue schedules in database (throttled to once every 5 minutes to prevent table locks)
+            if (Cache::add('sync_overdue_schedules_dash', true, 300)) {
+                PaymentSchedule::where('due_date', '<', $today)
+                    ->where('balance_due', '>', 0)
+                    ->whereIn('status', ['Pending', 'Partially Paid'])
+                    ->update(['status' => 'Overdue']);
+            }
+
+            // 1. Sales Queries
+            $salesQuery = SaleTransaction::query();
+            if ($isStoreAdmin || ($branch !== 'All' && !empty($branch))) {
+                $b = $isStoreAdmin ? ($user->employee ? $user->employee->branch_id : null) : $branch;
+                if ($b) {
                 $salesQuery->where(function($q) use ($b, $user) {
                     $q->where('branch_id', $b)
                       ->orWhere('processed_by', $user->user_id);
@@ -86,7 +93,7 @@ class DashboardController extends Controller
         $monthCollections = (float)(clone $paymentQuery)->whereMonth('payment_date', $currentMonth)->whereYear('payment_date', $currentYear)->sum('amount');
 
         // 3. Installment & Outstanding Balance
-        $instQuery = InstallmentAccount::with(['payments', 'paymentSchedules']);
+        $instQuery = InstallmentAccount::query();
         if ($isStoreAdmin || ($branch !== 'All' && !empty($branch))) {
             $b = $isStoreAdmin ? ($user->employee ? $user->employee->branch_id : null) : $branch;
             if ($b) {
@@ -100,20 +107,30 @@ class DashboardController extends Controller
                 });
             }
         }
-        $allInsts = (clone $instQuery)->get();
-        $totalInstallmentSales = (float)$allInsts->sum('total_payable');
-        
-        $totalOutstandingBalance = $allInsts->reduce(function ($carry, $inst) {
-            if ($inst->status === 'Pending') {
-                return $carry + (float)$inst->total_payable;
-            }
-            $paid = (float)$inst->payments->sum('amount');
-            return $carry + max(0, round($inst->total_payable - $paid, 2));
-        }, 0);
 
-        $activeInstallments = $allInsts->where('status', 'Active')->count();
-        $overdueInstallments = $allInsts->where('status', 'Overdue')->count();
-        $completedInstallments = $allInsts->where('status', 'Completed')->count();
+        $totalInstallmentSales = (float)(clone $instQuery)->sum('total_payable');
+        $activeInstallments = (clone $instQuery)->where('status', 'Active')->count();
+        $overdueInstallments = (clone $instQuery)->where('status', 'Overdue')->count();
+        $completedInstallments = (clone $instQuery)->where('status', 'Completed')->count();
+
+        // High-performance outstanding balance aggregation without full model hydration
+        $instSummaries = (clone $instQuery)->select('installment_id', 'total_payable', 'status')->get();
+        $instIds = $instSummaries->pluck('installment_id')->toArray();
+        $paidMap = empty($instIds) ? [] : Payment::whereIn('installment_id', $instIds)
+            ->groupBy('installment_id')
+            ->selectRaw('installment_id, SUM(amount) as paid')
+            ->pluck('paid', 'installment_id')
+            ->toArray();
+
+        $totalOutstandingBalance = 0;
+        foreach ($instSummaries as $inst) {
+            if ($inst->status === 'Pending') {
+                $totalOutstandingBalance += (float)$inst->total_payable;
+            } else {
+                $paid = (float)($paidMap[$inst->installment_id] ?? 0);
+                $totalOutstandingBalance += max(0, round((float)$inst->total_payable - $paid, 2));
+            }
+        }
 
         // 4. Products & Stock
         $totalProducts = Product::count();
@@ -123,9 +140,6 @@ class DashboardController extends Controller
         // 5. Customers & Branches
         $totalCustomers = Customer::count();
         $branchesList = \App\Models\BranchProfile::pluck('name')->toArray();
-        if (empty($branchesList)) {
-            $branchesList = ['Main Branch', 'North Branch', 'South Branch'];
-        }
         $totalBranches = count($branchesList);
 
         // 6. Employees & Attendance
@@ -199,7 +213,7 @@ class DashboardController extends Controller
             });
         }
 
-        return response()->json([
+        return [
             // Core Business Monitoring Metrics
             'total_sales' => $totalSales,
             'today_sales' => $todaySales,
@@ -256,7 +270,10 @@ class DashboardController extends Controller
                 'status' => $myLatestPayroll->status,
             ] : null,
             'my_recent_attendance' => $myRecentAttendance,
-        ]);
+        ];
+        });
+
+        return response()->json($result);
     }
 
     /**
@@ -297,9 +314,13 @@ class DashboardController extends Controller
             $endDate = $now->endOfMonth()->toDateString();
         }
 
-        // 1. Sales Performance
-        $salesQuery = SaleTransaction::whereDate('sale_date', '>=', $startDate)
-            ->whereDate('sale_date', '<=', $endDate);
+        $fingerprint = SyncController::computeFingerprint();
+        $cacheKey = "dash_perf_{$timeframe}_{$startDate}_{$endDate}_{$branch}_{$fingerprint}";
+
+        $result = Cache::remember($cacheKey, 2, function () use ($user, $isStoreAdmin, $branch, $startDate, $endDate, $timeframe) {
+            // 1. Sales Performance
+            $salesQuery = SaleTransaction::whereDate('sale_date', '>=', $startDate)
+                ->whereDate('sale_date', '<=', $endDate);
 
         if ($isStoreAdmin || ($branch !== 'All' && !empty($branch))) {
             $b = $isStoreAdmin ? ($user->employee ? $user->employee->branch_id : null) : $branch;
@@ -352,7 +373,7 @@ class DashboardController extends Controller
         $overdueCollected = (float)$payments->where('notes', 'like', '%Overdue%')->sum('amount');
 
         // 3. Installment in Range
-        $instQuery = InstallmentAccount::with('payments');
+        $instQuery = InstallmentAccount::query();
         if ($isStoreAdmin || ($branch !== 'All' && !empty($branch))) {
             $b = $isStoreAdmin ? ($user->employee ? $user->employee->branch_id : null) : $branch;
             if ($b) {
@@ -366,16 +387,25 @@ class DashboardController extends Controller
                 });
             }
         }
-        $allInsts = $instQuery->get();
-        $totalInstPayable = (float)$allInsts->sum('total_payable');
-        $totalInstPaid = $allInsts->reduce(function ($carry, $inst) {
-            return $carry + (float)$inst->payments->sum('amount') + (float)$inst->down_payment;
-        }, 0);
+        $totalInstPayable = (float)(clone $instQuery)->sum('total_payable');
+        $overdueAccounts = (clone $instQuery)->where('status', 'Overdue')->count();
+        $instCount = (clone $instQuery)->count();
+
+        $instSummaries = (clone $instQuery)->select('installment_id', 'total_payable', 'down_payment')->get();
+        $instIds = $instSummaries->pluck('installment_id')->toArray();
+        $paidMap = empty($instIds) ? [] : Payment::whereIn('installment_id', $instIds)
+            ->groupBy('installment_id')
+            ->selectRaw('installment_id, SUM(amount) as paid')
+            ->pluck('paid', 'installment_id')
+            ->toArray();
+
+        $totalInstPaid = 0;
+        foreach ($instSummaries as $inst) {
+            $totalInstPaid += (float)($paidMap[$inst->installment_id] ?? 0) + (float)$inst->down_payment;
+        }
         $totalOutstanding = max(0, round($totalInstPayable - $totalInstPaid, 2));
 
-        $overdueAccounts = $allInsts->where('status', 'Overdue')->count();
-
-        return response()->json([
+        return [
             'timeframe' => $timeframe,
             'date_range' => ['start' => $startDate, 'end' => $endDate],
             'branch' => $branch,
@@ -395,13 +425,16 @@ class DashboardController extends Controller
                 'overdue_collected' => $overdueCollected,
             ],
             'installments' => [
-                'total_accounts' => $allInsts->count(),
+                'total_accounts' => $instCount,
                 'total_financed' => $totalInstPayable,
                 'total_paid' => $totalInstPaid,
                 'outstanding_balance' => $totalOutstanding,
                 'overdue_accounts' => $overdueAccounts,
             ]
-        ]);
+        ];
+        });
+
+        return response()->json($result);
     }
 
     /**
@@ -409,59 +442,61 @@ class DashboardController extends Controller
      */
     public function branchComparison(Request $request)
     {
-        $branchProfiles = \App\Models\BranchProfile::all();
-        $branches = $branchProfiles->pluck('name')->toArray();
+        return \Illuminate\Support\Facades\Cache::remember('pace_dash_branch_comparison', 2, function () {
+            $branchProfiles = \App\Models\BranchProfile::all();
+            $branches = $branchProfiles->pluck('name')->toArray();
 
-        $comparison = [];
-        foreach ($branchProfiles as $bp) {
-            $branchId = $bp->id;
-            $branch = $bp->name;
-            // Sales
-            $sales = (float)SaleTransaction::whereHas('processedBy.employee', function ($eq) use ($branchId) {
-                $eq->where('branch_id', $branchId);
-            })->sum('total_amount');
+            $comparison = [];
+            foreach ($branchProfiles as $bp) {
+                $branchId = $bp->id;
+                $branch = $bp->name;
+                // Sales
+                $sales = (float)SaleTransaction::whereHas('processedBy.employee', function ($eq) use ($branchId) {
+                    $eq->where('branch_id', $branchId);
+                })->sum('total_amount');
 
-            // Collections
-            $collections = (float)Payment::whereHas('installmentAccount.sale.processedBy.employee', function ($eq) use ($branchId) {
-                $eq->where('branch_id', $branchId);
-            })->sum('amount');
+                // Collections
+                $collections = (float)Payment::whereHas('installmentAccount.sale.processedBy.employee', function ($eq) use ($branchId) {
+                    $eq->where('branch_id', $branchId);
+                })->sum('amount');
 
-            // Installment
-            $insts = InstallmentAccount::with('payments')->whereHas('sale.processedBy.employee', function ($eq) use ($branchId) {
-                $eq->where('branch_id', $branchId);
-            })->get();
+                // Installment
+                $insts = InstallmentAccount::with('payments')->whereHas('sale.processedBy.employee', function ($eq) use ($branchId) {
+                    $eq->where('branch_id', $branchId);
+                })->get();
 
-            $instSales = (float)$insts->sum('total_payable');
-            $instPaid = $insts->reduce(fn($c, $i) => $c + (float)$i->payments->sum('amount') + (float)$i->down_payment, 0);
-            $outstanding = max(0, round($instSales - $instPaid, 2));
-            $overdueCount = $insts->where('status', 'Overdue')->count();
+                $instSales = (float)$insts->sum('total_payable');
+                $instPaid = $insts->reduce(fn($c, $i) => $c + (float)$i->payments->sum('amount') + (float)$i->down_payment, 0);
+                $outstanding = max(0, round($instSales - $instPaid, 2));
+                $overdueCount = $insts->where('status', 'Overdue')->count();
 
-            // Find Store Administrator assigned to this branch
-            $manager = \App\Models\User::where('role', 'Store Administrator')
-                ->whereHas('employee', function ($q) use ($bp) {
-                    $q->where('branch_id', $bp->id);
-                })->first();
+                // Find Store Administrator assigned to this branch
+                $manager = \App\Models\User::where('role', 'Store Administrator')
+                    ->whereHas('employee', function ($q) use ($bp) {
+                        $q->where('branch_id', $bp->id);
+                    })->first();
 
-            $comparison[] = [
-                'id' => $bp->id,
-                'branch' => $branch,
-                'location' => $bp->location,
-                'manager' => $manager ? $manager->username : null,
-                'contact' => $bp->contact_number,
-                'status' => $bp->status,
-                'color' => $bp->color,
-                'image' => $bp->image_url,
-                'sales' => $sales,
-                'collections' => $collections,
-                'installment_sales' => $instSales,
-                'outstanding_balance' => $outstanding,
-                'overdue_accounts' => $overdueCount,
-            ];
-        }
+                $comparison[] = [
+                    'id' => $bp->id,
+                    'branch' => $branch,
+                    'location' => $bp->location,
+                    'manager' => $manager ? $manager->username : null,
+                    'contact' => $bp->contact_number,
+                    'status' => $bp->status,
+                    'color' => $bp->color,
+                    'image' => $bp->image_url,
+                    'sales' => $sales,
+                    'collections' => $collections,
+                    'installment_sales' => $instSales,
+                    'outstanding_balance' => $outstanding,
+                    'overdue_accounts' => $overdueCount,
+                ];
+            }
 
-        return response()->json([
-            'branches' => $comparison,
-        ]);
+            return response()->json([
+                'branches' => $comparison,
+            ]);
+        });
     }
 
     /**
@@ -472,76 +507,81 @@ class DashboardController extends Controller
         $user = $request->user();
         $isStoreAdmin = $user && in_array($user->role, ['Store Administrator', 'Store Admin']);
         $branch = $isStoreAdmin ? ($user->employee ? $user->employee->branch_id : null) : 'All';
+        $cacheKey = "pace_dash_alerts_" . ($isStoreAdmin ? "store_{$branch}" : "admin");
 
-        $alerts = [];
+        $data = \Illuminate\Support\Facades\Cache::remember($cacheKey, 2, function () use ($isStoreAdmin, $branch, $user) {
+            $alerts = [];
 
-        // 1. Low Stock Alert
-        $lowStock = Product::where('stock_quantity', 1)
-            ->where('stock_quantity', '>', 0)
-            ->get();
-        if ($lowStock->count() > 0) {
-            $alerts[] = [
-                'id' => 'low_stock',
-                'type' => 'warning',
-                'title' => 'Low Inventory Alert',
-                'message' => "{$lowStock->count()} product(s) are below configured reorder levels.",
-                'action_url' => '/products',
-            ];
-        }
-
-        // 2. Out of Stock Alert
-        $outOfStock = Product::where('stock_quantity', '<=', 0)->get();
-        if ($outOfStock->count() > 0) {
-            $alerts[] = [
-                'id' => 'out_of_stock',
-                'type' => 'danger',
-                'title' => 'Stock Depletion Warning',
-                'message' => "{$outOfStock->count()} product(s) are completely out of stock.",
-                'action_url' => '/products',
-            ];
-        }
-
-        // 3. Overdue Installments Alert
-        $instQuery = InstallmentAccount::where('status', 'Overdue');
-        if ($isStoreAdmin) {
-            if ($branch) {
-                $instQuery->whereHas('sale', function ($eq) use ($branch, $user) {
-                    $eq->where('branch_id', $branch)->orWhere('processed_by', $user->user_id);
-                });
-            } else {
-                $instQuery->whereHas('sale', function ($eq) use ($user) {
-                    $eq->where('processed_by', $user->user_id);
-                });
-            }
-        }
-        $overdueCount = $instQuery->count();
-        if ($overdueCount > 0) {
-            $alerts[] = [
-                'id' => 'overdue_installments',
-                'type' => 'danger',
-                'title' => 'Overdue Installment',
-                'message' => "{$overdueCount} installment(s) have past-due schedules.",
-                'action_url' => '/installments?tab=overdue',
-            ];
-        }
-
-        // 4. Unverified Accounts Alert (Admin)
-        if (!$isStoreAdmin) {
-            $unverifiedUsers = User::where('account_verified', false)->count();
-            if ($unverifiedUsers > 0) {
+            // 1. Low Stock Alert
+            $lowStockCount = Product::where('stock_quantity', '<=', 1)
+                ->where('stock_quantity', '>', 0)
+                ->count();
+            if ($lowStockCount > 0) {
                 $alerts[] = [
-                    'id' => 'unverified_users',
-                    'type' => 'info',
-                    'title' => 'Pending Account Verifications',
-                    'message' => "{$unverifiedUsers} user account(s) are awaiting Administrator verification.",
-                    'action_url' => '/users',
+                    'id' => 'low_stock',
+                    'type' => 'warning',
+                    'title' => 'Low Inventory Alert',
+                    'message' => "{$lowStockCount} product(s) are below configured reorder levels.",
+                    'action_url' => '/products',
                 ];
             }
-        }
 
-        return response()->json([
-            'alerts' => $alerts,
-        ]);
+            // 2. Out of Stock Alert
+            $outOfStockCount = Product::where('stock_quantity', '<=', 0)->count();
+            if ($outOfStockCount > 0) {
+                $alerts[] = [
+                    'id' => 'out_of_stock',
+                    'type' => 'danger',
+                    'title' => 'Stock Depletion Warning',
+                    'message' => "{$outOfStockCount} product(s) are completely out of stock.",
+                    'action_url' => '/products',
+                ];
+            }
+
+            // 3. Overdue Installments Alert
+            $instQuery = InstallmentAccount::where('status', 'Overdue');
+            if ($isStoreAdmin) {
+                if ($branch) {
+                    $instQuery->whereHas('sale', function ($eq) use ($branch, $user) {
+                        $eq->where('branch_id', $branch)->orWhere('processed_by', $user->user_id);
+                    });
+                } else {
+                    $instQuery->whereHas('sale', function ($eq) use ($user) {
+                        $eq->where('processed_by', $user->user_id);
+                    });
+                }
+            }
+            $overdueCount = $instQuery->count();
+            if ($overdueCount > 0) {
+                $alerts[] = [
+                    'id' => 'overdue_installments',
+                    'type' => 'danger',
+                    'title' => 'Overdue Installment',
+                    'message' => "{$overdueCount} installment(s) have past-due schedules.",
+                    'action_url' => '/installments?tab=overdue',
+                ];
+            }
+
+            // 4. Unverified Accounts Alert (Admin)
+            if (!$isStoreAdmin) {
+                $unverifiedUsers = User::where('account_verified', false)->count();
+                if ($unverifiedUsers > 0) {
+                    $alerts[] = [
+                        'id' => 'unverified_users',
+                        'type' => 'info',
+                        'title' => 'Pending Account Verifications',
+                        'message' => "{$unverifiedUsers} user account(s) are awaiting Administrator verification.",
+                        'action_url' => '/users',
+                    ];
+                }
+            }
+
+            return [
+                'alerts' => $alerts,
+            ];
+        });
+
+        return response()->json($data);
     }
 
     /**
@@ -549,61 +589,63 @@ class DashboardController extends Controller
      */
     public function charts()
     {
-        // Monthly Sales & Collections Trend
-        $salesTrend = DB::table('sale_transactions')
-            ->leftJoin('sale_items', 'sale_transactions.sale_id', '=', 'sale_items.sale_id')
-            ->selectRaw("DATE_FORMAT(sale_transactions.sale_date, '%b') as month, MONTH(sale_transactions.sale_date) as month_num, SUM(sale_transactions.total_amount) as sales, COUNT(DISTINCT sale_transactions.sale_id) as transactions, SUM(sale_items.quantity) as units_sold")
-            ->groupBy('month', 'month_num')
-            ->orderBy('month_num')
-            ->get();
+        return \Illuminate\Support\Facades\Cache::remember('pace_dash_charts', 2, function () {
+            // Monthly Sales & Collections Trend
+            $salesTrend = DB::table('sale_transactions')
+                ->leftJoin('sale_items', 'sale_transactions.sale_id', '=', 'sale_items.sale_id')
+                ->selectRaw("DATE_FORMAT(sale_transactions.sale_date, '%b') as month, MONTH(sale_transactions.sale_date) as month_num, SUM(sale_transactions.total_amount) as sales, COUNT(DISTINCT sale_transactions.sale_id) as transactions, SUM(sale_items.quantity) as units_sold")
+                ->groupBy('month', 'month_num')
+                ->orderBy('month_num')
+                ->get();
 
-        $collectionsTrend = DB::table('payments')
-            ->selectRaw("DATE_FORMAT(payment_date, '%b') as month, MONTH(payment_date) as month_num, SUM(amount) as collections")
-            ->groupBy('month', 'month_num')
-            ->orderBy('month_num')
-            ->get();
+            $collectionsTrend = DB::table('payments')
+                ->selectRaw("DATE_FORMAT(payment_date, '%b') as month, MONTH(payment_date) as month_num, SUM(amount) as collections")
+                ->groupBy('month', 'month_num')
+                ->orderBy('month_num')
+                ->get();
 
-        // Merge Trends
-        $combinedTrend = [];
-        $months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-        foreach ($months as $idx => $m) {
-            $mNum = $idx + 1;
-            $s = $salesTrend->firstWhere('month_num', $mNum);
-            $c = $collectionsTrend->firstWhere('month_num', $mNum);
-            
-            $combinedTrend[] = [
-                'month' => $m,
-                'sales' => $s ? (float)$s->sales : 0,
-                'collections' => $c ? (float)$c->collections : 0,
-                'transactions' => $s ? (int)$s->transactions : 0,
-                'units_sold' => $s ? (int)$s->units_sold : 0,
+            // Merge Trends
+            $combinedTrend = [];
+            $months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+            foreach ($months as $idx => $m) {
+                $mNum = $idx + 1;
+                $s = $salesTrend->firstWhere('month_num', $mNum);
+                $c = $collectionsTrend->firstWhere('month_num', $mNum);
+                
+                $combinedTrend[] = [
+                    'month' => $m,
+                    'sales' => $s ? (float)$s->sales : 0,
+                    'collections' => $c ? (float)$c->collections : 0,
+                    'transactions' => $s ? (int)$s->transactions : 0,
+                    'units_sold' => $s ? (int)$s->units_sold : 0,
+                ];
+            }
+
+            // Installment Status Distribution
+            $activeInst = InstallmentAccount::where('status', 'Active')->count();
+            $overdueInst = InstallmentAccount::where('status', 'Overdue')->count();
+            $completedInst = InstallmentAccount::where('status', 'Completed')->count();
+            $installmentStatus = [
+                ['name' => 'Active', 'value' => $activeInst, 'color' => '#16a34a'],
+                ['name' => 'Overdue', 'value' => $overdueInst, 'color' => '#dc2626'],
+                ['name' => 'Completed', 'value' => $completedInst, 'color' => '#2563eb'],
             ];
-        }
 
-        // Installment Status Distribution
-        $activeInst = InstallmentAccount::where('status', 'Active')->count();
-        $overdueInst = InstallmentAccount::where('status', 'Overdue')->count();
-        $completedInst = InstallmentAccount::where('status', 'Completed')->count();
-        $installmentStatus = [
-            ['name' => 'Active', 'value' => $activeInst, 'color' => '#16a34a'],
-            ['name' => 'Overdue', 'value' => $overdueInst, 'color' => '#dc2626'],
-            ['name' => 'Completed', 'value' => $completedInst, 'color' => '#2563eb'],
-        ];
+            // Branch Sales Distribution
+            $branchSales = DB::table('sale_transactions')
+                ->join('users', 'sale_transactions.processed_by', '=', 'users.user_id')
+                ->join('employees', 'users.employee_id', '=', 'employees.employee_id')
+                ->leftJoin('branch_profiles', 'employees.branch_id', '=', 'branch_profiles.id')
+                ->selectRaw("COALESCE(branch_profiles.name, 'Unassigned') as branch, SUM(sale_transactions.total_amount) as total_sales")
+                ->groupBy('branch_profiles.name')
+                ->get();
 
-        // Branch Sales Distribution
-        $branchSales = DB::table('sale_transactions')
-            ->join('users', 'sale_transactions.processed_by', '=', 'users.user_id')
-            ->join('employees', 'users.employee_id', '=', 'employees.employee_id')
-            ->leftJoin('branch_profiles', 'employees.branch_id', '=', 'branch_profiles.id')
-            ->selectRaw("COALESCE(branch_profiles.name, 'Main Branch') as branch, SUM(sale_transactions.total_amount) as total_sales")
-            ->groupBy('branch_profiles.name')
-            ->get();
-
-        return response()->json([
-            'sales_trend' => $combinedTrend,
-            'installment_status' => $installmentStatus,
-            'branch_sales' => $branchSales,
-        ]);
+            return response()->json([
+                'sales_trend' => $combinedTrend,
+                'installment_status' => $installmentStatus,
+                'branch_sales' => $branchSales,
+            ]);
+        });
     }
 
     /**
@@ -611,72 +653,79 @@ class DashboardController extends Controller
      */
     public function recent()
     {
-        $recentSales = SaleTransaction::with(['customer', 'processedBy.employee'])
-            ->orderByDesc('sale_date')
-            ->take(6)
-            ->get()
-            ->map(function ($s) {
-                $emp = $s->processedBy ? $s->processedBy->employee : null;
-                return [
-                    'sale_id' => $s->sale_id,
-                    'invoice_no' => $s->invoice_no,
-                    'customer_name' => $s->customer ? "{$s->customer->first_name} {$s->customer->last_name}" : 'Walk-in',
-                    'branch' => $emp ? ($emp->branch_name ?? (is_object($emp->branch) ? $emp->branch->name : ((string)$emp->branch ?: null))) : null,
-                    'sale_date' => date('Y-m-d', strtotime($s->sale_date)),
-                    'payment_method' => $s->payment_method,
-                    'total_amount' => (float)$s->total_amount,
-                    'status' => $s->status,
-                ];
-            });
+        $fingerprint = SyncController::computeFingerprint();
+        $cacheKey = "dash_recent_{$fingerprint}";
 
-        $overdueInstallments = InstallmentAccount::with(['customer', 'payments', 'sale.processedBy.employee'])
-            ->where('status', 'Overdue')
-            ->orderByDesc('installment_id')
-            ->take(6)
-            ->get()
-            ->map(function ($inst) {
-                $paid = (float)$inst->payments->sum('amount') + (float)$inst->down_payment;
-                $balance = max(0, (float)$inst->total_payable - $paid);
-                $emp = $inst->sale && $inst->sale->processedBy ? $inst->sale->processedBy->employee : null;
-                return [
-                    'installment_id' => $inst->installment_id,
-                    'account_no' => $inst->account_no,
-                    'customer_name' => $inst->customer ? "{$inst->customer->first_name} {$inst->customer->last_name}" : 'Customer',
-                    'customer_phone' => $inst->customer ? $inst->customer->phone : '',
-                    'branch' => $emp ? ($emp->branch_name ?? (is_object($emp->branch) ? $emp->branch->name : ((string)$emp->branch ?: null))) : null,
-                    'total_payable' => (float)$inst->total_payable,
-                    'paid' => $paid,
-                    'balance' => $balance,
-                    'status' => $inst->status,
-                ];
-            });
+        $result = Cache::remember($cacheKey, 2, function () {
+            $recentSales = SaleTransaction::with(['customer', 'processedBy.employee.branch'])
+                ->orderByDesc('sale_date')
+                ->take(6)
+                ->get()
+                ->map(function ($s) {
+                    $emp = $s->processedBy ? $s->processedBy->employee : null;
+                    return [
+                        'sale_id' => $s->sale_id,
+                        'invoice_no' => $s->invoice_no,
+                        'customer_name' => $s->customer ? "{$s->customer->first_name} {$s->customer->last_name}" : 'Walk-in',
+                        'branch' => $emp ? ($emp->branch_name ?? (is_object($emp->branch) ? $emp->branch->name : ((string)$emp->branch ?: null))) : null,
+                        'sale_date' => date('Y-m-d', strtotime($s->sale_date)),
+                        'payment_method' => $s->payment_method,
+                        'total_amount' => (float)$s->total_amount,
+                        'status' => $s->status,
+                    ];
+                });
 
-        $lowStock = Product::where('stock_quantity', 1)
-            ->orderBy('stock_quantity')
-            ->take(6)
-            ->get();
+            $overdueInstallments = InstallmentAccount::with(['customer', 'payments', 'sale.processedBy.employee.branch'])
+                ->where('status', 'Overdue')
+                ->orderByDesc('installment_id')
+                ->take(6)
+                ->get()
+                ->map(function ($inst) {
+                    $paid = (float)$inst->payments->sum('amount') + (float)$inst->down_payment;
+                    $balance = max(0, (float)$inst->total_payable - $paid);
+                    $emp = $inst->sale && $inst->sale->processedBy ? $inst->sale->processedBy->employee : null;
+                    return [
+                        'installment_id' => $inst->installment_id,
+                        'account_no' => $inst->account_no,
+                        'customer_name' => $inst->customer ? "{$inst->customer->first_name} {$inst->customer->last_name}" : 'Customer',
+                        'customer_phone' => $inst->customer ? $inst->customer->phone : '',
+                        'branch' => $emp ? ($emp->branch_name ?? (is_object($emp->branch) ? $emp->branch->name : ((string)$emp->branch ?: null))) : null,
+                        'total_payable' => (float)$inst->total_payable,
+                        'paid' => $paid,
+                        'balance' => $balance,
+                        'status' => $inst->status,
+                    ];
+                });
 
-        $recentActivity = SystemLog::with('user')
-            ->orderByDesc('id')
-            ->take(8)
-            ->get()
-            ->map(function ($log) {
-                return [
-                    'id' => $log->id,
-                    'action' => $log->action,
-                    'module' => $log->module,
-                    'description' => $log->description,
-                    'time' => $log->created_at ? $log->created_at->diffForHumans() : 'Just now',
-                    'user' => $log->user ? $log->user->username : 'System',
-                ];
-            });
+            $lowStock = Product::where('stock_quantity', 1)
+                ->orderBy('stock_quantity')
+                ->take(6)
+                ->get();
 
-        return response()->json([
-            'recent_sales' => $recentSales,
-            'overdue_installments' => $overdueInstallments,
-            'low_stock' => $lowStock,
-            'recent_activity' => $recentActivity,
-        ]);
+            $recentActivity = SystemLog::with('user')
+                ->orderByDesc('id')
+                ->take(8)
+                ->get()
+                ->map(function ($log) {
+                    return [
+                        'id' => $log->id,
+                        'action' => $log->action,
+                        'module' => $log->module,
+                        'description' => $log->description,
+                        'time' => $log->created_at ? $log->created_at->diffForHumans() : 'Just now',
+                        'user' => $log->user ? $log->user->username : 'System',
+                    ];
+                });
+
+            return [
+                'recent_sales' => $recentSales,
+                'overdue_installments' => $overdueInstallments,
+                'low_stock' => $lowStock,
+                'recent_activity' => $recentActivity,
+            ];
+        });
+
+        return response()->json($result);
     }
 }
 

@@ -33,7 +33,7 @@ export default function ReportsPage() {
   const [error, setError] = useState('')
 
   // Reusable Filter States
-  const [branch, setBranch] = useState(isStoreAdmin ? (user?.employee?.branch?.name || 'Main Branch') : 'All')
+  const [branch, setBranch] = useState(isStoreAdmin ? (user?.employee?.branch?.name || (typeof user?.employee?.branch === 'string' ? user.employee.branch : '')) : 'All')
   const [department, setDepartment] = useState('All')
   const [status, setStatus] = useState('All')
   const [startDate, setStartDate] = useState('')
@@ -269,7 +269,7 @@ export default function ReportsPage() {
         title="Reports & Analytics Center"
         subtitle={
           isStoreAdmin 
-            ? `Store Branch Reports (${user?.employee?.branch?.name || 'Main Branch'})` 
+            ? `Store Branch Reports (${user?.employee?.branch?.name || (typeof user?.employee?.branch === 'string' ? user.employee.branch : 'Assigned Branch')})` 
             : isEmployee 
               ? 'Personal Attendance & Payroll Records' 
               : 'Organization-wide analytics and filtered database summaries'

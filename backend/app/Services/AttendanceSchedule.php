@@ -36,17 +36,21 @@ class AttendanceSchedule
     {
         if (self::$cache !== null) return self::$cache;
 
-        $values = self::DEFAULTS;
-        try {
-            $stored = Setting::whereIn('key', array_keys(self::DEFAULTS))->pluck('value', 'key')->toArray();
-            foreach ($stored as $k => $v) {
-                if (is_string($v) && preg_match('/^\d{1,2}:\d{2}/', $v)) {
-                    $values[$k] = substr($v, 0, 5);
+        $values = \Illuminate\Support\Facades\Cache::remember('pace_attendance_schedule', 60, function () {
+            $vals = self::DEFAULTS;
+            try {
+                $stored = Setting::whereIn('key', array_keys(self::DEFAULTS))->pluck('value', 'key')->toArray();
+                foreach ($stored as $k => $v) {
+                    if (is_string($v) && preg_match('/^\d{1,2}:\d{2}/', $v)) {
+                        $vals[$k] = substr($v, 0, 5);
+                    }
                 }
+            } catch (\Throwable $e) {
+                // settings table unavailable — fall back to defaults
             }
-        } catch (\Throwable $e) {
-            // settings table unavailable — fall back to defaults
-        }
+            return $vals;
+        });
+
         return self::$cache = $values;
     }
 
@@ -107,7 +111,6 @@ class AttendanceSchedule
     public static function nextAction(?Attendance $record, Carbon $scan): string
     {
         if (!$record) return 'TIME_IN';
-        if ($record->time_out) return 'COMPLETED';
         if ($record->lunch_out && !$record->lunch_in) return 'LUNCH_IN';
 
         if (!$record->lunch_out) {

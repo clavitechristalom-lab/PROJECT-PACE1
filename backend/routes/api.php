@@ -65,6 +65,8 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/sync/status', [SyncController::class, 'status']);
     Route::post('/sync/trigger', [SyncController::class, 'triggerManualSync']);
     Route::post('/user/profile-image', [AuthController::class, 'uploadProfileImage']);
+    Route::post('/user/face-biometric-image', [AuthController::class, 'uploadFaceBiometricImage']);
+    Route::delete('/user/face-biometric-image', [AuthController::class, 'deleteFaceBiometricImage']);
 
     // Branches
     Route::get('/branches', [BranchController::class, 'index']);
@@ -94,6 +96,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/products/{id}', [ProductController::class, 'show']);
     Route::post('/products', [ProductController::class, 'store']);
     Route::put('/products/{id}', [ProductController::class, 'update']);
+    Route::post('/products/{id}', [ProductController::class, 'update']);
     Route::delete('/products/{id}', [ProductController::class, 'destroy']);
 
     // ─── Customers ──────────────────────────────────────────────────────────────
@@ -146,7 +149,9 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/employee/verify-account', [EmployeeController::class, 'verifyAccount']);
     Route::post('/employee/me/verify', [EmployeeController::class, 'verifyMe']);
     Route::post('/employee/me/verify-attendance-pin', [AttendanceController::class, 'approveVerification']);
+    Route::post('/employee/me/cancel-attendance-verification', [AttendanceController::class, 'rejectVerification']);
     Route::get('/employee/me/pending-verifications', [AttendanceController::class, 'pendingVerifications']);
+    Route::get('/employee/me/face-template', [AttendanceController::class, 'getMyFaceTemplate']);
     Route::get('/employees/{id}/qr', [EmployeeController::class, 'getQr']);
 
     // ─── Attendance QR Requests (Employee & Store Admin User Requests) ───────────
@@ -160,6 +165,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/attendance/scan-image', [AttendanceController::class, 'scanImage']);
         Route::post('/attendance/verify-qr', [AttendanceController::class, 'verifyQr']);
         Route::post('/attendance/verify-pin', [AttendanceController::class, 'verifyPin']);
+        Route::post('/attendance/cancel-verification', [AttendanceController::class, 'rejectVerification']);
         Route::get('/attendance/check-verification/{id}', [AttendanceController::class, 'checkVerification']);
     });
 
@@ -200,8 +206,10 @@ Route::middleware('auth:sanctum')->group(function () {
 
     Route::middleware('role:Administrator')->group(function () {
         Route::get('/admin/qr-monitoring', [EmployeeController::class, 'getQrMonitoringStats']);
+    });
 
-        // ─── Employee Financial Settings (Allowances, Deductions, Loans) ─────────
+    // ─── Employee Financial Settings (Allowances, Deductions, Loans) ─────────
+    Route::middleware('role:Administrator,Admin,Store Administrator,Store Admin')->group(function () {
         Route::get('/employees/{id}/financials', [\App\Http\Controllers\EmployeeFinancialController::class, 'getFinancials']);
         Route::post('/employees/{id}/allowances', [\App\Http\Controllers\EmployeeFinancialController::class, 'addAllowance']);
         Route::delete('/employees/allowances/{id}', [\App\Http\Controllers\EmployeeFinancialController::class, 'deleteAllowance']);
@@ -213,10 +221,11 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // ─── Payroll (Admin & Store Admin Scoped) ────────────────────────────────────
     Route::get('/payroll', [PayrollController::class, 'index']);
+    Route::get('/payroll/eligible-employees', [PayrollController::class, 'eligibleEmployees']);
     Route::get('/payroll/{id}/payslip', [PayrollController::class, 'show']);
     Route::get('/payroll-periods', [PayrollController::class, 'periods']);
 
-    Route::middleware('role:Store Administrator,Store Admin')->group(function () {
+    Route::middleware('role:Administrator,Admin,Store Administrator,Store Admin')->group(function () {
         Route::post('/payroll/generate', [PayrollController::class, 'generate']);
         Route::post('/payroll/generate-13th-month', [PayrollController::class, 'generate13thMonth']);
         Route::put('/payroll/{id}/approve', [PayrollController::class, 'approve']);

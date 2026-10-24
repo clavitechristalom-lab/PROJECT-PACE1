@@ -101,5 +101,9 @@ class DatabaseSeeder extends Seeder
             'is_active' => true,
             'last_login' => null,
         ]);
+
+        $this->call([
+            CatalogProductSeeder::class,
+        ]);
     }
 }

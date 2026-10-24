@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   BarChart, Bar, ComposedChart, Area, Line, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -16,7 +16,7 @@ import {
   Table, TR, TD, PageHeader, StatCard, Card, CardHeader, Pagination, showToast, showLoading, closeLoading, confirmAction, LoadingState, ErrorAlert, TableSkeleton, EmptyState,
   StatSkeleton, ProgressBar, TabBar
 } from '../components/ui'
-import { fmt, fmtDate } from '../lib/utils'
+import { fmt, fmtDate, fastDeepEqual } from '../lib/utils'
 import { api } from '../lib/api'
 import { useRealtimeSync, triggerDataSync } from '../lib/realtimeSync'
 import { TbCurrencyPeso } from 'react-icons/tb'
@@ -25,7 +25,7 @@ import BranchCarousel from '../components/branches/BranchCarousel'
 import BranchDetailsView from '../components/branches/BranchDetailsView'
 import CreateBranchModal from '../components/branches/CreateBranchModal'
 
-const PIE_COLORS = ['#10b981', '#ef4444', '#2563eb', '#f59e0b', '#8b5cf6']
+const PIE_COLORS = ['#3b82f6', '#1d4ed8', '#0284c7', '#6366f1', '#38bdf8']
 
 function PaymentMethodBadge({ method, provider }) {
   const m = (provider || method || '').toLowerCase()
@@ -39,8 +39,8 @@ function PaymentMethodBadge({ method, provider }) {
   }
   if (m.includes('maya')) {
     return (
-      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-800">
-        <FiSmartphone className="w-3 h-3 text-emerald-500" />
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-sky-50 text-sky-700 border border-sky-200 dark:bg-sky-950/40 dark:text-sky-300 dark:border-sky-800">
+        <FiSmartphone className="w-3 h-3 text-sky-500" />
         <span>Maya</span>
       </span>
     )
@@ -63,7 +63,7 @@ function PaymentMethodBadge({ method, provider }) {
   }
   return (
     <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-muted text-muted-foreground border border-border">
-      <TbCurrencyPeso className="w-3 h-3 text-emerald-500" />
+      <TbCurrencyPeso className="w-3 h-3 text-blue-500" />
       <span>{provider || method || 'Cash'}</span>
     </span>
   )
@@ -75,12 +75,29 @@ function AdminBusinessDashboard() {
   const isAdmin = user?.role === 'Administrator'
   const isStoreAdmin = user?.role === 'Store Administrator' || user?.role === 'Store Admin'
   const navigate = useNavigate()
-  const [stats, setStats] = useState(null)
-  const [charts, setCharts] = useState(null)
-  const [recent, setRecent] = useState(null)
+  const [stats, setStats] = useState(() => {
+    try {
+      const saved = sessionStorage.getItem('pace_cached_dash_stats')
+      return saved ? JSON.parse(saved) : null
+    } catch { return null }
+  })
+  const [charts, setCharts] = useState(() => {
+    try {
+      const saved = sessionStorage.getItem('pace_cached_dash_charts')
+      return saved ? JSON.parse(saved) : null
+    } catch { return null }
+  })
+  const [recent, setRecent] = useState(() => {
+    try {
+      const saved = sessionStorage.getItem('pace_cached_dash_recent')
+      return saved ? JSON.parse(saved) : null
+    } catch { return null }
+  })
   const [alerts, setAlerts] = useState([])
   const [branchComp, setBranchComp] = useState([])
-  const [loading, setLoading] = useState(true)
+  const [loading, setLoading] = useState(() => {
+    return !sessionStorage.getItem('pace_cached_dash_stats')
+  })
   const [error, setError] = useState('')
 
   // Performance Timeframe Filter State
@@ -89,6 +106,15 @@ function AdminBusinessDashboard() {
   const [customEnd, setCustomEnd] = useState('')
   const [perfData, setPerfData] = useState(null)
   const [perfLoading, setPerfLoading] = useState(false)
+  const inFlightRef = useRef(false)
+  const isMountedRef = useRef(true)
+
+  useEffect(() => {
+    isMountedRef.current = true
+    return () => {
+      isMountedRef.current = false
+    }
+  }, [])
 
   // Branch Detail Drilldown Modal
   const [selectedBranchDetail, setSelectedBranchDetail] = useState(null)
@@ -97,7 +123,10 @@ function AdminBusinessDashboard() {
   const [showQrWidgetModal, setShowQrWidgetModal] = useState(false)
 
   const loadData = async (source) => {
-    const isBg = source === 'timer' || source === 'database' || source === 'event' || source === 'focus' || source === 'mutation' || source === 'sync'
+    if (inFlightRef.current && source !== 'initial') return
+    inFlightRef.current = true
+
+    const isBg = source === 'timer' || source === 'database' || source === 'event' || source === 'focus' || source === 'mutation' || source === 'sync' || !!stats
     if (!isBg) {
       setLoading(true)
     }
@@ -110,33 +139,42 @@ function AdminBusinessDashboard() {
         api.dashboard.getAlerts().catch(() => ({ alerts: [] })),
         api.dashboard.getBranchComparison().catch(() => ({ branches: [] })),
       ])
-      setStats(statsData)
-      setCharts(chartsData)
-      setRecent(recentData)
-      setAlerts(alertsData?.alerts || [])
+      if (!isMountedRef.current) return
 
-      const liveBranches = branchData?.branches || [];
-      setBranchComp(liveBranches)
+      const liveBranches = branchData?.branches || []
+      setStats(prev => (fastDeepEqual(prev, statsData) ? prev : statsData))
+      setCharts(prev => (fastDeepEqual(prev, chartsData) ? prev : chartsData))
+      setRecent(prev => (fastDeepEqual(prev, recentData) ? prev : recentData))
+      setAlerts(prev => (fastDeepEqual(prev, alertsData?.alerts || []) ? prev : (alertsData?.alerts || [])))
+      setBranchComp(prev => (fastDeepEqual(prev, liveBranches) ? prev : liveBranches))
+
+      try {
+        sessionStorage.setItem('pace_cached_dash_stats', JSON.stringify(statsData))
+        sessionStorage.setItem('pace_cached_dash_charts', JSON.stringify(chartsData))
+        sessionStorage.setItem('pace_cached_dash_recent', JSON.stringify(recentData))
+      } catch (e) { }
 
       if (isAdmin) {
         api.qrRequests.getAll({ per_page: 1 }).then(res => {
-          if (res.summary) setQrRequestSummary(res.summary)
+          if (res.summary && isMountedRef.current) setQrRequestSummary(res.summary)
         }).catch(() => { })
       }
     } catch (err) {
+      if (!isMountedRef.current) return
       if (!isBg) {
         console.error('Failed to load admin business dashboard:', err)
         setError(err.message || 'Failed to load business dashboard metrics')
       }
     } finally {
-      if (!isBg) {
+      inFlightRef.current = false
+      if (!isBg && isMountedRef.current) {
         setLoading(false)
       }
     }
   }
 
-  const loadPerformance = async (tf = timeframe) => {
-    setPerfLoading(true)
+  const loadPerformance = async (tf = timeframe, silent = false) => {
+    if (!silent && !perfData) setPerfLoading(true)
     try {
       const params = {
         timeframe: tf,
@@ -144,11 +182,15 @@ function AdminBusinessDashboard() {
         date_to: tf === 'custom' ? customEnd : undefined,
       }
       const data = await api.dashboard.getBusinessPerformance(params)
-      setPerfData(data)
+      if (isMountedRef.current) {
+        setPerfData(prev => (fastDeepEqual(prev, data) ? prev : data))
+      }
     } catch (err) {
       console.error('Failed to load performance:', err)
     } finally {
-      setPerfLoading(false)
+      if (!silent && isMountedRef.current) {
+        setPerfLoading(false)
+      }
     }
   }
 
@@ -157,18 +199,16 @@ function AdminBusinessDashboard() {
     loadPerformance()
   }, [])
 
-  // High-frequency real-time synchronization
+  // High-frequency real-time synchronization (smooth 1-2s refresh target, zero flicker)
   useRealtimeSync(() => {
     loadData('sync')
-    loadPerformance()
-  }, [timeframe])
-
-
+    loadPerformance(timeframe, true)
+  }, [timeframe], { periodic: true })
 
   const handleTimeframeChange = (tf) => {
     setTimeframe(tf)
     if (tf !== 'custom') {
-      loadPerformance(tf)
+      loadPerformance(tf, false)
     }
   }
 
@@ -193,7 +233,7 @@ function AdminBusinessDashboard() {
 
   const quickActions = [
     ...(isAdmin ? [{ label: 'QR Requests', icon: <FiShield className="w-5 h-5 !text-white text-white" />, action: () => setShowQrWidgetModal(true), color: 'bg-amber-600', badge: qrRequestSummary?.pending || 0 }] : []),
-    { label: 'View Sales', icon: <FiShoppingCart className="w-5 h-5 !text-white text-white" />, path: '/sales', color: 'bg-emerald-600' },
+    { label: 'View Sales', icon: <FiShoppingCart className="w-5 h-5 !text-white text-white" />, path: '/sales', color: 'bg-blue-600' },
     { label: 'Record Payment', icon: <TbCurrencyPeso className="w-5 h-5 !text-white text-white" />, path: '/payments', color: 'bg-blue-600' },
     { label: 'Installment', icon: <FiCreditCard className="w-5 h-5 !text-white text-white" />, path: '/installments', color: 'bg-indigo-600' },
     { label: 'Overdue Monitoring', icon: <FiAlertTriangle className="w-5 h-5 !text-white text-white" />, path: '/installments?tab=overdue', color: 'bg-rose-600' },
@@ -212,9 +252,9 @@ function AdminBusinessDashboard() {
         action={
           <button
             onClick={() => setShowCreateBranchModal(true)}
-            className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-emerald-600 via-emerald-600 to-teal-700 hover:from-emerald-500 hover:to-teal-600 text-white font-semibold text-xs rounded-xl shadow-sm shadow-emerald-950/40 border border-emerald-400/30 transition-all cursor-pointer"
+            className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-blue-600 via-blue-600 to-indigo-700 hover:from-blue-500 hover:to-indigo-600 text-white font-semibold text-xs rounded-xl shadow-sm shadow-blue-950/40 border border-blue-400/30 transition-all cursor-pointer"
           >
-            <FiPlus className="w-4 h-4 text-amber-200" />
+            <FiPlus className="w-4 h-4 text-blue-100" />
             <span>Create Branch</span>
           </button>
         }
@@ -272,9 +312,9 @@ function AdminBusinessDashboard() {
                 <span className="text-[10px] uppercase font-bold text-indigo-500 block mb-1">Under Review</span>
                 <span className="text-2xl font-mono font-black text-indigo-600 dark:text-indigo-400">{qrRequestSummary.under_review || 0}</span>
               </div>
-              <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-center">
-                <span className="text-[10px] uppercase font-bold text-emerald-500 block mb-1">Approved</span>
-                <span className="text-2xl font-mono font-black text-emerald-600 dark:text-emerald-400">{qrRequestSummary.approved || 0}</span>
+              <div className="p-3 rounded-xl bg-blue-500/10 border border-blue-500/20 text-center">
+                <span className="text-[10px] uppercase font-bold text-blue-500 block mb-1">Approved</span>
+                <span className="text-2xl font-mono font-black text-blue-600 dark:text-blue-400">{qrRequestSummary.approved || 0}</span>
               </div>
               <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/20 text-center">
                 <span className="text-[10px] uppercase font-bold text-rose-500 block mb-1">Rejected</span>
@@ -318,14 +358,14 @@ function AdminBusinessDashboard() {
           value={fmt(stats?.total_sales || 0)}
           sub="cash & installment totals"
           icon={<TbCurrencyPeso className="w-5 h-5" />}
-          color="green"
+          color="blue"
         />
         <StatCard
           title="Total Collections"
           value={fmt(stats?.total_collections || 0)}
           sub="actual payments received"
           icon={<FiCheckCircle className="w-5 h-5" />}
-          color="blue"
+          color="navy"
         />
         <StatCard
           title="Installment Sales"
@@ -346,13 +386,13 @@ function AdminBusinessDashboard() {
           value={stats?.active_installments?.toString() || '0'}
           sub={`${stats?.overdue_installments || 0} overdue`}
           icon={<FiActivity className="w-5 h-5" />}
-          color="indigo"
+          color="cyan"
         />
       </div>
 
       {/* ─── SECTION 2: TIMEFRAME PERFORMANCE FILTER ─── */}
       <Card noPad className="border border-border overflow-hidden">
-        <div className="p-4 border-b border-border bg-emerald-950/10 dark:bg-emerald-950/30 flex flex-col md:flex-row md:items-center justify-between gap-3">
+        <div className="p-4 border-b border-border bg-blue-950/10 dark:bg-blue-950/30 flex flex-col md:flex-row md:items-center justify-between gap-3">
           <div>
             <h3 className="text-sm font-bold text-foreground">Business Performance Breakdown</h3>
             <p className="text-xs text-muted-foreground">Filter sales, collections, and overdue recovery by timeframe</p>
@@ -370,8 +410,8 @@ function AdminBusinessDashboard() {
                 key={t.id}
                 onClick={() => handleTimeframeChange(t.id)}
                 className={`px-3 py-1.5 rounded-xl text-xs font-semibold cursor-pointer transition-all ${timeframe === t.id
-                  ? 'bg-gradient-to-r from-emerald-600 to-emerald-700 text-white shadow-xs border border-emerald-400/30'
-                  : 'bg-card/70 border border-emerald-500/20 text-muted-foreground hover:text-foreground hover:bg-emerald-500/10'
+                  ? 'bg-gradient-to-r from-blue-600 to-indigo-700 text-white shadow-xs border border-blue-400/30'
+                  : 'bg-card/70 border border-blue-500/20 text-muted-foreground hover:text-foreground hover:bg-blue-500/10'
                   }`}
               >
                 {t.label}
@@ -402,7 +442,7 @@ function AdminBusinessDashboard() {
             </div>
             <button
               type="submit"
-              className="px-3 py-1 bg-gradient-to-r from-emerald-600 to-emerald-700 text-white font-bold rounded-xl border border-emerald-400/30 shadow-xs cursor-pointer"
+              className="px-3 py-1 bg-gradient-to-r from-blue-600 to-indigo-700 text-white font-bold rounded-xl border border-blue-400/30 shadow-xs cursor-pointer"
             >
               Apply Custom Filter
             </button>
@@ -414,10 +454,10 @@ function AdminBusinessDashboard() {
         ) : (
           <div className="p-4 grid grid-cols-1 md:grid-cols-3 gap-4">
             {/* Sales Breakdown */}
-            <div className="p-3.5 rounded-2xl bg-emerald-950/15 dark:bg-emerald-950/30 border border-emerald-500/20 backdrop-blur-xs space-y-2 text-xs">
+            <div className="p-3.5 rounded-2xl bg-blue-950/15 dark:bg-[#0c1a3a]/60 border border-blue-500/20 backdrop-blur-xs space-y-2 text-xs">
               <div className="font-bold text-foreground border-b border-border pb-1.5 flex justify-between">
                 <span>Sales Revenue</span>
-                <span className="font-mono text-emerald-600 dark:text-emerald-400">{perfData?.sales?.transactions || 0} Transactions</span>
+                <span className="font-mono text-blue-600 dark:text-blue-400">{perfData?.sales?.transactions || 0} Transactions</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Gross Sales:</span>
@@ -429,7 +469,7 @@ function AdminBusinessDashboard() {
               </div>
               <div className="flex justify-between border-t border-border pt-1 font-bold">
                 <span className="text-foreground">Net Sales:</span>
-                <span className="font-mono text-emerald-600 dark:text-emerald-400">{fmt(perfData?.sales?.net_sales || 0)}</span>
+                <span className="font-mono text-blue-600 dark:text-blue-400">{fmt(perfData?.sales?.net_sales || 0)}</span>
               </div>
               <div className="pt-1 text-[11px] text-muted-foreground flex justify-between">
                 <span>Cash vs Financing:</span>
@@ -438,10 +478,10 @@ function AdminBusinessDashboard() {
             </div>
 
             {/* Collections Breakdown */}
-            <div className="p-3.5 rounded-2xl bg-emerald-950/15 dark:bg-emerald-950/30 border border-emerald-500/20 backdrop-blur-xs space-y-2 text-xs">
+            <div className="p-3.5 rounded-2xl bg-blue-950/15 dark:bg-[#0c1a3a]/60 border border-blue-500/20 backdrop-blur-xs space-y-2 text-xs">
               <div className="font-bold text-foreground border-b border-border pb-1.5 flex justify-between">
                 <span>Payment Collections</span>
-                <span className="font-mono text-teal-600 dark:text-teal-400">{perfData?.collections?.payments_count || 0} Receipts</span>
+                <span className="font-mono text-sky-600 dark:text-sky-400">{perfData?.collections?.payments_count || 0} Receipts</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Cash Payments:</span>
@@ -453,23 +493,23 @@ function AdminBusinessDashboard() {
               </div>
               <div className="flex justify-between border-t border-border pt-1 font-bold">
                 <span className="text-foreground">Total Collections:</span>
-                <span className="font-mono text-teal-600 dark:text-teal-400">{fmt(perfData?.collections?.total_collected || 0)}</span>
+                <span className="font-mono text-sky-600 dark:text-sky-400">{fmt(perfData?.collections?.total_collected || 0)}</span>
               </div>
               <div className="pt-1 text-[11px] text-muted-foreground flex justify-between">
                 <span>Down Payments Collected:</span>
-                <span className="font-mono text-emerald-600 dark:text-emerald-400">{fmt(perfData?.collections?.down_payments || 0)}</span>
+                <span className="font-mono text-blue-600 dark:text-blue-400">{fmt(perfData?.collections?.down_payments || 0)}</span>
               </div>
             </div>
 
             {/* Overdue & Receivables Recovery */}
-            <div className="p-3.5 rounded-2xl bg-emerald-950/15 dark:bg-emerald-950/30 border border-emerald-500/20 backdrop-blur-xs space-y-2 text-xs">
+            <div className="p-3.5 rounded-2xl bg-blue-950/15 dark:bg-[#0c1a3a]/60 border border-blue-500/20 backdrop-blur-xs space-y-2 text-xs">
               <div className="font-bold text-foreground border-b border-border pb-1.5 flex justify-between">
                 <span>Receivables & Overdue</span>
                 <span className="font-mono text-amber-600 dark:text-amber-400">Recovery</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Overdue Payments Collected:</span>
-                <span className="font-mono font-semibold text-emerald-600 dark:text-emerald-400">{fmt(perfData?.overdue_collected || 0)}</span>
+                <span className="font-mono font-semibold text-blue-600 dark:text-blue-400">{fmt(perfData?.overdue_collected || 0)}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Total Financed Credit:</span>
@@ -510,7 +550,7 @@ function AdminBusinessDashboard() {
                 branchComp.map((b, idx) => (
                   <tr key={b.branch} className={`border-b border-border hover:bg-muted/40 ${idx % 2 === 1 ? 'bg-muted/10' : ''}`}>
                     <td className="py-3 px-4 font-bold text-foreground">{b.branch}</td>
-                    <td className="py-3 px-4 text-right font-mono font-semibold text-emerald-600">{fmt(b.sales)}</td>
+                    <td className="py-3 px-4 text-right font-mono font-semibold text-blue-600 dark:text-blue-400">{fmt(b.sales)}</td>
                     <td className="py-3 px-4 text-right font-mono font-semibold text-blue-600">{fmt(b.collections)}</td>
                     <td className="py-3 px-4 text-right font-mono text-purple-600">{fmt(b.installment_sales)}</td>
                     <td className="py-3 px-4 text-right font-mono font-bold text-rose-600">{fmt(b.outstanding_balance)}</td>
@@ -553,8 +593,8 @@ function AdminBusinessDashboard() {
               <ComposedChart data={charts?.sales_trend || []} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
                 <defs>
                   <linearGradient id="colorSales" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#4F8AFF" stopOpacity={0.3} />
-                    <stop offset="95%" stopColor="#4F8AFF" stopOpacity={0} />
+                    <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.35} />
+                    <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
                   </linearGradient>
                 </defs>
                 <CartesianGrid strokeDasharray="0" vertical={false} stroke="#64748b30" />
@@ -573,14 +613,14 @@ function AdminBusinessDashboard() {
                   dx={-10}
                 />
                 <Tooltip
-                  contentStyle={{ backgroundColor: '#0f172a', borderColor: '#1e293b', borderRadius: '12px', color: '#f8fafc' }}
+                  contentStyle={{ backgroundColor: '#081329', borderColor: '#1d3557', borderRadius: '14px', color: '#f8fafc', boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.5)' }}
                   itemStyle={{ color: '#e2e8f0' }}
                   formatter={v => `₱${v.toLocaleString()}`}
                 />
                 <Area
                   type="monotone"
                   dataKey="sales"
-                  stroke="#4F8AFF"
+                  stroke="#3b82f6"
                   strokeWidth={3}
                   fillOpacity={1}
                   fill="url(#colorSales)"
@@ -589,7 +629,7 @@ function AdminBusinessDashboard() {
                 <Line
                   type="monotone"
                   dataKey="collections"
-                  stroke="#2dd4bf"
+                  stroke="#38bdf8"
                   strokeWidth={3}
                   strokeDasharray="5 5"
                   dot={false}
@@ -679,7 +719,7 @@ function AdminBusinessDashboard() {
 function StoreAdminBusinessDashboard() {
   const { user } = useAuth()
   const navigate = useNavigate()
-  const branchName = user?.employee?.branch?.name || 'Main Branch'
+  const branchName = user?.employee?.branch?.name || (typeof user?.employee?.branch === 'string' ? user.employee.branch : '') || 'Assigned Branch'
 
   const [stats, setStats] = useState(null)
   const [perfData, setPerfData] = useState(null)
@@ -687,8 +727,20 @@ function StoreAdminBusinessDashboard() {
   const [timeframe, setTimeframe] = useState('this_month')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const inFlightRef = useRef(false)
+  const isMountedRef = useRef(true)
+
+  useEffect(() => {
+    isMountedRef.current = true
+    return () => {
+      isMountedRef.current = false
+    }
+  }, [])
 
   const loadData = async (source) => {
+    if (inFlightRef.current && source !== 'initial') return
+    inFlightRef.current = true
+
     const isBg = source === 'timer' || source === 'database' || source === 'event' || source === 'focus' || source === 'mutation' || source === 'sync'
     if (!isBg) {
       setLoading(true)
@@ -700,16 +752,19 @@ function StoreAdminBusinessDashboard() {
         api.dashboard.getBusinessPerformance({ timeframe }),
         api.dashboard.getRecent(),
       ])
-      setStats(statsData)
-      setPerfData(perfDataRes)
-      setRecent(recentData)
+      if (!isMountedRef.current) return
+      setStats(prev => (fastDeepEqual(prev, statsData) ? prev : statsData))
+      setPerfData(prev => (fastDeepEqual(prev, perfDataRes) ? prev : perfDataRes))
+      setRecent(prev => (fastDeepEqual(prev, recentData) ? prev : recentData))
     } catch (err) {
+      if (!isMountedRef.current) return
       if (!isBg) {
         console.error('Failed to load store admin dashboard:', err)
         setError(err.message || 'Failed to fetch branch metrics')
       }
     } finally {
-      if (!isBg) {
+      inFlightRef.current = false
+      if (!isBg && isMountedRef.current) {
         setLoading(false)
       }
     }
@@ -719,7 +774,7 @@ function StoreAdminBusinessDashboard() {
     loadData('initial')
   }, [timeframe])
 
-  useRealtimeSync(() => loadData('sync'), [timeframe])
+  useRealtimeSync(() => loadData('sync'), [timeframe], { periodic: true })
 
   if (loading) {
     return (
@@ -751,10 +806,10 @@ function StoreAdminBusinessDashboard() {
 
       {/* Store Branch Metric Cards */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <StatCard title="Today's Sales" value={fmt(stats?.today_sales || 0)} sub="cash & installment invoices" icon={<FiShoppingCart className="w-5 h-5" />} color="green" />
-        <StatCard title="Monthly Sales" value={fmt(stats?.monthly_sales || 0)} sub="month-to-date total" icon={<FiTrendingUp className="w-5 h-5" />} color="blue" />
+        <StatCard title="Today's Sales" value={fmt(stats?.today_sales || 0)} sub="cash & installment invoices" icon={<FiShoppingCart className="w-5 h-5" />} color="blue" />
+        <StatCard title="Monthly Sales" value={fmt(stats?.monthly_sales || 0)} sub="month-to-date total" icon={<FiTrendingUp className="w-5 h-5" />} color="navy" />
         <StatCard title="Today's Collections" value={fmt(stats?.today_collections || 0)} sub="payments received today" icon={<TbCurrencyPeso className="w-5 h-5" />} color="indigo" />
-        <StatCard title="Monthly Collections" value={fmt(stats?.monthly_collections || 0)} sub="month-to-date receipts" icon={<FiCreditCard className="w-5 h-5" />} color="purple" />
+        <StatCard title="Monthly Collections" value={fmt(stats?.monthly_collections || 0)} sub="month-to-date receipts" icon={<FiCreditCard className="w-5 h-5" />} color="cyan" />
       </div>
 
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
@@ -791,7 +846,7 @@ function StoreAdminBusinessDashboard() {
             <div className="flex justify-between"><span>Transactions:</span><span className="font-mono font-bold">{perfData?.sales?.transactions || 0}</span></div>
             <div className="flex justify-between"><span>Gross Sales:</span><span className="font-mono font-semibold">{fmt(perfData?.sales?.gross_sales || 0)}</span></div>
             <div className="flex justify-between"><span>Discounts:</span><span className="font-mono text-rose-600">- {fmt(perfData?.sales?.discounts || 0)}</span></div>
-            <div className="flex justify-between border-t border-border pt-1 font-bold"><span>Net Sales:</span><span className="font-mono text-emerald-600">{fmt(perfData?.sales?.net_sales || 0)}</span></div>
+            <div className="flex justify-between border-t border-border pt-1 font-bold"><span>Net Sales:</span><span className="font-mono text-blue-600 dark:text-blue-400">{fmt(perfData?.sales?.net_sales || 0)}</span></div>
           </div>
 
           <div className="p-3.5 rounded-2xl bg-card border border-border space-y-2 text-xs">
@@ -810,7 +865,7 @@ function StoreAdminBusinessDashboard() {
           onClick={() => navigate('/sales')}
           className="flex items-center gap-2 p-3 rounded-2xl bg-card border border-border hover:shadow-md transition-all font-semibold text-xs text-foreground cursor-pointer"
         >
-          <FiShoppingCart className="w-4 h-4 text-emerald-500" />
+          <FiShoppingCart className="w-4 h-4 text-blue-500" />
           <span>New Sale</span>
         </button>
         <button
@@ -863,6 +918,15 @@ export function EmployeeDashboard() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [payslip, setPayslip] = useState(null)
+  const inFlightRef = useRef(false)
+  const isMountedRef = useRef(true)
+
+  useEffect(() => {
+    isMountedRef.current = true
+    return () => {
+      isMountedRef.current = false
+    }
+  }, [])
 
   const openPayslip = async (id) => {
     try {
@@ -879,6 +943,9 @@ export function EmployeeDashboard() {
   }
 
   const loadData = async (source) => {
+    if (inFlightRef.current && source !== 'initial') return
+    inFlightRef.current = true
+
     const isBg = source === 'timer' || source === 'database' || source === 'event' || source === 'focus' || source === 'mutation' || source === 'sync'
     if (!isBg) {
       setLoading(true)
@@ -889,14 +956,17 @@ export function EmployeeDashboard() {
         role: 'Employee',
         employee_id: user?.employee_id || undefined,
       })
-      setStats(data)
+      if (!isMountedRef.current) return
+      setStats(prev => (fastDeepEqual(prev, data) ? prev : data))
     } catch (err) {
+      if (!isMountedRef.current) return
       if (!isBg) {
         console.error('Failed to load employee stats:', err)
         setError(err.message || 'Failed to load employee metrics')
       }
     } finally {
-      if (!isBg) {
+      inFlightRef.current = false
+      if (!isBg && isMountedRef.current) {
         setLoading(false)
       }
     }
@@ -906,7 +976,7 @@ export function EmployeeDashboard() {
     loadData('initial')
   }, [user])
 
-  useRealtimeSync(() => loadData('sync'), [user])
+  useRealtimeSync(() => loadData('sync'), [user], { periodic: true })
 
   const today = stats?.my_attendance_today
   const myPayroll = stats?.my_latest_payroll
@@ -977,7 +1047,7 @@ export function EmployeeDashboard() {
               </div>
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Total Hours</span>
-                <span className="font-mono font-semibold text-emerald-600">{today.total_hours}h</span>
+                <span className="font-mono font-semibold text-blue-600 dark:text-blue-400">{today.total_hours}h</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Overtime</span>
@@ -1028,7 +1098,7 @@ export function EmployeeDashboard() {
               </div>
               <div className="flex justify-between border-t border-border pt-2">
                 <span className="font-bold text-foreground">Net Pay</span>
-                <span className="font-mono text-base font-bold text-emerald-600">{fmt(myPayroll.net_pay)}</span>
+                <span className="font-mono text-base font-bold text-blue-600 dark:text-blue-400">{fmt(myPayroll.net_pay)}</span>
               </div>
               <div className="flex justify-between items-center">
                 <span className="text-muted-foreground">Status</span>
@@ -1068,7 +1138,7 @@ export function EmployeeDashboard() {
                     <td className="py-2.5 px-4 font-mono">{a.time_out}</td>
                     <td className="py-2.5 px-4 text-right font-mono">{a.regular_hours}h</td>
                     <td className="py-2.5 px-4 text-right font-mono font-bold text-amber-600">{a.overtime_hours}h</td>
-                    <td className="py-2.5 px-4 text-right font-mono font-bold text-emerald-600">{a.total_hours}h</td>
+                    <td className="py-2.5 px-4 text-right font-mono font-bold text-blue-600 dark:text-blue-400">{a.total_hours}h</td>
                     <td className="py-2.5 px-4 text-center"><StatusBadge status={a.status} /></td>
                   </tr>
                 ))
@@ -1106,13 +1176,13 @@ export function EmployeeDashboard() {
             <div className="grid grid-cols-2 gap-3 pt-1">
               {/* Earnings */}
               <div className="border border-border rounded-xl p-3 bg-card space-y-1.5">
-                <span className="font-bold text-emerald-600 uppercase tracking-wide block border-b border-border pb-1 text-[11px]">Earnings</span>
+                <span className="font-bold text-blue-600 dark:text-blue-400 uppercase tracking-wide block border-b border-border pb-1 text-[11px]">Earnings</span>
                 <div className="flex justify-between"><span>Basic Pay</span><span className="font-mono">{fmt(payslip.basic_salary)}</span></div>
                 <div className="flex justify-between"><span>Overtime Pay ({payslip.overtime_hours}h)</span><span className="font-mono">{fmt(payslip.overtime_pay)}</span></div>
                 <div className="flex justify-between"><span>Allowance</span><span className="font-mono">{fmt(payslip.allowance)}</span></div>
                 <div className="flex justify-between font-bold border-t border-border pt-1 text-foreground">
                   <span>Total Gross</span>
-                  <span className="font-mono text-emerald-600">{fmt(payslip.gross_pay)}</span>
+                  <span className="font-mono text-blue-600 dark:text-blue-400">{fmt(payslip.gross_pay)}</span>
                 </div>
               </div>
 
@@ -1136,7 +1206,7 @@ export function EmployeeDashboard() {
 
             <div className="border border-border p-3.5 rounded-xl flex justify-between items-center bg-muted/20">
               <span className="font-bold text-sm text-foreground">NET TAKE-HOME PAY</span>
-              <span className="text-xl font-bold font-mono text-emerald-600">{fmt(payslip.net_pay)}</span>
+              <span className="text-xl font-bold font-mono text-blue-600 dark:text-blue-400">{fmt(payslip.net_pay)}</span>
             </div>
 
             <div className="flex justify-between items-center pt-2 border-t border-border">

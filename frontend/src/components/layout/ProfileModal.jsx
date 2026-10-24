@@ -5,6 +5,10 @@ import {
   FiSmartphone, FiPrinter, FiDownload, FiInfo, FiChevronDown, FiCamera, FiUploadCloud
 } from 'react-icons/fi'
 import {
+  Scan, Camera, CameraOff, ShieldCheck, Sparkles, RefreshCw, CheckCircle2,
+  AlertCircle, KeyRound, Check, ChevronDown, Upload
+} from 'lucide-react'
+import {
   Btn, Badge, Input, Modal, TabBar, showToast, LoadingState, ErrorAlert
 } from '../ui'
 import { fmtDate, fmt } from '../../lib/utils'
@@ -12,6 +16,7 @@ import { api } from '../../lib/api'
 import { useAuth } from '../../context/AuthContext'
 import { QRCodeSVG } from 'qrcode.react'
 import { TbCurrencyPeso } from 'react-icons/tb'
+import FaceRecognitionEnrollment from '../biometrics/FaceRecognitionEnrollment'
 
 export default function ProfileModal({ open, isOpen, onClose }) {
   const isVisible = open || isOpen
@@ -63,6 +68,9 @@ export default function ProfileModal({ open, isOpen, onClose }) {
   const [pinLoading, setPinLoading] = useState(false)
   const [pinError, setPinError] = useState('')
   const [pinSuccess, setPinSuccess] = useState('')
+
+  // Backup PIN accordion
+  const [showPinBackup, setShowPinBackup] = useState(false)
 
   useEffect(() => {
     if (isVisible) {
@@ -205,6 +213,10 @@ export default function ProfileModal({ open, isOpen, onClose }) {
 
   const handleSaveEdit = async (e) => {
     e?.preventDefault()
+    if (editForm.phone && editForm.phone.length !== 11) {
+      showToast('Contact phone must be exactly 11 digits (e.g. 09123456789)', 'error')
+      return
+    }
     setSaving(true)
     try {
       let res;
@@ -415,7 +427,7 @@ export default function ProfileModal({ open, isOpen, onClose }) {
                   { id: 'profile', label: 'My Profile Information', icon: <FiUser className="w-3.5 h-3.5" /> },
                   ...(isAdmin ? [] : [{ id: 'attendance_qr', label: 'Attendance QR', icon: <FiSmartphone className="w-3.5 h-3.5" /> }]),
                   ...((user?.role === 'Store Administrator' || user?.role === 'Store Admin') ? [{ id: 'attendance_log', label: 'My Attendance Log', icon: <FiCalendar className="w-3.5 h-3.5" /> }] : []),
-                  ...(isAdmin || isCustomer ? [] : [{ id: 'security', label: 'Security & PIN', icon: <FiKey className="w-3.5 h-3.5" /> }]),
+                  ...(isAdmin || isCustomer ? [] : [{ id: 'security', label: 'Face Recognition', icon: <Scan className="w-3.5 h-3.5" /> }]),
                 ]}
                 activeTab={activeTab}
                 onChange={setActiveTab}
@@ -465,7 +477,7 @@ export default function ProfileModal({ open, isOpen, onClose }) {
                       </h3>
                       {!isCustomer && !isAdmin && (
                         isVerified ? (
-                          <span className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-700 dark:text-emerald-300 bg-emerald-100 dark:bg-emerald-950/50 border border-emerald-300 dark:border-emerald-800 px-2.5 py-0.5 rounded-full shadow-2xs">
+                          <span className="inline-flex items-center gap-1 text-[11px] font-bold text-blue-700 dark:text-blue-300 bg-blue-100 dark:bg-blue-950/50 border border-blue-300 dark:border-blue-800 px-2.5 py-0.5 rounded-full shadow-2xs">
                             <FiCheckCircle className="w-3 h-3" />
                             <span>Verified</span>
                           </span>
@@ -491,13 +503,13 @@ export default function ProfileModal({ open, isOpen, onClose }) {
                 {/* Account Verification Banner - Employee Only (Exclude Admin) */}
                 {!isCustomer && !isAdmin && (
                   <div className={`p-4 rounded-2xl border ${isVerified
-                    ? 'bg-emerald-50/40 dark:bg-emerald-950/20 border-emerald-200 dark:border-emerald-900/60'
+                    ? 'bg-blue-50/40 dark:bg-blue-950/20 border-blue-200 dark:border-blue-900/60'
                     : 'bg-amber-50/40 dark:bg-amber-950/20 border-amber-200 dark:border-amber-900/60'
                     }`}>
                     <div className="flex items-start justify-between gap-3">
                       <div className="flex items-start gap-2.5">
                         {isVerified ? (
-                          <FiCheckCircle className="w-5 h-5 text-emerald-600 dark:text-emerald-400 shrink-0 mt-0.5" />
+                          <FiCheckCircle className="w-5 h-5 text-blue-600 dark:text-blue-400 shrink-0 mt-0.5" />
                         ) : (
                           <FiAlertTriangle className="w-5 h-5 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
                         )}
@@ -523,7 +535,7 @@ export default function ProfileModal({ open, isOpen, onClose }) {
                             onClick={() => setVerificationDetailsOpen(true)}
                             className="px-3 py-1.5 text-xs font-semibold rounded-xl border border-border bg-card hover:bg-muted text-foreground cursor-pointer flex items-center gap-1.5 transition-colors"
                           >
-                            <FiShield className="w-3.5 h-3.5 text-emerald-500" />
+                            <FiShield className="w-3.5 h-3.5 text-blue-500" />
                             <span>Details</span>
                           </button>
                         )}
@@ -658,21 +670,7 @@ export default function ProfileModal({ open, isOpen, onClose }) {
                           </div>
                           <div>
                             <div className="text-[10px] text-muted-foreground uppercase tracking-wider font-bold mb-0.5">Salary</div>
-                            {isEditing ? (
-                              <div className="relative">
-                                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">₱</span>
-                                <input
-                                  type="number"
-                                  min="0"
-                                  step="0.01"
-                                  value={editForm.basic_salary || ''}
-                                  onChange={e => setEditForm(p => ({ ...p, basic_salary: e.target.value }))}
-                                  className="w-full pl-7 pr-3 py-2 rounded-xl border border-border bg-black/5 text-foreground text-sm font-medium focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition-all"
-                                />
-                              </div>
-                            ) : (
-                              <div className="font-semibold text-foreground">{employee.basic_salary ? fmt(employee.basic_salary) : '—'}</div>
-                            )}
+                            <div className="font-semibold text-foreground font-mono">{employee.basic_salary ? fmt(employee.basic_salary) : '—'}</div>
                           </div>
                           <div className="col-span-2">
                             <div className="text-[10px] text-muted-foreground uppercase tracking-wider font-bold mb-0.5">Pay Type</div>
@@ -722,12 +720,14 @@ export default function ProfileModal({ open, isOpen, onClose }) {
                       {/* Row 1: Contact & Email */}
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                         <div>
-                          <label className="block text-[11px] font-bold text-muted-foreground mb-1.5">Contact Phone</label>
+                          <label className="block text-[11px] font-bold text-muted-foreground mb-1.5">Contact Phone (11 digits)</label>
                           <input
-                            type="text"
+                            type="tel"
+                            maxLength={11}
                             value={editForm.phone}
-                            onChange={e => setEditForm(p => ({ ...p, phone: e.target.value }))}
-                            className="w-full px-3 py-2.5 rounded-xl border border-border bg-black/5  text-foreground text-sm font-medium focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition-all"
+                            onChange={e => setEditForm(p => ({ ...p, phone: e.target.value.replace(/\D/g, '').slice(0, 11) }))}
+                            placeholder="09XXXXXXXXX"
+                            className="w-full px-3 py-2.5 rounded-xl border border-border bg-black/5 text-foreground text-sm font-medium font-mono focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition-all"
                           />
                         </div>
                         <div>
@@ -822,13 +822,13 @@ export default function ProfileModal({ open, isOpen, onClose }) {
                   /* STATE 5: ACTIVE */
                   <div className="space-y-4 text-center">
                     {/* Active Ready Banner */}
-                    <div className="p-4 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 text-center space-y-1.5">
+                    <div className="p-4 rounded-2xl bg-blue-500/10 border border-blue-500/20 text-center space-y-1.5">
                       <div>
-                        <span className="inline-flex items-center gap-1 text-[11px] font-mono font-bold px-3 py-0.5 rounded-full bg-emerald-500/20 text-emerald-500 border border-emerald-500/30">
+                        <span className="inline-flex items-center gap-1 text-[11px] font-mono font-bold px-3 py-0.5 rounded-full bg-blue-500/20 text-blue-500 border border-blue-500/30">
                           <FiCheckCircle className="w-3.5 h-3.5" /> QR Status: ACTIVE
                         </span>
                       </div>
-                      <h3 className="text-base font-bold text-emerald-600 dark:text-emerald-400">Attendance QR Code Ready</h3>
+                      <h3 className="text-base font-bold text-blue-600 dark:text-blue-400">Attendance QR Code Ready</h3>
                       <p className="text-xs text-muted-foreground">
                         Your account has been verified and your permanent QR code has been issued by the Administrator.
                       </p>
@@ -859,7 +859,7 @@ export default function ProfileModal({ open, isOpen, onClose }) {
                       <div>
                         <h4 className="font-bold text-sm text-foreground">{employee.first_name} {employee.last_name}</h4>
                         <p className="font-mono text-xs font-bold text-primary">{employee.employee_code}</p>
-                        <p className="text-[11px] text-muted-foreground mt-0.5">{employee.position} · {employee.branch?.name || 'Main Branch'}</p>
+                        <p className="text-[11px] text-muted-foreground mt-0.5">{employee.position}{employee.branch?.name || (typeof employee.branch === 'string' ? employee.branch : '') ? ` · ${employee.branch?.name || (typeof employee.branch === 'string' ? employee.branch : '')}` : ''}</p>
                       </div>
                     </div>
                   </div>
@@ -1000,68 +1000,109 @@ export default function ProfileModal({ open, isOpen, onClose }) {
           </div>
         )}
 
-        {/* TAB: SECURITY & PIN */}
+        {/* TAB: FACE RECOGNITION (SECURITY) */}
         {activeTab === 'security' && (
           <div className="space-y-4">
-            <div className="p-4 bg-card rounded-2xl border border-border">
-              <h4 className="font-bold text-sm text-foreground mb-4 flex items-center gap-2">
-                <FiKey className="w-4 h-4 text-primary" /> Change Attendance PIN
-              </h4>
+            {/* Standard Biometric Face Recognition Enrollment Flow */}
+            <FaceRecognitionEnrollment
+              existingImage={employee?.face_biometric_image || user?.face_biometric_image}
+              faceBiometricImage={employee?.face_biometric_image || user?.face_biometric_image}
+              employee={employee}
+              onSuccess={async (payload) => {
+                const biometricUrl = payload?.face_biometric_image || payload?.imageUrl
+                if (biometricUrl) {
+                  setEmployee(prev => prev ? ({ ...prev, face_biometric_image: biometricUrl }) : prev)
+                }
+                await verifySession()
+              }}
+            />
 
-              {pinSuccess && (
-                <div className="mb-4 p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-500 text-xs font-semibold flex items-center gap-2">
-                  <FiCheckCircle /> {pinSuccess}
-                </div>
-              )}
-
-              {pinError && (
-                <div className="mb-4 p-3 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-500 text-xs font-semibold flex items-center gap-2">
-                  <FiAlertTriangle /> {pinError}
-                </div>
-              )}
-
-              <form onSubmit={handleChangePin} className="max-w-xs space-y-4">
-                {employee?.has_pin && (
-                  <div>
-                    <label className="block text-[10px] text-muted-foreground uppercase tracking-wider font-bold mb-1">Current PIN</label>
-                    <input
-                      type="password"
-                      maxLength={6}
-                      value={pinForm.current_pin}
-                      onChange={e => setPinForm(p => ({ ...p, current_pin: e.target.value.replace(/\D/g, '') }))}
-                      className="w-full px-3 py-2 rounded-xl border border-border bg-black/5 text-foreground text-sm font-mono tracking-widest focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition-all"
-                      placeholder="••••"
-                    />
+            {/* COLLAPSIBLE ACCORDION: ATTENDANCE PIN (BACKUP OPTION) */}
+            <div className="p-4 bg-card rounded-2xl border border-border shadow-2xs">
+              <button
+                type="button"
+                onClick={() => setShowPinBackup(!showPinBackup)}
+                className="w-full flex items-center justify-between text-left cursor-pointer group"
+              >
+                <div className="flex items-center gap-2">
+                  <div className="w-8 h-8 rounded-xl bg-muted flex items-center justify-center text-muted-foreground group-hover:text-foreground transition-colors">
+                    <KeyRound className="w-4 h-4" />
                   </div>
-                )}
-                <div>
-                  <label className="block text-[10px] text-muted-foreground uppercase tracking-wider font-bold mb-1">New PIN (4-6 digits)</label>
-                  <input
-                    type="password"
-                    maxLength={6}
-                    value={pinForm.new_pin}
-                    onChange={e => setPinForm(p => ({ ...p, new_pin: e.target.value.replace(/\D/g, '') }))}
-                    className="w-full px-3 py-2 rounded-xl border border-border bg-black/5 text-foreground text-sm font-mono tracking-widest focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition-all"
-                    placeholder="••••"
-                  />
+                  <div>
+                    <h5 className="font-bold text-xs text-foreground group-hover:text-primary transition-colors">
+                      Attendance PIN (Backup Authorization)
+                    </h5>
+                    <p className="text-[11px] text-muted-foreground">
+                      Optional 4-6 digit numeric PIN to authorize attendance if camera is unavailable
+                    </p>
+                  </div>
                 </div>
-                <div>
-                  <label className="block text-[10px] text-muted-foreground uppercase tracking-wider font-bold mb-1">Confirm New PIN</label>
-                  <input
-                    type="password"
-                    maxLength={6}
-                    value={pinForm.confirm_pin}
-                    onChange={e => setPinForm(p => ({ ...p, confirm_pin: e.target.value.replace(/\D/g, '') }))}
-                    className="w-full px-3 py-2 rounded-xl border border-border bg-black/5 text-foreground text-sm font-mono tracking-widest focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition-all"
-                    placeholder="••••"
-                  />
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] font-mono font-bold uppercase px-2 py-0.5 rounded-md bg-muted text-muted-foreground">
+                    {employee?.has_pin ? 'PIN Set' : 'No PIN'}
+                  </span>
+                  <ChevronDown className={`w-4 h-4 text-muted-foreground transition-transform duration-200 ${showPinBackup ? 'rotate-180' : ''}`} />
                 </div>
-                <div className="pt-2">
-                  <Btn variant="primary" type="submit" className="w-full" disabled={pinLoading}>
-                    {pinLoading ? 'Updating PIN...' : 'Update PIN'}
-                  </Btn>
+              </button>
+
+              {showPinBackup && (
+                <div className="pt-4 mt-3 border-t border-border animate-[fadeIn_0.2s_ease-out]">
+                  {pinSuccess && (
+                    <div className="mb-4 p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-500 text-xs font-semibold flex items-center gap-2">
+                      <FiCheckCircle /> {pinSuccess}
+                    </div>
+                  )}
+
+                  {pinError && (
+                    <div className="mb-4 p-3 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-500 text-xs font-semibold flex items-center gap-2">
+                      <FiAlertTriangle /> {pinError}
+                    </div>
+                  )}
+
+                  <form onSubmit={handleChangePin} className="max-w-xs space-y-4">
+                    {employee?.has_pin && (
+                      <div>
+                        <label className="block text-[10px] text-muted-foreground uppercase tracking-wider font-bold mb-1">Current PIN</label>
+                        <input
+                          type="password"
+                          maxLength={6}
+                          value={pinForm.current_pin}
+                          onChange={e => setPinForm(p => ({ ...p, current_pin: e.target.value.replace(/\D/g, '') }))}
+                          className="w-full px-3 py-2 rounded-xl border border-border bg-black/5 dark:bg-black/40 text-foreground text-sm font-mono tracking-widest focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition-all"
+                          placeholder="••••"
+                        />
+                      </div>
+                    )}
+                    <div>
+                      <label className="block text-[10px] text-muted-foreground uppercase tracking-wider font-bold mb-1">New PIN (4-6 digits)</label>
+                      <input
+                        type="password"
+                        maxLength={6}
+                        value={pinForm.new_pin}
+                        onChange={e => setPinForm(p => ({ ...p, new_pin: e.target.value.replace(/\D/g, '') }))}
+                        className="w-full px-3 py-2 rounded-xl border border-border bg-black/5 dark:bg-black/40 text-foreground text-sm font-mono tracking-widest focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition-all"
+                        placeholder="••••"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] text-muted-foreground uppercase tracking-wider font-bold mb-1">Confirm New PIN</label>
+                      <input
+                        type="password"
+                        maxLength={6}
+                        value={pinForm.confirm_pin}
+                        onChange={e => setPinForm(p => ({ ...p, confirm_pin: e.target.value.replace(/\D/g, '') }))}
+                        className="w-full px-3 py-2 rounded-xl border border-border bg-black/5 dark:bg-black/40 text-foreground text-sm font-mono tracking-widest focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition-all"
+                        placeholder="••••"
+                      />
+                    </div>
+                    <div className="pt-1">
+                      <Btn variant="primary" type="submit" className="w-full" disabled={pinLoading}>
+                        {pinLoading ? 'Updating PIN...' : 'Update PIN'}
+                      </Btn>
+                    </div>
+                  </form>
                 </div>
-              </form>
+              )}
             </div>
           </div>
         )}
@@ -1127,7 +1168,7 @@ export default function ProfileModal({ open, isOpen, onClose }) {
                 </div>
                 <div>
                   <span className="text-[10px] text-muted-foreground uppercase font-bold block">Branch</span>
-                  <span className="font-semibold text-foreground">{employee.branch?.name || 'Main Branch'}</span>
+                  <span className="font-semibold text-foreground">{employee.branch?.name || (typeof employee.branch === 'string' ? employee.branch : '') || '—'}</span>
                 </div>
                 <div>
                   <span className="text-[10px] text-muted-foreground uppercase font-bold block">Phone</span>
@@ -1162,9 +1203,9 @@ export default function ProfileModal({ open, isOpen, onClose }) {
             <div>
               <h3 className="text-base font-black text-foreground">{employee.first_name} {employee.last_name}</h3>
               <p className="font-mono text-xs font-bold text-primary">{employee.employee_code}</p>
-              <p className="text-xs text-muted-foreground">{employee.position} · {employee.branch?.name || 'Main Branch'}</p>
+              <p className="text-xs text-muted-foreground">{employee.position}{employee.branch?.name || (typeof employee.branch === 'string' ? employee.branch : '') ? ` · ${employee.branch?.name || (typeof employee.branch === 'string' ? employee.branch : '')}` : ''}</p>
             </div>
-            <div className="p-2.5 rounded-xl bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 text-[11px] font-medium">
+            <div className="p-2.5 rounded-xl bg-blue-500/10 text-blue-500 border border-blue-500/20 text-[11px] font-medium">
               Present this permanent QR code to the Store Administrator terminal scanner for attendance verification.
             </div>
             <div className="pt-2">
@@ -1184,8 +1225,8 @@ export default function ProfileModal({ open, isOpen, onClose }) {
           size="sm"
         >
           <div className="space-y-3 text-xs">
-            <div className="p-3 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 rounded-xl text-emerald-800 dark:text-emerald-300 flex items-start gap-2">
-              <FiCheckCircle className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" />
+            <div className="p-3 bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-800 rounded-xl text-blue-800 dark:text-blue-300 flex items-start gap-2">
+              <FiCheckCircle className="w-5 h-5 text-blue-600 shrink-0 mt-0.5" />
               <div>
                 <div className="font-bold text-sm">Account Fully Verified</div>
                 <div className="text-xs mt-0.5 opacity-90">

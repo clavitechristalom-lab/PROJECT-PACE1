@@ -23,10 +23,10 @@ class AutomationService
         $lastRun = Cache::get('automation_last_run', 0);
         $now = time();
 
-        if (!$force && ($now - $lastRun) < 60) {
+        if (!$force && ($now - $lastRun) < 600) {
             return [
                 'skipped' => true,
-                'message' => 'Automations executed recently (throttled to 60s).',
+                'message' => 'Automations executed recently (throttled to 600s).',
                 'last_run' => date('Y-m-d H:i:s', $lastRun),
             ];
         }

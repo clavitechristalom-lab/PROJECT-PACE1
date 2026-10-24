@@ -86,8 +86,7 @@ class Employee extends Model
             return (string)$this->attributes['branch'];
         }
         if (!empty($this->branch_id)) {
-            $bp = BranchProfile::find($this->branch_id);
-            return $bp ? $bp->name : null;
+            return BranchProfile::getNameById($this->branch_id);
         }
         return null;
     }
@@ -100,5 +99,24 @@ class Employee extends Model
     public function scanLogs()
     {
         return $this->hasMany(AttendanceScanLog::class, 'employee_id', 'employee_id');
+    }
+
+    /**
+     * Scope query to strictly include Store Administrator and Employee staff only.
+     * Excludes Administrators (System Admin, Main Admin) and Customers from payroll.
+     */
+    public function scopePayrollEligible($query)
+    {
+        return $query->where('status', 'Active')
+            ->whereHas('user', function ($uq) {
+                $uq->whereIn('role', ['Store Administrator', 'Store Admin', 'Employee', 'Staff'])
+                   ->where('is_active', true);
+            })
+            ->where(function ($ex) {
+                $ex->where('position', 'NOT LIKE', '%System Administrator%')
+                   ->where('position', 'NOT LIKE', '%Main Administrator%')
+                   ->where('position', '!=', 'Administrator')
+                   ->orWhereNull('position');
+            });
     }
 }
