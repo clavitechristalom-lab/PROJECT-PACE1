@@ -690,4 +690,3 @@ class PayrollController extends Controller
         return response()->json(['message' => 'Payroll period closed successfully', 'period' => $period]);
     }
 }
-
