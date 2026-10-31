@@ -147,11 +147,30 @@ class InstallmentController extends Controller
         }
 
         $query = InstallmentAccount::with([
-            'customer',
-            'sale.processedBy.employee',
-            'sale.items.product',
-            'payments',
-            'paymentSchedules'
+            'customer:customer_id,first_name,last_name,phone,email,address,branch_id',
+            'sale:sale_id,invoice_no,processed_by,branch_id',
+            'sale.processedBy:user_id,username,employee_id',
+            'sale.processedBy.employee:employee_id,branch_id',
+            'sale.items:sale_item_id,sale_id,product_id',
+            'sale.items.product:product_id,product_name',
+            'payments:payment_id,installment_id,amount,status',
+            'paymentSchedules:schedule_id,installment_id,due_date,balance_due,amount,status'
+        ])->select([
+            'installment_id',
+            'account_no',
+            'customer_id',
+            'sale_id',
+            'start_date',
+            'principal_amount',
+            'down_payment',
+            'interest_rate',
+            'interest_amount',
+            'total_payable',
+            'installment_amount',
+            'number_of_installments',
+            'frequency',
+            'status',
+            'notes'
         ])->where(function ($q) {
             $q->where('number_of_installments', '>', 0)
               ->orWhere('status', '!=', 'Completed');

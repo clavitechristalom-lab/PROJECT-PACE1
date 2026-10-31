@@ -13,17 +13,52 @@ class InstallmentAccount extends Model
         'installment_amount', 'number_of_installments', 'frequency', 'status', 'notes'
     ];
 
-    protected $appends = ['total_paid', 'balance'];
+    protected $appends = ['total_paid', 'balance', 'remaining_balance'];
 
     public function getTotalPaidAttribute(): float
     {
-        $paymentsSum = (float) ($this->relationLoaded('payments') ? $this->payments->sum('amount') : $this->payments()->sum('amount'));
-        return round($paymentsSum + (float) $this->down_payment, 2);
+        $payments = $this->relationLoaded('payments')
+            ? $this->payments
+            : $this->payments()->get();
+
+        $completedPayments = $payments->filter(function ($p) {
+            return !in_array($p->status, ['Pending Verification', 'Rejected']);
+        });
+
+        $paymentsSum = (float) $completedPayments->sum('amount');
+
+        $hasDownpaymentRow = $completedPayments->contains(function ($p) {
+            $ref = strtoupper((string) ($p->reference_no ?? ''));
+            $notes = strtolower((string) ($p->notes ?? ''));
+            return str_starts_with($ref, 'DOWNPAYMENT')
+                || str_contains($notes, 'downpayment')
+                || str_contains($notes, 'down payment');
+        });
+
+        $downPaymentToAdd = $hasDownpaymentRow ? 0.0 : (float) $this->down_payment;
+        return round($paymentsSum + $downPaymentToAdd, 2);
     }
 
     public function getBalanceAttribute(): float
     {
         return max(0, round((float) $this->total_payable - $this->total_paid, 2));
+    }
+
+    public function getRemainingBalanceAttribute(): float
+    {
+        return $this->balance;
+    }
+
+    public function syncCompletionStatus(): bool
+    {
+        if ((float) $this->total_payable > 0 && $this->balance <= 0) {
+            if ($this->status !== 'Complete Payment') {
+                $this->status = 'Complete Payment';
+                $this->saveQuietly();
+                return true;
+            }
+        }
+        return false;
     }
 
     public function customer()

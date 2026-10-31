@@ -121,7 +121,7 @@ export default function PaymentsPage() {
     }
   }, [])
 
-  const loadData = async (silent = false) => {
+  const loadData = async (silent = false, signal) => {
     // 1-2s Overlap Guard: Skip if previous cycle is still in flight
     if (inFlightRef.current) return
     inFlightRef.current = true
@@ -130,6 +130,7 @@ export default function PaymentsPage() {
     if (!isBg) setLoading(true)
     if (!isBg) setError('')
     try {
+      const reqOpts = signal ? { signal } : {}
       const needStatic = branches.length === 0 || !settings
       const needInstallments = installments.length === 0 || newPayModal || !silent
 
@@ -140,18 +141,18 @@ export default function PaymentsPage() {
           branch: branchFilter !== 'All' ? branchFilter : undefined,
           date_from: dateFrom || undefined,
           date_to: dateTo || undefined,
-        }),
-        api.payments.getMonitoring({ branch: branchFilter !== 'All' ? branchFilter : undefined }).catch(() => null),
+        }, reqOpts),
+        api.payments.getMonitoring({ branch: branchFilter !== 'All' ? branchFilter : undefined }, reqOpts).catch(() => null),
       ]
 
       if (needInstallments) {
-        promises.push(api.installments.getAll({ status: 'Active', branch: branchFilter !== 'All' ? branchFilter : undefined }).catch(() => ({ installments: [] })))
+        promises.push(api.installments.getAll({ status: 'Active', branch: branchFilter !== 'All' ? branchFilter : undefined }, reqOpts).catch(() => ({ installments: [] })))
       }
 
       if (needStatic) {
         promises.push(
-          api.branches.getAll().catch(() => []),
-          api.system.getSettings().catch(() => null)
+          api.branches.getAll(reqOpts).catch(() => []),
+          api.system.getSettings(reqOpts).catch(() => null)
         )
       }
 
@@ -205,8 +206,8 @@ export default function PaymentsPage() {
     loadData()
   }, [methodFilter, branchFilter, search, dateFrom, dateTo])
 
-  useRealtimeSync(() => {
-    loadData(true)
+  useRealtimeSync((_, signal) => {
+    loadData(true, signal)
   }, [methodFilter, branchFilter, search, dateFrom, dateTo], { periodic: true })
 
   useEffect(() => {
@@ -699,7 +700,7 @@ export default function PaymentsPage() {
           isOpen={true}
           onClose={() => setViewReceipt(null)}
           title="Official Payment Receipt"
-          size="md"
+          size="lg"
         >
           <div className="space-y-4 text-xs">
             <div className="text-center pb-3 border-b border-border space-y-0.5">
@@ -776,9 +777,9 @@ export default function PaymentsPage() {
           isOpen={true}
           onClose={() => setNewPayModal(false)}
           title="Record Customer Payment"
-          size="md"
+          size="lg"
         >
-          <form onSubmit={handleRecordPayment} className="space-y-3.5 text-xs">
+          <form onSubmit={handleRecordPayment} className="space-y-4 text-xs">
             <div>
               <label className="block font-bold text-muted-foreground mb-1">Select Installment *</label>
               <select
@@ -860,7 +861,7 @@ export default function PaymentsPage() {
               />
             </div>
 
-            <div className="flex justify-end gap-2 pt-2 border-t border-border">
+            <div className="flex justify-end gap-3 pt-4 border-t border-border">
               <button
                 type="button"
                 onClick={() => setNewPayModal(false)}
@@ -888,7 +889,7 @@ export default function PaymentsPage() {
           isOpen={true}
           onClose={() => setViewPayment(null)}
           title="Payment Details"
-          size="md"
+          size="lg"
         >
           <div className="space-y-4 text-xs">
             {viewPayment.status === 'Pending' && (

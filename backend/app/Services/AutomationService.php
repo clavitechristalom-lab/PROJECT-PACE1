@@ -37,6 +37,7 @@ class AutomationService
             'overdue_installments' => self::checkOverdueInstallments(),
             'inventory_thresholds' => self::checkInventoryThresholds(),
             'attendance_automations' => self::checkAttendanceAutomations(),
+            'weekly_payday_cutoff' => \App\Http\Controllers\PayrollController::autoFinalizeWeeklyPaydayCutoff(),
             'executed_at' => date('Y-m-d H:i:s', $now),
         ];
 
@@ -182,7 +183,7 @@ class AutomationService
 
         try {
             $schedule = AttendanceSchedule::get();
-            $cutoffTime = $schedule['schedule_cutoff'] ?? '08:05';
+            $cutoffTime = $schedule['schedule_cutoff'] ?? '08:00';
             $currentTime = date('H:i');
 
             // If morning cutoff has passed, mark records for present employees as Late if scanned after cutoff

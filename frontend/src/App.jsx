@@ -39,6 +39,8 @@ const lazyRetry = (factory, retries = 2, delay = 400) => {
 
 const DashboardPage = lazyRetry(() => import('./pages/DashboardPage'))
 const EmployeeDashboard = lazyRetry(() => import('./pages/DashboardPage').then(m => ({ default: m.EmployeeDashboard })))
+const ExcuseLetterPage = lazyRetry(() => import('./pages/ExcuseLetterPage'))
+const AdminExcuseLettersPage = lazyRetry(() => import('./pages/AdminExcuseLettersPage'))
 const CustomerDashboard = lazyRetry(() => import('./pages/CustomerDashboard'))
 const ProductsPage = lazyRetry(() => import('./pages/ProductsPage'))
 const CustomersPage = lazyRetry(() => import('./pages/CustomersPage'))
@@ -79,14 +81,14 @@ if (typeof window !== 'undefined') {
     window.location.hash = newHash
     try {
       window.history.replaceState(null, '', '/' + newHash)
-    } catch (_) {}
+    } catch (_) { }
   } else if (hasSession && (!hash || hash === '#/' || hash === '#') && savedPath && savedPath !== '/' && savedPath !== '/login') {
     // Only restore saved path if there is an active session; otherwise let user land on login
     const newHash = '#' + (savedPath.startsWith('/') ? savedPath : '/' + savedPath)
     window.location.hash = newHash
     try {
       window.history.replaceState(null, '', '/' + newHash)
-    } catch (_) {}
+    } catch (_) { }
   }
 }
 
@@ -168,7 +170,7 @@ function RoutePersistenceTracker() {
       triggerDataSync('installments')
       try {
         window.history.replaceState(null, '', window.location.pathname + window.location.hash)
-      } catch (_) {}
+      } catch (_) { }
     }
   }, [location])
 
@@ -256,100 +258,105 @@ function AppRoutes() {
     <>
       <RoutePersistenceTracker />
       <Suspense fallback={<FullPageLoader />}>
-      <Routes>
-        <Route
-          path="/login"
-          element={
-            <PublicRoute>
-              <LoginPage />
-            </PublicRoute>
-          }
-        />
-        <Route
-          path="/home"
-          element={
-            <PublicRoute>
-              <LoginPage />
-            </PublicRoute>
-          }
-        />
-        <Route
-          path="/appliances"
-          element={
-            <PublicRoute>
-              <LoginPage />
-            </PublicRoute>
-          }
-        />
-        <Route
-          path="/furniture"
-          element={
-            <PublicRoute>
-              <LoginPage />
-            </PublicRoute>
-          }
-        />
-        <Route
-          path="/about"
-          element={
-            <PublicRoute>
-              <LoginPage />
-            </PublicRoute>
-          }
-        />
-        <Route
-          path="/support"
-          element={<SupportRouteDispatcher />}
-        />
+        <Routes>
+          <Route
+            path="/login"
+            element={
+              <PublicRoute>
+                <LoginPage />
+              </PublicRoute>
+            }
+          />
+          <Route
+            path="/home"
+            element={
+              <PublicRoute>
+                <LoginPage />
+              </PublicRoute>
+            }
+          />
+          <Route
+            path="/appliances"
+            element={
+              <PublicRoute>
+                <LoginPage />
+              </PublicRoute>
+            }
+          />
+          <Route
+            path="/furniture"
+            element={
+              <PublicRoute>
+                <LoginPage />
+              </PublicRoute>
+            }
+          />
+          <Route
+            path="/about"
+            element={
+              <PublicRoute>
+                <LoginPage />
+              </PublicRoute>
+            }
+          />
+          <Route
+            path="/support"
+            element={<SupportRouteDispatcher />}
+          />
 
-        <Route element={<RequireAuth><AppShell /></RequireAuth>}>
-          <Route path="/dashboard" element={<RequireAuth roles={['Administrator', 'Store Administrator', 'Store Admin']}><DashboardPage /></RequireAuth>} />
-          <Route path="/products" element={<RequireAuth roles={['Administrator', 'Store Administrator', 'Store Admin']}><ProductsPage /></RequireAuth>} />
-          <Route path="/customers" element={<RequireAuth roles={['Administrator', 'Store Administrator', 'Store Admin']}><CustomersPage /></RequireAuth>} />
-          <Route path="/sales" element={<RequireAuth roles={['Administrator', 'Store Administrator', 'Store Admin']}><SalesPage /></RequireAuth>} />
-          <Route path="/transactions" element={<RequireAuth roles={['Administrator', 'Store Administrator', 'Store Admin']}><TransactionsPage /></RequireAuth>} />
-          <Route path="/installments" element={<RequireAuth roles={['Administrator', 'Store Administrator', 'Store Admin']}><InstallmentsPage /></RequireAuth>} />
-          <Route path="/payment-schedule" element={<RequireAuth roles={['Administrator', 'Store Administrator', 'Store Admin']}><PaymentSchedulePage /></RequireAuth>} />
-          <Route path="/payments" element={<RequireAuth roles={['Administrator', 'Store Administrator', 'Store Admin']}><PaymentsPage /></RequireAuth>} />
-          <Route path="/employees" element={<RequireAuth roles={['Administrator', 'Store Administrator', 'Store Admin']}><EmployeesPage /></RequireAuth>} />
-          <Route path="/admin/qr-requests" element={<RequireAuth roles={['Administrator']}><QrRequestsPage /></RequireAuth>} />
-          <Route path="/attendance" element={<RequireAuth roles={['Administrator', 'Store Administrator', 'Store Admin']}><AttendancePage /></RequireAuth>} />
-          <Route path="/attendance/qr" element={<RequireAuth roles={['Administrator', 'Store Administrator', 'Store Admin']}><AttendancePage /></RequireAuth>} />
-          <Route path="/payroll" element={<RequireAuth roles={['Administrator']}><PayrollPage /></RequireAuth>} />
-          <Route path="/reports" element={<RequireAuth roles={['Administrator', 'Store Administrator', 'Store Admin']}><ReportsPage /></RequireAuth>} />
-          <Route path="/admin/support" element={<RequireAuth roles={['Administrator', 'Store Administrator', 'Store Admin']}><SupportPage /></RequireAuth>} />
-          <Route path="/support" element={<RequireAuth roles={['Administrator', 'Store Administrator', 'Store Admin']}><SupportPage /></RequireAuth>} />
-          <Route path="/notifications" element={<RequireAuth><NotificationsPage /></RequireAuth>} />
-          <Route path="/employee/dashboard" element={<RequireAuth roles={['Employee']}><EmployeeDashboard /></RequireAuth>} />
-          <Route path="/employee/attendance" element={<RequireAuth roles={['Employee']}><AttendancePage /></RequireAuth>} />
-          <Route path="/employee/payroll" element={<RequireAuth roles={['Employee']}><PayrollPage /></RequireAuth>} />
-          <Route path="/employee/payslips" element={<RequireAuth roles={['Employee']}><PayrollPage /></RequireAuth>} />
-          <Route path="/employee/notifications" element={<RequireAuth roles={['Employee']}><NotificationsPage /></RequireAuth>} />
+          <Route element={<RequireAuth><AppShell /></RequireAuth>}>
+            <Route path="/dashboard" element={<RequireAuth roles={['Administrator', 'Store Administrator', 'Store Admin']}><DashboardPage /></RequireAuth>} />
+            <Route path="/products" element={<RequireAuth roles={['Administrator', 'Store Administrator', 'Store Admin']}><ProductsPage /></RequireAuth>} />
+            <Route path="/customers" element={<RequireAuth roles={['Administrator', 'Store Administrator', 'Store Admin']}><CustomersPage /></RequireAuth>} />
+            <Route path="/sales" element={<RequireAuth roles={['Administrator', 'Store Administrator', 'Store Admin']}><SalesPage /></RequireAuth>} />
+            <Route path="/transactions" element={<RequireAuth roles={['Administrator', 'Store Administrator', 'Store Admin']}><TransactionsPage /></RequireAuth>} />
+            <Route path="/installments" element={<RequireAuth roles={['Administrator', 'Store Administrator', 'Store Admin']}><InstallmentsPage /></RequireAuth>} />
+            <Route path="/payment-schedule" element={<RequireAuth roles={['Administrator', 'Store Administrator', 'Store Admin']}><PaymentSchedulePage /></RequireAuth>} />
+            <Route path="/payments" element={<RequireAuth roles={['Administrator', 'Store Administrator', 'Store Admin']}><PaymentsPage /></RequireAuth>} />
+            <Route path="/employees" element={<RequireAuth roles={['Administrator', 'Store Administrator', 'Store Admin']}><EmployeesPage /></RequireAuth>} />
+            <Route path="/admin/qr-requests" element={<RequireAuth roles={['Administrator']}><QrRequestsPage /></RequireAuth>} />
+            <Route path="/attendance" element={<RequireAuth roles={['Administrator', 'Store Administrator', 'Store Admin']}><AttendancePage /></RequireAuth>} />
+            <Route path="/attendance/qr" element={<RequireAuth roles={['Administrator', 'Store Administrator', 'Store Admin']}><AttendancePage /></RequireAuth>} />
+            <Route path="/payroll" element={<RequireAuth roles={['Administrator']}><PayrollPage /></RequireAuth>} />
+            <Route path="/reports" element={<RequireAuth roles={['Administrator', 'Store Administrator', 'Store Admin']}><ReportsPage /></RequireAuth>} />
+            <Route path="/admin/excuse-letters" element={<RequireAuth roles={['Administrator', 'Store Administrator', 'Store Admin']}><AdminExcuseLettersPage /></RequireAuth>} />
+            <Route path="/excuse-letters" element={<Navigate to="/admin/excuse-letters" replace />} />
+            <Route path="/message-reports" element={<RequireAuth roles={['Administrator', 'Store Administrator', 'Store Admin']}><SupportPage /></RequireAuth>} />
+            <Route path="/admin/support" element={<RequireAuth roles={['Administrator', 'Store Administrator', 'Store Admin']}><SupportPage /></RequireAuth>} />
+            <Route path="/support" element={<RequireAuth roles={['Administrator', 'Store Administrator', 'Store Admin']}><SupportPage /></RequireAuth>} />
+            <Route path="/notifications" element={<RequireAuth><NotificationsPage /></RequireAuth>} />
+            <Route path="/employee/dashboard" element={<RequireAuth roles={['Employee']}><EmployeeDashboard /></RequireAuth>} />
+            <Route path="/employee/attendance" element={<RequireAuth roles={['Employee']}><AttendancePage /></RequireAuth>} />
+            <Route path="/employee/payroll" element={<Navigate to="/employee/payslips" replace />} />
+            <Route path="/employee/payslips" element={<RequireAuth roles={['Employee']}><PayrollPage /></RequireAuth>} />
+            <Route path="/employee/excuse-letter" element={<RequireAuth roles={['Employee']}><ExcuseLetterPage /></RequireAuth>} />
+            <Route path="/employee/leave-letter" element={<Navigate to="/employee/excuse-letter" replace />} />
+            <Route path="/employee/notifications" element={<RequireAuth roles={['Employee']}><NotificationsPage /></RequireAuth>} />
 
-          {/* Store Administrator QR Attendance Terminal */}
-          <Route path="/store-admin/attendance/scanner" element={<RequireAuth roles={['Store Administrator', 'Store Admin']}><QrScannerPage /></RequireAuth>} />
-          <Route path="/store-settings" element={<RequireAuth roles={['Store Administrator', 'Store Admin']}><StoreSettingsPage /></RequireAuth>} />
+            {/* Store Administrator QR Attendance Terminal */}
+            <Route path="/store-admin/attendance/scanner" element={<RequireAuth roles={['Store Administrator', 'Store Admin']}><QrScannerPage /></RequireAuth>} />
+            <Route path="/store-settings" element={<RequireAuth roles={['Store Administrator', 'Store Admin']}><StoreSettingsPage /></RequireAuth>} />
 
-          {/* Administrator only routes */}
-          <Route path="/branches" element={<RequireAuth roles={['Administrator']}><BranchesPage /></RequireAuth>} />
-          <Route path="/admin-dashboard" element={<RequireAuth roles={['Administrator']}><SystemAdminDashboard /></RequireAuth>} />
-          <Route path="/qr-monitoring" element={<RequireAuth roles={['Administrator']}><QrMonitoringPage /></RequireAuth>} />
-          <Route path="/admin/qr-monitoring" element={<RequireAuth roles={['Administrator']}><QrMonitoringPage /></RequireAuth>} />
-          <Route path="/users" element={<RequireAuth roles={['Administrator']}><UsersPage /></RequireAuth>} />
-          <Route path="/system-logs" element={<RequireAuth roles={['Administrator']}><SystemLogsPage /></RequireAuth>} />
-          <Route path="/backups" element={<RequireAuth roles={['Administrator']}><BackupsPage /></RequireAuth>} />
-          <Route path="/storage" element={<RequireAuth roles={['Administrator']}><StoragePage /></RequireAuth>} />
-          <Route path="/system" element={<RequireAuth roles={['Administrator']}><UsersPage /></RequireAuth>} />
-          <Route path="/settings" element={<RequireAuth roles={['Administrator']}><SettingsPage /></RequireAuth>} />
-          <Route path="/settings/carousel" element={<RequireAuth roles={['Administrator']}><CarouselPage /></RequireAuth>} />
-          
-          {/* Customer Route inside AppShell */}
-          <Route path="/customer/dashboard" element={<RequireAuth roles={['Customer']}><CustomerDashboard /></RequireAuth>} />
-        </Route>
+            {/* Administrator only routes */}
+            <Route path="/branches" element={<RequireAuth roles={['Administrator']}><BranchesPage /></RequireAuth>} />
+            <Route path="/admin-dashboard" element={<RequireAuth roles={['Administrator']}><SystemAdminDashboard /></RequireAuth>} />
+            <Route path="/qr-monitoring" element={<RequireAuth roles={['Administrator']}><QrMonitoringPage /></RequireAuth>} />
+            <Route path="/admin/qr-monitoring" element={<RequireAuth roles={['Administrator']}><QrMonitoringPage /></RequireAuth>} />
+            <Route path="/users" element={<RequireAuth roles={['Administrator']}><UsersPage /></RequireAuth>} />
+            <Route path="/system-logs" element={<RequireAuth roles={['Administrator']}><SystemLogsPage /></RequireAuth>} />
+            <Route path="/backups" element={<RequireAuth roles={['Administrator']}><BackupsPage /></RequireAuth>} />
+            <Route path="/storage" element={<RequireAuth roles={['Administrator']}><StoragePage /></RequireAuth>} />
+            <Route path="/system" element={<RequireAuth roles={['Administrator']}><UsersPage /></RequireAuth>} />
+            <Route path="/settings" element={<RequireAuth roles={['Administrator']}><SettingsPage /></RequireAuth>} />
+            <Route path="/settings/carousel" element={<RequireAuth roles={['Administrator']}><CarouselPage /></RequireAuth>} />
 
-        <Route path="/" element={<RootRedirect />} />
-        <Route path="*" element={<RootRedirect />} />
-      </Routes>
+            {/* Customer Route inside AppShell */}
+            <Route path="/customer/dashboard" element={<RequireAuth roles={['Customer']}><CustomerDashboard /></RequireAuth>} />
+          </Route>
+
+          <Route path="/" element={<RootRedirect />} />
+          <Route path="*" element={<RootRedirect />} />
+        </Routes>
       </Suspense>
     </>
   )

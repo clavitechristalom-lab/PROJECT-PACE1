@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   FiHardDrive, FiDatabase, FiServer, FiTrash2, FiRefreshCw,
   FiCheckCircle, FiAlertTriangle, FiFolder, FiFileText, FiLayers,
@@ -6,34 +6,41 @@ import {
 } from 'react-icons/fi';
 import { Card, Btn, Spinner, showToast, showSuccess, showError, confirmAction } from '../ui';
 import { api } from '../../lib/api';
-import { triggerDataSync, useRealtimeSync } from '../../lib/realtimeSync';
+import { triggerDataSync, useRealtimeSync, fastDeepEqual } from '../../lib/realtimeSync';
 
 export default function StorageManagementTab({ onNavigateToBackups }) {
   const [storage, setStorage] = useState(null);
   const [loading, setLoading] = useState(true);
   const [cleaning, setCleaning] = useState(false);
   const [activeSubTab, setActiveSubTab] = useState('overview'); // 'overview' | 'tables' | 'files'
+  const inFlightRef = useRef(false);
 
-  const loadStorage = async (silent = false) => {
-    if (!silent) setLoading(true);
+  const loadStorage = useCallback(async (silent = false, signal) => {
+    const isSilent = silent === true;
+    if (inFlightRef.current && isSilent) return;
+    inFlightRef.current = true;
+    if (!isSilent) setLoading(true);
     try {
-      const data = await api.system.getStorage();
-      setStorage(data);
+      const data = await api.system.getStorage({ signal });
+      if (signal?.aborted) return;
+      setStorage(prev => (fastDeepEqual(prev, data) ? prev : data));
     } catch (err) {
+      if (err?.name === 'AbortError') return;
       console.error('Failed to load system storage data:', err);
-      if (!silent) showToast(err.message || 'Failed to load storage status', 'error');
+      if (!isSilent) showToast(err.message || 'Failed to load storage status', 'error');
     } finally {
-      if (!silent) setLoading(false);
+      inFlightRef.current = false;
+      if (!isSilent) setLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
-    loadStorage();
-  }, []);
+    loadStorage(false);
+  }, [loadStorage]);
 
-  useRealtimeSync(() => {
-    loadStorage(true);
-  }, []);
+  useRealtimeSync((_source, signal) => {
+    loadStorage(true, signal);
+  }, [loadStorage]);
 
   const handleCleanAction = async (action, actionLabel) => {
     const confirmed = await confirmAction({

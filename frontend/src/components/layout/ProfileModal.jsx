@@ -1,27 +1,25 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import {
   FiUser, FiShield, FiCheckCircle, FiAlertTriangle, FiEdit,
   FiSave, FiX, FiPhone, FiMail, FiMapPin, FiCreditCard, FiCalendar, FiClock, FiActivity, FiKey,
-  FiSmartphone, FiPrinter, FiDownload, FiInfo, FiChevronDown, FiCamera, FiUploadCloud
+  FiSmartphone, FiPrinter, FiDownload, FiInfo, FiChevronDown, FiCamera, FiUploadCloud, FiXCircle
 } from 'react-icons/fi'
-import {
-  Scan, Camera, CameraOff, ShieldCheck, Sparkles, RefreshCw, CheckCircle2,
-  AlertCircle, KeyRound, Check, ChevronDown, Upload
-} from 'lucide-react'
 import {
   Btn, Badge, Input, Modal, TabBar, showToast, LoadingState, ErrorAlert
 } from '../ui'
 import { fmtDate, fmt } from '../../lib/utils'
 import { api } from '../../lib/api'
 import { useAuth } from '../../context/AuthContext'
+import { useRealtimeSync, triggerDataSync, fastDeepEqual } from '../../lib/realtimeSync'
 import { QRCodeSVG } from 'qrcode.react'
-import { TbCurrencyPeso } from 'react-icons/tb'
+import { TbCurrencyPeso, TbFaceId, TbFaceId as Scan } from 'react-icons/tb'
 import FaceRecognitionEnrollment from '../biometrics/FaceRecognitionEnrollment'
 
 export default function ProfileModal({ open, isOpen, onClose }) {
   const isVisible = open || isOpen
   const { user, verifySession } = useAuth()
   const fileInputRef = useRef(null)
+  const inFlightRef = useRef(false)
   const [employee, setEmployee] = useState(null)
   const isAdmin = user?.role === 'Administrator' || user?.role === 'Admin' || user?.role === 'System Administrator' || employee?.position === 'System Administrator' || employee?.position === 'Administrator'
   const isCustomer = user?.role === 'Customer'
@@ -53,9 +51,11 @@ export default function ProfileModal({ open, isOpen, onClose }) {
     email: '',
     address: '',
     pay_type: 'Cash',
-    ewallet_provider: 'Gcash',
+    ewallet_provider: 'GCash',
+    ewallet_account_name: '',
     ewallet_account_no: '',
     bank_name: 'BDO',
+    bank_account_name: '',
     bank_account_no: '',
     emergency_contact_name: '',
     emergency_contact_relation: '',
@@ -92,73 +92,100 @@ export default function ProfileModal({ open, isOpen, onClose }) {
     }
   }, [activeTab, isVisible])
 
-  const loadProfile = async () => {
+  const loadProfile = useCallback(async (silent = false, signal) => {
     if (!isVisible) return
-    setLoading(true)
-    setError('')
+    const isSilent = silent === true
+    if (inFlightRef.current && isSilent) return
+    inFlightRef.current = true
+    if (!isSilent) {
+      setLoading(true)
+      setError('')
+    }
     try {
       if (isCustomer && user?.customer_id) {
-        const res = await api.customers.getById(user.customer_id)
+        const res = await api.customers.getById(user.customer_id, { signal })
+        if (signal?.aborted) return
         if (res?.customer || res) {
           const custData = res.customer || res
-          setEmployee(custData)
-          setEditForm({
-            customer_code: custData.customer_code || '',
-            first_name: custData.first_name || '',
-            middle_name: custData.middle_name || '',
-            last_name: custData.last_name || '',
-            gender: custData.gender || 'Male',
-            date_of_birth: custData.date_of_birth || '',
-            marital_status: custData.marital_status || 'Single',
-            status: custData.status || 'Active',
-            notes: custData.notes || '',
-            branch_id: custData.branch_id || custData.branch || '',
-            phone: custData.phone || '',
-            email: custData.email || '',
-            address: custData.address || '',
-          })
-        } else {
+          setEmployee(prev => (fastDeepEqual(prev, custData) ? prev : custData))
+          if (!isSilent) {
+            setEditForm({
+              customer_code: custData.customer_code || '',
+              first_name: custData.first_name || '',
+              middle_name: custData.middle_name || '',
+              last_name: custData.last_name || '',
+              gender: custData.gender || 'Male',
+              date_of_birth: custData.date_of_birth || '',
+              marital_status: custData.marital_status || 'Single',
+              status: custData.status || 'Active',
+              notes: custData.notes || '',
+              branch_id: custData.branch_id || custData.branch || '',
+              phone: custData.phone || '',
+              email: custData.email || '',
+              address: custData.address || '',
+            })
+          }
+        } else if (!isSilent) {
           setError('Customer information was not found.')
         }
       } else {
-        const res = await api.employees.getMe()
+        const res = await api.employees.getMe({ signal })
+        if (signal?.aborted) return
         if (res?.employee) {
-          setEmployee(res.employee)
-          setEditForm({
-            phone: res.employee.phone || '',
-            email: res.employee.email || '',
-            address: res.employee.address || '',
-            gender: res.employee.gender || 'Male',
-            birth_date: res.employee.birth_date || res.employee.date_of_birth || '',
-            date_of_birth: res.employee.date_of_birth || res.employee.birth_date || '',
-            marital_status: res.employee.marital_status || 'Single',
-            pay_type: res.employee.pay_type || 'Cash',
-            ewallet_provider: res.employee.ewallet_provider || 'Gcash',
-            ewallet_account_no: res.employee.ewallet_account_no || res.employee.phone || '',
-            bank_name: res.employee.bank_name || 'BDO',
-            bank_account_no: res.employee.bank_account_no || '',
-            emergency_contact_name: res.employee.emergency_contact_name || '',
-            emergency_contact_relation: res.employee.emergency_contact_relation || '',
-            emergency_contact_phone: res.employee.emergency_contact_phone || '',
-            branch_id: res.employee.branch_id || res.employee.branch?.id || '',
-          })
-        } else {
+          setEmployee(prev => (fastDeepEqual(prev, res.employee) ? prev : res.employee))
+          if (!isSilent) {
+            const rawPt = String(res.employee.pay_type || '').toLowerCase()
+            let normalizedPayType = 'Cash'
+            if (['e-wallet', 'ewallet', 'gcash', 'maya', 'paymaya'].includes(rawPt)) {
+              normalizedPayType = 'E-Wallet'
+            } else if (['online bank', 'bank', 'bank transfer'].includes(rawPt)) {
+              normalizedPayType = 'Online Bank'
+            } else if (rawPt === 'cash') {
+              normalizedPayType = 'Cash'
+            }
+            const fullNameDefault = `${res.employee.first_name || ''} ${res.employee.last_name || ''}`.trim()
+            setEditForm({
+              phone: res.employee.phone || '',
+              email: res.employee.email || '',
+              address: res.employee.address || '',
+              gender: res.employee.gender || 'Male',
+              birth_date: res.employee.birth_date || res.employee.date_of_birth || '',
+              date_of_birth: res.employee.date_of_birth || res.employee.birth_date || '',
+              marital_status: res.employee.marital_status || 'Single',
+              pay_type: normalizedPayType,
+              ewallet_provider: res.employee.ewallet_provider || 'GCash',
+              ewallet_account_name: res.employee.ewallet_account_name || fullNameDefault,
+              ewallet_account_no: res.employee.ewallet_account_no || res.employee.phone || '',
+              bank_name: res.employee.bank_name || 'BDO',
+              bank_account_name: res.employee.bank_account_name || fullNameDefault,
+              bank_account_no: res.employee.bank_account_no || '',
+              emergency_contact_name: res.employee.emergency_contact_name || '',
+              emergency_contact_relation: res.employee.emergency_contact_relation || '',
+              emergency_contact_phone: res.employee.emergency_contact_phone || '',
+              branch_id: res.employee.branch_id || res.employee.branch?.id || '',
+            })
+          }
+        } else if (!isSilent) {
           setError('Employee information was not found.')
         }
       }
     } catch (err) {
+      if (err?.name === 'AbortError') return
       console.error('Failed to load profile:', err)
-      if (err.status === 401) {
-        setError('Your session has expired. Please log in again.')
-      } else if (err.status === 404) {
-        setError(isCustomer ? 'Customer information was not found.' : 'Employee information was not found for this account.')
-      } else {
-        setError(err.message || 'Unable to load profile information.')
+      if (!isSilent) {
+        if (err.status === 401) {
+          setError('Your session has expired. Please log in again.')
+        } else if (err.status === 404) {
+          setError(isCustomer ? 'Customer information was not found.' : 'Employee information was not found for this account.')
+        } else {
+          setError(err.message || 'Unable to load profile information.')
+        }
       }
     } finally {
-      setLoading(false)
+      inFlightRef.current = false
+      if (!isSilent) setLoading(false)
     }
-  }
+  }, [isVisible, isCustomer, user?.customer_id])
 
   useEffect(() => {
     if (isVisible) {
@@ -171,9 +198,23 @@ export default function ProfileModal({ open, isOpen, onClose }) {
       setPinForm({ current_pin: '', new_pin: '', confirm_pin: '' })
       setPinError('')
       setPinSuccess('')
-      loadProfile()
+      loadProfile(false)
     }
-  }, [isVisible])
+  }, [isVisible, loadProfile])
+
+  useRealtimeSync((_source, signal) => {
+    if (!isVisible || isEditing) return
+    loadProfile(true, signal)
+    if (activeTab === 'attendance_log' && !isCustomer) {
+      api.employees.getMeAttendance({ signal })
+        .then(res => {
+          if (signal?.aborted) return
+          const list = res.attendance || res.records || []
+          setMyAttendance(prev => (fastDeepEqual(prev, list) ? prev : list))
+        })
+        .catch(() => { })
+    }
+  }, [isVisible, isEditing, activeTab, isCustomer, loadProfile])
 
   const handleConfirmVerify = async () => {
     setVerificationLoading(true)
@@ -194,6 +235,7 @@ export default function ProfileModal({ open, isOpen, onClose }) {
           verified_at: verifiedTime,
         }))
         setVerificationModalOpen(false)
+        triggerDataSync('employees')
       } else {
         setVerificationError(res?.message || 'Verification failed. Please contact administrator.')
       }
@@ -217,17 +259,34 @@ export default function ProfileModal({ open, isOpen, onClose }) {
       showToast('Contact phone must be exactly 11 digits (e.g. 09123456789)', 'error')
       return
     }
+    if (!isCustomer && !isAdmin) {
+      if (editForm.pay_type === 'E-Wallet') {
+        if (!editForm.ewallet_provider || !editForm.ewallet_account_name || !editForm.ewallet_account_no) {
+          showToast('Please enter your E-Wallet Provider, Account Name, and Account/Mobile Number.', 'error')
+          return
+        }
+      } else if (editForm.pay_type === 'Online Bank') {
+        if (!editForm.bank_name || !editForm.bank_account_name || !editForm.bank_account_no) {
+          showToast('Please enter your Bank Name, Account Name, and Bank Account Number.', 'error')
+          return
+        }
+      }
+    }
     setSaving(true)
     try {
       let res;
       if (isCustomer && user?.customer_id) {
         res = await api.customers.update(user.customer_id, editForm)
+        triggerDataSync('customers')
       } else {
         res = await api.employees.updateMe(editForm)
+        triggerDataSync('employees')
+        triggerDataSync('payroll')
       }
       showToast(res.message || 'Profile details updated successfully.', 'success')
       setEmployee(prev => ({
         ...prev,
+        ...(res.employee || {}),
         ...editForm,
       }))
       setIsEditing(false)
@@ -265,6 +324,7 @@ export default function ProfileModal({ open, isOpen, onClose }) {
       if (res.success) {
         setPinSuccess(res.message || 'PIN updated successfully.')
         setPinForm({ current_pin: '', new_pin: '', confirm_pin: '' })
+        triggerDataSync('employees')
         showToast('Security PIN updated successfully.', 'success')
       } else {
         setPinError(res.message || 'Failed to update PIN.')
@@ -298,6 +358,7 @@ export default function ProfileModal({ open, isOpen, onClose }) {
     try {
       const res = await api.auth.uploadProfileImage(formData)
       showToast(res.message || 'Profile image updated', 'success')
+      triggerDataSync(isCustomer ? 'customers' : 'employees')
       await verifySession() // Refresh user payload with new image URL
     } catch (err) {
       showToast(err.message || 'Failed to upload image', 'error')
@@ -314,7 +375,8 @@ export default function ProfileModal({ open, isOpen, onClose }) {
       if (res.success) {
         showToast(res.message || 'Your QR code request has been submitted to the Administrator.', 'success')
         setQrRequestModalOpen(false)
-        loadProfile()
+        triggerDataSync('qr_requests')
+        loadProfile(true)
       } else {
         showToast(res.message || 'Failed to submit request', 'error')
       }
@@ -341,11 +403,11 @@ export default function ProfileModal({ open, isOpen, onClose }) {
       <Modal
         title="MY PROFILE"
         onClose={onClose}
-        size="lg"
+        size="xl"
         footer={
-          <div className="flex justify-between items-center w-full flex-wrap gap-2">
+          <div className="flex justify-between items-center w-full flex-wrap gap-3">
             <div />
-            <div className="flex gap-2">
+            <div className="flex gap-3">
               {isEditing ? (
                 <>
                   <Btn variant="outline" size="sm" onClick={() => {
@@ -427,7 +489,7 @@ export default function ProfileModal({ open, isOpen, onClose }) {
                   { id: 'profile', label: 'My Profile Information', icon: <FiUser className="w-3.5 h-3.5" /> },
                   ...(isAdmin ? [] : [{ id: 'attendance_qr', label: 'Attendance QR', icon: <FiSmartphone className="w-3.5 h-3.5" /> }]),
                   ...((user?.role === 'Store Administrator' || user?.role === 'Store Admin') ? [{ id: 'attendance_log', label: 'My Attendance Log', icon: <FiCalendar className="w-3.5 h-3.5" /> }] : []),
-                  ...(isAdmin || isCustomer ? [] : [{ id: 'security', label: 'Face Recognition', icon: <Scan className="w-3.5 h-3.5" /> }]),
+                  ...(isAdmin || isCustomer ? [] : [{ id: 'security', label: 'Face Recognition', icon: <TbFaceId className="w-3.5 h-3.5" /> }]),
                 ]}
                 activeTab={activeTab}
                 onChange={setActiveTab}
@@ -545,7 +607,7 @@ export default function ProfileModal({ open, isOpen, onClose }) {
                 )}
 
                 {/* Form & Profile Sections */}
-                <div className={`grid grid-cols-1 ${isCustomer ? 'md:grid-cols-1' : 'md:grid-cols-2'} gap-4`}>
+                <div className="grid grid-cols-1 gap-4">
                   {/* Personal Information */}
                   <div className="p-4 bg-card rounded-2xl border border-border space-y-3">
                     <h4 className="font-bold uppercase tracking-wider text-muted-foreground text-[11px] flex items-center gap-1.5 border-b border-border pb-2">
@@ -580,7 +642,7 @@ export default function ProfileModal({ open, isOpen, onClose }) {
                             type="date"
                             max={new Date().toISOString().split('T')[0]}
                             value={editForm.birth_date || editForm.date_of_birth ? new Date(editForm.birth_date || editForm.date_of_birth).toISOString().split('T')[0] : ''}
-                            onClick={(e) => { try { e.target.showPicker() } catch (_) {} }}
+                            onClick={(e) => { try { e.target.showPicker() } catch (_) { } }}
                             onChange={e => setEditForm(p => ({ ...p, birth_date: e.target.value, date_of_birth: e.target.value }))}
                             className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground text-sm font-medium focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition-all cursor-pointer [color-scheme:dark]"
                           />
@@ -673,9 +735,226 @@ export default function ProfileModal({ open, isOpen, onClose }) {
                             <div className="font-semibold text-foreground font-mono">{employee.basic_salary ? fmt(employee.basic_salary) : '—'}</div>
                           </div>
                           <div className="col-span-2">
-                            <div className="text-[10px] text-muted-foreground uppercase tracking-wider font-bold mb-0.5">Pay Type</div>
-                            <div className="font-semibold text-foreground">{employee.pay_type || '—'}</div>
+                            <div className="text-[10px] text-muted-foreground uppercase tracking-wider font-bold mb-0.5">Preferred Payout Method</div>
+                            <div className="font-semibold text-foreground">{employee.pay_type || 'Cash'}</div>
                           </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Employee Payroll Payout Preferences */}
+                  {!isCustomer && !isAdmin && (
+                    <div className="p-4 bg-card rounded-2xl border border-border space-y-3.5">
+                      <div className="flex items-center justify-between border-b border-border pb-2">
+                        <h4 className="font-bold uppercase tracking-wider text-muted-foreground text-[11px] flex items-center gap-1.5">
+                          <FiCreditCard className="w-3.5 h-3.5 text-primary" />
+                          <span>Payroll Payout Preference</span>
+                        </h4>
+                        {!isEditing && (
+                          <button
+                            type="button"
+                            onClick={() => setIsEditing(true)}
+                            className="text-[11px] font-bold text-primary hover:underline cursor-pointer flex items-center gap-1"
+                          >
+                            <FiEdit className="w-3 h-3" /> Change Payout Method
+                          </button>
+                        )}
+                      </div>
+
+                      {isEditing ? (
+                        <div className="space-y-4">
+                          <div>
+                            <label className="block text-[11px] font-bold text-muted-foreground uppercase tracking-wider mb-2">
+                              Select Preferred Payout Method *
+                            </label>
+                            <div className="grid grid-cols-3 gap-2.5">
+                              {['Cash', 'E-Wallet', 'Online Bank'].map((method) => {
+                                const isSelected = (editForm.pay_type || 'Cash') === method
+                                return (
+                                  <button
+                                    key={method}
+                                    type="button"
+                                    onClick={() => setEditForm(p => ({ ...p, pay_type: method }))}
+                                    className={`py-2.5 px-3 rounded-xl border text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                                      isSelected
+                                        ? 'bg-primary text-primary-foreground border-primary shadow-sm'
+                                        : 'bg-muted/30 text-foreground border-border hover:bg-muted'
+                                    }`}
+                                  >
+                                    {method === 'Cash' && <TbCurrencyPeso className="w-4 h-4" />}
+                                    {method === 'E-Wallet' && <FiSmartphone className="w-3.5 h-3.5" />}
+                                    {method === 'Online Bank' && <FiCreditCard className="w-3.5 h-3.5" />}
+                                    <span>{method}</span>
+                                  </button>
+                                )
+                              })}
+                            </div>
+                          </div>
+
+                          {editForm.pay_type === 'E-Wallet' && (
+                            <div className="p-3.5 rounded-xl bg-blue-500/5 border border-blue-500/20 space-y-3">
+                              <div className="flex items-center justify-between flex-wrap gap-2">
+                                <span className="text-[11px] font-bold text-blue-600 dark:text-blue-400 uppercase tracking-wider">
+                                  E-Wallet Account Details
+                                </span>
+                                <div className="flex items-center gap-1.5">
+                                  {['GCash', 'Maya', 'GrabPay', 'ShopeePay'].map(prov => (
+                                    <button
+                                      key={prov}
+                                      type="button"
+                                      onClick={() => setEditForm(p => ({ ...p, ewallet_provider: prov }))}
+                                      className={`px-2 py-0.5 rounded-md text-[10px] font-bold border cursor-pointer transition ${
+                                        (editForm.ewallet_provider || '') === prov
+                                          ? 'bg-blue-600 text-white border-blue-600'
+                                          : 'bg-card text-muted-foreground border-border hover:text-foreground'
+                                      }`}
+                                    >
+                                      {prov}
+                                    </button>
+                                  ))}
+                                </div>
+                              </div>
+                              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                                <div>
+                                  <label className="block text-[10px] font-bold text-muted-foreground uppercase mb-1">Provider Name *</label>
+                                  <input
+                                    type="text"
+                                    value={editForm.ewallet_provider || ''}
+                                    onChange={e => setEditForm(p => ({ ...p, ewallet_provider: e.target.value }))}
+                                    placeholder="e.g. GCash, Maya"
+                                    className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground text-xs font-semibold focus:ring-2 focus:ring-primary outline-none"
+                                  />
+                                </div>
+                                <div>
+                                  <label className="block text-[10px] font-bold text-muted-foreground uppercase mb-1">Account Name *</label>
+                                  <input
+                                    type="text"
+                                    value={editForm.ewallet_account_name || ''}
+                                    onChange={e => setEditForm(p => ({ ...p, ewallet_account_name: e.target.value }))}
+                                    placeholder="Full Registered Name"
+                                    className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground text-xs font-semibold focus:ring-2 focus:ring-primary outline-none"
+                                  />
+                                </div>
+                                <div>
+                                  <label className="block text-[10px] font-bold text-muted-foreground uppercase mb-1">Account / Mobile No. *</label>
+                                  <input
+                                    type="text"
+                                    value={editForm.ewallet_account_no || ''}
+                                    onChange={e => setEditForm(p => ({ ...p, ewallet_account_no: e.target.value }))}
+                                    placeholder="09XXXXXXXXX"
+                                    className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground text-xs font-mono font-semibold focus:ring-2 focus:ring-primary outline-none"
+                                  />
+                                </div>
+                              </div>
+                            </div>
+                          )}
+
+                          {editForm.pay_type === 'Online Bank' && (
+                            <div className="p-3.5 rounded-xl bg-indigo-500/5 border border-indigo-500/20 space-y-3">
+                              <div className="flex items-center justify-between flex-wrap gap-2">
+                                <span className="text-[11px] font-bold text-indigo-600 dark:text-indigo-400 uppercase tracking-wider">
+                                  Online Bank Account Details
+                                </span>
+                                <div className="flex items-center gap-1.5 flex-wrap">
+                                  {['BDO', 'BPI', 'UnionBank', 'Metrobank', 'Landbank'].map(bnk => (
+                                    <button
+                                      key={bnk}
+                                      type="button"
+                                      onClick={() => setEditForm(p => ({ ...p, bank_name: bnk }))}
+                                      className={`px-2 py-0.5 rounded-md text-[10px] font-bold border cursor-pointer transition ${
+                                        (editForm.bank_name || '') === bnk
+                                          ? 'bg-indigo-600 text-white border-indigo-600'
+                                          : 'bg-card text-muted-foreground border-border hover:text-foreground'
+                                      }`}
+                                    >
+                                      {bnk}
+                                    </button>
+                                  ))}
+                                </div>
+                              </div>
+                              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                                <div>
+                                  <label className="block text-[10px] font-bold text-muted-foreground uppercase mb-1">Bank Name *</label>
+                                  <input
+                                    type="text"
+                                    value={editForm.bank_name || ''}
+                                    onChange={e => setEditForm(p => ({ ...p, bank_name: e.target.value }))}
+                                    placeholder="e.g. BDO, BPI, UnionBank"
+                                    className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground text-xs font-semibold focus:ring-2 focus:ring-primary outline-none"
+                                  />
+                                </div>
+                                <div>
+                                  <label className="block text-[10px] font-bold text-muted-foreground uppercase mb-1">Account Name *</label>
+                                  <input
+                                    type="text"
+                                    value={editForm.bank_account_name || ''}
+                                    onChange={e => setEditForm(p => ({ ...p, bank_account_name: e.target.value }))}
+                                    placeholder="Account Holder Name"
+                                    className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground text-xs font-semibold focus:ring-2 focus:ring-primary outline-none"
+                                  />
+                                </div>
+                                <div>
+                                  <label className="block text-[10px] font-bold text-muted-foreground uppercase mb-1">Account Number *</label>
+                                  <input
+                                    type="text"
+                                    value={editForm.bank_account_no || ''}
+                                    onChange={e => setEditForm(p => ({ ...p, bank_account_no: e.target.value }))}
+                                    placeholder="Account Number"
+                                    className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground text-xs font-mono font-semibold focus:ring-2 focus:ring-primary outline-none"
+                                  />
+                                </div>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <div className="space-y-2.5">
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs text-muted-foreground">Preferred Payout Method</span>
+                            <Badge
+                              text={employee.pay_type || 'Cash'}
+                              color={
+                                ['E-Wallet', 'Ewallet', 'GCash', 'PayMaya'].includes(employee.pay_type)
+                                  ? 'blue'
+                                  : ['Online Bank', 'Bank', 'Bank Transfer'].includes(employee.pay_type)
+                                  ? 'indigo'
+                                  : 'green'
+                              }
+                            />
+                          </div>
+                          {['E-Wallet', 'Ewallet', 'GCash', 'PayMaya'].includes(employee.pay_type) && (
+                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-2 border-t border-border/60 text-xs">
+                              <div>
+                                <div className="text-[10px] text-muted-foreground uppercase font-bold">Provider</div>
+                                <div className="font-bold text-foreground">{employee.ewallet_provider || 'GCash'}</div>
+                              </div>
+                              <div>
+                                <div className="text-[10px] text-muted-foreground uppercase font-bold">Account Name</div>
+                                <div className="font-semibold text-foreground">{employee.ewallet_account_name || `${employee.first_name || ''} ${employee.last_name || ''}`}</div>
+                              </div>
+                              <div>
+                                <div className="text-[10px] text-muted-foreground uppercase font-bold">Account / Mobile No.</div>
+                                <div className="font-mono font-bold text-primary">{employee.ewallet_account_no || employee.phone || '—'}</div>
+                              </div>
+                            </div>
+                          )}
+                          {['Online Bank', 'Bank', 'Bank Transfer'].includes(employee.pay_type) && (
+                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-2 border-t border-border/60 text-xs">
+                              <div>
+                                <div className="text-[10px] text-muted-foreground uppercase font-bold">Bank Name</div>
+                                <div className="font-bold text-foreground">{employee.bank_name || '—'}</div>
+                              </div>
+                              <div>
+                                <div className="text-[10px] text-muted-foreground uppercase font-bold">Account Name</div>
+                                <div className="font-semibold text-foreground">{employee.bank_account_name || `${employee.first_name || ''} ${employee.last_name || ''}`}</div>
+                              </div>
+                              <div>
+                                <div className="text-[10px] text-muted-foreground uppercase font-bold">Account Number</div>
+                                <div className="font-mono font-bold text-primary">{employee.bank_account_no || '—'}</div>
+                              </div>
+                            </div>
+                          )}
                         </div>
                       )}
                     </div>
@@ -1026,7 +1305,7 @@ export default function ProfileModal({ open, isOpen, onClose }) {
               >
                 <div className="flex items-center gap-2">
                   <div className="w-8 h-8 rounded-xl bg-muted flex items-center justify-center text-muted-foreground group-hover:text-foreground transition-colors">
-                    <KeyRound className="w-4 h-4" />
+                    <FiKey className="w-4 h-4" />
                   </div>
                   <div>
                     <h5 className="font-bold text-xs text-foreground group-hover:text-primary transition-colors">
@@ -1041,7 +1320,7 @@ export default function ProfileModal({ open, isOpen, onClose }) {
                   <span className="text-[10px] font-mono font-bold uppercase px-2 py-0.5 rounded-md bg-muted text-muted-foreground">
                     {employee?.has_pin ? 'PIN Set' : 'No PIN'}
                   </span>
-                  <ChevronDown className={`w-4 h-4 text-muted-foreground transition-transform duration-200 ${showPinBackup ? 'rotate-180' : ''}`} />
+                  <FiChevronDown className={`w-4 h-4 text-muted-foreground transition-transform duration-200 ${showPinBackup ? 'rotate-180' : ''}`} />
                 </div>
               </button>
 
@@ -1113,9 +1392,9 @@ export default function ProfileModal({ open, isOpen, onClose }) {
         <Modal
           title="REQUEST ATTENDANCE QR CODE"
           onClose={() => setQrRequestModalOpen(false)}
-          size="md"
+          size="lg"
           footer={
-            <div className="flex justify-end gap-2 w-full">
+            <div className="flex justify-end gap-3 w-full">
               <Btn variant="outline" size="sm" onClick={() => setQrRequestModalOpen(false)} disabled={submittingRequest}>
                 Cancel
               </Btn>
@@ -1141,11 +1420,11 @@ export default function ProfileModal({ open, isOpen, onClose }) {
               </span>
             </div>
 
-            <div className="p-4 rounded-2xl bg-card border border-border space-y-2.5 text-xs">
-              <span className="text-[10px] uppercase font-bold text-muted-foreground block border-b border-border pb-1">
+            <div className="p-4 rounded-2xl bg-card border border-border space-y-3 text-xs">
+              <span className="text-[10px] uppercase font-bold text-muted-foreground block border-b border-border pb-1.5">
                 {user?.role === 'Store Administrator' || user?.role === 'Store Admin' ? 'Store Administrator Information' : 'Employee Information'}
               </span>
-              <div className="grid grid-cols-2 gap-2.5">
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3.5">
                 <div>
                   <span className="text-[10px] text-muted-foreground uppercase font-bold block">
                     {user?.role === 'Store Administrator' || user?.role === 'Store Admin' ? 'Store Admin ID' : 'Employee ID'}
@@ -1189,7 +1468,7 @@ export default function ProfileModal({ open, isOpen, onClose }) {
         <Modal
           title="PERMANENT ATTENDANCE QR"
           onClose={() => setShowDisplayQrModal(false)}
-          size="sm"
+          size="lg"
         >
           <div className="p-4 text-center space-y-4">
             <div className="p-4 bg-white rounded-2xl shadow-xl border-2 border-slate-200 inline-block">
@@ -1205,11 +1484,11 @@ export default function ProfileModal({ open, isOpen, onClose }) {
               <p className="font-mono text-xs font-bold text-primary">{employee.employee_code}</p>
               <p className="text-xs text-muted-foreground">{employee.position}{employee.branch?.name || (typeof employee.branch === 'string' ? employee.branch : '') ? ` · ${employee.branch?.name || (typeof employee.branch === 'string' ? employee.branch : '')}` : ''}</p>
             </div>
-            <div className="p-2.5 rounded-xl bg-blue-500/10 text-blue-500 border border-blue-500/20 text-[11px] font-medium">
+            <div className="p-3 rounded-xl bg-blue-500/10 text-blue-500 border border-blue-500/20 text-xs font-medium max-w-md mx-auto">
               Present this permanent QR code to the Store Administrator terminal scanner for attendance verification.
             </div>
-            <div className="pt-2">
-              <Btn variant="primary" className="w-full" onClick={() => setShowDisplayQrModal(false)}>
+            <div className="pt-3 flex justify-end border-t border-border">
+              <Btn variant="primary" onClick={() => setShowDisplayQrModal(false)}>
                 Done / Close
               </Btn>
             </div>
@@ -1222,7 +1501,7 @@ export default function ProfileModal({ open, isOpen, onClose }) {
         <Modal
           title="Account Verification Details"
           onClose={() => setVerificationDetailsOpen(false)}
-          size="sm"
+          size="lg"
         >
           <div className="space-y-3 text-xs">
             <div className="p-3 bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-800 rounded-xl text-blue-800 dark:text-blue-300 flex items-start gap-2">

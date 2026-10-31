@@ -85,7 +85,13 @@ class TransactionController extends Controller
 
         // 1. Fetch Sales Transactions
         if ($type === 'All' || $type === 'Sale') {
-            $salesQuery = SaleTransaction::with(['customer', 'processedBy.employee', 'items.product']);
+            $salesQuery = SaleTransaction::with([
+                'customer:customer_id,first_name,last_name,customer_code',
+                'processedBy:user_id,username,employee_id',
+                'processedBy.employee:employee_id,first_name,last_name',
+                'items:sale_item_id,sale_id,product_id,quantity,unit_price,discount,total_price',
+                'items.product:product_id,product_name,product_code'
+            ]);
 
             if ($user && $user->role === 'Customer') {
                 $salesQuery->where('customer_id', $customerId ?? -1);
@@ -165,7 +171,12 @@ class TransactionController extends Controller
 
         // 2. Fetch Installment Payments
         if ($type === 'All' || $type === 'Payment') {
-            $paymentsQuery = Payment::with(['installmentAccount.customer', 'receivedBy.employee']);
+            $paymentsQuery = Payment::with([
+                'installmentAccount:installment_id,account_no,customer_id',
+                'installmentAccount.customer:customer_id,first_name,last_name,customer_code',
+                'receivedBy:user_id,username,employee_id',
+                'receivedBy.employee:employee_id,first_name,last_name'
+            ]);
 
             if ($user && $user->role === 'Customer') {
                 $paymentsQuery->whereHas('installmentAccount', function ($query) use ($customerId) {

@@ -10,15 +10,13 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': path.resolve(import.meta.dirname, './src'),
-      'react-icons/tb': path.resolve(import.meta.dirname, './src/lib/customIcons.js'),
-      'react-icons/bi': path.resolve(import.meta.dirname, './src/lib/customIcons.js'),
     },
   },
   optimizeDeps: {
     include: ['react', 'react-dom', 'react-router-dom', 'react-icons', 'react-icons/fi', 'sweetalert2', 'qrcode.react'],
   },
-  server: { 
-    host: '0.0.0.0', 
+  server: {
+    host: '0.0.0.0',
     port: 5173,
     proxy: {
       '/api': {

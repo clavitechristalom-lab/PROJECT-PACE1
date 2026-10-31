@@ -128,7 +128,7 @@ export default function EditBranchModal({ isOpen, onClose, onUpdate, initialData
   if (!isOpen) return null;
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title="Edit Branch Details">
+    <Modal isOpen={isOpen} onClose={onClose} title="Edit Branch Details" size="lg">
       <form onSubmit={handleSubmit} className="space-y-4">
         {/* Hidden single file input with click reset */}
         <input
@@ -222,7 +222,7 @@ export default function EditBranchModal({ isOpen, onClose, onUpdate, initialData
         </div>
 
         {/* Location & Contact */}
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div className="space-y-1">
             <label className="text-xs font-bold text-muted-foreground uppercase flex items-center gap-1">
               <FiMapPin className="w-3 h-3" /> Location
@@ -273,7 +273,7 @@ export default function EditBranchModal({ isOpen, onClose, onUpdate, initialData
         </div>
 
         {/* Action Buttons */}
-        <div className="pt-4 flex justify-between gap-2 border-t border-border">
+        <div className="pt-4 flex items-center justify-between gap-3 border-t border-border">
           {onDelete && (
             <button 
               type="button" 
@@ -284,7 +284,7 @@ export default function EditBranchModal({ isOpen, onClose, onUpdate, initialData
               <FiTrash2 className="w-4 h-4" /> Delete Branch
             </button>
           )}
-          <div className="flex gap-2 ml-auto">
+          <div className="flex items-center gap-3 ml-auto">
             <button 
               type="button" 
               onClick={onClose}

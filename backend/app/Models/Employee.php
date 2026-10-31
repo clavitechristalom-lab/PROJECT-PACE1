@@ -4,6 +4,21 @@ use Illuminate\Database\Eloquent\Model;
 
 class Employee extends Model
 {
+    const POSITION_MANAGER = 'Manager (Store Admin)';
+    const POSITION_CASHIER = 'Cashier (Employee)';
+    const POSITION_COLLECTOR = 'Collector (Employee)';
+    const POSITION_UTILITY = 'Utility (Employee)';
+
+    public static function getValidPositions(): array
+    {
+        return [
+            self::POSITION_MANAGER,
+            self::POSITION_CASHIER,
+            self::POSITION_COLLECTOR,
+            self::POSITION_UTILITY,
+        ];
+    }
+
     protected $primaryKey = 'employee_id';
     protected $table = 'employees';
 
@@ -11,7 +26,7 @@ class Employee extends Model
         'employee_code', 'first_name', 'middle_name', 'last_name', 'gender',
         'birth_date', 'date_of_birth', 'marital_status', 'tin_number', 'sss_number', 
         'philhealth_number', 'pagibig_number', 'position', 'department', 'branch_id', 'branch',
-        'pay_type', 'ewallet_provider', 'ewallet_account_no', 'bank_name', 'bank_account_no',
+        'pay_type', 'ewallet_provider', 'ewallet_account_name', 'ewallet_account_no', 'bank_name', 'bank_account_name', 'bank_account_no',
         'basic_salary', 'daily_rate', 'hourly_rate', 'phone', 'email', 
         'address', 'hire_date', 'working_hours', 'emergency_contact_name', 
         'emergency_contact_relation', 'emergency_contact_phone', 'documents',
@@ -38,6 +53,17 @@ class Employee extends Model
     public function getIsVerifiedAttribute()
     {
         return (bool)($this->account_verified || $this->information_verified);
+    }
+
+    public function getPositionAttribute($value)
+    {
+        if ($value === 'Staff' || empty($value)) {
+            return ($this->department === 'Store Admin') ? self::POSITION_MANAGER : self::POSITION_CASHIER;
+        }
+        if ($value === 'Store Administrator') {
+            return self::POSITION_MANAGER;
+        }
+        return $value;
     }
 
     protected static function booted()
@@ -99,6 +125,26 @@ class Employee extends Model
     public function scanLogs()
     {
         return $this->hasMany(AttendanceScanLog::class, 'employee_id', 'employee_id');
+    }
+
+    public function allowances()
+    {
+        return $this->hasMany(EmployeeAllowance::class, 'employee_id', 'employee_id');
+    }
+
+    public function bonuses()
+    {
+        return $this->hasMany(EmployeeBonus::class, 'employee_id', 'employee_id');
+    }
+
+    public function deductions()
+    {
+        return $this->hasMany(EmployeeDeduction::class, 'employee_id', 'employee_id');
+    }
+
+    public function loans()
+    {
+        return $this->hasMany(EmployeeLoan::class, 'employee_id', 'employee_id');
     }
 
     /**

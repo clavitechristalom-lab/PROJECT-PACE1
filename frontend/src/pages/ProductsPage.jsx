@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import {
   FiPackage, FiPlus, FiEdit, FiTrash2, FiEye,
@@ -40,7 +40,15 @@ export default function ProductsPage({ branchFilter, embedded }) {
     return ['All', ...Array.from(cats).sort()];
   }, [products]);
 
-  const [branches, setBranches] = useState([])
+  const [branches, setBranches] = useState(() => {
+    try {
+      const saved = sessionStorage.getItem('pace_cached_branches') || sessionStorage.getItem('pace_cached_dash_branches')
+      return saved ? JSON.parse(saved) : []
+    } catch { return [] }
+  })
+  const [selectedBranch, setSelectedBranch] = useState(branchFilter || 'All')
+  const activeBranch = branchFilter || selectedBranch
+
   const [loading, setLoading] = useState(() => {
     return !sessionStorage.getItem('pace_cached_products')
   })
@@ -68,7 +76,7 @@ export default function ProductsPage({ branchFilter, embedded }) {
         search: search || undefined,
         category: category !== 'All' ? category : undefined,
         stock_status: stockStatus !== 'All' ? stockStatus : undefined,
-        branch: branchFilter || undefined,
+        branch: activeBranch !== 'All' ? activeBranch : undefined,
       })
       showToast('Products exported successfully', 'success')
     } catch (err) {
@@ -92,30 +100,59 @@ export default function ProductsPage({ branchFilter, embedded }) {
   const [existingImages, setExistingImages] = useState([null, null, null, null])
   const [removeImages, setRemoveImages] = useState([false, false, false, false])
 
-  const loadProducts = async (source) => {
-    const isBackground = source === 'timer' || source === 'database' || source === 'event' || source === 'focus' || source === 'mutation' || products.length > 0
+  const loadBranches = async () => {
+    try {
+      const res = await api.branches.getAll()
+      const branchList = res?.branches || []
+      if (branchList.length > 0) {
+        setBranches(prev => fastDeepEqual(prev, branchList) ? prev : branchList)
+        try {
+          sessionStorage.setItem('pace_cached_branches', JSON.stringify(branchList))
+        } catch (e) { }
+      }
+    } catch (err) {
+      console.warn('Failed to load branches:', err)
+    }
+  }
+
+  const inFlightRef = useRef(false)
+
+  const loadProducts = async (source, signal) => {
+    const isBackground = source === true || source === 'timer' || source === 'database' || source === 'event' || source === 'focus' || source === 'mutation' || products.length > 0
+    if (inFlightRef.current && isBackground) return
+    inFlightRef.current = true
     if (!isBackground) {
       setLoading(true)
     }
     setError('')
     try {
+      const needBranches = branches.length === 0 || !isBackground
       const [data, branchesData] = await Promise.all([
         api.products.getAll({
           search: search || undefined,
           category: category !== 'All' ? category : undefined,
           stock_status: stockStatus !== 'All' ? stockStatus : undefined,
-          branch: branchFilter || undefined,
-        }),
-        isAdmin ? api.branches.getAll() : Promise.resolve({ branches: [] })
+          branch: activeBranch !== 'All' ? activeBranch : undefined,
+        }, signal ? { signal } : {}),
+        needBranches ? api.branches.getAll(signal ? { signal } : {}).catch(() => ({ branches: [] })) : Promise.resolve(null)
       ])
+      if (signal?.aborted) return
       const newProducts = data?.products || []
       setProducts(prev => fastDeepEqual(prev, newProducts) ? prev : newProducts)
-      if (isAdmin) {
-        const newBranches = branchesData?.branches || []
+      setViewItem(prev => {
+        if (!prev) return null
+        const updated = newProducts.find(p => p.product_id === prev.product_id)
+        return updated ? (fastDeepEqual(prev, updated) ? prev : updated) : prev
+      })
+      const newBranches = branchesData?.branches || []
+      if (newBranches.length > 0) {
         setBranches(prev => fastDeepEqual(prev, newBranches) ? prev : newBranches)
+        try {
+          sessionStorage.setItem('pace_cached_branches', JSON.stringify(newBranches))
+        } catch (e) { }
       }
       try {
-        if (!search && category === 'All' && stockStatus === 'All') {
+        if (!search && category === 'All' && stockStatus === 'All' && activeBranch === 'All') {
           sessionStorage.setItem('pace_cached_products', JSON.stringify(newProducts))
         }
       } catch (e) { }
@@ -126,6 +163,7 @@ export default function ProductsPage({ branchFilter, embedded }) {
         setError(err.message || 'Failed to fetch products')
       }
     } finally {
+      inFlightRef.current = false
       if (!isBackground) {
         setLoading(false)
       }
@@ -133,11 +171,36 @@ export default function ProductsPage({ branchFilter, embedded }) {
   }
 
   useEffect(() => {
+    loadBranches()
+  }, [])
+
+  useEffect(() => {
+    if (isAdmin && branches.length === 0) {
+      loadBranches()
+    }
+  }, [isAdmin])
+
+  useEffect(() => {
     loadProducts('filter_change')
-  }, [category, stockStatus])
+  }, [category, stockStatus, activeBranch])
 
   // Real-time synchronization
-  useRealtimeSync(loadProducts, [category, stockStatus, search], { periodic: true })
+  useRealtimeSync(loadProducts, [category, stockStatus, search, activeBranch], { periodic: true })
+
+  const openAdd = () => {
+    if (branches.length === 0) {
+      loadBranches()
+    }
+    setEditItem(null)
+    setForm({
+      ...emptyForm,
+      branch_id: activeBranch !== 'All' ? String(activeBranch) : (branches[0]?.id ? String(branches[0].id) : 'all')
+    })
+    setImageFiles([null, null, null, null])
+    setExistingImages([null, null, null, null])
+    setRemoveImages([false, false, false, false])
+    setAddModal(true)
+  }
 
   useEffect(() => {
     const id = searchParams.get('id')
@@ -166,6 +229,11 @@ export default function ProductsPage({ branchFilter, embedded }) {
           payload.append(key, value);
         }
       });
+      if (form.branch_id === 'all' || !form.branch_id) {
+        payload.set('branch_id', 'all');
+      } else {
+        payload.set('branch_id', form.branch_id);
+      }
       payload.set('unit_price', parseFloat(form.unit_price) || 0);
       if (form.discount_price) {
         payload.set('discount_price', parseFloat(form.discount_price) || 0);
@@ -243,6 +311,9 @@ export default function ProductsPage({ branchFilter, embedded }) {
   }
 
   const openEdit = (p) => {
+    if (branches.length === 0) {
+      loadBranches()
+    }
     setEditItem(p)
     setForm({
       product_code: p.product_code || '',
@@ -257,7 +328,7 @@ export default function ProductsPage({ branchFilter, embedded }) {
       unit: p.unit || 'unit',
       status: p.status || 'Active',
       description: p.description || '',
-      branch_id: p.branch_id?.toString() || '',
+      branch_id: p.branch_id ? String(p.branch_id) : 'all',
     })
 
     // Set images for preview
@@ -343,8 +414,12 @@ export default function ProductsPage({ branchFilter, embedded }) {
 
   // Filter & paginate
   const filtered = useMemo(() => {
-    return filterBySearch(products, search, ['product_code', 'product_name', 'brand', 'category'])
-  }, [products, search])
+    let result = filterBySearch(products, search, ['product_code', 'product_name', 'brand', 'category'])
+    if (activeBranch && activeBranch !== 'All') {
+      result = result.filter(p => String(p.branch_id) === String(activeBranch))
+    }
+    return result
+  }, [products, search, activeBranch])
 
   const total = filtered.length
   const paginated = filtered.slice((page - 1) * pageSize, page * pageSize)
@@ -375,7 +450,7 @@ export default function ProductsPage({ branchFilter, embedded }) {
               </button>
               {canManage && (
                 <button
-                  onClick={() => { setEditItem(null); setForm(emptyForm); setAddModal(true) }}
+                  onClick={openAdd}
                   className="flex items-center gap-2 px-4 py-2 bg-primary hover:bg-primary/90 text-primary-foreground font-semibold text-xs rounded-xl shadow-xs transition-all cursor-pointer"
                 >
                   <FiPlus className="w-4 h-4" />
@@ -422,6 +497,20 @@ export default function ProductsPage({ branchFilter, embedded }) {
           </div>
 
           <div className="flex gap-2 flex-wrap sm:flex-nowrap">
+            {isAdmin && !branchFilter && (
+              <select
+                value={selectedBranch}
+                onChange={e => { setSelectedBranch(e.target.value); setPage(1); }}
+                className="border border-border rounded-xl px-3 py-2 text-xs font-semibold text-foreground bg-card cursor-pointer"
+              >
+                <option value="All">All Branches</option>
+                {branches.map(b => (
+                  <option key={b.id} value={String(b.id)}>
+                    {b.name || b.branch} {b.location ? `(${b.location})` : ''}
+                  </option>
+                ))}
+              </select>
+            )}
             <select
               value={category}
               onChange={e => { setCategory(e.target.value); setPage(1) }}
@@ -452,7 +541,7 @@ export default function ProductsPage({ branchFilter, embedded }) {
             action={
               !isAdmin ? (
                 <button
-                  onClick={() => { setEditItem(null); setForm(emptyForm); setAddModal(true) }}
+                  onClick={openAdd}
                   className="flex items-center gap-1.5 px-3.5 py-1.5 bg-primary text-primary-foreground font-bold text-xs rounded-xl cursor-pointer"
                 >
                   <FiPlus className="w-4 h-4" />
@@ -506,7 +595,7 @@ export default function ProductsPage({ branchFilter, embedded }) {
                         {isAdmin && (
                           <td className="py-3 px-4">
                             <span className="text-[11px] font-semibold text-foreground bg-muted/50 px-2 py-1 rounded-md">
-                              {p.branch?.name || 'Unassigned'}
+                              {p.branch?.name || (p.branch_id ? `Branch #${p.branch_id}` : 'All Branches')}
                             </span>
                           </td>
                         )}
@@ -589,10 +678,10 @@ export default function ProductsPage({ branchFilter, embedded }) {
           isOpen={true}
           title={editItem ? `Edit Product — ${editItem.product_code}` : 'Add New Product'}
           onClose={() => { setAddModal(false); setEditItem(null) }}
-          size="md"
+          size="lg"
         >
-          <form onSubmit={handleSave} className="space-y-3.5 text-xs">
-            <div className="grid grid-cols-2 gap-2.5">
+          <form onSubmit={handleSave} className="space-y-4 text-xs">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
               <div>
                 <label className="block font-bold text-muted-foreground mb-1">SKU / Product Code</label>
                 <input
@@ -641,8 +730,11 @@ export default function ProductsPage({ branchFilter, embedded }) {
                     required
                   >
                     <option value="">Select Branch</option>
+                    <option value="all">All Branches (Global Inventory)</option>
                     {branches.map(b => (
-                      <option key={b.id} value={b.id}>{b.name}</option>
+                      <option key={b.id} value={String(b.id)}>
+                        {b.name || b.branch} {b.location ? `(${b.location})` : ''}
+                      </option>
                     ))}
                   </select>
                 </div>
@@ -789,7 +881,7 @@ export default function ProductsPage({ branchFilter, embedded }) {
               </div>
             </div>
 
-            <div className="flex justify-end gap-2 pt-2 border-t border-border">
+            <div className="flex justify-end gap-3 pt-4 border-t border-border">
               <button
                 type="button"
                 onClick={() => {
@@ -824,7 +916,7 @@ export default function ProductsPage({ branchFilter, embedded }) {
           isOpen={true}
           title={`Set Discount for ${discountModal.product_name}`}
           onClose={() => setDiscountModal(null)}
-          size="sm"
+          size="lg"
         >
           <form onSubmit={handleSaveDiscount} className="space-y-4">
             <div className="p-4 bg-emerald-50 dark:bg-emerald-950/20 rounded-xl border border-emerald-200 dark:border-emerald-900/30">
@@ -856,7 +948,7 @@ export default function ProductsPage({ branchFilter, embedded }) {
               </p>
             </div>
 
-            <div className="flex justify-end gap-2 pt-2 border-t border-border mt-4">
+            <div className="flex justify-end gap-3 pt-4 border-t border-border mt-4">
               <button
                 type="button"
                 onClick={() => setDiscountModal(null)}
@@ -884,7 +976,7 @@ export default function ProductsPage({ branchFilter, embedded }) {
           isOpen={true}
           title={`Product: ${viewItem.product_name}`}
           onClose={() => setViewItem(null)}
-          size="md"
+          size="lg"
         >
           <div className="space-y-4 text-xs">
             <div className="flex flex-col sm:flex-row gap-3">
@@ -903,7 +995,14 @@ export default function ProductsPage({ branchFilter, embedded }) {
                 <div><span className="text-[10px] text-muted-foreground uppercase font-bold block mb-0.5">Category:</span> <p className="font-semibold text-foreground">{viewItem.category}</p></div>
                 <div><span className="text-[10px] text-muted-foreground uppercase font-bold block mb-0.5">Brand:</span> <p className="font-medium text-foreground">{viewItem.brand || '—'}</p></div>
                 <div><span className="text-[10px] text-muted-foreground uppercase font-bold block mb-0.5">Status:</span> <div><StatusBadge status={viewItem.status} /></div></div>
-                {isAdmin && <div className="col-span-2"><span className="text-[10px] text-muted-foreground uppercase font-bold block mb-0.5">Branch:</span> <p className="font-medium text-primary">{viewItem.branch?.name || 'Unassigned'}</p></div>}
+                {isAdmin && (
+                  <div className="col-span-2">
+                    <span className="text-[10px] text-muted-foreground uppercase font-bold block mb-0.5">Branch:</span>
+                    <p className="font-medium text-primary">
+                      {viewItem.branch?.name || (viewItem.branch_id ? `Branch #${viewItem.branch_id}` : 'All Branches (Global)')}
+                    </p>
+                  </div>
+                )}
               </div>
             </div>
 

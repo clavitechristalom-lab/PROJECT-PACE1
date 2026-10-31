@@ -50,7 +50,9 @@ try {
     $department  = trim($data['department'] ?? '');
     $position    = trim($data['position'] ?? '');
     $workHours   = trim($data['working_hours'] ?? '8 AM to 5 PM');
-    $salary      = !empty($data['basic_salary']) ? (float)$data['basic_salary'] : 0.00;
+    $salary      = (isset($data['basic_salary']) && $data['basic_salary'] !== '' && $data['basic_salary'] !== null && is_numeric($data['basic_salary'])) ? (float)$data['basic_salary'] : 0.00;
+    $dailyRate   = $salary > 0 ? round($salary / 26, 2) : 0.00;
+    $hourlyRate  = $dailyRate > 0 ? round($dailyRate / 8, 2) : 0.00;
     $payType     = trim($data['pay_type'] ?? 'Monthly');
     $attendancePin = trim($data['attendance_pin'] ?? '');
 
@@ -74,9 +76,7 @@ try {
         sendJsonResponse(['success' => false, 'message' => 'Passwords do not match.'], 422);
     }
 
-    if (in_array($role, ['Store Administrator', 'Employee']) && empty($branchId)) {
-        sendJsonResponse(['success' => false, 'message' => 'Please select a branch for this staff account.'], 422);
-    }
+    // Branch assignment is optional by default (can be assigned later)
 
     $email = strtolower($rawEmail);
     $pdo = getDbConnection();
@@ -108,12 +108,35 @@ try {
     $nextEmpId = $maxEmpId + 1;
     $employeeCode = 'EMP-' . str_pad($nextEmpId, 3, '0', STR_PAD_LEFT);
 
+    $isRoleAdmin = in_array($role, ['Administrator', 'Admin'], true);
+
     // Hash password using bcrypt
     $passwordHash = password_hash($password, PASSWORD_BCRYPT, ['cost' => 12]);
-    $pinHash = !empty($attendancePin) ? password_hash($attendancePin, PASSWORD_BCRYPT) : null;
 
-    $defaultPosition = $position ?: ($role === 'Store Administrator' ? 'Store Administrator' : ($role === 'Administrator' ? 'System Administrator' : 'Staff'));
-    $defaultDept = $department ?: ($role === 'Administrator' ? 'Administration' : ($role === 'Store Administrator' ? 'Store Management' : 'Sales & Operations'));
+    if ($isRoleAdmin) {
+        $salary = 0.00;
+        $dailyRate = 0.00;
+        $hourlyRate = 0.00;
+        $pinHash = null;
+        $qrToken = null;
+        $qrActive = 0;
+        $qrGeneratedAt = null;
+        $branchId = null;
+        $branchName = null;
+        $payType = 'Executive';
+        $defaultPosition = $position ?: 'System Administrator';
+        $defaultDept = $department ?: 'Administration';
+    } else {
+        $pinHash = (!empty($attendancePin) && preg_match('/^\d{4,6}$/', $attendancePin)) ? password_hash($attendancePin, PASSWORD_BCRYPT) : null;
+        // Permanent QR starts completely empty (null) by default
+        $rawQr = trim($data['permanent_qr'] ?? ($data['qr_token'] ?? ''));
+        $qrToken = !empty($rawQr) ? $rawQr : null;
+        $qrActive = $qrToken !== null ? 1 : 0;
+        $qrGeneratedAt = $qrToken !== null ? date('Y-m-d H:i:s') : null;
+
+        $defaultPosition = $position ?: ($role === 'Store Administrator' ? 'Store Administrator' : 'Staff');
+        $defaultDept = $department ?: ($role === 'Store Administrator' ? 'Store Management' : 'Sales & Operations');
+    }
 
     $pdo->beginTransaction();
 
@@ -122,13 +145,17 @@ try {
         INSERT INTO employees (
             employee_code, first_name, middle_name, last_name, email, phone, 
             address, gender, birth_date, date_of_birth, marital_status, position, 
-            status, pay_type, basic_salary, branch_id, branch, department, 
-            working_hours, attendance_pin, pin_failed_attempts, created_at, updated_at
+            status, pay_type, basic_salary, daily_rate, hourly_rate, branch_id, branch, department, 
+            working_hours, attendance_pin, qr_token, qr_code, qr_active, qr_generated_at,
+            information_verified, account_verified, account_verified_at,
+            pin_failed_attempts, created_at, updated_at
         ) VALUES (
             :code, :fn, :mn, :ln, :email, :phone, 
             :address, :gender, :dob, :dob, :marital, :position, 
-            'Active', :paytype, :salary, :bid, :bname, :dept, 
-            :whours, :pin, 0, NOW(), NOW()
+            'Active', :paytype, :salary, :daily, :hourly, :bid, :bname, :dept, 
+            :whours, :pin, :qr, NULL, :qractive, :qrgen,
+            :info_ver, :acc_ver, :acc_ver_at,
+            0, NOW(), NOW()
         )
     ");
     $stmtEmp->execute([
@@ -145,32 +172,45 @@ try {
         ':position' => $defaultPosition,
         ':paytype'  => $payType,
         ':salary'   => $salary,
+        ':daily'    => $dailyRate,
+        ':hourly'   => $hourlyRate,
         ':bid'      => $branchId,
         ':bname'    => $branchName,
         ':dept'     => $defaultDept,
         ':whours'   => $workHours,
         ':pin'      => $pinHash,
+        ':qr'       => $qrToken,
+        ':qractive' => $qrActive,
+        ':qrgen'    => $qrGeneratedAt,
+        ':info_ver' => $isRoleAdmin ? 1 : 0,
+        ':acc_ver'  => $isRoleAdmin ? 1 : 0,
+        ':acc_ver_at' => $isRoleAdmin ? date('Y-m-d H:i:s') : null,
     ]);
 
     $employeeId = (int)$pdo->lastInsertId();
 
-    // Insert into users table
+    // Insert into users table: Admins are pre-verified; Staff/Customers must verify OTP
+    $accountVerified = $isRoleAdmin ? 1 : 0;
+    $accountVerifiedAt = $isRoleAdmin ? date('Y-m-d H:i:s') : null;
+
     $stmtUser = $pdo->prepare("
         INSERT INTO users (
             username, email, phone_number, password_hash, role, is_active, 
             employee_id, account_verified, account_verified_at, created_at, updated_at
         ) VALUES (
             :uname, :email, :phone, :phash, :role, 1, 
-            :eid, 1, NOW(), NOW(), NOW()
+            :eid, :ver, :ver_at, NOW(), NOW()
         )
     ");
     $stmtUser->execute([
-        ':uname' => $username,
-        ':email' => $email,
-        ':phone' => $rawPhone,
-        ':phash' => $passwordHash,
-        ':role'  => $role,
-        ':eid'   => $employeeId,
+        ':uname'  => $username,
+        ':email'  => $email,
+        ':phone'  => $rawPhone,
+        ':phash'  => $passwordHash,
+        ':role'   => $role,
+        ':eid'    => $employeeId,
+        ':ver'    => $accountVerified,
+        ':ver_at' => $accountVerifiedAt,
     ]);
 
     $userId = (int)$pdo->lastInsertId();
@@ -195,6 +235,14 @@ try {
         ':ip'    => $ip,
         ':ua'    => $ua,
     ]);
+
+    // Also sync to password_reset_otp table with 15-minute expiration
+    try {
+        $stmtDelReset = $pdo->prepare("DELETE FROM password_reset_otp WHERE email = ?");
+        $stmtDelReset->execute([$email]);
+        $stmtInsertReset = $pdo->prepare("INSERT INTO password_reset_otp (email, otp_code, expiry_time, used, created_at, updated_at) VALUES (?, ?, ?, 0, NOW(), NOW())");
+        $stmtInsertReset->execute([$email, $otpCode, $expiryTimestamp]);
+    } catch (\Throwable $e) {}
 
     $stmtUpdateUser = $pdo->prepare("
         UPDATE users 

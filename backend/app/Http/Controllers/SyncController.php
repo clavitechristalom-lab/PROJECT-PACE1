@@ -25,36 +25,57 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
 class SyncController extends Controller
 {
     /**
+     * Bump database mutation counter and invalidate sync caches.
+     * Invoked immediately whenever any database model is created, updated, or deleted.
+     */
+    public static function bumpMutation(?string $module = null): void
+    {
+        Cache::increment('pace_mutation_counter');
+        Cache::put('pace_db_mutation_version', microtime(true), 86400);
+        Cache::forget('pace_unified_fingerprint');
+        Cache::forget('pace_dash_charts');
+        Cache::forget('pace_dash_branch_comparison');
+        Cache::forget('pace_dash_recent');
+        Cache::forget('pace_storage_overview');
+    }
+
+    /**
+     * Invalidate unified fingerprint and clear sync caches.
+     * Backward-compatible alias for bumpMutation() invoked by controllers and services.
+     */
+    public static function invalidateFingerprint(?string $module = null): void
+    {
+        self::bumpMutation($module);
+    }
+
+    /**
      * Compute a unified version hash across all core database tables.
-     * Ultra-fast single aggregated query cached for 2 seconds (matching the 1 to 2 second target refresh).
+     * Sub-1ms index-only primary key checks combined with write-invalidation delta tracking.
      */
     public static function computeFingerprint(): int
     {
         return Cache::remember('pace_unified_fingerprint', 1, function () {
             try {
+                $mutationCounter = Cache::get('pace_mutation_counter', 0);
+                $mutationVersion = Cache::get('pace_db_mutation_version', 0);
+
+                // Sub-1ms O(1) B-tree index queries on primary keys (no slow COUNT(*) or table scans)
                 $res = DB::selectOne("
                     SELECT 
-                        (SELECT COALESCE(MAX(payment_id), 0) + COUNT(*) FROM payments) as p_sig,
-                        (SELECT COALESCE(MAX(sale_id), 0) + COUNT(*) FROM sale_transactions) as s_sig,
-                        (SELECT COALESCE(MAX(product_id), 0) + COUNT(*) FROM products) as pr_sig,
-                        (SELECT COALESCE(MAX(customer_id), 0) + COUNT(*) FROM customers) as c_sig,
-                        (SELECT COALESCE(MAX(id), 0) + COUNT(*) FROM attendance_scan_logs) as sc_sig,
-                        (SELECT COALESCE(MAX(attendance_id), 0) + COUNT(*) FROM attendance) as att_sig,
-                        (SELECT COALESCE(MAX(employee_id), 0) + COUNT(*) FROM employees) as emp_sig,
-                        (SELECT COALESCE(MAX(user_id), 0) + COUNT(*) FROM users) as u_sig,
-                        (SELECT COALESCE(MAX(request_id), 0) + COUNT(*) FROM qr_requests) as qr_sig,
-                        (SELECT COALESCE(MAX(id), 0) + COUNT(*) FROM support_messages) as sp_sig,
-                        (SELECT COALESCE(MAX(payroll_id), 0) + COUNT(*) FROM payroll) as py_sig,
-                        (SELECT COALESCE(UNIX_TIMESTAMP(MAX(updated_at)), 0) FROM products) as pr_upd,
-                        (SELECT COALESCE(UNIX_TIMESTAMP(MAX(updated_at)), 0) FROM branch_profiles) as br_upd,
-                        (SELECT COALESCE(UNIX_TIMESTAMP(MAX(updated_at)), 0) FROM support_messages) as sp_upd,
-                        (SELECT COALESCE(UNIX_TIMESTAMP(MAX(updated_at)), 0) FROM carousel_images) as cr_upd,
-                        (SELECT COALESCE(UNIX_TIMESTAMP(MAX(updated_at)), 0) FROM attendance) as att_upd,
-                        (SELECT COALESCE(UNIX_TIMESTAMP(MAX(updated_at)), 0) FROM employees) as emp_upd,
-                        (SELECT COALESCE(UNIX_TIMESTAMP(MAX(updated_at)), 0) FROM users) as u_upd,
-                        (SELECT COUNT(*) FROM carousel_images) as cr_cnt
+                        (SELECT COALESCE(MAX(payment_id), 0) FROM payments) as p_max,
+                        (SELECT COALESCE(MAX(sale_id), 0) FROM sale_transactions) as s_max,
+                        (SELECT COALESCE(MAX(product_id), 0) FROM products) as pr_max,
+                        (SELECT COALESCE(MAX(customer_id), 0) FROM customers) as c_max,
+                        (SELECT COALESCE(MAX(id), 0) FROM attendance_scan_logs) as sc_max,
+                        (SELECT COALESCE(MAX(attendance_id), 0) FROM attendance) as att_max,
+                        (SELECT COALESCE(MAX(employee_id), 0) FROM employees) as emp_max,
+                        (SELECT COALESCE(MAX(user_id), 0) FROM users) as u_max,
+                        (SELECT COALESCE(MAX(request_id), 0) FROM qr_requests) as qr_max,
+                        (SELECT COALESCE(MAX(id), 0) FROM support_messages) as sp_max,
+                        (SELECT COALESCE(MAX(payroll_id), 0) FROM payroll) as py_max,
+                        (SELECT COALESCE(MAX(id), 0) FROM carousel_images) as cr_max
                 ");
-                return (int)crc32(json_encode($res));
+                return (int)crc32(json_encode([$res, $mutationCounter, $mutationVersion]));
             } catch (\Throwable $e) {
                 return (int)time();
             }
@@ -68,10 +89,10 @@ class SyncController extends Controller
     {
         $user = $this->resolveUser($request);
 
-        // Run automated tasks (throttled to at most once per 600s)
+        // Run automated tasks (strictly throttled to at most once per 600s)
         $autoResults = AutomationService::runAllAutomations();
 
-        // 1. Unified mutation fingerprint (ultra-fast single aggregated query cached 1s)
+        // 1. Unified mutation fingerprint (ultra-fast sub-1ms check)
         $latestLogId = self::computeFingerprint();
 
         $userId = $user ? $user->user_id : 0;

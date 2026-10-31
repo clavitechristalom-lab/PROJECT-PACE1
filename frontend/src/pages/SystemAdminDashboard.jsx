@@ -630,8 +630,9 @@ export default function SystemAdminDashboard() {
         <Modal 
           onClose={closeCarouselModal} 
           title="Add Carousel Image"
+          size="lg"
         >
-          <form onSubmit={handleCarouselUpload} className="space-y-4">
+          <form onSubmit={handleCarouselUpload} className="space-y-5">
             <div>
               <label className="block text-sm font-medium mb-3">Upload Promotion/Product Image(s)</label>
               <div className="relative flex flex-col items-center justify-center w-full h-48 border-2 border-dashed border-border rounded-xl bg-muted/20 hover:bg-muted/40 transition-colors overflow-hidden group">
@@ -677,7 +678,7 @@ export default function SystemAdminDashboard() {
                 />
               </div>
             </div>
-            <div className="flex justify-end gap-3 mt-8">
+            <div className="flex items-center justify-end gap-3 pt-4 border-t border-border">
               <Btn type="button" variant="secondary" onClick={closeCarouselModal}>
                 Cancel
               </Btn>

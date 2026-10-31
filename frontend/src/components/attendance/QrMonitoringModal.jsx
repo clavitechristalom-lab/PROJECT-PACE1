@@ -1,11 +1,11 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import {
   FiActivity, FiCheckCircle, FiXCircle, FiAlertTriangle,
   FiUsers, FiShield, FiClock, FiRefreshCw, FiSearch,
   FiFilter, FiLayers, FiCalendar, FiMapPin, FiKey, FiX
 } from 'react-icons/fi'
 import { api } from '../../lib/api'
-import { useRealtimeSync } from '../../lib/realtimeSync'
+import { useRealtimeSync, fastDeepEqual } from '../../lib/realtimeSync'
 import {
   Card, StatCard, Badge, StatusBadge, SearchBar,
   Table, TR, TD, TableSkeleton, EmptyState, Btn, Modal, showToast
@@ -29,34 +29,43 @@ export default function QrMonitoringModal({ open, isOpen, onClose }) {
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState('All')
   const [actionFilter, setActionFilter] = useState('All')
+  const inFlightRef = useRef(false)
 
-  const loadData = async (silent = false) => {
-    if (!silent) setLoading(true)
+  const loadData = useCallback(async (silent = false, signal) => {
+    const isSilent = silent === true
+    if (inFlightRef.current && isSilent) return
+    inFlightRef.current = true
+    if (!isSilent) setLoading(true)
     try {
-      const res = await api.system.getQrMonitoring()
+      const res = await api.system.getQrMonitoring({ signal })
+      if (signal?.aborted) return
       if (res.success) {
-        setStats(res.stats || {})
-        setLogs(res.recent_logs || [])
+        const nextStats = res.stats || {}
+        const nextLogs = res.recent_logs || []
+        setStats(prev => (fastDeepEqual(prev, nextStats) ? prev : nextStats))
+        setLogs(prev => (fastDeepEqual(prev, nextLogs) ? prev : nextLogs))
       }
     } catch (err) {
+      if (err?.name === 'AbortError') return
       console.error('Failed to load QR monitoring stats:', err)
-      if (!silent) showToast(err.message || 'Failed to load QR monitoring data', 'error')
+      if (!isSilent) showToast(err.message || 'Failed to load QR monitoring data', 'error')
     } finally {
-      if (!silent) setLoading(false)
+      inFlightRef.current = false
+      if (!isSilent) setLoading(false)
     }
-  }
+  }, [])
 
   useEffect(() => {
     if (isVisible) {
-      loadData()
+      loadData(false)
     }
-  }, [isVisible])
+  }, [isVisible, loadData])
 
-  useRealtimeSync(() => {
+  useRealtimeSync((_source, signal) => {
     if (isVisible) {
-      loadData(true)
+      loadData(true, signal)
     }
-  }, [isVisible])
+  }, [isVisible, loadData])
 
   if (!isVisible) return null
 
@@ -78,9 +87,9 @@ export default function QrMonitoringModal({ open, isOpen, onClose }) {
     <Modal
       title="QR ATTENDANCE MONITORING"
       onClose={onClose}
-      size="2xl"
+      size="xl"
       footer={
-        <div className="flex justify-between items-center w-full">
+        <div className="flex justify-between items-center w-full gap-3">
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
             <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
             <span>Live MySQL Database Sync Active</span>
@@ -91,7 +100,7 @@ export default function QrMonitoringModal({ open, isOpen, onClose }) {
         </div>
       }
     >
-      <div className="space-y-6 pb-2">
+      <div className="space-y-5">
         {/* Header summary & Live Sync Button */}
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 p-4 rounded-2xl bg-muted/20 border border-border">
           <div>
@@ -102,13 +111,13 @@ export default function QrMonitoringModal({ open, isOpen, onClose }) {
               Real-time organization-wide QR security metrics, branch scan attempts, and audit trail.
             </p>
           </div>
-          <Btn variant="outline" size="sm" onClick={loadData} icon={<FiRefreshCw className={loading ? 'animate-spin' : ''} />}>
+          <Btn variant="outline" size="sm" onClick={() => loadData(false)} icon={<FiRefreshCw className={loading ? 'animate-spin' : ''} />}>
             Live Sync
           </Btn>
         </div>
 
         {/* QR Request & Badges Real Database Statistic Cards */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3.5">
           <StatCard
             title="Total Employees"
             value={stats.total_employees?.toString() || '0'}
@@ -139,7 +148,7 @@ export default function QrMonitoringModal({ open, isOpen, onClose }) {
           />
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
           <StatCard
             title="Today's QR Scans"
             value={stats.today_scans?.toString() || '0'}

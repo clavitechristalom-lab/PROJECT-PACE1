@@ -41,33 +41,24 @@ class CustomerDashboardController extends Controller
             }
         }
 
-        if ($branchId) {
-            $branchProductsCount = Product::where('branch_id', $branchId)->count();
-            if ($branchProductsCount > 0) {
-                $totalProducts = $branchProductsCount;
-                $outOfStockCount = Product::where('branch_id', $branchId)->where('stock_quantity', '<=', 0)->count();
-                $saleItemCount = Product::where('branch_id', $branchId)->where('status', 'Active')->whereNotNull('discount_price')->count();
-
-                $categories = Product::where('branch_id', $branchId)
-                    ->select('category', \Illuminate\Support\Facades\DB::raw('count(*) as count'))
-                    ->groupBy('category')
-                    ->get();
-            } else {
-                $totalProducts = Product::count();
-                $outOfStockCount = Product::where('stock_quantity', '<=', 0)->count();
-                $saleItemCount = Product::where('status', 'Active')->whereNotNull('discount_price')->count();
-                $categories = Product::select('category', \Illuminate\Support\Facades\DB::raw('count(*) as count'))
-                    ->groupBy('category')
-                    ->get();
-            }
-        } else {
-            $totalProducts = Product::count();
-            $outOfStockCount = Product::where('stock_quantity', '<=', 0)->count();
-            $saleItemCount = Product::where('status', 'Active')->whereNotNull('discount_price')->count();
-            $categories = Product::select('category', \Illuminate\Support\Facades\DB::raw('count(*) as count'))
-                ->groupBy('category')
-                ->get();
+        $prodQuery = Product::query();
+        if ($branchId && Product::where('branch_id', $branchId)->exists()) {
+            $prodQuery->where('branch_id', $branchId);
         }
+
+        $prodStats = (clone $prodQuery)->selectRaw("
+            COUNT(*) as total,
+            COUNT(CASE WHEN stock_quantity <= 0 THEN 1 END) as out_of_stock,
+            COUNT(CASE WHEN status = 'Active' AND discount_price IS NOT NULL THEN 1 END) as sale_items
+        ")->first();
+
+        $totalProducts = (int)($prodStats->total ?? 0);
+        $outOfStockCount = (int)($prodStats->out_of_stock ?? 0);
+        $saleItemCount = (int)($prodStats->sale_items ?? 0);
+
+        $categories = (clone $prodQuery)->select('category', \Illuminate\Support\Facades\DB::raw('count(*) as count'))
+            ->groupBy('category')
+            ->get();
 
         // Financial metrics for this customer
         if ($customerId) {

@@ -1,27 +1,21 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
-  Lock,
-  User,
-  Camera,
-  CameraOff,
-  Scan,
-  ScanLine,
-  Check,
-  CheckCircle2,
-  AlertCircle,
-  AlertTriangle,
-  RefreshCw,
-  X,
-  ShieldCheck,
-  ShieldAlert,
-  Sparkles,
-  KeyRound,
-  Fingerprint,
-  UserCheck,
-  Activity,
-  Smile
-} from 'lucide-react'
+  FiLock,
+  FiUser,
+  FiCameraOff,
+  FiMaximize,
+  FiCheckCircle,
+  FiAlertCircle,
+  FiAlertTriangle,
+  FiRefreshCw,
+  FiX,
+  FiShield,
+  FiShieldOff,
+  FiZap,
+  FiKey
+} from 'react-icons/fi'
+import { FaFingerprint } from 'react-icons/fa'
 import { showToast } from '../ui'
 import { api } from '../../lib/api'
 import { useAuth } from '../../context/AuthContext'
@@ -897,8 +891,8 @@ export default function FaceRecognitionAttendanceModal({
         }
       `}</style>
 
-      {/* Main Modal Card: dark emerald/slate theme with rounded-3xl container */}
-      <div className="w-full max-w-md sm:max-w-[465px] bg-[#071510] border border-emerald-500/30 rounded-3xl overflow-hidden shadow-[0_0_60px_rgba(5,150,105,0.22)] relative animate-in zoom-in-95 duration-200 transition-all flex flex-col">
+      {/* Main Modal Card: dark emerald/slate theme with rounded-2xl large container */}
+      <div className="w-full max-w-3xl max-h-[90vh] bg-[#071510] border border-emerald-500/30 rounded-2xl overflow-y-auto shadow-[0_0_60px_rgba(5,150,105,0.22)] relative animate-in zoom-in-95 duration-200 transition-all flex flex-col">
 
         {/* Top Glowing Accent Line */}
         <div className={`absolute top-0 left-0 right-0 h-1 transition-colors duration-300 ${
@@ -919,14 +913,14 @@ export default function FaceRecognitionAttendanceModal({
           title="Cancel and return to Scan Employee QR Code"
           aria-label="Cancel"
         >
-          <X className="w-4 h-4" />
+          <FiX className="w-4 h-4" />
         </button>
 
         {/* 1. HEADER & BADGES LAYOUT */}
         <div className="pt-6 px-6 pb-2 text-center space-y-3">
           {/* Top Lock Icon Badge */}
           <div className="relative mx-auto w-13 h-13 sm:w-14 sm:h-14 rounded-2xl bg-emerald-950/80 border border-emerald-500/40 flex items-center justify-center text-emerald-400 shadow-[0_0_25px_rgba(16,185,129,0.4)]">
-            <Lock className="w-6 h-6 text-emerald-400 stroke-[2.2]" />
+            <FiLock className="w-6 h-6 text-emerald-400 stroke-[2.2]" />
             <span className="absolute -inset-1 rounded-2xl bg-emerald-500/10 blur-sm pointer-events-none" />
           </div>
 
@@ -949,7 +943,7 @@ export default function FaceRecognitionAttendanceModal({
             {/* Card 1: Requested By */}
             <div className="p-3 bg-[#0b1c18] rounded-2xl border border-emerald-900/60 flex items-center gap-2.5 shadow-inner">
               <div className="w-9 h-9 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 flex items-center justify-center shrink-0 shadow-sm">
-                <User className="w-4 h-4 text-emerald-400" />
+                <FiUser className="w-4 h-4 text-emerald-400" />
               </div>
               <div className="flex-1 min-w-0">
                 <p className="text-[9px] font-black text-emerald-400 uppercase tracking-widest">
@@ -980,7 +974,7 @@ export default function FaceRecognitionAttendanceModal({
                 </div>
               ) : (
                 <div className="w-9 h-9 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 flex items-center justify-center shrink-0">
-                  <Fingerprint className="w-4 h-4" />
+                  <FaFingerprint className="w-4 h-4" />
                 </div>
               )}
               <div className="flex-1 min-w-0">
@@ -1015,7 +1009,7 @@ export default function FaceRecognitionAttendanceModal({
               {!cameraError && !videoPlaying && (
                 <div className="flex flex-col items-center justify-center space-y-2 text-emerald-400/80 animate-pulse">
                   <div className="relative w-14 h-14 rounded-full border border-emerald-500/40 flex items-center justify-center bg-emerald-950/60 shadow-[0_0_20px_rgba(16,185,129,0.3)]">
-                    <Scan className="w-7 h-7 text-emerald-400 animate-spin" />
+                    <FiMaximize className="w-7 h-7 text-emerald-400 animate-spin" />
                     <span className="absolute inset-0 rounded-full border border-emerald-400 animate-ping opacity-25" />
                   </div>
                   <p className="text-[11px] font-semibold text-emerald-300">Connecting Biometric Camera...</p>
@@ -1039,7 +1033,7 @@ export default function FaceRecognitionAttendanceModal({
             {cameraError && (
               <div className="absolute inset-0 z-30 flex flex-col items-center justify-center p-5 text-center bg-[#071311]/95 space-y-3">
                 <div className="w-12 h-12 rounded-full bg-rose-500/10 border border-rose-500/30 flex items-center justify-center text-rose-400">
-                  <CameraOff className="w-6 h-6" />
+                  <FiCameraOff className="w-6 h-6" />
                 </div>
                 <div className="space-y-1">
                   <p className="text-sm font-bold text-white">Camera Unavailable</p>
@@ -1052,7 +1046,7 @@ export default function FaceRecognitionAttendanceModal({
                   onClick={startCamera}
                   className="mt-2 flex items-center gap-2 px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-[0_0_15px_rgba(16,185,129,0.4)] transition-all cursor-pointer"
                 >
-                  <RefreshCw className="w-3.5 h-3.5" />
+                  <FiRefreshCw className="w-3.5 h-3.5" />
                   Retry Camera
                 </button>
               </div>
@@ -1095,22 +1089,22 @@ export default function FaceRecognitionAttendanceModal({
                 <div className="absolute top-3.5 left-1/2 -translate-x-1/2 z-20 pointer-events-none max-w-[90%]">
                   {isVerified ? (
                     <div className="flex items-center gap-1.5 px-3.5 py-1 rounded-full bg-emerald-950/95 border border-emerald-400 text-emerald-300 text-[11px] font-bold shadow-[0_0_15px_rgba(16,185,129,0.6)]">
-                      <Sparkles className="w-3.5 h-3.5 text-emerald-400" />
+                      <FiZap className="w-3.5 h-3.5 text-emerald-400" />
                       <span>Biometric Verification Successful</span>
                     </div>
                   ) : isMatchEvaluatedFalse ? (
                     <div className="flex items-center gap-1.5 px-3.5 py-1 rounded-full bg-rose-950/95 border border-rose-500 text-rose-300 text-[11px] font-bold shadow-[0_0_15px_rgba(244,63,94,0.6)] animate-pulse">
-                      <ShieldAlert className="w-3.5 h-3.5 text-rose-400" />
+                      <FiShieldOff className="w-3.5 h-3.5 text-rose-400" />
                       <span>Face mismatch! Not the registered Face ID. Restarting...</span>
                     </div>
                   ) : isMatchEvaluatedTrue ? (
                     <div className="flex items-center gap-1.5 px-3.5 py-1 rounded-full bg-emerald-950/90 border border-emerald-400 text-emerald-300 text-[11px] font-bold shadow-[0_0_15px_rgba(16,185,129,0.5)]">
-                      <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+                      <FiShield className="w-3.5 h-3.5 text-emerald-400" />
                       <span>Face ID Match: TRUE · Validating ({remainingSeconds}s)</span>
                     </div>
                   ) : !isScanningValid ? (
                     <div className="flex items-center gap-1.5 px-3.5 py-1 rounded-full bg-amber-950/90 border border-amber-500/70 text-amber-300 text-[11px] font-semibold backdrop-blur-md shadow-[0_0_15px_rgba(245,158,11,0.4)]">
-                      <AlertTriangle className="w-3.5 h-3.5 text-amber-400 animate-pulse" />
+                      <FiAlertTriangle className="w-3.5 h-3.5 text-amber-400 animate-pulse" />
                       <span>
                         {validationState.lightingQuality === 'too_dark'
                           ? 'Low Lighting'
@@ -1121,7 +1115,7 @@ export default function FaceRecognitionAttendanceModal({
                     </div>
                   ) : (
                     <div className="flex items-center gap-1.5 px-3.5 py-1 rounded-full bg-emerald-950/80 border border-emerald-500/60 text-emerald-300 text-[11px] font-semibold backdrop-blur-md shadow-[0_0_15px_rgba(16,185,129,0.35)]">
-                      <Scan className="w-3.5 h-3.5 animate-spin text-emerald-400" />
+                      <FiMaximize className="w-3.5 h-3.5 animate-spin text-emerald-400" />
                       <span>Matching Face ID Record...</span>
                     </div>
                   )}
@@ -1225,7 +1219,7 @@ export default function FaceRecognitionAttendanceModal({
                 {isVerified && (
                   <div className="absolute inset-0 bg-emerald-950/25 backdrop-blur-[1px] flex items-center justify-center pointer-events-none z-30 animate-in zoom-in-75 duration-300">
                     <div className="w-14 h-14 rounded-full bg-emerald-500/25 border-2 border-emerald-400 flex items-center justify-center text-emerald-300 shadow-[0_0_30px_rgba(16,185,129,0.7)]">
-                      <CheckCircle2 className="w-8 h-8 text-emerald-400" />
+                      <FiCheckCircle className="w-8 h-8 text-emerald-400" />
                     </div>
                   </div>
                 )}
@@ -1238,7 +1232,7 @@ export default function FaceRecognitionAttendanceModal({
                     title="Scan Again"
                     className="absolute bottom-3.5 right-3.5 z-30 p-2 rounded-xl bg-black/75 hover:bg-black/90 text-emerald-400 border border-emerald-500/40 hover:border-emerald-400 shadow-md transition-all cursor-pointer"
                   >
-                    <RefreshCw className="w-3.5 h-3.5" />
+                    <FiRefreshCw className="w-3.5 h-3.5" />
                   </button>
                 )}
               </>
@@ -1248,7 +1242,7 @@ export default function FaceRecognitionAttendanceModal({
           {/* 4. AUTOMATIC MISMATCH & IMMEDIATE RE-SCAN LOOP ALERT ("then again mag face id") */}
           {mismatchError && !isVerified && (
             <div className="p-3.5 rounded-2xl bg-rose-950/90 border border-rose-500/80 text-rose-200 text-xs flex items-start gap-3 shadow-[0_0_20px_rgba(244,63,94,0.35)] animate-in fade-in duration-200">
-              <AlertCircle className="w-5 h-5 text-rose-400 shrink-0 mt-0.5 animate-pulse" />
+              <FiAlertCircle className="w-5 h-5 text-rose-400 shrink-0 mt-0.5 animate-pulse" />
               <div className="flex-1 leading-snug">
                 <p className="font-bold text-rose-200 text-sm">Face Mismatch Detected</p>
                 <p className="mt-0.5 text-xs text-rose-300/90 font-medium">
@@ -1270,7 +1264,7 @@ export default function FaceRecognitionAttendanceModal({
           {/* 2. STRICT LIGHTING & LIVENESS WARNING (Non-blocking, Keeps Video Intact) */}
           {!mismatchError && !isVerified && !isScanningValid && (
             <div className="p-3 rounded-2xl bg-amber-950/70 border border-amber-500/40 text-amber-200 text-xs flex items-start gap-2.5 animate-in fade-in duration-200">
-              <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5 animate-pulse" />
+              <FiAlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5 animate-pulse" />
               <div className="leading-snug">
                 <p className="font-bold text-amber-300">
                   {validationState.lightingQuality === 'too_dark'
@@ -1298,17 +1292,17 @@ export default function FaceRecognitionAttendanceModal({
               <span className="font-semibold text-emerald-200/90 flex items-center gap-1.5 truncate">
                 {isVerified ? (
                   <>
-                    <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                    <FiCheckCircle className="w-4 h-4 text-emerald-400 shrink-0" />
                     <span className="text-emerald-400 font-bold">Biometric Verification Successful</span>
                   </>
                 ) : isMatchEvaluatedFalse ? (
                   <>
-                    <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
+                    <FiAlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
                     <span className="text-rose-400 font-bold">Face mismatch! Not the registered Face ID. Restarting...</span>
                   </>
                 ) : !isScanningValid ? (
                   <>
-                    <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 animate-pulse" />
+                    <FiAlertTriangle className="w-4 h-4 text-amber-400 shrink-0 animate-pulse" />
                     <span className="text-amber-400">
                       {validationState.lightingQuality === 'too_dark'
                         ? 'Paused: Insufficient lighting - face a light source'
@@ -1321,14 +1315,14 @@ export default function FaceRecognitionAttendanceModal({
                   </>
                 ) : isMatchEvaluatedTrue ? (
                   <>
-                    <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0" />
+                    <FiShield className="w-4 h-4 text-emerald-400 shrink-0" />
                     <span className="text-emerald-300">
                       Validating 3D Biometric Liveness... ({remainingSeconds}s remaining)
                     </span>
                   </>
                 ) : (
                   <>
-                    <Scan className="w-4 h-4 text-emerald-400 animate-spin shrink-0" />
+                    <FiMaximize className="w-4 h-4 text-emerald-400 animate-spin shrink-0" />
                     <span className="text-emerald-300">Evaluating liveness and registered Face ID...</span>
                   </>
                 )}
@@ -1389,33 +1383,33 @@ export default function FaceRecognitionAttendanceModal({
             >
               {authorizing || (isVerified && scanProgress >= 100) ? (
                 <>
-                  <RefreshCw className="w-4 h-4 animate-spin text-white" />
+                  <FiRefreshCw className="w-4 h-4 animate-spin text-white" />
                   <span className="tracking-wide">
                     {mode === 'enrollment' ? 'Registering Face ID...' : 'Authorizing Automatically...'}
                   </span>
                 </>
               ) : isVerified ? (
                 <>
-                  <CheckCircle2 className="w-4 h-4 text-white stroke-[2.5]" />
+                  <FiCheckCircle className="w-4 h-4 text-white stroke-[2.5]" />
                   <span className="tracking-wide">
                     {mode === 'enrollment' ? 'Enrolled · Complete' : 'Verified · Processing...'}
                   </span>
                 </>
               ) : isMatchEvaluatedFalse ? (
                 <>
-                  <ShieldAlert className="w-4 h-4 text-rose-400" />
+                  <FiShieldOff className="w-4 h-4 text-rose-400" />
                   <span className="tracking-wide text-xs">Face mismatch! Restarting scanning loop...</span>
                 </>
               ) : isMatchEvaluatedTrue ? (
                 <>
-                  <ShieldCheck className="w-4 h-4 text-emerald-400" />
+                  <FiShield className="w-4 h-4 text-emerald-400" />
                   <span className="tracking-wide text-xs">
                     Auto-Authorizing on 100% Match ({remainingSeconds}s)...
                   </span>
                 </>
               ) : (
                 <>
-                  <Lock className="w-4 h-4 opacity-40" />
+                  <FiLock className="w-4 h-4 opacity-40" />
                   <span className="tracking-wide text-xs">
                     {mode === 'enrollment' ? 'Awaiting Face Alignment' : 'Awaiting Registered Face ID Match'}
                   </span>
@@ -1435,7 +1429,7 @@ export default function FaceRecognitionAttendanceModal({
                 }}
                 className="text-xs text-emerald-400/80 hover:text-emerald-300 underline underline-offset-4 font-semibold transition-colors flex items-center justify-center gap-1.5 mx-auto cursor-pointer"
               >
-                <KeyRound className="w-3.5 h-3.5" />
+                <FiKey className="w-3.5 h-3.5" />
                 <span>Prefer PIN Verification instead?</span>
               </button>
             </div>

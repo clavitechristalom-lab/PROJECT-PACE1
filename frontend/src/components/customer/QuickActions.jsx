@@ -1,14 +1,15 @@
 import React from 'react';
-import { ShoppingCart, FileText, CreditCard, HelpCircle, ChevronRight, Wallet, Bell } from '../../lib/customIcons';
+import { FiShoppingCart, FiFileText, FiCreditCard, FiHelpCircle, FiChevronRight, FiBell } from 'react-icons/fi';
+import { BiWallet } from 'react-icons/bi';
 
 export default function QuickActions({ onAction }) {
   const actions = [
-    { name: 'Make Payment', icon: <Wallet size={20} />, color: 'text-purple-600 dark:text-purple-400', bg: 'bg-purple-100 dark:bg-purple-900/40', border: 'border-purple-200 dark:border-purple-800' },
-    { name: 'Browse Products', icon: <ShoppingCart size={20} />, color: 'text-blue-600 dark:text-blue-400', bg: 'bg-blue-100 dark:bg-blue-900/40', border: 'border-blue-200 dark:border-blue-800' },
-    { name: 'Installments', icon: <CreditCard size={20} />, color: 'text-emerald-600 dark:text-emerald-400', bg: 'bg-emerald-100 dark:bg-emerald-900/40', border: 'border-emerald-200 dark:border-emerald-800' },
-    { name: 'Notifications', icon: <Bell size={20} />, color: 'text-amber-600 dark:text-amber-400', bg: 'bg-amber-100 dark:bg-amber-900/40', border: 'border-amber-200 dark:border-amber-800' },
-    { name: 'View Statements', icon: <FileText size={20} />, color: 'text-[#176B87] dark:text-[#64ccc5]', bg: 'bg-[#176B87]/10 dark:bg-[#176B87]/20', border: 'border-[#176B87]/20 dark:border-[#176B87]/30' },
-    { name: 'Support', icon: <HelpCircle size={20} />, color: 'text-slate-600 dark:text-slate-400', bg: 'bg-muted', border: 'border-border' },
+    { name: 'Make Payment', icon: <BiWallet size={20} />, color: 'text-purple-600 dark:text-purple-400', bg: 'bg-purple-100 dark:bg-purple-900/40', border: 'border-purple-200 dark:border-purple-800' },
+    { name: 'Browse Products', icon: <FiShoppingCart size={20} />, color: 'text-blue-600 dark:text-blue-400', bg: 'bg-blue-100 dark:bg-blue-900/40', border: 'border-blue-200 dark:border-blue-800' },
+    { name: 'Installments', icon: <FiCreditCard size={20} />, color: 'text-emerald-600 dark:text-emerald-400', bg: 'bg-emerald-100 dark:bg-emerald-900/40', border: 'border-emerald-200 dark:border-emerald-800' },
+    { name: 'Notifications', icon: <FiBell size={20} />, color: 'text-amber-600 dark:text-amber-400', bg: 'bg-amber-100 dark:bg-amber-900/40', border: 'border-amber-200 dark:border-amber-800' },
+    { name: 'View Statements', icon: <FiFileText size={20} />, color: 'text-[#176B87] dark:text-[#64ccc5]', bg: 'bg-[#176B87]/10 dark:bg-[#176B87]/20', border: 'border-[#176B87]/20 dark:border-[#176B87]/30' },
+    { name: 'Support', icon: <FiHelpCircle size={20} />, color: 'text-slate-600 dark:text-slate-400', bg: 'bg-muted', border: 'border-border' },
   ];
 
   return (
@@ -30,7 +31,7 @@ export default function QuickActions({ onAction }) {
               <span className="font-semibold text-foreground group-hover:text-primary transition-colors">{action.name}</span>
             </div>
             <div className="w-8 h-8 rounded-full flex items-center justify-center text-muted-foreground group-hover:text-primary group-hover:bg-primary/10 transition-colors">
-              <ChevronRight size={18} />
+              <FiChevronRight size={18} />
             </div>
           </button>
         ))}

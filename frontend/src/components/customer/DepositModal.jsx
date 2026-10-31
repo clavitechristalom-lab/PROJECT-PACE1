@@ -508,13 +508,13 @@ export default function DepositModal({
   return (
     <>
       <div
-        className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-900/60 backdrop-blur-sm animate-[fadeIn_0.2s_ease]"
+        className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-[fadeIn_0.2s_ease]"
         onClick={(e) => { if (e.target === e.currentTarget && !loading) onClose(); }}
       >
-        <div className="bg-card w-full max-w-xl rounded-3xl shadow-2xl border border-border flex flex-col max-h-[92vh] overflow-hidden animate-[slideUp_0.2s_ease]">
+        <div className="bg-card w-full max-w-3xl rounded-2xl shadow-2xl border border-border flex flex-col max-h-[90vh] overflow-hidden animate-[slideUp_0.2s_ease]">
 
           {/* ─── Modal Header ─── */}
-          <div className="flex items-start justify-between p-6 pb-4 border-b border-border/60 bg-muted/20 relative shrink-0">
+          <div className="flex items-start justify-between px-6 py-4 border-b border-border/60 bg-muted/20 relative shrink-0">
             {step === 2 && (
               <button
                 onClick={() => setStep(1)}
@@ -551,7 +551,7 @@ export default function DepositModal({
           </div>
 
           {/* ─── Modal Body ─── */}
-          <div className="overflow-y-auto p-6 space-y-5 flex-1">
+          <div className="overflow-y-auto p-6 sm:p-8 space-y-5 flex-1">
 
             {/* ══════════════════════════════════════════════════════════════════════
                 STEP 1: PRODUCT LIST, INSTALLMENT TERMS & PAYMENT METHOD

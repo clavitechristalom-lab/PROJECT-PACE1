@@ -1,25 +1,14 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import {
-  Scan,
-  Camera,
-  CameraOff,
-  Check,
-  CheckCircle2,
-  AlertCircle,
-  AlertTriangle,
-  RefreshCw,
-  X,
-  ShieldCheck,
-  ShieldAlert,
-  Sparkles,
-  Sun,
-  Glasses,
-  Lock,
-  UserCheck,
-  Eye,
-  Activity,
-  Fingerprint
-} from 'lucide-react'
+  FiMaximize,
+  FiCamera,
+  FiCameraOff,
+  FiCheckCircle,
+  FiAlertCircle,
+  FiAlertTriangle,
+  FiShield,
+  FiActivity
+} from 'react-icons/fi'
 import { showToast } from '../ui'
 import { api } from '../../lib/api'
 import {
@@ -484,7 +473,7 @@ export default function FaceRecognitionEnrollment({
   const remainingSeconds = Math.max(0, (10 - (scanProgress / 10))).toFixed(1)
 
   return (
-    <div className={`relative w-full max-w-xl mx-auto rounded-3xl bg-[#061710] border border-emerald-500/20 text-slate-100 shadow-[0_0_50px_rgba(5,150,105,0.2)] overflow-hidden p-6 sm:p-8 transition-all duration-300 ${className}`}>
+    <div className={`relative w-full max-w-3xl mx-auto rounded-3xl bg-[#061710] border border-emerald-500/20 text-slate-100 shadow-[0_0_50px_rgba(5,150,105,0.2)] overflow-hidden p-6 sm:p-8 transition-all duration-300 ${className}`}>
       
       {/* Hidden high-res capture canvas */}
       <canvas ref={canvasRef} className="hidden" />
@@ -512,7 +501,7 @@ export default function FaceRecognitionEnrollment({
         <div className="space-y-6 animate-in fade-in duration-200">
           <div className="flex items-start gap-4">
             <div className="w-12 h-12 rounded-2xl bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center text-emerald-400 shadow-[0_0_20px_rgba(16,185,129,0.2)] shrink-0">
-              <Scan className="w-6 h-6 animate-pulse" />
+              <FiMaximize className="w-6 h-6 animate-pulse" />
             </div>
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2.5 flex-wrap">
@@ -521,7 +510,7 @@ export default function FaceRecognitionEnrollment({
                 </h3>
                 {existingImage && (
                   <span className="inline-flex items-center gap-1 text-[11px] font-mono font-bold uppercase rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 px-2.5 py-0.5">
-                    <ShieldCheck className="w-3.5 h-3.5" /> Face ID Active
+                    <FiShield className="w-3.5 h-3.5" /> Face ID Active
                   </span>
                 )}
               </div>
@@ -533,7 +522,7 @@ export default function FaceRecognitionEnrollment({
 
           {/* Privacy Notice Card */}
           <div className="p-4 rounded-2xl bg-emerald-950/30 border border-emerald-500/20 text-xs text-emerald-200/90 flex items-start gap-3 leading-relaxed">
-            <ShieldCheck className="w-5 h-5 text-emerald-400 shrink-0 mt-0.5" />
+            <FiShield className="w-5 h-5 text-emerald-400 shrink-0 mt-0.5" />
             <div>
               <p className="font-semibold text-white mb-0.5">Biometric Privacy & Liveness Notice</p>
               <p className="text-emerald-300/80 text-[11px] leading-relaxed">
@@ -580,7 +569,7 @@ export default function FaceRecognitionEnrollment({
                 onClick={startCameraAndScanning}
                 className="px-6 py-2.5 text-xs font-bold tracking-wide rounded-2xl bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-slate-950 shadow-[0_0_25px_rgba(16,185,129,0.4)] transition-all cursor-pointer flex items-center gap-2"
               >
-                <Camera className="w-4 h-4" />
+                <FiCamera className="w-4 h-4" />
                 <span>Start enrollment</span>
               </button>
             </div>
@@ -590,7 +579,7 @@ export default function FaceRecognitionEnrollment({
 
       {/* ──────────────────────────────────────────────────────────
           SCREEN 2: VIEWFINDER WITH GRANULAR TELEMETRY (Active Flow)
-         ────────────────────────────────────────────────────────── */}
+          ────────────────────────────────────────────────────────── */}
       {step === 'scanning' && (
         <div className="space-y-4 text-center animate-in fade-in duration-200">
           <div>
@@ -610,7 +599,7 @@ export default function FaceRecognitionEnrollment({
               {!cameraActive && (
                 <div className="flex flex-col items-center justify-center space-y-2 text-emerald-400/80 animate-pulse">
                   <div className="relative w-14 h-14 rounded-full border border-emerald-500/40 flex items-center justify-center bg-emerald-950/60 shadow-[0_0_20px_rgba(16,185,129,0.3)]">
-                    <Scan className="w-7 h-7 text-emerald-400 animate-spin" />
+                    <FiMaximize className="w-7 h-7 text-emerald-400 animate-spin" />
                     <span className="absolute inset-0 rounded-full border border-emerald-400 animate-ping opacity-25" />
                   </div>
                   <p className="text-[11px] font-semibold text-emerald-300">Connecting Biometric Camera...</p>
@@ -679,7 +668,7 @@ export default function FaceRecognitionEnrollment({
           <div className="space-y-1">
             <div className="flex items-center justify-between text-[10px] text-emerald-400 font-bold px-1 uppercase tracking-wider">
               <span className="flex items-center gap-1.5">
-                <Activity className="w-3.5 h-3.5 text-emerald-400 animate-pulse" />
+                <FiActivity className="w-3.5 h-3.5 text-emerald-400 animate-pulse" />
                 Granular Structural Feature Mapping
               </span>
               <span className="font-mono text-[9px] text-emerald-300">
@@ -726,7 +715,7 @@ export default function FaceRecognitionEnrollment({
           {/* 4. AUTOMATIC MISMATCH / AUTO-RESET LOOP ALERT */}
           {mismatchError && (
             <div className="p-3.5 rounded-2xl bg-rose-950/90 border border-rose-500/80 text-rose-200 text-xs flex items-start gap-3 shadow-[0_0_20px_rgba(244,63,94,0.35)] animate-in fade-in duration-200">
-              <AlertCircle className="w-5 h-5 text-rose-400 shrink-0 mt-0.5 animate-pulse" />
+              <FiAlertCircle className="w-5 h-5 text-rose-400 shrink-0 mt-0.5 animate-pulse" />
               <div className="flex-1 leading-snug text-left">
                 <p className="font-bold text-rose-200 text-sm">Face Mismatch Detected</p>
                 <p className="mt-0.5 text-xs text-rose-300/90 font-medium">
@@ -746,7 +735,7 @@ export default function FaceRecognitionEnrollment({
           {/* 2. STRICT LIGHTING & LIVENESS WARNING */}
           {!mismatchError && !isScanningValid && (
             <div className="p-3 rounded-2xl bg-amber-950/70 border border-amber-500/40 text-amber-200 text-xs flex items-start gap-2.5 animate-in fade-in duration-200 text-left">
-              <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5 animate-pulse" />
+              <FiAlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5 animate-pulse" />
               <div className="leading-snug">
                 <p className="font-bold text-amber-300">
                   {validationState.lightingQuality === 'too_dark'
@@ -774,14 +763,14 @@ export default function FaceRecognitionEnrollment({
               <span className="font-semibold text-emerald-200/90 flex items-center gap-1.5 truncate">
                 {isScanningValid ? (
                   <>
-                    <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0" />
+                    <FiShield className="w-4 h-4 text-emerald-400 shrink-0" />
                     <span className="text-emerald-300">
                       Validating 3D Biometric Liveness... ({remainingSeconds}s remaining)
                     </span>
                   </>
                 ) : (
                   <>
-                    <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 animate-pulse" />
+                    <FiAlertTriangle className="w-4 h-4 text-amber-400 shrink-0 animate-pulse" />
                     <span className="text-amber-400">Paused: Align face in frame with good lighting...</span>
                   </>
                 )}
@@ -824,7 +813,7 @@ export default function FaceRecognitionEnrollment({
       {step === 'completed' && (
         <div className="space-y-6 text-center animate-in zoom-in-95 duration-200 py-4">
           <div className="relative mx-auto w-16 h-16 rounded-full bg-emerald-500/20 border-2 border-emerald-400 flex items-center justify-center text-emerald-400 shadow-[0_0_35px_rgba(16,185,129,0.5)]">
-            <CheckCircle2 className="w-10 h-10 text-emerald-400" />
+            <FiCheckCircle className="w-10 h-10 text-emerald-400" />
             <span className="absolute -inset-1 rounded-full bg-emerald-500/20 blur-md pointer-events-none" />
           </div>
 
@@ -851,7 +840,7 @@ export default function FaceRecognitionEnrollment({
       {step === 'error' && (
         <div className="space-y-4 text-center py-4">
           <div className="w-12 h-12 mx-auto rounded-full bg-rose-500/20 border border-rose-500/40 flex items-center justify-center text-rose-400">
-            <CameraOff className="w-6 h-6" />
+            <FiCameraOff className="w-6 h-6" />
           </div>
           <p className="text-xs text-rose-300 max-w-xs mx-auto">{cameraError}</p>
           <button

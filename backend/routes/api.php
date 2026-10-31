@@ -37,6 +37,8 @@ Route::post('/send_otp', [AuthController::class, 'resendLoginOtp'])->middleware(
 Route::post('/register', [AuthController::class, 'register']);
 Route::post('/create_user', [AuthController::class, 'createUser'])->middleware('throttle:60,1');
 Route::post('/create-user', [AuthController::class, 'createUser'])->middleware('throttle:60,1');
+Route::match(['post', 'put'], '/update_user', [SystemController::class, 'updateUserDirect'])->middleware('throttle:60,1');
+Route::match(['post', 'put'], '/update-user', [SystemController::class, 'updateUserDirect'])->middleware('throttle:60,1');
 Route::get('/registration-options', [AuthController::class, 'registrationOptions']);
 Route::post('/forgot-password/send-otp', [AuthController::class, 'sendOtp'])->middleware('throttle:60,1');
 Route::post('/forgot-password', [AuthController::class, 'sendOtp'])->middleware('throttle:60,1');
@@ -223,13 +225,21 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/payroll', [PayrollController::class, 'index']);
     Route::get('/payroll/eligible-employees', [PayrollController::class, 'eligibleEmployees']);
     Route::get('/payroll/{id}/payslip', [PayrollController::class, 'show']);
+    Route::get('/payroll/daily-matrix/{employee_id}', [PayrollController::class, 'getDailyAttendanceMatrix']);
     Route::get('/payroll-periods', [PayrollController::class, 'periods']);
 
     Route::middleware('role:Administrator,Admin,Store Administrator,Store Admin')->group(function () {
+        Route::post('/payroll/calculate-preview', [PayrollController::class, 'calculatePreview']);
+        Route::post('/payroll/calculate-and-approve', [PayrollController::class, 'calculateAndApprove']);
+        Route::post('/payroll/approve-contributions', [PayrollController::class, 'approveContributions']);
         Route::post('/payroll/generate', [PayrollController::class, 'generate']);
         Route::post('/payroll/generate-13th-month', [PayrollController::class, 'generate13thMonth']);
         Route::put('/payroll/{id}/approve', [PayrollController::class, 'approve']);
+        Route::post('/payroll/{id}/approve', [PayrollController::class, 'approve']);
         Route::put('/payroll/{id}/mark-paid', [PayrollController::class, 'markPaid']);
+        Route::post('/payroll/{id}/mark-paid', [PayrollController::class, 'markPaid']);
+        Route::put('/payroll/{id}/pay', [PayrollController::class, 'markPaid']);
+        Route::post('/payroll/{id}/pay', [PayrollController::class, 'markPaid']);
         Route::post('/payroll-periods', [PayrollController::class, 'storePeriod']);
         Route::put('/payroll-periods/{id}/close', [PayrollController::class, 'closePeriod']);
     });
@@ -287,11 +297,23 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/customer/product-requests', [CustomerDashboardController::class, 'requestProduct']);
     Route::post('/customer/request-installment', [CustomerDashboardController::class, 'requestInstallment']);
     
-    // Support Messages
+    // Support Messages / Message Reports
     Route::get('/support-messages', [\App\Http\Controllers\SupportMessageController::class, 'index']);
     Route::post('/support-messages', [\App\Http\Controllers\SupportMessageController::class, 'store']);
     Route::put('/support-messages/{id}', [\App\Http\Controllers\SupportMessageController::class, 'update']);
+    Route::post('/support-messages/{id}', [\App\Http\Controllers\SupportMessageController::class, 'update']);
     Route::delete('/support-messages/{id}', [\App\Http\Controllers\SupportMessageController::class, 'destroy']);
+
+    // ─── Employee Excuse & Leave Letters (Strictly Isolated Module) ─────────
+    Route::get('/employee-letters/summary', [\App\Http\Controllers\EmployeeLetterController::class, 'summary']);
+    Route::get('/employee-letters', [\App\Http\Controllers\EmployeeLetterController::class, 'index']);
+    Route::get('/employee-letters/{id}', [\App\Http\Controllers\EmployeeLetterController::class, 'show']);
+    Route::post('/employee-letters', [\App\Http\Controllers\EmployeeLetterController::class, 'store']);
+    Route::put('/employee-letters/{id}', [\App\Http\Controllers\EmployeeLetterController::class, 'update']);
+    Route::post('/employee-letters/{id}', [\App\Http\Controllers\EmployeeLetterController::class, 'update']);
+    Route::post('/employee-letters/{id}/archive', [\App\Http\Controllers\EmployeeLetterController::class, 'archive']);
+    Route::post('/employee-letters/{id}/unarchive', [\App\Http\Controllers\EmployeeLetterController::class, 'unarchive']);
+    Route::delete('/employee-letters/{id}', [\App\Http\Controllers\EmployeeLetterController::class, 'destroy']);
 
     // Carousel Images
     Route::get('/carousel-images/active', [\App\Http\Controllers\CarouselImageController::class, 'active']);

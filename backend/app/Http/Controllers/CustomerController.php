@@ -34,7 +34,15 @@ class CustomerController extends Controller
             }
         }
 
-        $query = Customer::with(['installmentAccounts.payments', 'branch', 'user', 'installmentAllowedByUser']);
+        $query = Customer::with([
+            'installmentAccounts' => function ($q) {
+                $q->select(['installment_id', 'customer_id', 'status', 'down_payment', 'total_payable'])
+                  ->withSum('payments', 'amount');
+            },
+            'branch:id,name',
+            'user:user_id,customer_id,is_active',
+            'installmentAllowedByUser:user_id,username',
+        ]);
 
         if ($user && $user->role === 'Store Administrator') {
             // Store Admin sees only their branch customers + unassigned (NULL branch) customers
@@ -120,7 +128,7 @@ class CustomerController extends Controller
 
             $totalBalance = 0;
             foreach ($c->installmentAccounts->whereIn('status', ['Active', 'Overdue']) as $inst) {
-                $paid = (float)$inst->payments->sum('amount') + (float)$inst->down_payment;
+                $paid = (float)($inst->payments_sum_amount ?? 0) + (float)$inst->down_payment;
                 $balance = max(0, (float)$inst->total_payable - $paid);
                 $totalBalance += $balance;
             }
@@ -193,7 +201,7 @@ class CustomerController extends Controller
                 $q->orderByDesc('sale_date');
             },
             'installmentAccounts' => function ($q) {
-                $q->with(['payments', 'paymentSchedules', 'sale'])->orderByDesc('installment_id');
+                $q->with(['payments.receivedBy:user_id,username', 'paymentSchedules', 'sale'])->orderByDesc('installment_id');
             }
         ])->findOrFail($id);
 
@@ -298,10 +306,6 @@ class CustomerController extends Controller
 
     public function store(Request $request)
     {
-        if ($request->user() && $request->user()->role === 'Administrator') {
-            return response()->json(['success' => false, 'message' => 'Admin is not authorized to create customers.'], 403);
-        }
-
         $validated = $request->validate([
             'customer_code' => 'nullable|string|unique:customers,customer_code',
             'first_name'    => 'required|string|max:255',
@@ -316,13 +320,30 @@ class CustomerController extends Controller
             'status'        => 'required|string|in:Active,Inactive',
             'notes'         => 'nullable|string',
             'branch_id'     => 'nullable|integer|exists:branch_profiles,id',
+            'branch'        => 'nullable|string|max:255',
         ]);
 
         $user = auth()->user();
-        if ($user && $user->role === 'Store Administrator') {
-            // Always force the customer's branch to the Store Admin's own branch
-            if ($user->employee && $user->employee->branch_id) {
+        if ($user && in_array($user->role, ['Store Administrator', 'Store Admin'])) {
+            // Default to Store Admin's assigned branch if not explicitly chosen
+            if (empty($validated['branch_id']) && $user->employee && $user->employee->branch_id) {
                 $validated['branch_id'] = $user->employee->branch_id;
+            }
+        }
+
+        // Keep branch_id and branch string synchronized in ledger
+        if (!empty($validated['branch_id'])) {
+            $bp = BranchProfile::find($validated['branch_id']);
+            if ($bp) {
+                $validated['branch'] = $bp->name;
+            }
+        } elseif ($request->filled('branch')) {
+            $bp = BranchProfile::where('name', $request->input('branch'))->first();
+            if ($bp) {
+                $validated['branch_id'] = $bp->id;
+                $validated['branch'] = $bp->name;
+            } else {
+                $validated['branch'] = $request->input('branch');
             }
         }
 
@@ -332,15 +353,18 @@ class CustomerController extends Controller
         }
 
         $customer = Customer::create($validated);
+        $customer->load(['branch', 'branchProfile']);
 
         SystemLog::create([
             'user_id'     => $request->user()?->user_id ?? $request->input('user_id'),
             'action'      => 'CREATE',
             'module'      => 'Customers',
-            'description' => "Created new customer: {$customer->first_name} {$customer->last_name} ({$customer->customer_code})",
+            'description' => "Created new customer: {$customer->first_name} {$customer->last_name} ({$customer->customer_code})" . ($customer->branch_name ? " for branch {$customer->branch_name}" : ""),
             'ip_address'  => $request->ip(),
             'user_agent'  => $request->userAgent(),
         ]);
+
+        SyncController::invalidateFingerprint();
 
         return response()->json([
             'message'  => 'Customer created successfully',
@@ -350,10 +374,6 @@ class CustomerController extends Controller
 
     public function update(Request $request, $id)
     {
-        if ($request->user() && $request->user()->role === 'Administrator') {
-            return response()->json(['success' => false, 'message' => 'Admin is not authorized to update customers.'], 403);
-        }
-
         $customer = Customer::findOrFail($id);
 
         $validated = $request->validate([
@@ -370,38 +390,63 @@ class CustomerController extends Controller
             'status'        => 'required|string|in:Active,Inactive',
             'notes'         => 'nullable|string',
             'branch_id'     => 'nullable|integer|exists:branch_profiles,id',
+            'branch'        => 'nullable|string|max:255',
         ]);
 
         $user = auth()->user();
-        if ($user && $user->role === 'Store Administrator') {
-            if ($user->employee && $user->employee->branch_id) {
+        if ($user && in_array($user->role, ['Store Administrator', 'Store Admin'])) {
+            if (empty($validated['branch_id']) && $user->employee && $user->employee->branch_id) {
                 $validated['branch_id'] = $user->employee->branch_id;
             }
         }
 
+        // Keep branch_id and branch string synchronized in ledger
+        if (array_key_exists('branch_id', $validated)) {
+            if (!empty($validated['branch_id'])) {
+                $bp = BranchProfile::find($validated['branch_id']);
+                $validated['branch'] = $bp ? $bp->name : null;
+            } else {
+                $validated['branch'] = null;
+            }
+        } elseif ($request->filled('branch')) {
+            $bp = BranchProfile::where('name', $request->input('branch'))->first();
+            if ($bp) {
+                $validated['branch_id'] = $bp->id;
+                $validated['branch'] = $bp->name;
+            } else {
+                $validated['branch'] = $request->input('branch');
+            }
+        }
+
         $customer->update($validated);
+        $customer->load(['branch', 'branchProfile']);
+
+        // Synchronize customer branch in sales transactions ledger
+        if ($customer->branch_id) {
+            SaleTransaction::where('customer_id', $customer->customer_id)
+                ->whereNull('branch_id')
+                ->update(['branch_id' => $customer->branch_id]);
+        }
 
         SystemLog::create([
             'user_id'     => $request->user()?->user_id ?? $request->input('user_id'),
             'action'      => 'UPDATE',
             'module'      => 'Customers',
-            'description' => "Updated customer: {$customer->first_name} {$customer->last_name} ({$customer->customer_code})",
+            'description' => "Updated customer: {$customer->first_name} {$customer->last_name} ({$customer->customer_code})" . ($customer->branch_name ? " with branch {$customer->branch_name}" : ""),
             'ip_address'  => $request->ip(),
             'user_agent'  => $request->userAgent(),
         ]);
 
+        SyncController::invalidateFingerprint();
+
         return response()->json([
             'message'  => 'Customer updated successfully',
-            'customer' => $customer->load('branch'),
+            'customer' => $customer,
         ]);
     }
 
     public function destroy(Request $request, $id)
     {
-        if ($request->user() && $request->user()->role === 'Administrator') {
-            return response()->json(['success' => false, 'message' => 'Admin is not authorized to delete customers.'], 403);
-        }
-
         $customer = Customer::findOrFail($id);
         $name = "{$customer->first_name} {$customer->last_name}";
         $code = $customer->customer_code;
@@ -416,6 +461,8 @@ class CustomerController extends Controller
             'ip_address'  => $request->ip(),
             'user_agent'  => $request->userAgent(),
         ]);
+
+        SyncController::invalidateFingerprint();
 
         return response()->json(['message' => 'Customer deleted successfully']);
     }
@@ -476,6 +523,8 @@ class CustomerController extends Controller
                 ]);
             }
         }
+
+        SyncController::invalidateFingerprint();
 
         return response()->json([
             'message'     => 'Customer branch updated successfully',
@@ -550,6 +599,8 @@ class CustomerController extends Controller
             ];
             \App\Services\NotificationService::sendToUser($customer->user->user_id, $notifData);
         }
+
+        SyncController::invalidateFingerprint();
 
         return response()->json([
             'success' => true,

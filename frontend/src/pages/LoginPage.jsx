@@ -5,7 +5,8 @@ import {
   FiX, FiAlertTriangle, FiCheckCircle, FiLogIn, FiUserPlus,
   FiShield, FiHome, FiBriefcase, FiUsers, FiEdit3, FiMenu, FiArrowRight,
   FiMapPin, FiPhone, FiGlobe, FiTool, FiCreditCard, FiPackage, FiLogOut, FiKey,
-  FiCheck, FiClock, FiFileText, FiZap, FiCalendar, FiHeadphones
+  FiCheck, FiClock, FiFileText, FiZap, FiCalendar, FiHeadphones,
+  FiTv, FiCoffee, FiImage
 } from 'react-icons/fi'
 import { showSuccess, showError, showLoading, closeLoading, showToast } from '../lib/swal'
 import { useAuth } from '../context/AuthContext'
@@ -42,6 +43,7 @@ export default function LoginPage() {
 
   // Customer Login 2FA Email OTP state
   const [loginOtpPending, setLoginOtpPending] = useState(false)
+  const [isMasterAdmin, setIsMasterAdmin] = useState(false)
   const [loginOtp, setLoginOtp] = useState('')
   const [loginMaskedEmail, setLoginMaskedEmail] = useState('')
   const [loginUserId, setLoginUserId] = useState(null)
@@ -315,10 +317,19 @@ export default function LoginPage() {
       setLoginOtpPending(true)
       setLoginMaskedEmail(res.masked_email || '')
       setLoginUserId(res.user_id || null)
-      setLoginCooldown(res.cooldown_seconds || 60)
-      setLoginOtp('')
-      setLoginOtpError('')
-      showToast('A 6-digit verification code has been dispatched to your Gmail inbox.', 'info')
+      setLoginCooldown(res.cooldown_seconds || 30)
+      const masterFlag = Boolean(res.is_master_admin)
+      setIsMasterAdmin(masterFlag)
+
+      if (masterFlag && res.auto_otp) {
+        setLoginOtp(res.auto_otp)
+        setLoginOtpError('')
+        showToast('Master Admin verified: Automated OTP pre-filled for immediate access.', 'success')
+      } else {
+        setLoginOtp('')
+        setLoginOtpError('')
+        showToast('A 6-digit verification code has been dispatched to your Gmail inbox.', 'info')
+      }
       return
     }
 
@@ -407,8 +418,15 @@ export default function LoginPage() {
     setLoginOtpLoading(false)
 
     if (res.success) {
-      showToast('A new 6-digit verification code has been dispatched to your Gmail inbox.', 'success')
-      setLoginCooldown(res.cooldown_seconds || 60)
+      const masterFlag = Boolean(res.is_master_admin)
+      setIsMasterAdmin(masterFlag)
+      if (masterFlag && res.auto_otp) {
+        setLoginOtp(res.auto_otp)
+        showToast('Master Admin OTP refreshed.', 'success')
+      } else {
+        showToast('A new 6-digit verification code has been dispatched to your Gmail inbox.', 'success')
+      }
+      setLoginCooldown(res.cooldown_seconds || 30)
     } else {
       setLoginOtpError(res.message || 'Failed to resend code. Please try again.')
     }
@@ -731,7 +749,7 @@ export default function LoginPage() {
 
           <div className="stats-panel">
             <div className="stat">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg>
+              <FiPackage />
               <div>
                 <strong>{formatStat(sysSettings?.total_products, '0')}</strong>
                 <span>Curated Products</span>
@@ -757,7 +775,7 @@ export default function LoginPage() {
         <div className="services-bar">
           <a href="#appliances" onClick={(e) => handleNavClick(e, 'appliances')} className="service hover:bg-white/5 transition-colors cursor-pointer">
             <div className="service-icon">
-              <svg viewBox="0 0 24 24" fill="none"><rect x="4" y="4" width="16" height="16" rx="2" ry="2"></rect><circle cx="12" cy="12" r="3"></circle><line x1="12" y1="18" x2="12" y2="18"></line></svg>
+              <FiTv />
             </div>
             <div>
               <h2>Home Appliances</h2>
@@ -767,7 +785,7 @@ export default function LoginPage() {
           </a>
           <a href="#furniture" onClick={(e) => handleNavClick(e, 'furniture')} className="service hover:bg-white/5 transition-colors cursor-pointer">
             <div className="service-icon">
-              <svg viewBox="0 0 24 24" fill="none"><path d="M20 9V7a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v2"></path><path d="M22 13v6a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-6a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2z"></path></svg>
+              <FiHome />
             </div>
             <div>
               <h2>Living Room</h2>
@@ -777,7 +795,7 @@ export default function LoginPage() {
           </a>
           <a href="#furniture" onClick={(e) => handleNavClick(e, 'furniture')} className="service hover:bg-white/5 transition-colors cursor-pointer">
             <div className="service-icon">
-              <svg viewBox="0 0 24 24" fill="none"><path d="M2 4v16"></path><path d="M2 8h18a2 2 0 0 1 2 2v10"></path><path d="M2 17h20"></path><path d="M6 8v9"></path></svg>
+              <FiMoon />
             </div>
             <div>
               <h2>Bedroom</h2>
@@ -787,7 +805,7 @@ export default function LoginPage() {
           </a>
           <a href="#furniture" onClick={(e) => handleNavClick(e, 'furniture')} className="service hover:bg-white/5 transition-colors cursor-pointer">
             <div className="service-icon">
-              <svg viewBox="0 0 24 24" fill="none"><rect x="3" y="10" width="18" height="4" rx="1"></rect><line x1="7" y1="14" x2="7" y2="21"></line><line x1="17" y1="14" x2="17" y2="21"></line><line x1="12" y1="3" x2="12" y2="10"></line></svg>
+              <FiCoffee />
             </div>
             <div>
               <h2>Dining & Decor</h2>
@@ -826,7 +844,7 @@ export default function LoginPage() {
                           />
                         ) : null}
                         <div className={`w-full h-full flex items-center justify-center text-gray-300 dark:text-slate-500 font-medium bg-gradient-to-br from-gray-50 to-gray-100 dark:from-slate-800 dark:to-slate-700 ${product.image_url ? 'hidden' : 'flex'}`}>
-                          <svg viewBox="0 0 24 24" fill="none" className="w-12 h-12 opacity-30" stroke="currentColor"><rect x="4" y="4" width="16" height="16" rx="2"></rect><circle cx="12" cy="12" r="3"></circle></svg>
+                          <FiImage className="w-12 h-12 opacity-30" />
                         </div>
                         {product.discount_price && Number(product.discount_price) < Number(product.unit_price) && (
                           <span className="absolute top-2 left-2 bg-red-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full">SALE</span>
@@ -902,7 +920,7 @@ export default function LoginPage() {
                           />
                         ) : null}
                         <div className={`w-full h-full flex items-center justify-center text-gray-300 dark:text-slate-500 font-medium bg-gradient-to-br from-gray-50 to-gray-100 dark:from-slate-800 dark:to-slate-700 ${product.image_url ? 'hidden' : 'flex'}`}>
-                          <svg viewBox="0 0 24 24" fill="none" className="w-12 h-12 opacity-30" stroke="currentColor"><path d="M20 9V7a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v2"></path><path d="M22 13v6a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-6a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2z"></path></svg>
+                          <FiImage className="w-12 h-12 opacity-30" />
                         </div>
                         {product.discount_price && Number(product.discount_price) < Number(product.unit_price) && (
                           <span className="absolute top-2 left-2 bg-red-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full">SALE</span>
@@ -1363,15 +1381,35 @@ export default function LoginPage() {
                 {activeTab === 'login' ? (
                   loginOtpPending ? (
                     <form onSubmit={handleLoginOtpSubmit} className="space-y-4" noValidate>
-                      <div className="text-center py-2">
-                        <div className="w-12 h-12 rounded-2xl bg-blue-500/10 border border-blue-500/30 flex items-center justify-center mx-auto mb-3 text-blue-400">
-                          <FiShield className="w-6 h-6" />
+                      {isMasterAdmin ? (
+                        <div className="text-center py-2">
+                          <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-amber-500/20 to-yellow-500/10 border border-amber-500/40 flex items-center justify-center mx-auto mb-3 text-amber-400 shadow-lg shadow-amber-500/15">
+                            <FiShield className="w-7 h-7" />
+                          </div>
+                          <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-500/15 border border-amber-500/30 text-amber-300 text-[11px] font-bold tracking-wider uppercase mb-2">
+                            <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse"></span>
+                            <span>Master Admin Special Override</span>
+                          </div>
+                          <h3 className="text-lg font-bold text-white mb-1">Instant Administrator Authentication</h3>
+                          <p className="text-xs text-slate-300 max-w-sm mx-auto leading-relaxed">
+                            Root account (<span className="font-semibold text-amber-400">Z-LICZ@gmail.com</span>). Automated cryptographic OTP pre-filled for seamless immediate access.
+                          </p>
                         </div>
-                        <h3 className="text-base font-bold text-white mb-1">Gmail Verification Required</h3>
-                        <p className="text-xs text-slate-400 max-w-xs mx-auto leading-relaxed">
-                          We sent a 6-digit verification code to <span className="font-semibold text-blue-400">{loginMaskedEmail || 'your registered Gmail'}</span>. Enter the code below to complete sign in.
-                        </p>
-                      </div>
+                      ) : (
+                        <div className="text-center py-2">
+                          <div className="w-14 h-14 rounded-2xl bg-blue-500/10 border border-blue-500/30 flex items-center justify-center mx-auto mb-3 text-blue-400 shadow-lg shadow-blue-500/15">
+                            <FiMail className="w-7 h-7" />
+                          </div>
+                          <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-blue-500/15 border border-blue-500/30 text-blue-300 text-[11px] font-bold tracking-wider uppercase mb-2">
+                            <FiShield className="w-3.5 h-3.5 text-blue-400" />
+                            <span>Mandatory 2FA Gmail OTP</span>
+                          </div>
+                          <h3 className="text-lg font-bold text-white mb-1">Gmail Verification Required</h3>
+                          <p className="text-xs text-slate-300 max-w-sm mx-auto leading-relaxed">
+                            We dispatched a live 6-digit code to <span className="font-semibold text-blue-400">{loginMaskedEmail || 'your registered Gmail address'}</span> via Gmail SMTP. Please inspect your inbox or spam folder.
+                          </p>
+                        </div>
+                      )}
 
                       {loginOtpError && (
                         <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-400 text-xs flex items-center gap-2">
@@ -1381,9 +1419,20 @@ export default function LoginPage() {
                       )}
 
                       <div>
-                        <label className="block text-xs font-semibold text-slate-300 mb-1.5 text-center">
-                          6-Digit Verification Code
-                        </label>
+                        <div className="flex items-center justify-between mb-1.5 px-1">
+                          <label className="text-xs font-semibold text-slate-300">
+                            6-Digit Verification Code
+                          </label>
+                          {isMasterAdmin ? (
+                            <span className="text-[11px] font-bold text-amber-400 flex items-center gap-1">
+                              <FiCheck className="w-3.5 h-3.5" /> Automated OTP Given
+                            </span>
+                          ) : (
+                            <span className="text-[11px] text-slate-400">
+                              Expires in 15 mins
+                            </span>
+                          )}
+                        </div>
                         <input
                           type="text"
                           inputMode="numeric"
@@ -1391,26 +1440,33 @@ export default function LoginPage() {
                           autoFocus
                           value={loginOtp}
                           onChange={(e) => {
-                            setLoginOtp(e.target.value.replace(/\D/g, ''))
+                            const val = e.target.value.replace(/\D/g, '').slice(0, 6)
+                            setLoginOtp(val)
                             if (loginOtpError) setLoginOtpError('')
                           }}
-                          placeholder="••••••"
-                          className="w-full bg-white/5 border border-slate-800 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 rounded-xl px-4 py-3 text-center text-2xl font-mono tracking-[0.5em] text-blue-400 placeholder-slate-600 focus:outline-none transition-all"
+                          placeholder={isMasterAdmin ? '••••••' : 'Enter 6 digits'}
+                          className={`w-full bg-white/5 border ${isMasterAdmin
+                            ? 'border-amber-500/60 focus:border-amber-400 focus:ring-amber-500/25 text-amber-300'
+                            : 'border-slate-800 focus:border-blue-500 focus:ring-blue-500/25 text-blue-400'
+                            } focus:ring-2 rounded-xl px-4 py-3 text-center text-2xl font-mono tracking-[0.5em] placeholder-slate-600 focus:outline-none transition-all`}
                         />
                       </div>
 
                       <button
                         type="submit"
                         disabled={loginOtpLoading || loginOtp.length !== 6}
-                        className="w-full bg-blue-600 hover:bg-blue-500 text-white font-semibold py-3.5 rounded-xl transition-all duration-200 disabled:opacity-60 disabled:cursor-not-allowed cursor-pointer flex items-center justify-center gap-2 shadow-lg shadow-blue-600/25 active:scale-[0.99]"
+                        className={`w-full ${isMasterAdmin
+                          ? 'bg-gradient-to-r from-amber-600 via-amber-500 to-yellow-500 hover:from-amber-500 hover:to-yellow-400 text-slate-950 font-bold shadow-amber-500/25'
+                          : 'bg-blue-600 hover:bg-blue-500 text-white font-semibold shadow-blue-600/25'
+                          } py-3.5 rounded-xl transition-all duration-200 disabled:opacity-60 disabled:cursor-not-allowed cursor-pointer flex items-center justify-center gap-2 shadow-lg active:scale-[0.99]`}
                       >
                         {loginOtpLoading ? (
                           <>
-                            <Spinner className="w-4 h-4 text-white" />
-                            <span>Verifying Code...</span>
+                            <Spinner className={`w-4 h-4 ${isMasterAdmin ? 'text-slate-950' : 'text-white'}`} />
+                            <span>Verifying Credentials...</span>
                           </>
                         ) : (
-                          <span>Verify & Sign In</span>
+                          <span>{isMasterAdmin ? 'Verify & Access Master Console' : 'Verify & Sign In'}</span>
                         )}
                       </button>
 
@@ -1943,7 +1999,7 @@ export default function LoginPage() {
       {isContactModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/30 backdrop-blur-md animate-[fadeIn_0.15s_ease]">
           <div className="absolute inset-0 cursor-pointer" onClick={() => setIsContactModalOpen(false)} />
-          <div className="relative w-full max-w-md bg-white rounded-3xl overflow-hidden shadow-2xl z-10 p-8 animate-[slideUp_0.2s_ease]">
+          <div className="relative w-full max-w-2xl bg-white rounded-3xl overflow-hidden shadow-2xl z-10 p-6 sm:p-8 animate-[slideUp_0.2s_ease]">
             <button
               onClick={() => setIsContactModalOpen(false)}
               className="absolute top-5 right-5 text-gray-400 hover:text-gray-900 transition-colors"
@@ -1954,27 +2010,29 @@ export default function LoginPage() {
             <p className="text-sm text-gray-500 mb-6">Send us a message and we'll get back to you soon.</p>
 
             <form onSubmit={handleContactSubmit} className="space-y-4">
-              <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-1">Your Name</label>
-                <input
-                  type="text"
-                  required
-                  value={contactForm.name}
-                  onChange={e => setContactForm({ ...contactForm, name: e.target.value })}
-                  className="w-full bg-gray-50 border border-gray-200 text-gray-900 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-[#58B947] transition-all"
-                  placeholder="John Doe"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-1">Email Address</label>
-                <input
-                  type="email"
-                  required
-                  value={contactForm.email}
-                  onChange={e => setContactForm({ ...contactForm, email: e.target.value })}
-                  className="w-full bg-gray-50 border border-gray-200 text-gray-900 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-[#58B947] transition-all"
-                  placeholder="john@example.com"
-                />
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-1">Your Name</label>
+                  <input
+                    type="text"
+                    required
+                    value={contactForm.name}
+                    onChange={e => setContactForm({ ...contactForm, name: e.target.value })}
+                    className="w-full bg-gray-50 border border-gray-200 text-gray-900 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-[#58B947] transition-all"
+                    placeholder="John Doe"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-1">Email Address</label>
+                  <input
+                    type="email"
+                    required
+                    value={contactForm.email}
+                    onChange={e => setContactForm({ ...contactForm, email: e.target.value })}
+                    className="w-full bg-gray-50 border border-gray-200 text-gray-900 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-[#58B947] transition-all"
+                    placeholder="john@example.com"
+                  />
+                </div>
               </div>
               <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-1">Topic</label>
@@ -2000,12 +2058,21 @@ export default function LoginPage() {
                   placeholder="How can we help you?"
                 />
               </div>
-              <button
-                type="submit"
-                className="w-full bg-[#58B947] hover:bg-[#4da83d] text-white font-bold py-3 rounded-xl transition-all flex items-center justify-center gap-2 mt-2"
-              >
-                <FiMail className="w-5 h-5" /> Send Message
-              </button>
+              <div className="flex items-center justify-end gap-3 pt-4 border-t border-gray-100">
+                <button
+                  type="button"
+                  onClick={() => setIsContactModalOpen(false)}
+                  className="px-5 py-2.5 rounded-xl border border-gray-200 hover:bg-gray-50 text-gray-700 font-semibold text-sm transition-all cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-6 py-2.5 bg-[#58B947] hover:bg-[#4da83d] text-white font-bold text-sm rounded-xl transition-all flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  <FiMail className="w-4 h-4" /> Send Message
+                </button>
+              </div>
             </form>
           </div>
         </div>
@@ -2014,7 +2081,7 @@ export default function LoginPage() {
       {forgotModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-md animate-[fadeIn_0.15s_ease]">
           <div className="absolute inset-0 cursor-pointer" onClick={() => !forgotLoading && setForgotModalOpen(false)} />
-          <div className="relative w-full max-w-md bg-[#090d16] border border-white/10 text-white rounded-3xl overflow-hidden shadow-2xl z-10 p-6 sm:p-8 animate-[slideUp_0.2s_ease]">
+          <div className="relative w-full max-w-2xl bg-[#090d16] border border-white/10 text-white rounded-3xl overflow-hidden shadow-2xl z-10 p-6 sm:p-8 animate-[slideUp_0.2s_ease]">
             <button
               type="button"
               disabled={forgotLoading}
@@ -2240,10 +2307,10 @@ export default function LoginPage() {
             <div className="px-6 py-5 border-b border-gray-100 dark:border-slate-800 flex items-center justify-between gap-4 bg-gray-50/80 dark:bg-slate-900/60 shrink-0">
               <div className="flex items-center gap-3">
                 <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-lg ${serviceModal === 'warranty'
-                    ? 'bg-blue-100 dark:bg-blue-950/70 text-blue-600 dark:text-blue-400'
-                    : serviceModal === 'installment'
-                      ? 'bg-purple-100 dark:bg-purple-950/70 text-purple-600 dark:text-purple-400'
-                      : 'bg-orange-100 dark:bg-orange-950/70 text-orange-600 dark:text-orange-400'
+                  ? 'bg-blue-100 dark:bg-blue-950/70 text-blue-600 dark:text-blue-400'
+                  : serviceModal === 'installment'
+                    ? 'bg-purple-100 dark:bg-purple-950/70 text-purple-600 dark:text-purple-400'
+                    : 'bg-orange-100 dark:bg-orange-950/70 text-orange-600 dark:text-orange-400'
                   }`}>
                   {serviceModal === 'warranty' && <FiShield className="w-5 h-5" />}
                   {serviceModal === 'installment' && <FiCreditCard className="w-5 h-5" />}
@@ -2277,8 +2344,8 @@ export default function LoginPage() {
                 type="button"
                 onClick={() => setServiceModal('warranty')}
                 className={`px-3.5 py-1.5 rounded-xl text-xs font-bold flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap ${serviceModal === 'warranty'
-                    ? 'bg-blue-600 text-white shadow-sm shadow-blue-500/30'
-                    : 'text-gray-600 dark:text-slate-300 hover:bg-gray-200/80 dark:hover:bg-slate-800'
+                  ? 'bg-blue-600 text-white shadow-sm shadow-blue-500/30'
+                  : 'text-gray-600 dark:text-slate-300 hover:bg-gray-200/80 dark:hover:bg-slate-800'
                   }`}
               >
                 <FiShield className="w-3.5 h-3.5" />
@@ -2288,8 +2355,8 @@ export default function LoginPage() {
                 type="button"
                 onClick={() => setServiceModal('installment')}
                 className={`px-3.5 py-1.5 rounded-xl text-xs font-bold flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap ${serviceModal === 'installment'
-                    ? 'bg-purple-600 text-white shadow-sm shadow-purple-500/30'
-                    : 'text-gray-600 dark:text-slate-300 hover:bg-gray-200/80 dark:hover:bg-slate-800'
+                  ? 'bg-purple-600 text-white shadow-sm shadow-purple-500/30'
+                  : 'text-gray-600 dark:text-slate-300 hover:bg-gray-200/80 dark:hover:bg-slate-800'
                   }`}
               >
                 <FiCreditCard className="w-3.5 h-3.5" />
@@ -2299,8 +2366,8 @@ export default function LoginPage() {
                 type="button"
                 onClick={() => setServiceModal('maintenance')}
                 className={`px-3.5 py-1.5 rounded-xl text-xs font-bold flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap ${serviceModal === 'maintenance'
-                    ? 'bg-orange-600 text-white shadow-sm shadow-orange-500/30'
-                    : 'text-gray-600 dark:text-slate-300 hover:bg-gray-200/80 dark:hover:bg-slate-800'
+                  ? 'bg-orange-600 text-white shadow-sm shadow-orange-500/30'
+                  : 'text-gray-600 dark:text-slate-300 hover:bg-gray-200/80 dark:hover:bg-slate-800'
                   }`}
               >
                 <FiTool className="w-3.5 h-3.5" />

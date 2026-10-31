@@ -19,6 +19,10 @@ class Customer extends Model
         'installment_allowed_at' => 'datetime',
     ];
 
+    protected $appends = [
+        'branch_name',
+    ];
+
     // Relationships
     public function saleTransactions()
     {

@@ -25,9 +25,9 @@
 }
 
 :root {
-  --background: #f1f5f9;
+  --background: #f8fafc;
   --foreground: #0f172a;
-  --card: rgba(255, 255, 255, 0.92);
+  --card: #ffffff;
   --card-foreground: #0f172a;
   --primary: #2563eb;
   --primary-foreground: #ffffff;
@@ -37,7 +37,7 @@
   --muted-foreground: #475569;
   --accent: #0284c7;
   --accent-foreground: #ffffff;
-  --border: rgba(59, 130, 246, 0.18);
+  --border: rgba(59, 130, 246, 0.16);
   --ring: #2563eb;
   --radius: 8px;
   --icon-color: #2563eb;
@@ -46,7 +46,7 @@
 .dark {
   --background: #081026;
   --foreground: #f8fafc;
-  --card: rgba(12, 24, 56, 0.82);
+  --card: #0c1838;
   --card-foreground: #f8fafc;
   --primary: #3b82f6;
   --primary-foreground: #ffffff;
@@ -62,8 +62,8 @@
 }
 
 .bg-card {
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
 }
 
 /* Global React Icon Theme Class */
@@ -157,6 +157,28 @@ body {
   }
 }
 
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-8px)
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0)
+  }
+}
+
+@keyframes slideRight {
+  from {
+    transform: translateX(-100%);
+  }
+
+  to {
+    transform: translateX(0);
+  }
+}
+
 .transition-sidebar {
   transition: width 0.2s ease, transform 0.2s ease;
 }
@@ -200,11 +222,11 @@ body {
 .branch-modal-shell {
   position: relative;
   background: var(--c-surface);
-  border-radius: 18px;
+  border-radius: 16px;
   box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.06), 0 24px 64px rgba(0, 0, 0, 0.18);
   width: 100%;
-  max-width: 1000px;
-  max-height: 88vh;
+  max-width: 48rem;
+  max-height: 90vh;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -537,90 +559,93 @@ body {
   line-height: 1.5;
 }
 
-/* Futuristic 3D Light & Dark Environments */
-.admin-shell {
-  background: url('/assets/admin_bg_light.jpg') no-repeat center center fixed !important;
-  background-size: cover !important;
+/* Clean Role-Based Dashboard & View Backgrounds (Admin, Store Admin, Employee, Customer) */
+.admin-shell,
+.role-admin,
+.role-administrator,
+.role-store-admin,
+.role-store-administrator,
+.role-employee,
+.role-customer {
+  background: var(--background) !important;
+  background-image: none !important;
+  background-color: var(--background) !important;
 }
 
 .admin-shell.dark,
-.dark .admin-shell {
-  background: url('/assets/admin_bg.jpg') no-repeat center center fixed !important;
-  background-size: cover !important;
+.dark .admin-shell,
+.dark .role-admin,
+.dark .role-administrator,
+.dark .role-store-admin,
+.dark .role-store-administrator,
+.dark .role-employee,
+.dark .role-customer {
+  background: var(--background) !important;
+  background-image: none !important;
+  background-color: var(--background) !important;
 }
 
-/* Luxury Showroom Glassmorphism Panels */
+/* Default Clean Solid Card & Surface Panels with High Contrast */
 .bg-card,
 .bg-surface {
-  background: rgba(255, 255, 255, 0.88) !important;
-  backdrop-filter: blur(18px) saturate(180%);
-  -webkit-backdrop-filter: blur(18px) saturate(180%);
-  border: 1px solid rgba(16, 185, 129, 0.22) !important;
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.9),
-    0 8px 30px rgba(5, 36, 22, 0.08);
-  transition: transform 0.3s ease, box-shadow 0.3s ease;
+  background: var(--card) !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  border: 1px solid var(--border) !important;
+  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.05), 0 1px 2px -1px rgba(0, 0, 0, 0.05) !important;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
 }
 
 .bg-card:hover {
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 1),
-    0 12px 36px rgba(5, 36, 22, 0.12),
-    0 0 16px rgba(16, 185, 129, 0.16);
+  box-shadow: 0 4px 12px 0 rgba(0, 0, 0, 0.08) !important;
 }
 
 .dark .bg-card,
 .dark .bg-surface {
-  background: rgba(8, 25, 17, 0.78) !important;
-  backdrop-filter: blur(20px) saturate(160%);
-  -webkit-backdrop-filter: blur(20px) saturate(160%);
-  border: 1px solid rgba(52, 211, 153, 0.18) !important;
-  box-shadow:
-    inset 0 1px 0 rgba(245, 158, 11, 0.12),
-    0 8px 32px rgba(0, 0, 0, 0.5);
-  transition: transform 0.3s ease, box-shadow 0.3s ease;
+  background: var(--card) !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  border: 1px solid var(--border) !important;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35) !important;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
 }
 
 .dark .bg-card:hover {
-  transform: translateY(-2px);
-  box-shadow:
-    inset 0 1px 0 rgba(245, 158, 11, 0.2),
-    0 14px 44px rgba(0, 0, 0, 0.65),
-    0 0 20px rgba(16, 185, 129, 0.25);
-  /* Luxury emerald glow */
+  transform: translateY(-1px);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.5) !important;
 }
 
-/* Solid Showroom Structure - Sidebar & Header (No Transparency) */
+/* Solid Clean Sidebar & Header */
 .sidebar-shell {
   background: #ffffff !important;
   backdrop-filter: none !important;
   -webkit-backdrop-filter: none !important;
-  border-right: 1px solid rgba(59, 130, 246, 0.18) !important;
-  box-shadow: 4px 0 24px rgba(15, 23, 42, 0.05);
+  border-right: 1px solid var(--border) !important;
+  box-shadow: 1px 0 3px rgba(15, 23, 42, 0.04);
 }
 
 .dark .sidebar-shell {
   background: #081226 !important;
   backdrop-filter: none !important;
   -webkit-backdrop-filter: none !important;
-  border-right: 1px solid rgba(59, 130, 246, 0.22) !important;
-  box-shadow: 4px 0 32px rgba(2, 6, 23, 0.7);
+  border-right: 1px solid var(--border) !important;
+  box-shadow: 2px 0 12px rgba(2, 6, 23, 0.5);
 }
 
 .header-shell {
   background: #ffffff !important;
   backdrop-filter: none !important;
   -webkit-backdrop-filter: none !important;
-  border-bottom: 1px solid rgba(59, 130, 246, 0.18) !important;
-  box-shadow: 0 4px 20px rgba(15, 23, 42, 0.05);
+  border-bottom: 1px solid var(--border) !important;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
 }
 
 .dark .header-shell {
   background: #081226 !important;
   backdrop-filter: none !important;
   -webkit-backdrop-filter: none !important;
-  border-bottom: 1px solid rgba(59, 130, 246, 0.22) !important;
-  box-shadow: 0 4px 28px rgba(2, 6, 23, 0.6);
+  border-bottom: 1px solid var(--border) !important;
+  box-shadow: 0 2px 12px rgba(2, 6, 23, 0.5);
 }
 
 /* === LOGIN PAGE STYLES === */

@@ -9,8 +9,7 @@ use Carbon\Carbon;
 /**
  * Central attendance schedule rules.
  *
- *   TIME IN   08:00 AM
- *   CUT OFF   08:05 AM   (arrivals after this are LATE)
+ *   TIME IN   08:00 AM   (CUT OFF is exact 08:00 AM - arrivals after this are LATE)
  *   LUNCH OUT 12:00 PM
  *   LUNCH IN  01:00 PM
  *   TIME OUT  05:00 PM   (work after this is OVERTIME)
@@ -21,7 +20,7 @@ class AttendanceSchedule
 {
     public const DEFAULTS = [
         'schedule_time_in'   => '08:00',
-        'schedule_cutoff'    => '08:05',
+        'schedule_cutoff'    => '08:00',
         'schedule_lunch_out' => '12:00',
         'schedule_lunch_in'  => '13:00',
         'schedule_time_out'  => '17:00',
@@ -39,10 +38,16 @@ class AttendanceSchedule
         $values = \Illuminate\Support\Facades\Cache::remember('pace_attendance_schedule', 60, function () {
             $vals = self::DEFAULTS;
             try {
-                $stored = Setting::whereIn('key', array_keys(self::DEFAULTS))->pluck('value', 'key')->toArray();
+                $keysToFetch = array_merge(array_keys(self::DEFAULTS), ['attendance_cutoff', 'cutoff_time']);
+                $stored = Setting::whereIn('key', $keysToFetch)->pluck('value', 'key')->toArray();
                 foreach ($stored as $k => $v) {
                     if (is_string($v) && preg_match('/^\d{1,2}:\d{2}/', $v)) {
-                        $vals[$k] = substr($v, 0, 5);
+                        $parsed = substr($v, 0, 5);
+                        if ($k === 'attendance_cutoff' || $k === 'cutoff_time') {
+                            $vals['schedule_cutoff'] = $parsed;
+                        } else {
+                            $vals[$k] = $parsed;
+                        }
                     }
                 }
             } catch (\Throwable $e) {
@@ -110,7 +115,7 @@ class AttendanceSchedule
     /** Decide the next punch action for a record at the given scan time. */
     public static function nextAction(?Attendance $record, Carbon $scan): string
     {
-        if (!$record) return 'TIME_IN';
+        if (!$record || empty($record->time_in)) return 'TIME_IN';
         if ($record->lunch_out && !$record->lunch_in) return 'LUNCH_IN';
 
         if (!$record->lunch_out) {

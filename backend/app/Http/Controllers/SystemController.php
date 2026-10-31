@@ -353,8 +353,16 @@ class SystemController extends Controller
     public function storeUser(Request $request)
     {
         $role = $request->input('role');
-        if ($role === 'Store Admin') {
+        if (in_array($role, ['Store Admin', 'Manager (Store Admin)'])) {
             $request->merge(['role' => 'Store Administrator']);
+            if (!$request->filled('position')) {
+                $request->merge(['position' => 'Manager (Store Admin)']);
+            }
+        } elseif (in_array($role, ['Cashier (Employee)', 'Collector (Employee)', 'Utility (Employee)'])) {
+            if (!$request->filled('position')) {
+                $request->merge(['position' => $role]);
+            }
+            $request->merge(['role' => 'Employee']);
         }
 
         $validated = $request->validate([
@@ -422,13 +430,36 @@ class SystemController extends Controller
         ], 201);
     }
 
+    public function updateUserDirect(Request $request)
+    {
+        $id = $request->input('user_id') ?: $request->input('id');
+        if (!$id && $request->input('employee_id')) {
+            $u = User::where('employee_id', $request->input('employee_id'))->first();
+            if ($u) {
+                $id = $u->user_id;
+            }
+        }
+        if (!$id) {
+            return response()->json(['success' => false, 'message' => 'User ID is required for update.'], 422);
+        }
+        return $this->updateUser($request, $id);
+    }
+
     public function updateUser(Request $request, $id)
     {
         $user = User::findOrFail($id);
 
         $role = $request->input('role');
-        if ($role === 'Store Admin') {
+        if (in_array($role, ['Store Admin', 'Manager (Store Admin)'])) {
             $request->merge(['role' => 'Store Administrator']);
+            if (!$request->filled('position')) {
+                $request->merge(['position' => 'Manager (Store Admin)']);
+            }
+        } elseif (in_array($role, ['Cashier (Employee)', 'Collector (Employee)', 'Utility (Employee)'])) {
+            if (!$request->filled('position')) {
+                $request->merge(['position' => $role]);
+            }
+            $request->merge(['role' => 'Employee']);
         }
 
         $validated = $request->validate([
@@ -487,8 +518,13 @@ class SystemController extends Controller
                     $empData['date_of_birth'] = $dob;
                     $empData['birth_date'] = $dob;
                 }
-                if ($request->has('marital_status')) $empData['marital_status'] = $request->input('marital_status');
-                if ($request->has('position')) $empData['position'] = $request->input('position');
+                if ($request->has('position')) {
+                    $pos = $request->input('position');
+                    $empData['position'] = $pos;
+                    if (!$request->filled('department')) {
+                        $empData['department'] = ($pos === 'Manager (Store Admin)') ? 'Store Admin' : 'Employee';
+                    }
+                }
                 if ($request->has('department')) $empData['department'] = $request->input('department');
                 if ($request->has('branch_id')) {
                     $bId = $request->input('branch_id') ?: null;
@@ -507,6 +543,36 @@ class SystemController extends Controller
                 if ($request->has('address')) $empData['address'] = $request->input('address');
                 if ($request->has('first_name')) $empData['first_name'] = $request->input('first_name');
                 if ($request->has('last_name')) $empData['last_name'] = $request->input('last_name');
+
+                // Basic Salary: accepts empty or nullable values cleanly without DB errors
+                if ($request->has('basic_salary')) {
+                    $sal = $request->input('basic_salary');
+                    $salVal = ($sal !== '' && $sal !== null && is_numeric($sal)) ? (float)$sal : 0.00;
+                    $empData['basic_salary'] = $salVal;
+                    $empData['daily_rate'] = $salVal > 0 ? round($salVal / 26, 2) : 0.00;
+                    $empData['hourly_rate'] = $empData['daily_rate'] > 0 ? round($empData['daily_rate'] / 8, 2) : 0.00;
+                }
+
+                // Permanent QR: converts empty/null to NULL to avoid unique index violation
+                if ($request->has('permanent_qr') || $request->has('qr_token')) {
+                    $rawQr = trim($request->input('permanent_qr') ?? ($request->input('qr_token') ?? ''));
+                    $empData['qr_token'] = !empty($rawQr) ? $rawQr : null;
+                    $empData['qr_active'] = !empty($rawQr) ? true : false;
+                    if (empty($rawQr)) {
+                        $empData['qr_generated_at'] = null;
+                    }
+                }
+
+                // PIN: accepts empty or nullable values without error
+                if ($request->has('attendance_pin') || $request->has('pin')) {
+                    $rawPin = trim($request->input('attendance_pin') ?? ($request->input('pin') ?? ''));
+                    if ($rawPin !== '') {
+                        $empData['attendance_pin'] = Hash::make($rawPin);
+                    } else {
+                        $empData['attendance_pin'] = null;
+                    }
+                }
+
                 if (!empty($empData)) {
                     $employee->update($empData);
                 }

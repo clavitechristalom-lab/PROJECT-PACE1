@@ -8,6 +8,16 @@ use Laravel\Sanctum\HasApiTokens;
 class User extends Authenticatable
 {
     use HasApiTokens;
+
+    const ROLE_ADMINISTRATOR = 'Administrator';
+    const ROLE_STORE_ADMIN = 'Store Administrator';
+    const ROLE_EMPLOYEE = 'Employee';
+    const ROLE_CUSTOMER = 'Customer';
+
+    const POSITION_CASHIER = 'Cashier (Employee)';
+    const POSITION_COLLECTOR = 'Collector (Employee)';
+    const POSITION_UTILITY = 'Utility (Employee)';
+
     protected $table = 'users';
 
     protected $primaryKey = 'user_id';

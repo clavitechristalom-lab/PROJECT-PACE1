@@ -100,21 +100,21 @@ export default function EmployeePinVerificationModal({ request, onClose, onSucce
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-in fade-in duration-200">
-      <Card className="w-full max-w-sm overflow-hidden bg-card border-border shadow-2xl relative animate-in zoom-in-95 duration-200">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 bg-slate-950/80 backdrop-blur-sm animate-in fade-in duration-200">
+      <Card noPad className="w-full max-w-2xl rounded-2xl overflow-hidden bg-card border-border shadow-2xl relative animate-in zoom-in-95 duration-200 flex flex-col">
         <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-emerald-500 via-primary to-emerald-500 animate-gradient-x"></div>
         
-        <div className="p-6 space-y-5">
-          <div className="text-center space-y-1">
-            <h2 className="text-lg font-black text-foreground flex items-center justify-center gap-2 uppercase tracking-wide">
+        <div className="p-6 sm:p-8 space-y-5">
+          <div className="text-center space-y-1.5 border-b border-border pb-4">
+            <h2 className="text-lg sm:text-xl font-black text-foreground flex items-center justify-center gap-2 uppercase tracking-wide">
               <FiLock className="text-primary" /> Attendance Authorization
             </h2>
-            <p className="text-xs text-muted-foreground">
+            <p className="text-xs sm:text-sm text-muted-foreground max-w-lg mx-auto">
               A Store Admin is requesting your attendance authorization. Enter your PIN to confirm.
             </p>
           </div>
 
-          <div className="p-3 bg-muted/40 rounded-xl border border-border flex items-center gap-3">
+          <div className="p-4 bg-muted/40 rounded-xl border border-border flex items-center gap-3.5 max-w-md mx-auto">
             <div className="w-10 h-10 rounded-full bg-primary/20 text-primary flex items-center justify-center shrink-0">
               <FiUser className="w-5 h-5" />
             </div>
@@ -130,7 +130,7 @@ export default function EmployeePinVerificationModal({ request, onClose, onSucce
 
           <div className="space-y-4">
             <div className="flex flex-col items-center">
-              <div className="relative group w-48">
+              <div className="relative group w-64">
                 <input
                   type={showPin ? "text" : "password"}
                   value={enteredPin}
@@ -154,7 +154,7 @@ export default function EmployeePinVerificationModal({ request, onClose, onSucce
             </div>
 
             {/* Touch Keypad */}
-            <div className="grid grid-cols-3 gap-2 w-64 mx-auto pt-2">
+            <div className="grid grid-cols-3 gap-2.5 w-72 mx-auto pt-2">
               {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((num) => (
                 <button
                   key={num}
@@ -190,11 +190,19 @@ export default function EmployeePinVerificationModal({ request, onClose, onSucce
           </div>
         </div>
 
-        <div className="p-4 border-t border-border bg-muted/20 space-y-2">
-          <div className="flex gap-3">
+        <div className="px-6 py-4 border-t border-border bg-muted/20 flex flex-col sm:flex-row items-center justify-between gap-3">
+          {onSwitchToFace ? (
+            <button
+              type="button"
+              onClick={onSwitchToFace}
+              className="text-xs text-primary hover:underline font-semibold flex items-center gap-1.5 cursor-pointer"
+            >
+              Use Face Recognition instead
+            </button>
+          ) : <div />}
+          <div className="flex items-center justify-end gap-3 w-full sm:w-auto">
             <Btn
               variant="outline"
-              className="flex-1"
               onClick={() => {
                 if (typeof onCancel === 'function') {
                   onCancel()
@@ -213,7 +221,6 @@ export default function EmployeePinVerificationModal({ request, onClose, onSucce
             </Btn>
             <Btn 
               variant="primary" 
-              className="flex-1" 
               onClick={handleVerify} 
               disabled={enteredPin.length < 4 || verifying}
               icon={verifying ? null : <FiCheck />}
@@ -221,17 +228,6 @@ export default function EmployeePinVerificationModal({ request, onClose, onSucce
               {verifying ? 'Authorizing...' : 'Authorize'}
             </Btn>
           </div>
-          {onSwitchToFace && (
-            <div className="text-center pt-1">
-              <button
-                type="button"
-                onClick={onSwitchToFace}
-                className="text-xs text-primary hover:underline font-semibold flex items-center justify-center gap-1.5 mx-auto cursor-pointer"
-              >
-                Use Face Recognition instead
-              </button>
-            </div>
-          )}
         </div>
       </Card>
     </div>

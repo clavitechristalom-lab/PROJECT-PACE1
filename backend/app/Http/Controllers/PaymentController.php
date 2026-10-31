@@ -40,7 +40,29 @@ class PaymentController extends Controller
                 return response()->json($cached);
             }
         }
-        $query = Payment::with(['installmentAccount.customer', 'installmentAccount.sale.processedBy.employee.branch', 'receivedBy.employee.branch']);
+        $query = Payment::with([
+            'installmentAccount:installment_id,account_no,customer_id,sale_id,total_payable,down_payment,status',
+            'installmentAccount.customer:customer_id,first_name,last_name,phone,branch_id',
+            'installmentAccount.sale:sale_id,processed_by,branch_id',
+            'installmentAccount.sale.processedBy:user_id,username,employee_id',
+            'installmentAccount.sale.processedBy.employee:employee_id,first_name,last_name,branch_id',
+            'receivedBy:user_id,username,employee_id',
+            'receivedBy.employee:employee_id,first_name,last_name,branch_id'
+        ])->select([
+            'payment_id',
+            'installment_id',
+            'schedule_id',
+            'receipt_no',
+            'payment_date',
+            'amount',
+            'payment_method',
+            'reference_no',
+            'received_by',
+            'status',
+            'notes',
+            'proof_of_payment',
+            'created_at'
+        ]);
 
         // Scoping
         if ($user && $user->role === 'Customer') {

@@ -1,13 +1,15 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { api } from '../../lib/api';
 import { showToast, confirmAction, showLoading, closeLoading, Btn, Card, StatusBadge } from '../ui';
 import { FiPlus, FiTrash2 } from 'react-icons/fi';
 import { fmt } from '../../lib/utils';
 import { TbCurrencyPeso } from 'react-icons/tb';
+import { useRealtimeSync, triggerDataSync, fastDeepEqual } from '../../lib/realtimeSync';
 
 export default function EmployeeFinancialsTab({ employeeId }) {
   const [financials, setFinancials] = useState(null);
   const [loading, setLoading] = useState(true);
+  const inFlightRef = useRef(false);
 
   // Forms
   const [allowanceName, setAllowanceName] = useState('');
@@ -20,20 +22,32 @@ export default function EmployeeFinancialsTab({ employeeId }) {
   const [loanTotal, setLoanTotal] = useState('');
   const [loanMonthly, setLoanMonthly] = useState('');
 
-  const loadFinancials = async () => {
+  const loadFinancials = useCallback(async (silent = false, signal) => {
+    if (!employeeId) return;
+    if (inFlightRef.current && silent) return;
+    inFlightRef.current = true;
     try {
-      const data = await api.employees.getFinancials(employeeId);
-      setFinancials(data);
+      const data = await api.employees.getFinancials(employeeId, { signal });
+      if (signal?.aborted) return;
+      setFinancials(prev => (fastDeepEqual(prev, data) ? prev : data));
     } catch (err) {
-      showToast('Failed to load financials', 'error');
+      if (err?.name !== 'AbortError' && !silent) {
+        showToast('Failed to load financials', 'error');
+      }
     } finally {
-      setLoading(false);
+      inFlightRef.current = false;
+      if (!silent) setLoading(false);
     }
-  };
+  }, [employeeId]);
 
   useEffect(() => {
-    loadFinancials();
-  }, [employeeId]);
+    setLoading(true);
+    loadFinancials(false);
+  }, [employeeId, loadFinancials]);
+
+  useRealtimeSync((_source, signal) => {
+    loadFinancials(true, signal);
+  }, [employeeId, loadFinancials]);
 
   const handleAddAllowance = async (e) => {
     e.preventDefault();
@@ -43,7 +57,9 @@ export default function EmployeeFinancialsTab({ employeeId }) {
       await api.employees.addAllowance(employeeId, { name: allowanceName, amount: allowanceAmount, is_active: true });
       showToast('Allowance added', 'success');
       setAllowanceName(''); setAllowanceAmount('');
-      loadFinancials();
+      triggerDataSync('employees');
+      triggerDataSync('payroll');
+      loadFinancials(true);
     } catch (err) {
       showToast(err.message, 'error');
     } finally { closeLoading(); }
@@ -57,7 +73,9 @@ export default function EmployeeFinancialsTab({ employeeId }) {
       await api.employees.addDeduction(employeeId, { name: deductionName, amount: deductionAmount, is_active: true });
       showToast('Deduction added', 'success');
       setDeductionName(''); setDeductionAmount('');
-      loadFinancials();
+      triggerDataSync('employees');
+      triggerDataSync('payroll');
+      loadFinancials(true);
     } catch (err) {
       showToast(err.message, 'error');
     } finally { closeLoading(); }
@@ -71,7 +89,9 @@ export default function EmployeeFinancialsTab({ employeeId }) {
       await api.employees.addLoan(employeeId, { name: loanName, total_amount: loanTotal, monthly_deduction: loanMonthly });
       showToast('Loan added', 'success');
       setLoanName(''); setLoanTotal(''); setLoanMonthly('');
-      loadFinancials();
+      triggerDataSync('employees');
+      triggerDataSync('payroll');
+      loadFinancials(true);
     } catch (err) {
       showToast(err.message, 'error');
     } finally { closeLoading(); }
@@ -86,7 +106,9 @@ export default function EmployeeFinancialsTab({ employeeId }) {
       if (type === 'deduction') await api.employees.deleteDeduction(id);
       if (type === 'loan') await api.employees.deleteLoan(id);
       showToast('Removed successfully', 'success');
-      loadFinancials();
+      triggerDataSync('employees');
+      triggerDataSync('payroll');
+      loadFinancials(true);
     } catch (err) {
       showToast(err.message, 'error');
     } finally { closeLoading(); }

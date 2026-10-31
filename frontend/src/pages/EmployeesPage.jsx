@@ -8,7 +8,7 @@ import {
   FiFileText, FiSmartphone
 } from 'react-icons/fi'
 import {
-  Table, TR, TD, Badge, Btn, Modal, Input, Select, Textarea, ConfirmDialog,
+  Table, TR, TD, Badge, Btn, Modal, Input, Select, Textarea,
   PageHeader, StatCard, Card, Pagination, showToast, StatusBadge,
   TabBar, LoadingState, ErrorAlert, TableSkeleton, EmptyState, confirmAction,
 } from '../components/ui'
@@ -19,6 +19,22 @@ import { QRCodeSVG } from 'qrcode.react'
 import EmployeeFinancialsTab from '../components/employees/EmployeeFinancialsTab'
 import { TbCurrencyPeso } from 'react-icons/tb'
 import { useAuth } from '../context/AuthContext'
+
+export const isEmpAdmin = (emp) => {
+  if (!emp) return false
+  const pos = (emp.position || '').toLowerCase().trim()
+  const code = (emp.employee_code || '').toUpperCase().trim()
+  const role = (emp.user?.role || '').toLowerCase().trim()
+  return (
+    pos === 'system administrator' ||
+    pos === 'administrator' ||
+    pos === 'main administrator' ||
+    pos === 'system admin' ||
+    code.startsWith('SYS-') ||
+    role === 'administrator' ||
+    role === 'admin'
+  )
+}
 
 export default function EmployeesPage({ branchFilter, embedded }) {
   const { user } = useAuth()
@@ -81,7 +97,7 @@ export default function EmployeesPage({ branchFilter, embedded }) {
     employee_code: '', first_name: '', middle_name: '', last_name: '',
     gender: 'Male', birth_date: '', date_of_birth: '', marital_status: 'Single',
     tin_number: '', sss_number: '', philhealth_number: '', pagibig_number: '',
-    position: '', department: 'Unassigned', branch_id: '',
+    position: 'Cashier (Employee)', department: 'Employee', branch_id: '',
     pay_type: 'Cash', ewallet_provider: 'Gcash', ewallet_account_no: '', bank_name: 'BDO', bank_account_no: '',
     basic_salary: '', phone: '', email: '',
     address: '', hire_date: '', working_hours: '8 AM to 5 PM',
@@ -89,10 +105,13 @@ export default function EmployeesPage({ branchFilter, embedded }) {
     emergency_contact_name: '', emergency_contact_relation: '', emergency_contact_phone: ''
   }
   const [form, setForm] = useState(emptyForm)
+  const inFlightRef = useRef(false)
 
-  const loadEmployees = async (source) => {
+  const loadEmployees = async (source, signal) => {
     // Only show full loading spinner on initial manual change, not background auto-syncs
-    const isBackground = source === 'timer' || source === 'database' || source === 'event' || source === 'focus' || source === 'mutation' || employees.length > 0
+    const isBackground = source === true || source === 'timer' || source === 'database' || source === 'event' || source === 'focus' || source === 'mutation' || employees.length > 0
+    if (inFlightRef.current && isBackground) return
+    inFlightRef.current = true
     if (!isBackground) {
       setLoading(true)
     }
@@ -103,9 +122,19 @@ export default function EmployeesPage({ branchFilter, embedded }) {
         status: statusFilter !== 'All' ? statusFilter : undefined,
         branch_id: branchFilter || (branchSelectFilter !== 'All' ? branchSelectFilter : undefined),
         department: deptFilter !== 'All' ? deptFilter : undefined,
-      })
+      }, { signal })
+      if (signal?.aborted) return
       const newEmps = data?.employees || []
       setEmployees(prev => fastDeepEqual(prev, newEmps) ? prev : newEmps)
+      const activeDetailId = detailItem?.employee?.employee_id || detailItem?.employee_id
+      if (activeDetailId && isBackground) {
+        api.employees.getById(activeDetailId, { signal })
+          .then(d => {
+            if (signal?.aborted || !d) return
+            setDetailItem(prev => (!prev || fastDeepEqual(prev, d)) ? prev : d)
+          })
+          .catch(() => {})
+      }
       try {
         if (!search && statusFilter === 'All' && deptFilter === 'All' && branchSelectFilter === 'All') {
           sessionStorage.setItem('pace_cached_employees', JSON.stringify(newEmps))
@@ -118,6 +147,7 @@ export default function EmployeesPage({ branchFilter, embedded }) {
         setError(err.message || 'Failed to fetch employees')
       }
     } finally {
+      inFlightRef.current = false
       if (!isBackground) {
         setLoading(false)
       }
@@ -140,8 +170,8 @@ export default function EmployeesPage({ branchFilter, embedded }) {
 
   const handleSave = async (e) => {
     e.preventDefault()
-    if (!form.first_name || !form.last_name || !form.position || !form.basic_salary) {
-      showToast('Please fill in required fields (Name, Position, Salary)', 'error')
+    if (!form.first_name || !form.last_name || !form.position) {
+      showToast('Please fill in required fields (First Name, Last Name, Position)', 'error')
       return
     }
 
@@ -162,9 +192,12 @@ export default function EmployeesPage({ branchFilter, embedded }) {
 
     setSaving(true)
     try {
+      const isTargetAdmin = isEmpAdmin(editItem) || isEmpAdmin(form)
       const payload = {
         ...form,
-        basic_salary: parseFloat(form.basic_salary) || 0,
+        basic_salary: isTargetAdmin ? 0.00 : ((form.basic_salary !== '' && form.basic_salary !== null && !isNaN(Number(form.basic_salary))) ? parseFloat(form.basic_salary) : null),
+        branch_id: form.branch_id || null,
+        attendance_pin: isTargetAdmin ? null : (form.attendance_pin || null),
       }
 
       if (editItem) {
@@ -196,19 +229,40 @@ export default function EmployeesPage({ branchFilter, embedded }) {
     }
   }
 
-  const handleDelete = async () => {
-    if (!deleteItem) return
-    const confirmed = await confirmAction('Delete Employee?', `Are you sure you want to delete ${deleteItem.first_name} ${deleteItem.last_name}? This cannot be undone.`, 'Yes, Delete')
+  const handleDelete = async (targetEmp) => {
+    const empToDelete = targetEmp || deleteItem
+    if (!empToDelete) return
+
+    const fullName = `${empToDelete.first_name || ''} ${empToDelete.last_name || ''}`.trim()
+    const confirmed = await confirmAction(
+      'Delete Employee?',
+      `Are you sure you want to delete ${fullName} (${empToDelete.employee_code || 'ID: ' + empToDelete.employee_id})? This cannot be undone.`,
+      'Yes, Delete'
+    )
     if (!confirmed) return
 
     setSaving(true)
     try {
-      await api.employees.delete(deleteItem.employee_id)
-      setEmployees(prev => prev.filter(emp => emp.employee_id !== deleteItem.employee_id))
+      await api.employees.delete(empToDelete.employee_id)
+      setEmployees(prev => prev.filter(emp => emp.employee_id !== empToDelete.employee_id))
+      try {
+        const saved = sessionStorage.getItem('pace_cached_employees')
+        if (saved) {
+          const parsed = JSON.parse(saved)
+          const updated = parsed.filter(emp => emp.employee_id !== empToDelete.employee_id)
+          sessionStorage.setItem('pace_cached_employees', JSON.stringify(updated))
+        }
+      } catch (e) {
+        console.warn('Could not update cached employees', e)
+      }
       triggerDataSync('employees')
       showToast('Employee record deleted successfully', 'success')
+      if (detailItem?.employee?.employee_id === empToDelete.employee_id || detailItem?.employee_id === empToDelete.employee_id) {
+        setDetailItem(null)
+      }
       setDeleteItem(null)
     } catch (err) {
+      console.error('Failed to delete employee:', err)
       showToast(err.message || 'Failed to delete employee', 'error')
     } finally {
       setSaving(false)
@@ -217,6 +271,14 @@ export default function EmployeesPage({ branchFilter, embedded }) {
 
   const openEdit = (emp) => {
     setEditItem(emp)
+    let pos = emp.position || ''
+    if (pos === 'Staff' || pos === '') {
+      pos = 'Cashier (Employee)'
+    } else if (pos === 'Store Administrator') {
+      pos = 'Manager (Store Admin)'
+    }
+    const dept = emp.department || (pos === 'Manager (Store Admin)' ? 'Store Admin' : 'Employee')
+
     setForm({
       employee_code: emp.employee_code || '',
       first_name: emp.first_name || '',
@@ -230,8 +292,9 @@ export default function EmployeesPage({ branchFilter, embedded }) {
       sss_number: emp.sss_number || '',
       philhealth_number: emp.philhealth_number || '',
       pagibig_number: emp.pagibig_number || '',
-      position: emp.position || '',
-      
+      position: pos,
+      department: dept,
+
       branch_id: emp.branch_id || '',
       pay_type: emp.pay_type || 'Cash',
       ewallet_provider: emp.ewallet_provider || 'Gcash',
@@ -509,7 +572,7 @@ export default function EmployeesPage({ branchFilter, embedded }) {
   // Live aggregates
   const totalEmployees = employees.length
   const activeCount = employees.filter(e => e.status === 'Active').length
-  const totalPayrollBase = employees.filter(e => e.status === 'Active').reduce((acc, e) => acc + (parseFloat(e.basic_salary) || 0), 0)
+  const totalPayrollBase = employees.filter(e => e.status === 'Active' && !isEmpAdmin(e)).reduce((acc, e) => acc + (parseFloat(e.basic_salary) || 0), 0)
   const uniqueBranches = new Set(employees.map(e => e.branch_id).filter(Boolean)).size
 
   return (
@@ -625,7 +688,7 @@ export default function EmployeesPage({ branchFilter, embedded }) {
                     <th className="py-3 px-4 text-left">Employee ID</th>
                     <th className="py-3 px-4 text-left">Employee Name</th>
                     <th className="py-3 px-4 text-left">Position</th>
-                    
+
                     <th className="py-3 px-4 text-left">Branch</th>
                     <th className="py-3 px-4 text-center">QR Status</th>
                     <th className="py-3 px-4 text-left">Issued Date</th>
@@ -637,6 +700,7 @@ export default function EmployeesPage({ branchFilter, embedded }) {
                 </thead>
                 <tbody className="divide-y divide-border">
                   {paginated.map((emp, i) => {
+                    const isRowAdmin = isEmpAdmin(emp)
                     const isQrActive = emp.qr_token && emp.qr_active
                     const isQrRevoked = emp.qr_token && !emp.qr_active
                     const isNotGenerated = !emp.qr_token
@@ -650,23 +714,29 @@ export default function EmployeesPage({ branchFilter, embedded }) {
                           {emp.first_name} {emp.last_name}
                         </td>
                         <td className="py-3 px-4 text-muted-foreground">{emp.position}</td>
-                        
+
                         <td className="py-3 px-4 font-medium text-foreground">{emp.branch?.name || 'Unassigned'}</td>
                         <td className="py-3 px-4 text-center">
-                          {isQrActive && (
-                            <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-500 border border-emerald-500/30">
-                              <FiCheckCircle className="w-3 h-3" /> ACTIVE
-                            </span>
-                          )}
-                          {isQrRevoked && (
-                            <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-rose-500/10 text-rose-500 border border-rose-500/30">
-                              <FiX className="w-3 h-3" /> REVOKED
-                            </span>
-                          )}
-                          {isNotGenerated && (
-                            <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-amber-500/10 text-amber-500 border border-amber-500/30">
-                              NOT GENERATED
-                            </span>
+                          {isRowAdmin ? (
+                            <span className="text-muted-foreground font-normal text-xs">—</span>
+                          ) : (
+                            <>
+                              {isQrActive && (
+                                <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-500 border border-emerald-500/30">
+                                  <FiCheckCircle className="w-3 h-3" /> ACTIVE
+                                </span>
+                              )}
+                              {isQrRevoked && (
+                                <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-rose-500/10 text-rose-500 border border-rose-500/30">
+                                  <FiX className="w-3 h-3" /> REVOKED
+                                </span>
+                              )}
+                              {isNotGenerated && (
+                                <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-amber-500/10 text-amber-500 border border-amber-500/30">
+                                  NOT GENERATED
+                                </span>
+                              )}
+                            </>
                           )}
                         </td>
                         <td className="py-3 px-4 text-muted-foreground font-mono text-[11px]">{emp.issued_date || '—'}</td>
@@ -676,51 +746,55 @@ export default function EmployeesPage({ branchFilter, embedded }) {
                           <StatusBadge status={emp.attendance_status || 'No Attendance'} />
                         </td>
                         <td className="py-3 px-4 text-center">
-                          <div className="flex items-center justify-center gap-1.5 flex-wrap">
-                            {isNotGenerated && isAdmin && (
-                              <button
-                                type="button"
-                                onClick={() => handleOpenGenerateModal(emp)}
-                                className="px-3 py-1 rounded-lg bg-primary hover:bg-primary/90 text-primary-foreground font-bold text-[11px] transition shadow-xs cursor-pointer"
-                              >
-                                Generate QR
-                              </button>
-                            )}
-                            {isQrActive && isAdmin && (
-                              <>
+                          {isRowAdmin ? (
+                            <span className="text-muted-foreground font-normal text-xs">—</span>
+                          ) : (
+                            <div className="flex items-center justify-center gap-1.5 flex-wrap">
+                              {isNotGenerated && isAdmin && (
                                 <button
                                   type="button"
-                                  onClick={() => handleOpenViewQrBadge(emp)}
-                                  className="px-2.5 py-1 rounded-lg bg-secondary hover:bg-secondary/80 text-foreground font-semibold text-[11px] transition border border-border cursor-pointer"
+                                  onClick={() => handleOpenGenerateModal(emp)}
+                                  className="px-3 py-1 rounded-lg bg-primary hover:bg-primary/90 text-primary-foreground font-bold text-[11px] transition shadow-xs cursor-pointer"
                                 >
-                                  View QR
+                                  Generate QR
                                 </button>
+                              )}
+                              {isQrActive && isAdmin && (
+                                <>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleOpenViewQrBadge(emp)}
+                                    className="px-2.5 py-1 rounded-lg bg-secondary hover:bg-secondary/80 text-foreground font-semibold text-[11px] transition border border-border cursor-pointer"
+                                  >
+                                    View QR
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleOpenViewQrBadge(emp)}
+                                    className="px-2.5 py-1 rounded-lg bg-secondary hover:bg-secondary/80 text-foreground font-semibold text-[11px] transition border border-border cursor-pointer"
+                                  >
+                                    Print QR
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleRevokeQrAdmin(emp)}
+                                    className="px-2.5 py-1 rounded-lg bg-rose-500/20 hover:bg-rose-500/30 text-rose-500 font-bold text-[11px] transition border border-rose-500/40 cursor-pointer"
+                                  >
+                                    Revoke QR
+                                  </button>
+                                </>
+                              )}
+                              {isQrRevoked && isAdmin && (
                                 <button
                                   type="button"
-                                  onClick={() => handleOpenViewQrBadge(emp)}
-                                  className="px-2.5 py-1 rounded-lg bg-secondary hover:bg-secondary/80 text-foreground font-semibold text-[11px] transition border border-border cursor-pointer"
+                                  onClick={() => handleReissueQrAdmin(emp)}
+                                  className="px-3 py-1 rounded-lg bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold text-[11px] transition shadow-xs cursor-pointer"
                                 >
-                                  Print QR
+                                  Issue New QR
                                 </button>
-                                <button
-                                  type="button"
-                                  onClick={() => handleRevokeQrAdmin(emp)}
-                                  className="px-2.5 py-1 rounded-lg bg-rose-500/20 hover:bg-rose-500/30 text-rose-500 font-bold text-[11px] transition border border-rose-500/40 cursor-pointer"
-                                >
-                                  Revoke QR
-                                </button>
-                              </>
-                            )}
-                            {isQrRevoked && isAdmin && (
-                              <button
-                                type="button"
-                                onClick={() => handleReissueQrAdmin(emp)}
-                                className="px-3 py-1 rounded-lg bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold text-[11px] transition shadow-xs cursor-pointer"
-                              >
-                                Issue New QR
-                              </button>
-                            )}
-                          </div>
+                              )}
+                            </div>
+                          )}
                         </td>
                       </tr>
                     )
@@ -761,7 +835,7 @@ export default function EmployeesPage({ branchFilter, embedded }) {
                       <th className="py-3 px-4 text-left">Code</th>
                       <th className="py-3 px-4 text-left">Employee Name</th>
                       <th className="py-3 px-4 text-left">Position</th>
-                      
+
                       <th className="py-3 px-4 text-left">Branch</th>
                       <th className="py-3 px-4 text-center">Permanent QR & PIN</th>
                       <th className="py-3 px-4 text-center">Verification</th>
@@ -771,7 +845,10 @@ export default function EmployeesPage({ branchFilter, embedded }) {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-border">
-                    {paginated.map((emp, i) => (
+                    {paginated.map((emp, i) => {
+                      const isRowAdmin = isEmpAdmin(emp)
+
+                      return (
                       <tr key={emp.employee_id} className={`hover:bg-muted/40 transition-colors ${i % 2 === 1 ? 'bg-muted/10' : ''}`}>
                         <td className="py-3 px-4 font-mono font-bold text-foreground">
                           <div className="flex items-center gap-1.5">
@@ -788,25 +865,31 @@ export default function EmployeesPage({ branchFilter, embedded }) {
                         <td className="py-3 px-4 font-medium text-foreground">{emp.position}</td>
                         <td className="py-3 px-4"><Badge text={emp.branch?.name || 'Unassigned'} variant="neutral" /></td>
                         <td className="py-3 px-4 text-center">
-                          <div className="flex items-center justify-center gap-1.5 flex-wrap">
-                            {!emp.qr_token ? (
-                              <span className="inline-flex items-center text-[10px] font-mono px-2 py-0.5 rounded-full border bg-amber-500/10 text-amber-500 border-amber-500/30">
-                                QR Not Issued
+                          {isRowAdmin ? (
+                            <span className="text-muted-foreground font-normal text-xs">—</span>
+                          ) : (
+                            <div className="flex items-center justify-center gap-1.5 flex-wrap">
+                              {!emp.qr_token ? (
+                                <span className="inline-flex items-center text-[10px] font-mono px-2 py-0.5 rounded-full border bg-amber-500/10 text-amber-500 border-amber-500/30">
+                                  QR Not Issued
+                                </span>
+                              ) : (
+                                <span className={`inline-flex items-center gap-1 text-[10px] font-mono px-2 py-0.5 rounded-full border ${emp.qr_active ? 'bg-emerald-500/10 text-emerald-500 border-emerald-500/30' : 'bg-rose-500/10 text-rose-500 border-rose-500/30'}`}>
+                                  <FiCheckCircle className="w-3 h-3" />
+                                  <span>QR {emp.qr_active ? 'Active' : 'Disabled'}</span>
+                                </span>
+                              )}
+                              <span className="inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground border border-border">
+                                <FiKey className="w-2.5 h-2.5" />
+                                <span>{emp.has_pin ? 'PIN Set' : 'Default'}</span>
                               </span>
-                            ) : (
-                              <span className={`inline-flex items-center gap-1 text-[10px] font-mono px-2 py-0.5 rounded-full border ${emp.qr_active ? 'bg-emerald-500/10 text-emerald-500 border-emerald-500/30' : 'bg-rose-500/10 text-rose-500 border-rose-500/30'}`}>
-                                <FiCheckCircle className="w-3 h-3" />
-                                <span>QR {emp.qr_active ? 'Active' : 'Disabled'}</span>
-                              </span>
-                            )}
-                            <span className="inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground border border-border">
-                              <FiKey className="w-2.5 h-2.5" />
-                              <span>{emp.has_pin ? 'PIN Set' : 'Default'}</span>
-                            </span>
-                          </div>
+                            </div>
+                          )}
                         </td>
                         <td className="py-3 px-4 text-center">
-                          {(emp.account_verified || emp.information_verified || emp.is_verified) ? (
+                          {isRowAdmin ? (
+                            <span className="text-muted-foreground font-normal text-xs">—</span>
+                          ) : (emp.account_verified || emp.information_verified || emp.is_verified) ? (
                             <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-50 dark:bg-emerald-950/40 text-emerald-800 dark:text-emerald-300 border border-emerald-300">
                               <FiCheckCircle className="w-3 h-3 text-emerald-600" />
                               <span>Verified</span>
@@ -819,7 +902,11 @@ export default function EmployeesPage({ branchFilter, embedded }) {
                           )}
                         </td>
                         <td className="py-3 px-4 text-right font-mono font-bold text-foreground">
-                          {fmt(emp.basic_salary)}
+                          {isRowAdmin ? (
+                            <span className="text-muted-foreground font-normal text-xs">—</span>
+                          ) : (
+                            fmt(emp.basic_salary)
+                          )}
                         </td>
                         <td className="py-3 px-4 text-center">
                           <button
@@ -841,43 +928,44 @@ export default function EmployeesPage({ branchFilter, embedded }) {
                           </button>
                         </td>
                         {!isEmployee && (
-                        <td className="py-3 px-4 text-center">
-                          <div className="flex items-center justify-center gap-1">
-                            {isAdmin && (
+                          <td className="py-3 px-4 text-center">
+                            <div className="flex items-center justify-center gap-1">
+                              {isAdmin && !isRowAdmin && (
+                                <button
+                                  onClick={() => openQrBadge(emp)}
+                                  title="View Permanent QR Badge"
+                                  className="p-1.5 rounded-lg border border-border hover:bg-muted text-foreground transition-colors cursor-pointer"
+                                >
+                                  <FiCamera className="w-3.5 h-3.5 text-primary" />
+                                </button>
+                              )}
                               <button
-                                onClick={() => openQrBadge(emp)}
-                                title="View Permanent QR Badge"
+                                onClick={() => openDetail(emp)}
+                                title="View profile ledger"
                                 className="p-1.5 rounded-lg border border-border hover:bg-muted text-foreground transition-colors cursor-pointer"
                               >
-                                <FiCamera className="w-3.5 h-3.5 text-primary" />
+                                <FiEye className="w-3.5 h-3.5" />
                               </button>
-                            )}
-                            <button
-                              onClick={() => openDetail(emp)}
-                              title="View profile ledger"
-                              className="p-1.5 rounded-lg border border-border hover:bg-muted text-foreground transition-colors cursor-pointer"
-                            >
-                              <FiEye className="w-3.5 h-3.5" />
-                            </button>
-                            <button
-                              onClick={() => openEdit(emp)}
-                              title="Edit employee"
-                              className="p-1.5 rounded-lg border border-border hover:bg-muted text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
-                            >
-                              <FiEdit className="w-3.5 h-3.5" />
-                            </button>
-                            <button
-                              onClick={() => handleDelete(emp)}
-                              title="Delete employee"
-                              className="p-1.5 rounded-lg border border-border hover:bg-rose-50 hover:text-rose-600 dark:hover:bg-rose-950/40 text-muted-foreground transition-colors cursor-pointer"
-                            >
-                              <FiTrash2 className="w-3.5 h-3.5" />
-                            </button>
-                          </div>
-                        </td>
-                      )}
-                    </tr>
-                    ))}
+                              <button
+                                onClick={() => openEdit(emp)}
+                                title="Edit employee"
+                                className="p-1.5 rounded-lg border border-border hover:bg-muted text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+                              >
+                                <FiEdit className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                onClick={() => handleDelete(emp)}
+                                title="Delete employee"
+                                className="p-1.5 rounded-lg border border-border hover:bg-rose-50 hover:text-rose-600 dark:hover:bg-rose-950/40 text-muted-foreground transition-colors cursor-pointer"
+                              >
+                                <FiTrash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </td>
+                        )}
+                      </tr>
+                    )
+                  })}
                   </tbody>
                 </table>
               </div>
@@ -896,7 +984,7 @@ export default function EmployeesPage({ branchFilter, embedded }) {
           isOpen={true}
           title={editItem ? `Edit Employee — ${editItem.employee_code}` : 'Register New Employee'}
           onClose={() => { setAddModal(false); setEditItem(null) }}
-          size="lg"
+          size="xl"
         >
           <form onSubmit={handleSave} className="space-y-4 text-xs">
             <TabBar
@@ -966,7 +1054,7 @@ export default function EmployeesPage({ branchFilter, embedded }) {
                       type="date"
                       max={new Date().toISOString().split('T')[0]}
                       value={form.date_of_birth}
-                      onClick={(e) => { try { e.target.showPicker() } catch (_) {} }}
+                      onClick={(e) => { try { e.target.showPicker() } catch (_) { } }}
                       onChange={e => setForm(f => ({ ...f, date_of_birth: e.target.value, birth_date: e.target.value }))}
                       className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground font-mono cursor-pointer [color-scheme:dark]"
                     />
@@ -1078,58 +1166,64 @@ export default function EmployeesPage({ branchFilter, embedded }) {
               <div className="space-y-3 mt-2">
                 <div className="grid grid-cols-2 gap-2.5">
                   <div>
-                    <label className="block font-bold text-muted-foreground mb-1">Position / Job Title *</label>
-                    <input
-                      type="text"
-                      value={form.position}
-                      onChange={e => setForm(f => ({ ...f, position: e.target.value }))}
-                      placeholder="e.g. Sales Executive"
-                      required
-                      className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground font-semibold"
-                    />
-                  </div>
-                  <div>
                     <label className="block font-bold text-muted-foreground mb-1">Department</label>
                     <select
-                      value={form.department || 'Unassigned'}
-                      onChange={e => setForm(f => ({ ...f, department: e.target.value }))}
-                      className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground font-semibold"
+                      value={form.department || (form.position === 'Manager (Store Admin)' ? 'Store Admin' : 'Employee')}
+                      onChange={e => {
+                        const newDept = e.target.value
+                        setForm(f => ({
+                          ...f,
+                          department: newDept,
+                          position: newDept === 'Store Admin' ? 'Manager (Store Admin)' : (f.position === 'Manager (Store Admin)' ? 'Cashier (Employee)' : f.position)
+                        }))
+                      }}
+                      className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground font-semibold cursor-pointer [color-scheme:dark] [&>option]:bg-[#0f172a] [&>option]:text-white"
                     >
-                      <option value="Unassigned">Unassigned</option>
-                      <option value="Store Admin">Store Admin</option>
-                      <option value="Employee">Employee</option>
+                      <option value="Employee" className="bg-[#0f172a] text-white">Employee</option>
+                      <option value="Store Admin" className="bg-[#0f172a] text-white">Store Admin</option>
+                      <option value="Unassigned" className="bg-[#0f172a] text-white">Unassigned</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block font-bold text-muted-foreground mb-1">Position / Job Title *</label>
+                    <select
+                      value={form.position || (form.department === 'Store Admin' ? 'Manager (Store Admin)' : 'Cashier (Employee)')}
+                      onChange={e => {
+                        const val = e.target.value
+                        setForm(f => ({
+                          ...f,
+                          position: val,
+                          department: val === 'Manager (Store Admin)' ? 'Store Admin' : (f.department === 'Store Admin' ? 'Employee' : f.department)
+                        }))
+                      }}
+                      required
+                      className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground font-semibold cursor-pointer [color-scheme:dark] [&>option]:bg-[#0f172a] [&>option]:text-white"
+                    >
+                      {form.department === 'Store Admin' ? (
+                        <option value="Manager (Store Admin)" className="bg-[#0f172a] text-white">Manager (Store Admin)</option>
+                      ) : (
+                        <>
+                          <option value="Cashier (Employee)" className="bg-[#0f172a] text-white">Cashier (Employee)</option>
+                          <option value="Collector (Employee)" className="bg-[#0f172a] text-white">Collector (Employee)</option>
+                          <option value="Utility (Employee)" className="bg-[#0f172a] text-white">Utility (Employee)</option>
+                        </>
+                      )}
                     </select>
                   </div>
                 </div>
 
-                <div className="grid grid-cols-3 gap-2.5">
+                <div className="grid grid-cols-2 gap-2.5">
                   <div>
-                    <label className="block font-bold text-muted-foreground mb-1">Branch Location</label>
+                    <label className="block font-bold text-muted-foreground mb-1">Branch Location (Optional)</label>
                     <select
                       value={form.branch_id}
                       onChange={e => setForm(f => ({ ...f, branch_id: e.target.value }))}
                       disabled={isStoreAdmin}
                       className={`w-full bg-muted/50 border border-border rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-primary transition-colors appearance-none ${isStoreAdmin ? 'opacity-50 cursor-not-allowed' : ''}`}
                     >
-                      <option value="">{isStoreAdmin ? 'Auto-assigned to your branch' : 'Unassigned'}</option>
+                      <option value="">{isStoreAdmin ? 'Auto-assigned to your branch' : 'Unassigned (Assign Later)'}</option>
                       {!isStoreAdmin && branchesList.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
                     </select>
-                  </div>
-                  <div>
-                    <label className="block font-bold text-muted-foreground mb-1">
-                      Basic Monthly Salary (PHP) {editingId ? '(Fixed)' : '*'}
-                    </label>
-                    <input
-                      type="number"
-                      step="0.01"
-                      value={form.basic_salary}
-                      onChange={e => setForm(f => ({ ...f, basic_salary: e.target.value }))}
-                      placeholder="0.00"
-                      required
-                      disabled={Boolean(editingId)}
-                      title={editingId ? 'Salary is fixed upon account creation and cannot be edited.' : ''}
-                      className={`w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground font-mono font-bold ${editingId ? 'opacity-60 cursor-not-allowed bg-muted/40' : ''}`}
-                    />
                   </div>
                   <div>
                     <label className="block font-bold text-muted-foreground mb-1">Pay Distribution Type</label>
@@ -1217,17 +1311,19 @@ export default function EmployeesPage({ branchFilter, embedded }) {
                       <option value="Inactive">Inactive</option>
                     </select>
                   </div>
-                  <div>
-                    <label className="block font-bold text-muted-foreground mb-1">Attendance PIN</label>
-                    <input
-                      type="text"
-                      value={form.attendance_pin}
-                      onChange={e => setForm(f => ({ ...f, attendance_pin: e.target.value }))}
-                      placeholder={editItem ? 'Leave blank to keep current' : 'Default: 1234'}
-                      className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground font-mono"
-                      maxLength={6}
-                    />
-                  </div>
+                  {!isEmpAdmin(editItem) && (
+                    <div>
+                      <label className="block font-bold text-muted-foreground mb-1">Attendance PIN (Optional)</label>
+                      <input
+                        type="text"
+                        value={form.attendance_pin}
+                        onChange={e => setForm(f => ({ ...f, attendance_pin: e.target.value.replace(/\D/g, '') }))}
+                        placeholder={editItem ? 'Leave blank to keep current' : 'Leave blank to assign later'}
+                        className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground font-mono"
+                        maxLength={6}
+                      />
+                    </div>
+                  )}
                 </div>
               </div>
             )}
@@ -1270,7 +1366,7 @@ export default function EmployeesPage({ branchFilter, embedded }) {
               </div>
             )}
 
-            <div className="flex justify-end gap-2 pt-2 border-t border-border">
+            <div className="flex justify-end gap-3 pt-4 border-t border-border">
               <button
                 type="button"
                 onClick={() => { setAddModal(false); setEditItem(null) }}
@@ -1298,14 +1394,16 @@ export default function EmployeesPage({ branchFilter, embedded }) {
           isOpen={true}
           title={detailItem ? `${detailItem.employee.first_name} ${detailItem.employee.last_name} (${detailItem.employee.employee_code})` : 'Loading Employee Records...'}
           onClose={() => setDetailItem(null)}
-          size="lg"
+          size="xl"
         >
           {detailLoading || !detailItem ? (
             <LoadingState message="Fetching complete employee employment records..." />
           ) : (
             <div className="space-y-4 text-xs">
               <TabBar
-                tabs={[
+                tabs={isEmpAdmin(detailItem.employee) ? [
+                  { id: 'profile', label: 'Employment Profile', icon: <FiUser className="w-3.5 h-3.5" /> },
+                ] : [
                   { id: 'profile', label: 'Employment Profile', icon: <FiUser className="w-3.5 h-3.5" /> },
                   { id: 'qr', label: 'Permanent QR Badge', icon: <FiCamera className="w-3.5 h-3.5" /> },
                   { id: 'attendance', label: `Attendance (${detailItem.attendance?.length || 0})`, icon: <FiClock className="w-3.5 h-3.5" /> },
@@ -1379,20 +1477,28 @@ export default function EmployeesPage({ branchFilter, embedded }) {
                           </div>
 
                           {/* QR Code Container */}
-                          <div className="mt-4 p-3 bg-white rounded-xl shadow-md border-2 border-slate-200">
-                            <QRCodeSVG
-                              id="employee-badge-qr-code"
-                              value={detailItem.employee.qr_token}
-                              size={120}
-                              level="H"
-                              includeMargin={false}
-                            />
+                          <div className="mt-4 p-3 bg-white rounded-xl shadow-md border-2 border-slate-200 flex items-center justify-center min-h-[144px]">
+                            {detailItem.employee.qr_token ? (
+                              <QRCodeSVG
+                                id="employee-badge-qr-code"
+                                value={detailItem.employee.qr_token}
+                                size={120}
+                                level="H"
+                                includeMargin={false}
+                              />
+                            ) : (
+                              <div className="w-[120px] h-[120px] flex flex-col items-center justify-center text-slate-400 bg-slate-50 border border-dashed border-slate-300 rounded-lg p-2 text-center">
+                                <FiSlash className="w-6 h-6 text-slate-300 mb-1" />
+                                <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">No QR Issued</span>
+                                <span className="text-[9px] text-slate-400 mt-0.5">Starts Empty</span>
+                              </div>
+                            )}
                           </div>
 
                           <div className="mt-3 flex items-center gap-1.5">
-                            <span className={`w-2 h-2 rounded-full ${detailItem.employee.qr_active ? 'bg-emerald-400 animate-pulse' : 'bg-rose-500'}`} />
+                            <span className={`w-2 h-2 rounded-full ${detailItem.employee.qr_token && detailItem.employee.qr_active ? 'bg-emerald-400 animate-pulse' : 'bg-slate-500'}`} />
                             <span className="text-[10px] uppercase font-bold tracking-wider text-slate-300">
-                              QR Status: {detailItem.employee.qr_active ? 'Active' : 'Disabled'}
+                              QR Status: {!detailItem.employee.qr_token ? 'Not Generated' : detailItem.employee.qr_active ? 'Active' : 'Disabled'}
                             </span>
                           </div>
                         </div>
@@ -1403,8 +1509,8 @@ export default function EmployeesPage({ branchFilter, embedded }) {
                         <div className="p-3.5 bg-muted/20 rounded-xl border border-border space-y-2.5">
                           <div className="flex items-center justify-between">
                             <h4 className="font-bold text-xs text-foreground">Badge Security Settings</h4>
-                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${detailItem.employee.qr_active ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'}`}>
-                              {detailItem.employee.qr_active ? 'Active' : 'Disabled'}
+                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${!detailItem.employee.qr_token ? 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300' : detailItem.employee.qr_active ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'}`}>
+                              {!detailItem.employee.qr_token ? 'Empty' : detailItem.employee.qr_active ? 'Active' : 'Disabled'}
                             </span>
                           </div>
                           <p className="text-[11px] text-muted-foreground">
@@ -1415,7 +1521,7 @@ export default function EmployeesPage({ branchFilter, embedded }) {
                             <div>
                               <span className="font-bold block text-foreground">Attendance PIN</span>
                               <span className="text-muted-foreground text-[11px]">
-                                {detailItem.employee.has_pin ? 'Secure PIN Configured' : 'Default PIN active (1234)'}
+                                {detailItem.employee.has_pin ? 'Secure PIN Configured' : 'PIN Not Set (Optional)'}
                               </span>
                             </div>
                             <button
@@ -1435,7 +1541,8 @@ export default function EmployeesPage({ branchFilter, embedded }) {
                               <button
                                 type="button"
                                 onClick={handleDownloadQr}
-                                className="flex items-center justify-center gap-1 px-3 py-1.5 rounded-xl border border-border hover:bg-muted font-semibold cursor-pointer"
+                                disabled={!detailItem.employee.qr_token}
+                                className={`flex items-center justify-center gap-1 px-3 py-1.5 rounded-xl border border-border hover:bg-muted font-semibold cursor-pointer ${!detailItem.employee.qr_token ? 'opacity-50 cursor-not-allowed' : ''}`}
                               >
                                 <FiDownload className="w-3.5 h-3.5" />
                                 <span>Download QR</span>
@@ -1494,59 +1601,61 @@ export default function EmployeesPage({ branchFilter, embedded }) {
                       <p className="text-muted-foreground text-xs mt-0.5 font-medium">{detailItem.employee.position} · {detailItem.employee.department} · {detailItem.employee.branch?.name || 'Unassigned'}</p>
                       <div className="mt-1.5 flex items-center gap-2">
                         <StatusBadge status={detailItem.employee.status} />
-                        <Badge text={`${detailItem.employee.pay_type} Rate`} variant="neutral" />
+                        <Badge text={isEmpAdmin(detailItem.employee) ? 'Executive / System Admin' : `${detailItem.employee.pay_type} Rate`} variant={isEmpAdmin(detailItem.employee) ? 'info' : 'neutral'} />
                       </div>
                     </div>
                   </div>
 
-                  {/* Verification Control */}
-                  <div className={`p-3 rounded-xl border flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2.5 ${detailItem.employee.information_verified
+                  {/* Verification Control - Staff & Regular Employees Only */}
+                  {!isEmpAdmin(detailItem.employee) && (
+                    <div className={`p-3 rounded-xl border flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2.5 ${detailItem.employee.information_verified
                       ? 'bg-emerald-50/80 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-900 text-emerald-900 dark:text-emerald-200'
                       : 'bg-amber-50/80 dark:bg-amber-950/30 border-amber-200 dark:border-amber-900 text-amber-900 dark:text-amber-200'
-                    }`}>
-                    <div className="flex items-center gap-2.5">
-                      <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${detailItem.employee.information_verified ? 'bg-emerald-200 text-emerald-900' : 'bg-amber-200 text-amber-900'
-                        }`}>
-                        {detailItem.employee.information_verified ? <FiCheckCircle className="w-4 h-4" /> : <FiAlertTriangle className="w-4 h-4" />}
-                      </div>
-                      <div>
-                        <div className="flex items-center gap-1.5">
-                          <span className="font-bold text-xs">Account Verification:</span>
-                          <span className={`text-[10px] font-bold px-2 py-0.2 rounded-full ${detailItem.employee.information_verified ? 'bg-emerald-200 text-emerald-900' : 'bg-amber-200 text-amber-900'
-                            }`}>
-                            {detailItem.employee.information_verified ? 'Officially Verified' : 'Pending Verification'}
-                          </span>
+                      }`}>
+                      <div className="flex items-center gap-2.5">
+                        <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${detailItem.employee.information_verified ? 'bg-emerald-200 text-emerald-900' : 'bg-amber-200 text-amber-900'
+                          }`}>
+                          {detailItem.employee.information_verified ? <FiCheckCircle className="w-4 h-4" /> : <FiAlertTriangle className="w-4 h-4" />}
                         </div>
-                        <p className="text-[10px] opacity-80 mt-0.5">
-                          {detailItem.employee.information_verified && detailItem.employee.information_verified_at
-                            ? `Verified by Administrator on ${fmtDate(detailItem.employee.information_verified_at)}`
-                            : 'Only authorized administrators can verify employee accounts.'}
-                        </p>
+                        <div>
+                          <div className="flex items-center gap-1.5">
+                            <span className="font-bold text-xs">Account Verification:</span>
+                            <span className={`text-[10px] font-bold px-2 py-0.2 rounded-full ${detailItem.employee.information_verified ? 'bg-emerald-200 text-emerald-900' : 'bg-amber-200 text-amber-900'
+                              }`}>
+                              {detailItem.employee.information_verified ? 'Officially Verified' : 'Pending Verification'}
+                            </span>
+                          </div>
+                          <p className="text-[10px] opacity-80 mt-0.5">
+                            {detailItem.employee.information_verified && detailItem.employee.information_verified_at
+                              ? `Verified by Administrator on ${fmtDate(detailItem.employee.information_verified_at)}`
+                              : 'Only authorized administrators can verify employee accounts.'}
+                          </p>
+                        </div>
+                      </div>
+
+                      <div>
+                        {detailItem.employee.information_verified ? (
+                          <button
+                            type="button"
+                            onClick={() => handleToggleVerify(detailItem.employee.employee_id, false)}
+                            disabled={verifyLoading}
+                            className="px-3 py-1 rounded-lg bg-rose-600 hover:bg-rose-700 text-white font-bold text-[11px] cursor-pointer"
+                          >
+                            Revoke Verification
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => handleToggleVerify(detailItem.employee.employee_id, true)}
+                            disabled={verifyLoading}
+                            className="px-3 py-1 rounded-lg bg-primary hover:bg-primary/90 text-primary-foreground font-bold text-[11px] cursor-pointer"
+                          >
+                            Verify Account (Admin)
+                          </button>
+                        )}
                       </div>
                     </div>
-
-                    <div>
-                      {detailItem.employee.information_verified ? (
-                        <button
-                          type="button"
-                          onClick={() => handleToggleVerify(detailItem.employee.employee_id, false)}
-                          disabled={verifyLoading}
-                          className="px-3 py-1 rounded-lg bg-rose-600 hover:bg-rose-700 text-white font-bold text-[11px] cursor-pointer"
-                        >
-                          Revoke Verification
-                        </button>
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={() => handleToggleVerify(detailItem.employee.employee_id, true)}
-                          disabled={verifyLoading}
-                          className="px-3 py-1 rounded-lg bg-primary hover:bg-primary/90 text-primary-foreground font-bold text-[11px] cursor-pointer"
-                        >
-                          Verify Account (Admin)
-                        </button>
-                      )}
-                    </div>
-                  </div>
+                  )}
 
                   <div className="grid grid-cols-2 gap-3 p-3 bg-muted/20 rounded-xl border border-border">
                     <div><span className="text-[10px] uppercase font-bold text-muted-foreground block mb-0.5">Employee ID</span> <p className="font-mono font-bold text-foreground">{detailItem.employee.employee_code}</p></div>
@@ -1556,20 +1665,23 @@ export default function EmployeesPage({ branchFilter, embedded }) {
                     <div className="col-span-2"><span className="text-[10px] uppercase font-bold text-muted-foreground block mb-0.5">Residential Address</span> <p className="text-foreground">{detailItem.employee.address || '—'}</p></div>
                   </div>
 
-                  <div className="grid grid-cols-3 gap-2.5">
-                    <div className="p-3 border border-border rounded-xl bg-card text-center">
-                      <span className="text-[10px] uppercase font-bold text-muted-foreground">Basic Salary</span>
-                      <p className="text-base font-bold font-mono text-primary mt-0.5">{fmt(detailItem.employee.basic_salary)}</p>
+                  {/* Compensation Details - Staff & Regular Employees Only */}
+                  {!isEmpAdmin(detailItem.employee) && (
+                    <div className="grid grid-cols-3 gap-2.5">
+                      <div className="p-3 border border-border rounded-xl bg-card text-center">
+                        <span className="text-[10px] uppercase font-bold text-muted-foreground">Basic Salary</span>
+                        <p className="text-base font-bold font-mono text-primary mt-0.5">{fmt(detailItem.employee.basic_salary)}</p>
+                      </div>
+                      <div className="p-3 border border-border rounded-xl bg-card text-center">
+                        <span className="text-[10px] uppercase font-bold text-muted-foreground">Daily Rate</span>
+                        <p className="text-base font-bold font-mono text-emerald-600 mt-0.5">{fmt(detailItem.employee.daily_rate || 0)}</p>
+                      </div>
+                      <div className="p-3 border border-border rounded-xl bg-card text-center">
+                        <span className="text-[10px] uppercase font-bold text-muted-foreground">Hourly Rate</span>
+                        <p className="text-base font-bold font-mono text-amber-600 mt-0.5">{fmt(detailItem.employee.hourly_rate || 0)}</p>
+                      </div>
                     </div>
-                    <div className="p-3 border border-border rounded-xl bg-card text-center">
-                      <span className="text-[10px] uppercase font-bold text-muted-foreground">Daily Rate</span>
-                      <p className="text-base font-bold font-mono text-emerald-600 mt-0.5">{fmt(detailItem.employee.daily_rate || 0)}</p>
-                    </div>
-                    <div className="p-3 border border-border rounded-xl bg-card text-center">
-                      <span className="text-[10px] uppercase font-bold text-muted-foreground">Hourly Rate</span>
-                      <p className="text-base font-bold font-mono text-amber-600 mt-0.5">{fmt(detailItem.employee.hourly_rate || 0)}</p>
-                    </div>
-                  </div>
+                  )}
                 </div>
               )}
 
@@ -1658,9 +1770,9 @@ export default function EmployeesPage({ branchFilter, embedded }) {
           isOpen={true}
           title={`Set Attendance PIN: ${pinEmployee.first_name} ${pinEmployee.last_name}`}
           onClose={() => setPinModalOpen(false)}
-          size="sm"
+          size="lg"
         >
-          <form onSubmit={handleSavePin} className="space-y-3.5 text-xs">
+          <form onSubmit={handleSavePin} className="space-y-4 text-xs">
             <div className="p-3 bg-muted/30 border border-border rounded-xl space-y-1">
               <span className="font-bold block flex items-center gap-1 text-foreground">
                 <FiKey className="w-3.5 h-3.5 text-primary" />
@@ -1669,38 +1781,40 @@ export default function EmployeesPage({ branchFilter, embedded }) {
               <p className="text-muted-foreground">The PIN must be 4 to 6 numeric digits. It is securely hashed using bcrypt in the database.</p>
             </div>
 
-            <div>
-              <label className="block font-bold text-muted-foreground mb-1">New Attendance PIN (4-6 digits)</label>
-              <input
-                type="password"
-                maxLength={6}
-                value={newPin}
-                onChange={e => setNewPin(e.target.value.replace(/\D/g, ''))}
-                placeholder="e.g. 4821"
-                required
-                autoFocus
-                className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground font-mono text-center tracking-widest text-base"
-              />
-            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className="block font-bold text-muted-foreground mb-1">New Attendance PIN (4-6 digits)</label>
+                <input
+                  type="password"
+                  maxLength={6}
+                  value={newPin}
+                  onChange={e => setNewPin(e.target.value.replace(/\D/g, ''))}
+                  placeholder="e.g. 4821"
+                  required
+                  autoFocus
+                  className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground font-mono text-center tracking-widest text-base"
+                />
+              </div>
 
-            <div>
-              <label className="block font-bold text-muted-foreground mb-1">Confirm Attendance PIN</label>
-              <input
-                type="password"
-                maxLength={6}
-                value={confirmPin}
-                onChange={e => setConfirmPin(e.target.value.replace(/\D/g, ''))}
-                placeholder="Re-enter PIN"
-                required
-                className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground font-mono text-center tracking-widest text-base"
-              />
+              <div>
+                <label className="block font-bold text-muted-foreground mb-1">Confirm Attendance PIN</label>
+                <input
+                  type="password"
+                  maxLength={6}
+                  value={confirmPin}
+                  onChange={e => setConfirmPin(e.target.value.replace(/\D/g, ''))}
+                  placeholder="Re-enter PIN"
+                  required
+                  className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground font-mono text-center tracking-widest text-base"
+                />
+              </div>
             </div>
 
             {newPin && confirmPin && newPin !== confirmPin && (
               <p className="text-xs font-semibold text-rose-600">PINs do not match</p>
             )}
 
-            <div className="flex justify-end gap-2 pt-2 border-t border-border">
+            <div className="flex justify-end gap-3 pt-4 border-t border-border">
               <button
                 type="button"
                 onClick={() => setPinModalOpen(false)}
@@ -1726,7 +1840,7 @@ export default function EmployeesPage({ branchFilter, embedded }) {
           isOpen={true}
           title="GENERATE PERMANENT ATTENDANCE QR"
           onClose={() => setGenerateModalEmp(null)}
-          size="md"
+          size="lg"
         >
           <div className="space-y-4 text-xs">
             <div className="p-4 rounded-xl bg-slate-950/80 border border-slate-800 space-y-2.5">
@@ -1742,7 +1856,7 @@ export default function EmployeesPage({ branchFilter, embedded }) {
                 <span className="text-slate-400">Position:</span>
                 <span className="font-semibold text-slate-200">{generateModalEmp.position}</span>
               </div>
-              
+
               <div className="flex justify-between items-center bg-muted/30 p-2.5 rounded-lg border border-border text-xs">
                 <span className="text-slate-400">Branch:</span>
                 <span className="font-semibold text-emerald-400">{generateModalEmp.branch?.name || 'Unassigned'}</span>
@@ -1755,7 +1869,7 @@ export default function EmployeesPage({ branchFilter, embedded }) {
               </p>
             </div>
 
-            <div className="flex justify-end gap-2.5 pt-3 border-t border-slate-800">
+            <div className="flex justify-end gap-3 pt-4 border-t border-slate-800">
               <Btn variant="outline" onClick={() => setGenerateModalEmp(null)} disabled={qrActionLoading}>
                 Cancel
               </Btn>
@@ -1773,10 +1887,10 @@ export default function EmployeesPage({ branchFilter, embedded }) {
           isOpen={true}
           title={`Attendance QR Badge: ${viewQrEmp.first_name} ${viewQrEmp.last_name}`}
           onClose={() => setViewQrEmp(null)}
-          size="md"
+          size="lg"
         >
           <div className="space-y-4 text-xs">
-            <div className="max-w-xs mx-auto p-6 rounded-2xl bg-white text-slate-900 shadow-2xl border border-slate-200 text-center space-y-3 print:border-none print:shadow-none">
+            <div className="max-w-sm mx-auto p-6 rounded-2xl bg-white text-slate-900 shadow-2xl border border-slate-200 text-center space-y-3 print:border-none print:shadow-none">
               <div className="text-[10px] font-black uppercase tracking-widest text-slate-500 border-b border-slate-200 pb-2">
                 Official Permanent Attendance Badge
               </div>
@@ -1801,7 +1915,7 @@ export default function EmployeesPage({ branchFilter, embedded }) {
               </div>
             </div>
 
-            <div className="flex justify-end gap-2 pt-3 border-t border-slate-800">
+            <div className="flex justify-end gap-3 pt-4 border-t border-slate-800">
               <Btn variant="outline" onClick={() => window.print()} icon={<FiPrinter />}>
                 Print QR
               </Btn>
@@ -1813,17 +1927,7 @@ export default function EmployeesPage({ branchFilter, embedded }) {
         </Modal>
       )}
 
-      {/* Delete confirmation */}
-      {deleteItem && (
-        <ConfirmDialog
-          title="Delete Employee"
-          message={`Are you sure you want to remove employee "${deleteItem.first_name} ${deleteItem.last_name}" (${deleteItem.employee_code})? This action cannot be undone.`}
-          confirmLabel={saving ? "Deleting..." : "Delete Employee"}
-          danger
-          onConfirm={handleDelete}
-          onCancel={() => setDeleteItem(null)}
-        />
-      )}
+
     </div>
   )
 }

@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import {
   FiUser, FiUsers, FiPlus, FiEdit, FiTrash2, FiEye,
@@ -35,6 +35,7 @@ export default function CustomersPage({ branchFilter, embedded }) {
   const [error, setError] = useState('')
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState('All')
+  const [selectedBranchFilter, setSelectedBranchFilter] = useState(branchFilter || 'All')
   const [page, setPage] = useState(1)
   const pageSize = 10
 
@@ -70,12 +71,21 @@ export default function CustomersPage({ branchFilter, embedded }) {
     }
   }
 
-  // Load branches list for Admin assign-branch feature
+  // Load branches list for branch assignment and dropdowns
   useEffect(() => {
-    if (isAdmin) {
-      api.branches.getAll().then(res => setBranches(res.branches || [])).catch(() => {})
+    api.branches.getAll()
+      .then(res => {
+        const list = res?.branches || (Array.isArray(res) ? res : [])
+        setBranches(list)
+      })
+      .catch(() => {})
+  }, [])
+
+  useEffect(() => {
+    if (branchFilter && branchFilter !== 'All') {
+      setSelectedBranchFilter(String(branchFilter))
     }
-  }, [isAdmin])
+  }, [branchFilter])
 
   const openAssignBranch = (c) => {
     setAssignBranchCustomer(c)
@@ -151,26 +161,41 @@ export default function CustomersPage({ branchFilter, embedded }) {
   // Form
   const emptyForm = {
     customer_code: '', first_name: '', middle_name: '', last_name: '',
-    phone: '', email: '', address: '', status: 'Active', notes: ''
+    phone: '', email: '', address: '', status: 'Active', notes: '',
+    branch_id: '',
   }
   const [form, setForm] = useState(emptyForm)
+  const inFlightRef = useRef(false)
 
-  const loadCustomers = async (source) => {
-    const isBackground = source === 'timer' || source === 'database' || source === 'event' || source === 'focus' || source === 'mutation' || customers.length > 0
+  const loadCustomers = async (source, signal) => {
+    const isBackground = source === true || source === 'timer' || source === 'database' || source === 'event' || source === 'focus' || source === 'mutation' || customers.length > 0
+    if (inFlightRef.current && isBackground) return
+    inFlightRef.current = true
     if (!isBackground) {
       setLoading(true)
     }
     setError('')
     try {
+      const effectiveBranch = branchFilter || (selectedBranchFilter !== 'All' ? selectedBranchFilter : undefined)
       const data = await api.customers.getAll({
         search: search || undefined,
         status: statusFilter !== 'All' ? statusFilter : undefined,
-        branch: branchFilter || undefined,
-      })
+        branch: effectiveBranch,
+      }, { signal })
+      if (signal?.aborted) return
       const newCustomers = data?.customers || []
       setCustomers(prev => fastDeepEqual(prev, newCustomers) ? prev : newCustomers)
+      const activeDetailId = detailCustomer?.customer?.customer_id || detailCustomer?.customer_id
+      if (activeDetailId && isBackground) {
+        api.customers.getById(activeDetailId, { signal })
+          .then(d => {
+            if (signal?.aborted || !d) return
+            setDetailCustomer(prev => (!prev || fastDeepEqual(prev, d)) ? prev : d)
+          })
+          .catch(() => {})
+      }
       try {
-        if (!search && statusFilter === 'All') {
+        if (!search && statusFilter === 'All' && selectedBranchFilter === 'All') {
           sessionStorage.setItem('pace_cached_customers', JSON.stringify(newCustomers))
         }
       } catch (e) { }
@@ -181,6 +206,7 @@ export default function CustomersPage({ branchFilter, embedded }) {
         setError(err.message || 'Failed to fetch customers')
       }
     } finally {
+      inFlightRef.current = false
       if (!isBackground) {
         setLoading(false)
       }
@@ -189,10 +215,10 @@ export default function CustomersPage({ branchFilter, embedded }) {
 
   useEffect(() => {
     loadCustomers('filter_change')
-  }, [statusFilter])
+  }, [statusFilter, selectedBranchFilter])
 
   // Real-time synchronization
-  useRealtimeSync(loadCustomers, [statusFilter, search, branchFilter], { periodic: true })
+  useRealtimeSync(loadCustomers, [statusFilter, search, branchFilter, selectedBranchFilter], { periodic: true })
 
   useEffect(() => {
     const id = searchParams.get('id')
@@ -215,8 +241,12 @@ export default function CustomersPage({ branchFilter, embedded }) {
 
     setSaving(true)
     try {
+      const payload = {
+        ...form,
+        branch_id: form.branch_id === '' || form.branch_id === null ? null : parseInt(form.branch_id)
+      }
       if (editItem) {
-        const res = await api.customers.update(editItem.customer_id, form)
+        const res = await api.customers.update(editItem.customer_id, payload)
         if (res.customer) {
           setCustomers(prev => prev.map(c => c.customer_id === editItem.customer_id ? res.customer : c))
         } else {
@@ -225,7 +255,7 @@ export default function CustomersPage({ branchFilter, embedded }) {
         showToast('Customer updated successfully', 'success')
       } else {
         // Create new customer
-        const res = await api.customers.create(form)
+        const res = await api.customers.create(payload)
         if (res.customer) {
           setCustomers(prev => [...prev, res.customer])
         } else {
@@ -276,6 +306,7 @@ export default function CustomersPage({ branchFilter, embedded }) {
       address: c.address || '',
       status: c.status || 'Active',
       notes: c.notes || '',
+      branch_id: c.branch_id !== null && c.branch_id !== undefined ? String(c.branch_id) : '',
     })
     setAddModal(true)
   }
@@ -295,7 +326,7 @@ export default function CustomersPage({ branchFilter, embedded }) {
   }
 
   const filtered = useMemo(() => {
-    return filterBySearch(customers, search, ['first_name', 'last_name', 'customer_code', 'phone', 'email'])
+    return filterBySearch(customers, search, ['first_name', 'last_name', 'customer_code', 'phone', 'email', 'branch_name'])
   }, [customers, search])
 
   const total = filtered.length
@@ -324,9 +355,18 @@ export default function CustomersPage({ branchFilter, embedded }) {
                 <span>{exporting ? 'Exporting...' : 'Export CSV'}</span>
               </button>
 
-              {isStoreAdmin && (
+              {(isStoreAdmin || isAdmin) && (
                 <button
-                  onClick={() => { setForm(emptyForm); setEditItem(null); setAddModal(true) }}
+                  onClick={() => {
+                    const defaultBranch = branchFilter
+                      ? String(branchFilter)
+                      : (user?.employee?.branch_id
+                        ? String(user.employee.branch_id)
+                        : (branches[0]?.id ? String(branches[0].id) : ''))
+                    setForm({ ...emptyForm, branch_id: defaultBranch })
+                    setEditItem(null)
+                    setAddModal(true)
+                  }}
                   className="flex items-center gap-2 px-4 py-2 bg-primary hover:bg-primary/90 text-primary-foreground font-semibold text-xs rounded-xl shadow-xs transition-all cursor-pointer"
                 >
                   <FiPlus className="w-4 h-4" />
@@ -371,7 +411,19 @@ export default function CustomersPage({ branchFilter, embedded }) {
             )}
           </div>
 
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
+            <select
+              value={selectedBranchFilter}
+              onChange={e => { setSelectedBranchFilter(e.target.value); setPage(1) }}
+              className="border border-border rounded-xl px-3 py-2 text-xs font-semibold text-foreground bg-card cursor-pointer"
+            >
+              <option value="All">All Branches</option>
+              {branches.map(b => (
+                <option key={b.id || b.name} value={String(b.id || b.name)}>{b.name}</option>
+              ))}
+              <option value="unassigned">Unassigned</option>
+            </select>
+
             <select
               value={statusFilter}
               onChange={e => { setStatusFilter(e.target.value); setPage(1) }}
@@ -398,14 +450,20 @@ export default function CustomersPage({ branchFilter, embedded }) {
           />
         ) : (
           <>
-            <div className="overflow-x-auto">
+            {/* Desktop Table View */}
+            <div className="hidden md:block overflow-x-auto">
               <table className="w-full text-xs min-w-[700px]">
                 <thead>
                   <tr className="border-b border-border bg-muted/50 text-muted-foreground uppercase font-semibold text-[11px]">
                     <th className="py-3 px-4 text-left">Customer Code</th>
                     <th className="py-3 px-4 text-left">Full Name</th>
                     <th className="py-3 px-4 text-left">Contact Info</th>
-                    <th className="py-3 px-4 text-left">Branch</th>
+                    <th className="py-3 px-4 text-left">
+                      <span className="flex items-center gap-1.5">
+                        <FiGitBranch className="w-3.5 h-3.5 text-primary" />
+                        <span>Branch</span>
+                      </span>
+                    </th>
                     <th className="py-3 px-4 text-center">Active Accounts</th>
                     <th className="py-3 px-4 text-right">Total Balance</th>
                     <th className="py-3 px-4 text-center">Status</th>
@@ -515,7 +573,7 @@ export default function CustomersPage({ branchFilter, embedded }) {
                               <FiGitBranch className="w-3.5 h-3.5" />
                             </button>
                           )}
-                          {(isStoreAdmin || !isAdmin) && (
+                          {(isStoreAdmin || isAdmin) && (
                             <button
                               onClick={() => openEdit(c)}
                               title="Edit profile"
@@ -524,7 +582,7 @@ export default function CustomersPage({ branchFilter, embedded }) {
                               <FiEdit className="w-3.5 h-3.5" />
                             </button>
                           )}
-                          {(isStoreAdmin || !isAdmin) && (
+                          {(isStoreAdmin || isAdmin) && (
                             <button
                               onClick={() => handleDelete(c)}
                               title="Delete customer"
@@ -540,6 +598,98 @@ export default function CustomersPage({ branchFilter, embedded }) {
                 </tbody>
               </table>
             </div>
+
+            {/* Mobile / Tablet Cards View */}
+            <div className="block md:hidden divide-y divide-border">
+              {paginated.map((c) => (
+                <div key={c.customer_id} className="p-4 space-y-3 hover:bg-muted/20 transition-colors">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-1.5 font-mono font-bold text-xs text-foreground">
+                      <FiUser className="w-3.5 h-3.5 text-primary" />
+                      <span>{c.customer_code}</span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <StatusBadge status={c.status} />
+                      {c.branch_name ? (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300">
+                          <FiGitBranch className="w-3 h-3" />
+                          <span>{c.branch_name}</span>
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300">
+                          Unassigned
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  <div>
+                    <div className="font-semibold text-sm text-foreground">
+                      {c.first_name} {c.middle_name ? `${c.middle_name}. ` : ''}{c.last_name}
+                    </div>
+                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1 text-xs text-muted-foreground font-mono">
+                      <span className="flex items-center gap-1">
+                        <FiPhone className="w-3 h-3" /> {c.phone}
+                      </span>
+                      {c.email && (
+                        <span className="flex items-center gap-1">
+                          <FiMail className="w-3 h-3" /> {c.email}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between text-xs pt-1 border-t border-border/50">
+                    <div>
+                      <span className="text-[10px] text-muted-foreground uppercase font-bold block">Accounts</span>
+                      <span className="font-semibold text-foreground">{c.active_installments || 0} active</span>
+                    </div>
+                    <div className="text-right">
+                      <span className="text-[10px] text-muted-foreground uppercase font-bold block">Balance</span>
+                      <span className={`font-mono font-bold ${(c.balance || 0) > 0 ? 'text-rose-600' : 'text-muted-foreground'}`}>
+                        {fmt(c.balance || 0)}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-end gap-1.5 pt-2 border-t border-border">
+                    <button
+                      onClick={() => openDetail(c)}
+                      className="flex items-center gap-1 px-2.5 py-1 text-xs rounded-lg border border-border hover:bg-muted font-medium cursor-pointer"
+                    >
+                      <FiEye className="w-3.5 h-3.5" />
+                      <span>View</span>
+                    </button>
+                    {isAdmin && (
+                      <button
+                        onClick={() => openAssignBranch(c)}
+                        className="flex items-center gap-1 px-2.5 py-1 text-xs rounded-lg border border-border hover:bg-blue-50 hover:text-blue-600 font-medium cursor-pointer"
+                      >
+                        <FiGitBranch className="w-3.5 h-3.5" />
+                        <span>Branch</span>
+                      </button>
+                    )}
+                    {(isStoreAdmin || isAdmin) && (
+                      <button
+                        onClick={() => openEdit(c)}
+                        className="flex items-center gap-1 px-2.5 py-1 text-xs rounded-lg border border-border hover:bg-muted font-medium cursor-pointer"
+                      >
+                        <FiEdit className="w-3.5 h-3.5" />
+                        <span>Edit</span>
+                      </button>
+                    )}
+                    {(isStoreAdmin || isAdmin) && (
+                      <button
+                        onClick={() => handleDelete(c)}
+                        className="p-1 rounded-lg border border-border hover:bg-rose-50 hover:text-rose-600 text-muted-foreground cursor-pointer"
+                      >
+                        <FiTrash2 className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
             <Pagination total={total} page={page} pageSize={pageSize} onChange={setPage} />
           </>
         )}
@@ -551,10 +701,10 @@ export default function CustomersPage({ branchFilter, embedded }) {
           isOpen={true}
           title={editItem ? `Edit Customer — ${editItem?.customer_code || ''}` : 'Add New Customer'}
           onClose={() => { setAddModal(false); setEditItem(null); setForm(emptyForm) }}
-          size="md"
+          size="lg"
         >
-          <form onSubmit={handleSave} className="space-y-3.5 text-xs">
-            <div className="grid grid-cols-3 gap-2.5">
+          <form onSubmit={handleSave} className="space-y-4 text-xs">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
               <div>
                 <label className="block font-bold text-muted-foreground mb-1">First Name *</label>
                 <input
@@ -589,7 +739,7 @@ export default function CustomersPage({ branchFilter, embedded }) {
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-2.5">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
               <div>
                 <label className="block font-bold text-muted-foreground mb-1">Phone Number *</label>
                 <div className="relative">
@@ -635,7 +785,7 @@ export default function CustomersPage({ branchFilter, embedded }) {
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-2.5">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
               <div>
                 <label className="block font-bold text-muted-foreground mb-1">Customer Code</label>
                 <input
@@ -646,17 +796,45 @@ export default function CustomersPage({ branchFilter, embedded }) {
                   className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground font-mono"
                 />
               </div>
+
               <div>
                 <label className="block font-bold text-muted-foreground mb-1">Account Status</label>
                 <select
                   value={form.status}
                   onChange={e => setForm(f => ({ ...f, status: e.target.value }))}
-                  className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground font-semibold"
+                  className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground font-semibold cursor-pointer"
                 >
                   <option value="Active">Active</option>
                   <option value="Inactive">Inactive</option>
                 </select>
               </div>
+            </div>
+
+            <div className="bg-muted/20 p-3.5 rounded-xl border border-border">
+              <label className="block font-bold text-foreground mb-1.5 flex items-center justify-between">
+                <span className="flex items-center gap-1.5">
+                  <FiGitBranch className="w-4 h-4 text-primary" />
+                  <span>Assigned Store Branch</span>
+                </span>
+                <span className="text-[10px] font-normal text-muted-foreground">
+                  (Associates customer with branch ledger)
+                </span>
+              </label>
+              <select
+                value={form.branch_id || ''}
+                onChange={e => setForm(f => ({ ...f, branch_id: e.target.value }))}
+                className="w-full px-3 py-2.5 rounded-xl border border-border bg-card text-foreground font-semibold text-xs focus:outline-none focus:ring-2 focus:ring-primary/20 cursor-pointer"
+              >
+                <option value="">— Unassigned (No Branch) —</option>
+                {branches.map(b => (
+                  <option key={b.id || b.branch_id || b.name} value={String(b.id || b.branch_id)}>
+                    {b.name || b.branch_name}
+                  </option>
+                ))}
+              </select>
+              <p className="text-[11px] text-muted-foreground mt-1">
+                Customer purchases, installments, and payment schedules will be scoped to this store branch in the ledger.
+              </p>
             </div>
 
             <div>
@@ -670,7 +848,7 @@ export default function CustomersPage({ branchFilter, embedded }) {
               />
             </div>
 
-            <div className="flex justify-end gap-2 pt-2 border-t border-border">
+            <div className="flex justify-end gap-3 pt-4 border-t border-border">
               <button
                 type="button"
                 onClick={() => { setAddModal(false); setEditItem(null) }}
@@ -698,7 +876,7 @@ export default function CustomersPage({ branchFilter, embedded }) {
           isOpen={true}
           title={detailCustomer ? `${detailCustomer.customer.first_name} ${detailCustomer.customer.last_name} (${detailCustomer.customer.customer_code})` : 'Loading Customer...'}
           onClose={() => setDetailCustomer(null)}
-          size="lg"
+          size="xl"
         >
           {detailLoading || !detailCustomer ? (
             <LoadingState message="Fetching complete customer credit & purchase history..." />
@@ -733,6 +911,25 @@ export default function CustomersPage({ branchFilter, embedded }) {
                     <div>
                       <span className="text-[10px] uppercase font-bold text-muted-foreground">Email:</span>
                       <p className="text-foreground">{detailCustomer.customer.email || '—'}</p>
+                    </div>
+                    <div className="col-span-2 sm:col-span-1">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[10px] uppercase font-bold text-muted-foreground">Store Branch:</span>
+                        {isAdmin && (
+                          <button
+                            type="button"
+                            onClick={() => openAssignBranch(detailCustomer.customer)}
+                            className="text-[10px] font-semibold text-primary hover:underline flex items-center gap-1 cursor-pointer"
+                          >
+                            <FiGitBranch className="w-3 h-3" />
+                            <span>Change</span>
+                          </button>
+                        )}
+                      </div>
+                      <p className="font-semibold text-foreground flex items-center gap-1 mt-0.5">
+                        <FiGitBranch className="w-3.5 h-3.5 text-blue-500 shrink-0" />
+                        <span>{detailCustomer.customer.branch_name || 'Unassigned'}</span>
+                      </p>
                     </div>
                     <div className="col-span-2">
                       <span className="text-[10px] uppercase font-bold text-muted-foreground">Address:</span>
@@ -914,22 +1111,26 @@ export default function CustomersPage({ branchFilter, embedded }) {
           isOpen={true}
           title={`Assign Branch — ${assignBranchCustomer.first_name} ${assignBranchCustomer.last_name}`}
           onClose={() => { setAssignBranchModal(false); setAssignBranchCustomer(null) }}
-          size="sm"
+          size="lg"
         >
           <div className="space-y-4 text-xs">
-            <div className="p-3 rounded-xl bg-muted/50 border border-border space-y-1">
-              <div className="text-muted-foreground">Customer Code</div>
-              <div className="font-mono font-bold text-foreground">{assignBranchCustomer.customer_code}</div>
-              <div className="text-muted-foreground mt-1">Current Branch</div>
-              <div className="font-semibold">
-                {assignBranchCustomer.branch_name ? (
-                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300">
-                    <FiGitBranch className="w-3 h-3" />
-                    {assignBranchCustomer.branch_name}
-                  </span>
-                ) : (
-                  <span className="text-amber-600">Unassigned</span>
-                )}
+            <div className="p-3.5 rounded-xl bg-muted/50 border border-border grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <div className="text-muted-foreground mb-0.5">Customer Code</div>
+                <div className="font-mono font-bold text-foreground">{assignBranchCustomer.customer_code}</div>
+              </div>
+              <div>
+                <div className="text-muted-foreground mb-0.5">Current Branch</div>
+                <div className="font-semibold">
+                  {assignBranchCustomer.branch_name ? (
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300">
+                      <FiGitBranch className="w-3 h-3" />
+                      {assignBranchCustomer.branch_name}
+                    </span>
+                  ) : (
+                    <span className="text-amber-600">Unassigned</span>
+                  )}
+                </div>
               </div>
             </div>
 
@@ -938,7 +1139,7 @@ export default function CustomersPage({ branchFilter, embedded }) {
               <select
                 value={selectedBranchId}
                 onChange={e => setSelectedBranchId(e.target.value)}
-                className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground text-xs focus:outline-none focus:ring-2 focus:ring-primary/20"
+                className="w-full px-3 py-2.5 rounded-xl border border-border bg-card text-foreground text-xs focus:outline-none focus:ring-2 focus:ring-primary/20"
               >
                 <option value="">— Unassigned (no branch) —</option>
                 {branches.map(b => (
@@ -947,7 +1148,7 @@ export default function CustomersPage({ branchFilter, embedded }) {
               </select>
             </div>
 
-            <div className="flex justify-end gap-2 pt-2">
+            <div className="flex justify-end gap-3 pt-4 border-t border-border">
               <button
                 type="button"
                 onClick={() => { setAssignBranchModal(false); setAssignBranchCustomer(null) }}

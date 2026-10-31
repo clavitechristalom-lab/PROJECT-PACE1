@@ -1,15 +1,16 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Modal, LoadingState, EmptyState, Badge, StatusBadge, showToast, showSuccess, showError, showWarning, confirmDelete } from '../ui';
 import { api } from '../../lib/api';
 import { fmt } from '../../lib/utils';
 import { FiPackage, FiCalendar, FiClock, FiCreditCard, FiAlertCircle, FiCheckCircle, FiFileText, FiMessageCircle, FiChevronLeft, FiChevronRight, FiShoppingCart, FiX, FiTrash2 } from 'react-icons/fi';
 import { TbCurrencyPeso } from 'react-icons/tb';
 import { useAuth } from '../../context/AuthContext';
-import { triggerDataSync } from '../../lib/realtimeSync';
+import { triggerDataSync, useRealtimeSync, fastDeepEqual } from '../../lib/realtimeSync';
 
 export function ProductListModal({ isOpen, onClose, category, availableCategories = [], initialProductId = null, onBuyProduct }) {
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
+  const inFlightRef = useRef(false);
 
   // Search and Filter State
   const [searchQuery, setSearchQuery] = useState('');
@@ -17,7 +18,7 @@ export function ProductListModal({ isOpen, onClose, category, availableCategorie
 
   // Carousel state
   const [currentIndex, setCurrentIndex] = useState(0);
-  const itemsPerPage = 3; // Desktop: 3 product cards visible
+  const itemsPerPage = 3; // Large modal: 3 product cards visible
 
   // Detail Modal state
   const [selectedProduct, setSelectedProduct] = useState(null);
@@ -35,26 +36,45 @@ export function ProductListModal({ isOpen, onClose, category, availableCategorie
     }
   }, [isOpen, category]);
 
-  const loadProducts = () => {
+  const loadProducts = useCallback((silent = false, signal) => {
     if (!isOpen) return;
-    setLoading(true);
+    const isSilent = silent === true;
+    if (inFlightRef.current && isSilent) return;
+    inFlightRef.current = true;
+    if (!isSilent) setLoading(true);
     const params = { status: 'Active' };
     if (activeCategory !== 'All') params.category = activeCategory;
     if (searchQuery) params.search = searchQuery;
 
-    api.products.getAll(params)
+    api.products.getAll(params, { signal })
       .then(data => {
-        setProducts(data.products || []);
-        setCurrentIndex(0);
+        if (signal?.aborted) return;
+        const nextProducts = data.products || [];
+        setProducts(prev => (fastDeepEqual(prev, nextProducts) ? prev : nextProducts));
+        setSelectedProduct(prev => {
+          if (!prev) return null;
+          const updated = nextProducts.find(p => p.product_id === prev.product_id);
+          return updated ? (fastDeepEqual(prev, updated) ? prev : updated) : prev;
+        });
+        if (!isSilent) setCurrentIndex(0);
       })
-      .catch(err => console.error(err))
-      .finally(() => setLoading(false));
-  };
+      .catch(err => {
+        if (err?.name !== 'AbortError') console.error(err);
+      })
+      .finally(() => {
+        inFlightRef.current = false;
+        if (!isSilent) setLoading(false);
+      });
+  }, [isOpen, activeCategory, searchQuery]);
 
   useEffect(() => {
     if (!isOpen) return;
-    loadProducts();
-  }, [isOpen, activeCategory, searchQuery]);
+    loadProducts(false);
+  }, [isOpen, activeCategory, searchQuery, loadProducts]);
+
+  useRealtimeSync((_source, signal) => {
+    if (isOpen) loadProducts(true, signal);
+  }, [isOpen, loadProducts]);
 
   if (!isOpen) return null;
 
@@ -77,8 +97,8 @@ export function ProductListModal({ isOpen, onClose, category, availableCategorie
   return (
     <>
       {/* BACKGROUND MODAL: CATEGORY PRODUCT MODAL */}
-      <Modal isOpen={isOpen} onClose={onClose} title="Product Catalog" size="lg">
-        <div className="flex flex-col relative h-[500px]">
+      <Modal isOpen={isOpen} onClose={onClose} title="Product Catalog" size="xl">
+        <div className="flex flex-col relative h-[520px]">
           {/* Filter & Search Bar */}
           <div className="flex flex-col sm:flex-row justify-between items-center gap-4 mb-4 pb-4 border-b border-border shrink-0">
             <div className="flex gap-2 overflow-x-auto pb-1 max-w-full">
@@ -129,7 +149,7 @@ export function ProductListModal({ isOpen, onClose, category, availableCategorie
                   <FiChevronLeft className="w-6 h-6" />
                 </button>
 
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 flex-1 items-start">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 flex-1 items-start">
                   {visibleProducts.map(p => {
                     const salePrice = p.discount_price || null;
 
@@ -258,109 +278,109 @@ function ProductDetailModal({ product, onClose, onBuyProduct }) {
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-[fadeIn_0.2s_ease]">
-      <div className="bg-background rounded-2xl shadow-2xl w-full max-w-3xl overflow-hidden relative flex flex-col md:flex-row">
+      <div className="bg-background rounded-2xl shadow-2xl border border-border w-full max-w-3xl max-h-[90vh] overflow-hidden relative flex flex-col">
 
-        {/* Left: Image Gallery */}
-        <div className="w-full md:w-1/2 bg-muted relative flex flex-col">
-          {/* Close button for mobile */}
-          <button onClick={onClose} className="md:hidden absolute top-3 right-3 z-10 bg-black/30 hover:bg-black/50 text-white rounded-full p-1.5 transition-colors">
-            <FiX className="w-5 h-5" />
-          </button>
-
-          <div className="relative flex-1 min-h-[300px]">
-            {images.length > 0 ? (
-              <>
-                <img 
-                  src={images[currentImageIndex]} 
-                  alt={product.product_name} 
-                  className="w-full h-full object-contain p-4 absolute inset-0" 
-                  onError={(e) => { e.target.style.display = 'none'; }}
-                />
-                <div className="absolute inset-0 bg-gradient-to-t from-black/20 to-transparent pointer-events-none"></div>
-              </>
-            ) : (
-              <div className="w-full h-full min-h-[300px] flex flex-col items-center justify-center p-6 text-muted-foreground">
-                <FiPackage className="w-16 h-16 opacity-30 mb-2" />
-                <span className="text-sm font-medium">No Image Available</span>
-              </div>
-            )}
-
-            {/* Gallery Counter */}
-            {images.length > 1 && (
-              <div className="absolute bottom-3 right-3 bg-black/50 text-white text-xs font-mono px-2 py-1 rounded backdrop-blur-md">
-                {currentImageIndex + 1} / {images.length}
-              </div>
-            )}
-
-            {/* Navigation Arrows */}
-            {images.length > 1 && (
-              <>
-                <button
-                  onClick={() => setCurrentImageIndex(prev => Math.max(0, prev - 1))}
-                  disabled={currentImageIndex === 0}
-                  className="absolute left-2 top-1/2 -translate-y-1/2 bg-black/30 hover:bg-black/60 text-white rounded-full p-1.5 disabled:opacity-0 transition-all"
-                >
-                  <FiChevronLeft className="w-5 h-5" />
-                </button>
-                <button
-                  onClick={() => setCurrentImageIndex(prev => Math.min(images.length - 1, prev + 1))}
-                  disabled={currentImageIndex === images.length - 1}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 bg-black/30 hover:bg-black/60 text-white rounded-full p-1.5 disabled:opacity-0 transition-all"
-                >
-                  <FiChevronRight className="w-5 h-5" />
-                </button>
-              </>
-            )}
-          </div>
-
-          {/* Thumbnails */}
-          {images.length > 1 && (
-            <div className="flex gap-2 p-3 bg-slate-200 dark:bg-slate-900 overflow-x-auto">
-              {images.map((img, idx) => (
-                <button
-                  key={idx}
-                  onClick={() => setCurrentImageIndex(idx)}
-                  className={`w-16 h-12 shrink-0 rounded overflow-hidden border-2 transition-colors ${idx === currentImageIndex ? 'border-[#176B87]' : 'border-transparent'}`}
-                >
-                  <img src={img} className="w-full h-full object-cover" />
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-
-        {/* Right: Product Info */}
-        <div className="w-full md:w-1/2 p-6 flex flex-col max-h-[80vh] overflow-y-auto relative">
-          <button onClick={onClose} className="hidden md:block absolute top-4 right-4 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors">
-            <FiX className="w-6 h-6" />
-          </button>
-
-          <div className="mb-2 flex items-center gap-2 flex-wrap pr-8">
+        {/* Header */}
+        <div className="flex items-center justify-between px-6 py-4 border-b border-border shrink-0">
+          <div className="flex items-center gap-2 min-w-0">
             <Badge variant="outline">{product.category}</Badge>
             <Badge variant={product.stock_quantity > 0 ? "success" : "destructive"}>{product.stock_quantity > 0 ? `${product.stock_quantity} in stock` : 'Out of Stock'}</Badge>
           </div>
+          <button onClick={onClose} className="w-8 h-8 rounded-xl hover:bg-muted text-muted-foreground hover:text-foreground flex items-center justify-center transition-colors cursor-pointer shrink-0">
+            <FiX className="w-5 h-5" />
+          </button>
+        </div>
 
-          <h2 className="text-2xl font-bold text-foreground leading-tight mt-1 mb-6">{product.product_name}</h2>
+        {/* Scrollable Body */}
+        <div className="p-6 sm:p-8 space-y-5 overflow-y-auto flex-1">
+          {/* Image Gallery */}
+          <div className="w-full bg-muted rounded-2xl overflow-hidden border border-border relative flex flex-col">
+            <div className="relative h-64">
+              {images.length > 0 ? (
+                <>
+                  <img 
+                    src={images[currentImageIndex]} 
+                    alt={product.product_name} 
+                    className="w-full h-full object-contain p-4 absolute inset-0" 
+                    onError={(e) => { e.target.style.display = 'none'; }}
+                  />
+                  <div className="absolute inset-0 bg-gradient-to-t from-black/20 to-transparent pointer-events-none"></div>
+                </>
+              ) : (
+                <div className="w-full h-full flex flex-col items-center justify-center p-6 text-muted-foreground">
+                  <FiPackage className="w-12 h-12 opacity-30 mb-2" />
+                  <span className="text-xs font-medium">No Image Available</span>
+                </div>
+              )}
 
-          {product.discount_price ? (
-            <div className="mb-6">
-              <div className="text-sm font-semibold text-muted-foreground line-through">{fmt(product.unit_price)}</div>
-              <div className="font-mono text-3xl font-bold text-emerald-600">{fmt(product.discount_price)}</div>
+              {/* Gallery Counter */}
+              {images.length > 1 && (
+                <div className="absolute bottom-3 right-3 bg-black/50 text-white text-xs font-mono px-2 py-1 rounded backdrop-blur-md">
+                  {currentImageIndex + 1} / {images.length}
+                </div>
+              )}
+
+              {/* Navigation Arrows */}
+              {images.length > 1 && (
+                <>
+                  <button
+                    onClick={() => setCurrentImageIndex(prev => Math.max(0, prev - 1))}
+                    disabled={currentImageIndex === 0}
+                    className="absolute left-2 top-1/2 -translate-y-1/2 bg-black/30 hover:bg-black/60 text-white rounded-full p-1.5 disabled:opacity-0 transition-all"
+                  >
+                    <FiChevronLeft className="w-5 h-5" />
+                  </button>
+                  <button
+                    onClick={() => setCurrentImageIndex(prev => Math.min(images.length - 1, prev + 1))}
+                    disabled={currentImageIndex === images.length - 1}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 bg-black/30 hover:bg-black/60 text-white rounded-full p-1.5 disabled:opacity-0 transition-all"
+                  >
+                    <FiChevronRight className="w-5 h-5" />
+                  </button>
+                </>
+              )}
             </div>
-          ) : (
-            <div className="font-mono text-3xl font-bold text-primary mb-6">
-              {fmt(product.unit_price)}
-            </div>
-          )}
 
-          <div className="flex-1 flex flex-col space-y-6">
+            {/* Thumbnails */}
+            {images.length > 1 && (
+              <div className="flex gap-2 p-2.5 bg-slate-200 dark:bg-slate-900 overflow-x-auto">
+                {images.map((img, idx) => (
+                  <button
+                    key={idx}
+                    onClick={() => setCurrentImageIndex(idx)}
+                    className={`w-14 h-10 shrink-0 rounded overflow-hidden border-2 transition-colors ${idx === currentImageIndex ? 'border-[#176B87]' : 'border-transparent'}`}
+                  >
+                    <img src={img} className="w-full h-full object-cover" />
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="flex items-start justify-between gap-4">
+            <h2 className="text-lg font-bold text-foreground leading-tight">{product.product_name}</h2>
+            <div className="text-right shrink-0">
+              {product.discount_price ? (
+                <>
+                  <div className="text-xs font-semibold text-muted-foreground line-through">{fmt(product.unit_price)}</div>
+                  <div className="font-mono text-xl font-bold text-emerald-600">{fmt(product.discount_price)}</div>
+                </>
+              ) : (
+                <div className="font-mono text-xl font-bold text-primary">
+                  {fmt(product.unit_price)}
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {/* Specifications Block */}
             <div>
-              <h4 className="text-sm font-bold text-foreground mb-3 flex items-center gap-2">
-                <FiPackage className="w-4 h-4 text-[#176B87]" />
+              <h4 className="text-xs font-bold uppercase tracking-wider text-muted-foreground mb-2 flex items-center gap-1.5">
+                <FiPackage className="w-3.5 h-3.5 text-[#176B87]" />
                 Specifications
               </h4>
-              <div className="bg-muted/30 rounded-lg p-3 space-y-2 text-sm border border-border">
+              <div className="bg-muted/30 rounded-xl p-3.5 space-y-1.5 text-xs border border-border h-[calc(100%-1.5rem)]">
                 <div className="flex justify-between items-center py-1">
                   <span className="text-muted-foreground font-medium">Brand</span>
                   <span className="font-semibold text-foreground text-right">{product.brand || 'N/A'}</span>
@@ -383,37 +403,45 @@ function ProductDetailModal({ product, onClose, onBuyProduct }) {
             </div>
 
             {/* Description Block */}
-            <div>
-              <h4 className="text-sm font-bold text-foreground mb-2 flex items-center gap-2">
-                <FiFileText className="w-4 h-4 text-[#176B87]" />
+            <div className="flex flex-col">
+              <h4 className="text-xs font-bold uppercase tracking-wider text-muted-foreground mb-2 flex items-center gap-1.5">
+                <FiFileText className="w-3.5 h-3.5 text-[#176B87]" />
                 Description
               </h4>
-              <p className="text-sm text-muted-foreground leading-relaxed whitespace-pre-wrap bg-background border border-border/50 rounded-lg p-3">
+              <p className="text-xs text-muted-foreground leading-relaxed whitespace-pre-wrap bg-background border border-border/50 rounded-xl p-3.5 flex-1">
                 {product.description || 'No detailed description provided for this product.'}
               </p>
             </div>
           </div>
 
-          {/* Active Payment Action Button */}
-          <div className="w-full mt-6 space-y-2">
-            {onBuyProduct && (
-              <button
-                type="button"
-                onClick={() => {
-                  onClose();
-                  onBuyProduct(product);
-                }}
-                className="w-full py-3.5 px-4 rounded-xl bg-[#7c3aed] hover:bg-[#6d28d9] active:bg-[#5b21b6] text-white font-bold text-sm shadow-md shadow-purple-600/25 flex items-center justify-center gap-2 transition-all cursor-pointer hover:scale-[1.01]"
-              >
-                <FiShoppingCart className="w-4 h-4" />
-                <span>Make Payment for this Product ({fmt(product.discount_price || product.unit_price)})</span>
-              </button>
-            )}
-            <div className="w-full bg-blue-50 dark:bg-blue-950/30 text-blue-800 dark:text-blue-300 border border-blue-100 dark:border-blue-900 font-medium py-2.5 px-3 rounded-xl flex items-center justify-center gap-2 text-xs text-center">
-              <FiCheckCircle className="w-4 h-4 text-emerald-500 shrink-0" />
-              <span>Instant checkout via GCash, Maya, or BDO Online Banking</span>
-            </div>
+          <div className="w-full bg-blue-50 dark:bg-blue-950/30 text-blue-800 dark:text-blue-300 border border-blue-100 dark:border-blue-900 font-medium py-2.5 px-3 rounded-xl flex items-center justify-center gap-2 text-xs text-center">
+            <FiCheckCircle className="w-4 h-4 text-emerald-500 shrink-0" />
+            <span>Instant checkout via GCash, Maya, or BDO Online Banking</span>
           </div>
+        </div>
+
+        {/* Footer Action Buttons */}
+        <div className="px-6 py-4 border-t border-border bg-muted/20 flex items-center justify-end gap-3 shrink-0">
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-4 py-2.5 rounded-xl border border-border hover:bg-muted text-xs font-bold text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+          >
+            Close
+          </button>
+          {onBuyProduct && (
+            <button
+              type="button"
+              onClick={() => {
+                onClose();
+                onBuyProduct(product);
+              }}
+              className="py-2.5 px-4 rounded-xl bg-[#7c3aed] hover:bg-[#6d28d9] active:bg-[#5b21b6] text-white font-bold text-xs shadow-md shadow-purple-600/25 flex items-center justify-center gap-2 transition-all cursor-pointer"
+            >
+              <FiShoppingCart className="w-4 h-4" />
+              <span>Make Payment ({fmt(product.discount_price || product.unit_price)})</span>
+            </button>
+          )}
         </div>
 
       </div>
@@ -434,7 +462,7 @@ export function PaymentDetailsModal({ isOpen, onClose, installments }) {
   if (!isOpen) return null;
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title="Upcoming Payments" size="md">
+    <Modal isOpen={isOpen} onClose={onClose} title="Upcoming Payments" size="lg">
       {schedules.length === 0 ? (
         <EmptyState icon={<FiCalendar className="w-12 h-12 text-muted-foreground/30 mx-auto" />} title="No upcoming payments" description="You have no pending payments scheduled." />
       ) : (
@@ -466,9 +494,9 @@ export function CreditDetailsModal({ isOpen, onClose, installments }) {
   if (!isOpen) return null;
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title="Credit Balance Breakdown" size="md">
+    <Modal isOpen={isOpen} onClose={onClose} title="Credit Balance Breakdown" size="lg">
       <div className="space-y-4">
-        <div className="grid grid-cols-3 gap-2">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
           <div className="bg-muted/30 border border-border p-3 rounded-xl text-center">
             <div className="text-[10px] uppercase font-bold text-muted-foreground mb-1">Total Credit</div>
             <div className="font-mono font-bold text-foreground">{fmt(totalPayable)}</div>
@@ -519,7 +547,7 @@ export function OverduePaymentsModal({ isOpen, onClose, installments }) {
   if (!isOpen) return null;
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title="Overdue Payments" size="md">
+    <Modal isOpen={isOpen} onClose={onClose} title="Overdue Payments" size="lg">
       {overdueSchedules.length === 0 ? (
         <EmptyState icon={<FiCheckCircle className="w-12 h-12 text-emerald-500/50 mx-auto" />} title="All Caught Up!" description="You do not have any overdue payments." />
       ) : (
@@ -561,7 +589,7 @@ export function FullyPaidProductDetailsModal({ isOpen, onClose, accountData }) {
   const item = saleItems.length > 0 ? saleItems[0] : null;
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title="Fully Paid Product & Product Details" size="lg">
+    <Modal isOpen={isOpen} onClose={onClose} title="Fully Paid Product & Product Details" size="xl">
       <div className="space-y-6">
         {/* Product Info Section */}
         <div className="flex flex-col sm:flex-row gap-6 p-5 bg-emerald-50/50 dark:bg-emerald-900/10 rounded-xl border border-emerald-100 dark:border-emerald-800/50">
@@ -646,7 +674,7 @@ export function FullyPaidProductDetailsModal({ isOpen, onClose, accountData }) {
           isOpen={true}
           onClose={() => setViewReceipt(null)}
           title="Official Payment Receipt"
-          size="md"
+          size="lg"
         >
           <div className="p-4 space-y-4">
             <div className="text-center pb-4 border-b border-border/50">
@@ -698,19 +726,38 @@ export function InstallmentAccountDetailsModal({ isOpen, onClose, installmentId 
   const [accountData, setAccountData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [viewReceipt, setViewReceipt] = useState(null);
+  const inFlightRef = useRef(false);
+
+  const loadAccountDetails = useCallback((silent = false, signal) => {
+    if (!isOpen || !installmentId) return;
+    const isSilent = silent === true;
+    if (inFlightRef.current && isSilent) return;
+    inFlightRef.current = true;
+    if (!isSilent) setLoading(true);
+    api.installments.getById(installmentId, { signal })
+      .then(data => {
+        if (signal?.aborted) return;
+        const nextData = data.installment || data;
+        setAccountData(prev => (fastDeepEqual(prev, nextData) ? prev : nextData));
+      })
+      .catch(err => {
+        if (err?.name !== 'AbortError') console.error(err);
+      })
+      .finally(() => {
+        inFlightRef.current = false;
+        if (!isSilent) setLoading(false);
+      });
+  }, [isOpen, installmentId]);
 
   useEffect(() => {
     if (isOpen && installmentId) {
-      setLoading(true);
-      api.installments.getById(installmentId)
-        .then(data => {
-          // data has { account, next_payment, sale_items, schedules, payments }
-          setAccountData(data.installment || data);
-        })
-        .catch(err => console.error(err))
-        .finally(() => setLoading(false));
+      loadAccountDetails(false);
     }
-  }, [isOpen, installmentId]);
+  }, [isOpen, installmentId, loadAccountDetails]);
+
+  useRealtimeSync((_source, signal) => {
+    if (isOpen && installmentId) loadAccountDetails(true, signal);
+  }, [isOpen, installmentId, loadAccountDetails]);
 
   if (!isOpen) return null;
 
@@ -719,11 +766,11 @@ export function InstallmentAccountDetailsModal({ isOpen, onClose, installmentId 
   const schedules = accountData?.schedules || [];
   const payments = accountData?.payments || [];
   const item = saleItems.length > 0 ? saleItems[0] : null;
-  const isFullPayment = acc.account_no?.startsWith('REQ') || acc.number_of_installments === 0 || acc.status === 'Completed';
+  const isFullPayment = acc.account_no?.startsWith('REQ') || Number(acc.number_of_installments) === 0;
 
   if (loading || !accountData) {
     return (
-      <Modal isOpen={isOpen} onClose={onClose} title="Loading Details" size="lg">
+      <Modal isOpen={isOpen} onClose={onClose} title="Loading Details" size="xl">
         <LoadingState message="Loading account details..." />
       </Modal>
     );
@@ -734,7 +781,7 @@ export function InstallmentAccountDetailsModal({ isOpen, onClose, installmentId 
   }
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title="Installment & Product Details" size="lg">
+    <Modal isOpen={isOpen} onClose={onClose} title="Installment & Product Details" size="xl">
       <div className="space-y-6">
         {/* Product Info Section */}
         <div className="flex flex-col sm:flex-row gap-6 p-5 bg-slate-50 dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800">
@@ -755,7 +802,7 @@ export function InstallmentAccountDetailsModal({ isOpen, onClose, installmentId 
               <h3 className="text-xl font-bold text-slate-800 dark:text-slate-100 leading-tight">
                 {item ? item.product_name : 'Multiple Items / Custom Product'}
               </h3>
-              <StatusBadge status={acc.status} />
+              <StatusBadge status={Number(acc.balance) <= 0 ? 'Complete Payment' : acc.status} />
             </div>
 
             {item && item.description && (
@@ -774,27 +821,27 @@ export function InstallmentAccountDetailsModal({ isOpen, onClose, installmentId 
         </div>
 
         {/* Financials Section */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-          <div className="p-4 bg-[var(--card)] border border-slate-200 dark:border-slate-800 rounded-xl">
-            <div className="text-xs text-slate-500 uppercase font-semibold mb-1">Total Price</div>
-            <div className="text-lg font-mono font-bold text-slate-800 dark:text-slate-100">{fmt(acc.total_payable)}</div>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3.5">
+          <div className="p-3 bg-[var(--card)] border border-slate-200 dark:border-slate-800 rounded-xl">
+            <div className="text-xs text-slate-500 uppercase font-semibold mb-1">Total Payable</div>
+            <div className="text-base font-mono font-bold text-slate-800 dark:text-slate-100">{fmt(acc.total_payable)}</div>
           </div>
-          <div className="p-4 bg-[var(--card)] border border-slate-200 dark:border-slate-800 rounded-xl">
-            <div className="text-xs text-slate-500 uppercase font-semibold mb-1">Down Payment</div>
-            <div className="text-lg font-mono font-bold text-slate-800 dark:text-slate-100">{fmt(acc.down_payment)}</div>
+          <div className="p-3 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-xl">
+            <div className="text-xs text-emerald-600 dark:text-emerald-400 uppercase font-semibold mb-1">Total Paid</div>
+            <div className="text-base font-mono font-bold text-emerald-700 dark:text-emerald-300">{fmt(acc.paid ?? acc.total_paid)}</div>
           </div>
-          <div className="p-4 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-xl">
-            <div className="text-xs text-emerald-600 dark:text-emerald-400 uppercase font-semibold mb-1">Remaining Bal</div>
-            <div className="text-lg font-mono font-bold text-emerald-700 dark:text-emerald-300">{fmt(acc.balance)}</div>
+          <div className="p-3 bg-rose-50 dark:bg-rose-900/20 border border-rose-200 dark:border-rose-800 rounded-xl">
+            <div className="text-xs text-rose-600 dark:text-rose-400 uppercase font-semibold mb-1">Remaining Balance</div>
+            <div className="text-base font-mono font-bold text-rose-700 dark:text-rose-300">{fmt(acc.balance)}</div>
           </div>
-          <div className="p-4 bg-[#176B87]/5 border border-[#176B87]/20 rounded-xl">
+          <div className="p-3 bg-[#176B87]/5 border border-[#176B87]/20 rounded-xl">
             <div className="text-xs text-[#176B87] dark:text-[#64ccc5] uppercase font-semibold mb-1">Monthly Pay</div>
-            <div className="text-lg font-mono font-bold text-[#176B87] dark:text-[#64ccc5]">{fmt(acc.installment_amount)}</div>
+            <div className="text-base font-mono font-bold text-[#176B87] dark:text-[#64ccc5]">{fmt(acc.installment_amount)}</div>
           </div>
         </div>
 
         {/* Tables Section */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-4">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 mt-2">
           {/* Payment History */}
           <div>
             <h4 className="text-sm font-bold text-foreground mb-3">Payments Made (History)</h4>
@@ -881,7 +928,7 @@ export function InstallmentAccountDetailsModal({ isOpen, onClose, installmentId 
           isOpen={true}
           onClose={() => setViewReceipt(null)}
           title="Official Payment Receipt"
-          size="md"
+          size="lg"
         >
           <div className="space-y-4 text-xs">
             <div className="text-center pb-3 border-b border-slate-200 dark:border-slate-800 space-y-0.5">
@@ -962,45 +1009,64 @@ export function InstallmentAccountDetailsModal({ isOpen, onClose, installmentId 
 export function StatementModal({ isOpen, onClose }) {
   const [statements, setStatements] = useState([]);
   const [loading, setLoading] = useState(true);
+  const inFlightRef = useRef(false);
+
+  const loadStatements = useCallback((silent = false, signal) => {
+    if (!isOpen) return;
+    const isSilent = silent === true;
+    if (inFlightRef.current && isSilent) return;
+    inFlightRef.current = true;
+    if (!isSilent) setLoading(true);
+    Promise.all([
+      api.transactions.getAll({ type: 'Sale' }, { signal }),
+      api.payments.getAll({}, { signal })
+    ])
+      .then(([salesRes, paymentsRes]) => {
+        if (signal?.aborted) return;
+        const sales = (salesRes.transactions || []).map(s => ({
+          date: s.date,
+          reference: s.reference_code,
+          type: 'Purchase',
+          amount: Number(s.amount || 0),
+          status: s.status,
+          rawDate: new Date(s.date).getTime()
+        }));
+
+        const payments = (paymentsRes.payments || []).map(p => ({
+          date: p.payment_date,
+          reference: p.receipt_no,
+          type: 'Payment',
+          amount: parseFloat(p.amount),
+          status: p.status,
+          rawDate: new Date(p.payment_date).getTime()
+        }));
+
+        const combined = [...sales, ...payments].sort((a, b) => b.rawDate - a.rawDate);
+        setStatements(prev => (fastDeepEqual(prev, combined) ? prev : combined));
+      })
+      .catch(err => {
+        if (err?.name !== 'AbortError') console.error(err);
+      })
+      .finally(() => {
+        inFlightRef.current = false;
+        if (!isSilent) setLoading(false);
+      });
+  }, [isOpen]);
 
   useEffect(() => {
     if (isOpen) {
-      setLoading(true);
-      Promise.all([
-        api.transactions.getAll({ type: 'Sale' }),
-        api.payments.getAll()
-      ])
-        .then(([salesRes, paymentsRes]) => {
-          const sales = (salesRes.transactions || []).map(s => ({
-            date: s.date,
-            reference: s.reference_code,
-            type: 'Purchase',
-            amount: Number(s.amount || 0),
-            status: s.status,
-            rawDate: new Date(s.date)
-          }));
-
-          const payments = (paymentsRes.payments || []).map(p => ({
-            date: p.payment_date,
-            reference: p.receipt_no,
-            type: 'Payment',
-            amount: parseFloat(p.amount),
-            status: p.status,
-            rawDate: new Date(p.payment_date)
-          }));
-
-          const combined = [...sales, ...payments].sort((a, b) => b.rawDate - a.rawDate);
-          setStatements(combined);
-        })
-        .catch(err => console.error(err))
-        .finally(() => setLoading(false));
+      loadStatements(false);
     }
-  }, [isOpen]);
+  }, [isOpen, loadStatements]);
+
+  useRealtimeSync((_source, signal) => {
+    if (isOpen) loadStatements(true, signal);
+  }, [isOpen, loadStatements]);
 
   if (!isOpen) return null;
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title="Statement of Account" size="lg">
+    <Modal isOpen={isOpen} onClose={onClose} title="Statement of Account" size="xl">
       {loading ? (
         <LoadingState message="Loading your statement..." />
       ) : statements.length === 0 ? (
@@ -1171,7 +1237,7 @@ export function MakePaymentModal({ isOpen, onClose, installments, onPaymentSucce
   const selectedScheduleDetails = pendingSchedules.find(s => s.schedule_id.toString() === selectedSchedule);
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title="Make a Payment" size="md">
+    <Modal isOpen={isOpen} onClose={onClose} title="Make a Payment" size="lg">
       <form onSubmit={handleSubmit} className="space-y-4">
         <div>
           <label className="block text-xs font-bold text-muted-foreground mb-1">Payment Type</label>
@@ -1458,14 +1524,23 @@ export function MakePaymentModal({ isOpen, onClose, installments, onPaymentSucce
           </>
         )}
 
-        <button
-          type="submit"
-          disabled={submitting || (paymentType === 'Installment Payment' && (!selectedSchedule || installments.length === 0)) || (paymentType === 'Get Product' && !selectedProductId) || !proofImage}
-          className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl flex items-center justify-center gap-2 transition-colors disabled:opacity-50"
-        >
-          {submitting ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div> : <TbCurrencyPeso className="w-4 h-4" />}
-          <span>{submitting ? 'Processing...' : (paymentType === 'Get Product' ? 'Submit Product Request' : 'Submit Payment')}</span>
-        </button>
+        <div className="flex items-center justify-end gap-3 pt-4 border-t border-border">
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-4 py-2.5 rounded-xl border border-border hover:bg-muted text-xs font-bold text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+          >
+            Cancel
+          </button>
+          <button
+            type="submit"
+            disabled={submitting || (paymentType === 'Installment Payment' && (!selectedSchedule || installments.length === 0)) || (paymentType === 'Get Product' && !selectedProductId) || !proofImage}
+            className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl flex items-center justify-center gap-2 transition-colors disabled:opacity-50 cursor-pointer"
+          >
+            {submitting ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div> : <TbCurrencyPeso className="w-4 h-4" />}
+            <span>{submitting ? 'Processing...' : (paymentType === 'Get Product' ? 'Submit Product Request' : 'Submit Payment')}</span>
+          </button>
+        </div>
       </form>
     </Modal>
   );
@@ -1478,31 +1553,37 @@ export function SupportModal({ isOpen, onClose }) {
   const [activeTab, setActiveTab] = useState('submit');
   const [myMessages, setMyMessages] = useState([]);
   const [loadingHistory, setLoadingHistory] = useState(false);
+  const inFlightRef = useRef(false);
+
+  const loadMyMessages = useCallback(async (silent = false, signal) => {
+    const isSilent = silent === true;
+    if (inFlightRef.current && isSilent) return;
+    inFlightRef.current = true;
+    if (!isSilent) setLoadingHistory(true);
+    try {
+      const data = await api.supportMessages.getAll({}, { signal });
+      if (signal?.aborted) return;
+      const nextMsgs = data.messages || [];
+      setMyMessages(prev => (fastDeepEqual(prev, nextMsgs) ? prev : nextMsgs));
+    } catch (err) {
+      if (err?.name !== 'AbortError') console.error(err);
+    } finally {
+      inFlightRef.current = false;
+      if (!isSilent) setLoadingHistory(false);
+    }
+  }, []);
 
   useEffect(() => {
     if (isOpen && activeTab === 'history') {
-      loadMyMessages();
+      loadMyMessages(false);
     }
-  }, [isOpen, activeTab]);
+  }, [isOpen, activeTab, loadMyMessages]);
 
-  // Auto-refresh history every 5 seconds when viewing it
-  useEffect(() => {
-    if (!isOpen || activeTab !== 'history') return;
-    const interval = setInterval(() => loadMyMessages(true), 5000);
-    return () => clearInterval(interval);
-  }, [isOpen, activeTab]);
-
-  const loadMyMessages = async (silent = false) => {
-    if (!silent) setLoadingHistory(true);
-    try {
-      const data = await api.supportMessages.getAll();
-      setMyMessages(data.messages || []);
-    } catch (err) {
-      console.error(err);
-    } finally {
-      if (!silent) setLoadingHistory(false);
+  useRealtimeSync((_source, signal) => {
+    if (isOpen) {
+      loadMyMessages(true, signal);
     }
-  };
+  }, [isOpen, loadMyMessages]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -1615,14 +1696,23 @@ export function SupportModal({ isOpen, onClose }) {
             ></textarea>
           </div>
 
-          <button
-            type="submit"
-            disabled={submitting}
-            className="w-full py-2.5 bg-primary hover:bg-primary/90 text-primary-foreground font-bold rounded-xl flex items-center justify-center gap-2 transition-colors disabled:opacity-50"
-          >
-            {submitting ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div> : <FiMessageCircle className="w-4 h-4" />}
-            <span>{submitting ? 'Sending...' : 'Send Message'}</span>
-          </button>
+          <div className="flex items-center justify-end gap-3 pt-4 border-t border-border">
+            <button
+              type="button"
+              onClick={onClose}
+              className="px-4 py-2.5 rounded-xl border border-border hover:bg-muted text-xs font-bold text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={submitting}
+              className="px-5 py-2.5 bg-primary hover:bg-primary/90 text-primary-foreground text-xs font-bold rounded-xl flex items-center justify-center gap-2 transition-colors disabled:opacity-50 cursor-pointer"
+            >
+              {submitting ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div> : <FiMessageCircle className="w-4 h-4" />}
+              <span>{submitting ? 'Sending...' : 'Send Message'}</span>
+            </button>
+          </div>
         </form>
       ) : (
         <div className="space-y-3 max-h-[60vh] overflow-y-auto pr-1">
@@ -1795,24 +1885,35 @@ export function InstallmentsModal({ isOpen, onClose, onMakePayment, onViewLedger
   const [installments, setInstallments] = useState([]);
   const [loading, setLoading] = useState(true);
   const [activeFilter, setActiveFilter] = useState('All'); // 'All' | 'Active' | 'Overdue' | 'Completed'
+  const inFlightRef = useRef(false);
 
-  const loadData = async () => {
-    setLoading(true);
+  const loadData = useCallback(async (silent = false, signal) => {
+    const isSilent = silent === true;
+    if (inFlightRef.current && isSilent) return;
+    inFlightRef.current = true;
+    if (!isSilent) setLoading(true);
     try {
-      const res = await api.customerApp.getInstallments();
-      setInstallments(res.installments || []);
+      const res = await api.customerApp.getInstallments({ signal });
+      if (signal?.aborted) return;
+      const nextList = res.installments || [];
+      setInstallments(prev => (fastDeepEqual(prev, nextList) ? prev : nextList));
     } catch (err) {
-      console.error('Failed to load customer installments', err);
+      if (err?.name !== 'AbortError') console.error('Failed to load customer installments', err);
     } finally {
-      setLoading(false);
+      inFlightRef.current = false;
+      if (!isSilent) setLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
     if (isOpen) {
-      loadData();
+      loadData(false);
     }
-  }, [isOpen]);
+  }, [isOpen, loadData]);
+
+  useRealtimeSync((_source, signal) => {
+    if (isOpen) loadData(true, signal);
+  }, [isOpen, loadData]);
 
   if (!isOpen) return null;
 
@@ -1821,44 +1922,44 @@ export function InstallmentsModal({ isOpen, onClose, onMakePayment, onViewLedger
   const monthlyAmortization = activeAccounts.reduce((sum, i) => sum + (Number(i.monthly_payment) || 0), 0);
 
   const filteredInstallments = installments.filter(i => {
-    if (activeFilter === 'Active') return i.status === 'Active' || i.status === 'Pending';
-    if (activeFilter === 'Overdue') return i.status === 'Overdue';
-    if (activeFilter === 'Completed') return i.status === 'Completed';
+    if (activeFilter === 'Active') return (i.status === 'Active' || i.status === 'Pending') && Number(i.balance) > 0;
+    if (activeFilter === 'Overdue') return i.status === 'Overdue' && Number(i.balance) > 0;
+    if (activeFilter === 'Completed' || activeFilter === 'Complete Payment') return i.status === 'Complete Payment' || i.status === 'Completed' || Number(i.balance) <= 0;
     return true;
   });
 
   return (
     <Modal isOpen={isOpen} onClose={onClose} title="My Installments & Accounts" size="xl">
-      <div className="space-y-6">
+      <div className="space-y-4">
         {/* Top Summary Banner / KPIs */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-          <div className="p-4 rounded-2xl bg-card border border-border shadow-xs flex items-center gap-3.5">
-            <div className="w-11 h-11 rounded-xl bg-purple-100 dark:bg-purple-950/60 text-purple-600 dark:text-purple-300 flex items-center justify-center font-bold">
-              <FiCreditCard className="w-5 h-5" />
+          <div className="p-3 rounded-2xl bg-card border border-border shadow-xs flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl bg-purple-100 dark:bg-purple-950/60 text-purple-600 dark:text-purple-300 flex items-center justify-center font-bold shrink-0">
+              <FiCreditCard className="w-4 h-4" />
             </div>
-            <div>
-              <p className="text-[10px] uppercase font-bold tracking-wider text-muted-foreground">Active Accounts</p>
-              <p className="text-xl font-black text-foreground">{activeAccounts.length}</p>
-            </div>
-          </div>
-
-          <div className="p-4 rounded-2xl bg-card border border-border shadow-xs flex items-center gap-3.5">
-            <div className="w-11 h-11 rounded-xl bg-blue-100 dark:bg-blue-950/60 text-blue-600 dark:text-blue-300 flex items-center justify-center font-bold">
-              <FiCalendar className="w-5 h-5" />
-            </div>
-            <div>
-              <p className="text-[10px] uppercase font-bold tracking-wider text-muted-foreground">Monthly Payment</p>
-              <p className="text-xl font-black text-foreground">{fmt(monthlyAmortization)}</p>
+            <div className="min-w-0">
+              <p className="text-[10px] uppercase font-bold tracking-wider text-muted-foreground truncate">Active Accounts</p>
+              <p className="text-base font-black text-foreground">{activeAccounts.length}</p>
             </div>
           </div>
 
-          <div className="p-4 rounded-2xl bg-card border border-border shadow-xs flex items-center gap-3.5">
-            <div className="w-11 h-11 rounded-xl bg-emerald-100 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-300 flex items-center justify-center font-bold">
-              <TbCurrencyPeso className="w-6 h-6" />
+          <div className="p-3 rounded-2xl bg-card border border-border shadow-xs flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl bg-blue-100 dark:bg-blue-950/60 text-blue-600 dark:text-blue-300 flex items-center justify-center font-bold shrink-0">
+              <FiCalendar className="w-4 h-4" />
             </div>
-            <div>
-              <p className="text-[10px] uppercase font-bold tracking-wider text-muted-foreground">Remaining Balance</p>
-              <p className="text-xl font-black text-emerald-600 dark:text-emerald-400">{fmt(totalBalance)}</p>
+            <div className="min-w-0">
+              <p className="text-[10px] uppercase font-bold tracking-wider text-muted-foreground truncate">Monthly Payment</p>
+              <p className="text-base font-black text-foreground truncate">{fmt(monthlyAmortization)}</p>
+            </div>
+          </div>
+
+          <div className="p-3 rounded-2xl bg-card border border-border shadow-xs flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl bg-emerald-100 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-300 flex items-center justify-center font-bold shrink-0">
+              <TbCurrencyPeso className="w-5 h-5" />
+            </div>
+            <div className="min-w-0">
+              <p className="text-[10px] uppercase font-bold tracking-wider text-muted-foreground truncate">Remaining Balance</p>
+              <p className="text-base font-black text-emerald-600 dark:text-emerald-400 truncate">{fmt(totalBalance)}</p>
             </div>
           </div>
         </div>
@@ -1941,7 +2042,7 @@ export function InstallmentsModal({ isOpen, onClose, onMakePayment, onViewLedger
                     </div>
 
                     <div className="flex items-center gap-2">
-                      <StatusBadge status={inst.status || 'Active'} />
+                      <StatusBadge status={Number(inst.balance) <= 0 ? 'Complete Payment' : (inst.status || 'Active')} />
                     </div>
                   </div>
 
@@ -1950,7 +2051,7 @@ export function InstallmentsModal({ isOpen, onClose, onMakePayment, onViewLedger
                     <div className="flex justify-between items-center text-xs">
                       <span className="text-muted-foreground">Repayment Progress</span>
                       <span className="font-semibold text-foreground font-mono">
-                        {fmt(inst.paid_amount || 0)} / {fmt(inst.total_amount)} ({progressPct}%)
+                        {fmt(inst.total_paid ?? inst.paid_amount ?? 0)} / {fmt(inst.total_payable ?? inst.total_amount)} ({progressPct}%)
                       </span>
                     </div>
                     <div className="w-full h-2 rounded-full bg-muted overflow-hidden">
@@ -1962,14 +2063,14 @@ export function InstallmentsModal({ isOpen, onClose, onMakePayment, onViewLedger
                   </div>
 
                   {/* Key Financials Grid */}
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs p-3 rounded-xl bg-muted/30 border border-border/60">
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3.5 text-xs p-3.5 rounded-xl bg-muted/30 border border-border/60">
                     <div>
-                      <p className="text-[10px] text-muted-foreground uppercase font-bold">Total Financed</p>
-                      <p className="font-mono font-bold text-foreground mt-0.5">{fmt(inst.total_amount)}</p>
+                      <p className="text-[10px] text-muted-foreground uppercase font-bold">Total Payable</p>
+                      <p className="font-mono font-bold text-foreground mt-0.5">{fmt(inst.total_payable ?? inst.total_amount)}</p>
                     </div>
                     <div>
-                      <p className="text-[10px] text-muted-foreground uppercase font-bold">Monthly Payment</p>
-                      <p className="font-mono font-bold text-purple-600 dark:text-purple-400 mt-0.5">{fmt(inst.monthly_payment)}</p>
+                      <p className="text-[10px] text-muted-foreground uppercase font-bold">Total Paid</p>
+                      <p className="font-mono font-bold text-emerald-600 dark:text-emerald-400 mt-0.5">{fmt(inst.total_paid ?? inst.paid_amount ?? 0)}</p>
                     </div>
                     <div>
                       <p className="text-[10px] text-muted-foreground uppercase font-bold">Remaining Balance</p>
@@ -1980,7 +2081,7 @@ export function InstallmentsModal({ isOpen, onClose, onMakePayment, onViewLedger
                     <div>
                       <p className="text-[10px] text-muted-foreground uppercase font-bold">Next Due Date</p>
                       <p className="font-semibold text-foreground mt-0.5">
-                        {inst.next_due_date || (inst.balance <= 0 ? 'Fully Paid' : 'N/A')}
+                        {inst.next_due_date || (inst.balance <= 0 ? 'Complete Payment' : 'N/A')}
                       </p>
                     </div>
                   </div>

@@ -41,7 +41,27 @@ class SaleController extends Controller
             }
         }
 
-        $query = SaleTransaction::with(['customer', 'processedBy.employee']);
+        $query = SaleTransaction::with([
+            'customer:customer_id,first_name,last_name,phone,email',
+            'processedBy:user_id,username,employee_id',
+            'processedBy.employee:employee_id,first_name,last_name'
+        ])->select([
+            'sale_id',
+            'invoice_no',
+            'customer_id',
+            'processed_by',
+            'branch_id',
+            'sale_date',
+            'payment_method',
+            'subtotal',
+            'discount_amount',
+            'total_amount',
+            'amount_paid',
+            'balance_due',
+            'status',
+            'notes',
+            'created_at'
+        ]);
 
         // Branch scoping for Store Administrator — use branch_id directly on sale_transactions
         if ($user && in_array($user->role, ['Store Administrator', 'Store Admin'])) {

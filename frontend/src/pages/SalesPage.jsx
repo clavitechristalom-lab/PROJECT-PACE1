@@ -64,7 +64,7 @@ export default function SalesPage({ branchFilter, embedded }) {
     }
   }, [])
 
-  const loadData = async (silent = false) => {
+  const loadData = async (silent = false, signal) => {
     // 1-2s Overlap Guard: Skip if previous request is still in-flight
     if (inFlightRef.current) return
     inFlightRef.current = true
@@ -73,6 +73,7 @@ export default function SalesPage({ branchFilter, embedded }) {
     if (!isBg) setLoading(true)
     if (!isBg) setError('')
     try {
+      const reqOpts = signal ? { signal } : {}
       const needCatalog = products.length === 0 || customers.length === 0 || !silent
 
       const promises = [
@@ -81,13 +82,13 @@ export default function SalesPage({ branchFilter, embedded }) {
           payment_method: methodFilter !== 'All' ? methodFilter : undefined,
           status: statusFilter !== 'All' ? statusFilter : undefined,
           branch: branchFilter || undefined,
-        })
+        }, reqOpts)
       ]
 
       if (needCatalog) {
         promises.push(
-          api.products.getAll({ branch: branchFilter || undefined }).catch(() => ({ products: [] })),
-          api.customers.getAll({ status: 'Active', branch: branchFilter || undefined }).catch(() => ({ customers: [] }))
+          api.products.getAll({ branch: branchFilter || undefined }, reqOpts).catch(() => ({ products: [] })),
+          api.customers.getAll({ status: 'Active', branch: branchFilter || undefined }, reqOpts).catch(() => ({ customers: [] }))
         )
       }
 
@@ -125,7 +126,7 @@ export default function SalesPage({ branchFilter, embedded }) {
   }, [methodFilter, statusFilter, branchFilter, search])
 
   // Real-time synchronization across multi-user accounts (1-2s target)
-  useRealtimeSync(() => loadData(true), [methodFilter, statusFilter, branchFilter, search], { periodic: true })
+  useRealtimeSync((_, signal) => loadData(true, signal), [methodFilter, statusFilter, branchFilter, search], { periodic: true })
 
   const openViewSale = async (s) => {
     try {
@@ -437,7 +438,7 @@ export default function SalesPage({ branchFilter, embedded }) {
           isOpen={true}
           title={`Sales Invoice: ${viewSale.sale.invoice_no}`}
           onClose={() => setViewSale(null)}
-          size="md"
+          size="lg"
         >
           <div className="space-y-4 text-xs">
             <div className="text-center pb-2 border-b border-border">
@@ -537,9 +538,9 @@ export default function SalesPage({ branchFilter, embedded }) {
           isOpen={true}
           title="Create New Sales Transaction"
           onClose={() => setNewSaleModal(false)}
-          size="lg"
+          size="xl"
         >
-          <form onSubmit={handleCreateSale} className="space-y-3.5 text-xs">
+          <form onSubmit={handleCreateSale} className="space-y-4 text-xs">
             <div className="grid grid-cols-2 gap-2.5">
               <div>
                 <label className="block font-bold text-muted-foreground mb-1">Select Customer *</label>
@@ -712,7 +713,7 @@ export default function SalesPage({ branchFilter, embedded }) {
               />
             </div>
 
-            <div className="flex justify-end gap-2 pt-2 border-t border-border">
+            <div className="flex justify-end gap-3 pt-4 border-t border-border">
               <button
                 type="button"
                 onClick={() => setNewSaleModal(false)}

@@ -30,12 +30,12 @@ const getPopupConfig = (type = 'info', isDanger = false) => {
 
   return {
     customClass: {
-      popup: `${popupBg} !backdrop-blur-xl border !rounded-3xl shadow-2xl p-6 sm:p-8 max-w-[420px] ${textColor}`,
+      popup: `${popupBg} !backdrop-blur-xl border !rounded-2xl shadow-2xl p-6 sm:p-8 max-w-2xl w-full ${textColor}`,
       title: 'hidden',
       htmlContainer: '!m-0 !p-0',
-      actions: 'flex items-center justify-center gap-3 mt-6 w-full',
-      confirmButton: `inline-flex items-center justify-center font-bold !rounded-xl cursor-pointer transition-all active:scale-95 px-6 py-2.5 text-sm ${confirmBtnClass}`,
-      cancelButton: `inline-flex items-center justify-center font-semibold !rounded-xl cursor-pointer transition-all active:scale-95 px-5 py-2.5 text-sm ${cancelBtnClass}`,
+      actions: 'flex items-center justify-end gap-3 mt-6 pt-4 border-t border-slate-200 dark:border-slate-800/80 w-full',
+      confirmButton: `inline-flex items-center justify-center font-bold !rounded-xl cursor-pointer transition-all active:scale-95 px-5 py-2.5 text-sm ${confirmBtnClass}`,
+      cancelButton: `inline-flex items-center justify-center font-semibold !rounded-xl cursor-pointer transition-all active:scale-95 px-4 py-2.5 text-sm ${cancelBtnClass}`,
     },
     buttonsStyling: false,
     background: 'transparent',
@@ -114,7 +114,7 @@ const buildHtml = (title, text = '', type = 'success') => {
         ${title}
       </div>
       ${text ? `
-      <div class="flex items-start text-center w-full max-w-[340px] mx-auto justify-center">
+      <div class="flex items-start text-center w-full max-w-xl mx-auto justify-center">
         <div class="${textColor} text-xs sm:text-sm font-normal leading-relaxed text-center">
           ${text}
         </div>

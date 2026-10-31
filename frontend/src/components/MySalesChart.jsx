@@ -1,25 +1,67 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import {
   ComposedChart, Bar, Line, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, Legend
 } from 'recharts'
 import { Card } from './ui'
 import { api } from '../lib/api'
+import { useRealtimeSync, fastDeepEqual } from '../lib/realtimeSync'
 
-export default function MySalesChart({ sales }) {
+export default function MySalesChart({ sales: propSales, title = 'My sales' }) {
+  const [fetchedSales, setFetchedSales] = useState([])
+  const inFlightRef = useRef(false)
+
+  const loadSales = useCallback(async (_silent = false, signal) => {
+    if (propSales !== undefined) return
+    if (inFlightRef.current) return
+    inFlightRef.current = true
+    try {
+      const res = await api.sales.getAll({}, { signal })
+      if (signal?.aborted) return
+      const list = Array.isArray(res) ? res : (res?.data || [])
+      setFetchedSales(prev => (fastDeepEqual(prev, list) ? prev : list))
+    } catch (err) {
+      if (err?.name !== 'AbortError') {
+        // Silent background error ignore
+      }
+    } finally {
+      inFlightRef.current = false
+    }
+  }, [propSales])
+
+  useEffect(() => {
+    if (propSales === undefined) {
+      loadSales(false)
+    }
+  }, [propSales, loadSales])
+
+  useRealtimeSync((_source, signal) => {
+    if (propSales === undefined) {
+      loadSales(true, signal)
+    }
+  }, [propSales, loadSales])
+
+  const sales = propSales !== undefined ? propSales : fetchedSales
+
   if (!sales || sales.length === 0) {
     return null
   }
 
   const grouped = {}
   sales.forEach(s => {
-    const d = new Date(s.transaction_date || s.created_at)
+    const d = new Date(s.sale_date || s.transaction_date || s.created_at)
     const month = d.toLocaleString('default', { month: 'short' })
     if (!grouped[month]) {
-      grouped[month] = { month, total_sales: 0, units: 0 }
+      grouped[month] = { month, total_sales: 0, sales: 0, units: 0, units_sold: 0 }
     }
-    grouped[month].total_sales += Number(s.total_amount) || 0
-    grouped[month].units += (s.items || []).reduce((sum, item) => sum + Number(item.quantity || 1), 0)
+    const amt = Number(s.total_amount ?? s.amount) || 0
+    const qty = (s.items && s.items.length > 0)
+      ? s.items.reduce((sum, item) => sum + Number(item.quantity || 1), 0)
+      : Number(s.items_count || 1)
+    grouped[month].total_sales += amt
+    grouped[month].sales += amt
+    grouped[month].units += qty
+    grouped[month].units_sold += qty
   })
 
   const data = Object.values(grouped).sort((a, b) => {
@@ -30,7 +72,7 @@ export default function MySalesChart({ sales }) {
 
   return (
     <Card noPad className="p-6 border border-border mb-6 bg-card">
-      <h3 className="text-xl font-bold text-foreground text-center mb-6">My sales</h3>
+      <h3 className="text-xl font-bold text-foreground text-center mb-6">{title}</h3>
       <div className="h-[300px] w-full">
         <ResponsiveContainer width="100%" height="100%">
           <ComposedChart data={data} margin={{ top: 10, right: 20, left: 20, bottom: 0 }}>
@@ -48,11 +90,11 @@ export default function MySalesChart({ sales }) {
               axisLine={false} 
               tickLine={false} 
               tick={{ fontSize: 12, fill: 'hsl(var(--muted-foreground))' }} 
-              tickFormatter={v => `$${v.toLocaleString()}`}
+              tickFormatter={v => `₱${v.toLocaleString()}`}
             />
             <Tooltip
               formatter={(value, name) => {
-                if (name === 'Total Transaction') return `$${value.toLocaleString()}`
+                if (name === 'Total Transaction') return `₱${Number(value || 0).toLocaleString()}`
                 return value
               }}
               contentStyle={{ borderRadius: '12px', border: '1px solid hsl(var(--border))', background: 'hsl(var(--card))', color: 'hsl(var(--foreground))', fontSize: '12px' }}

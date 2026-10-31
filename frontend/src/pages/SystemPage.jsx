@@ -46,7 +46,7 @@ export default function SystemPage({ defaultTab = 'users' }) {
   const initialUserForm = {
     username: '', password: '', confirmPassword: '', role: 'Employee', is_active: true, employee_id: '', customer_id: '',
     employee_code: '', first_name: '', last_name: '', middle_name: '', phone: '', address: '', gender: 'Male', date_of_birth: '', marital_status: 'Single', email: '',
-    branch_id: '', department: '', position: '', working_hours: '8 AM to 5 PM', basic_salary: '', pay_type: 'Cash',
+    branch_id: '', department: 'Employee', position: 'Cashier (Employee)', working_hours: '8 AM to 5 PM', basic_salary: '', pay_type: 'Cash',
     attendance_pin: '', confirm_attendance_pin: ''
   }
   const [userForm, setUserForm] = useState(initialUserForm)
@@ -199,16 +199,7 @@ export default function SystemPage({ defaultTab = 'users' }) {
           showToast('Attendance PINs do not match', 'error')
           return
         }
-        if (['Store Administrator', 'Employee'].includes(role)) {
-          if (!userForm.branch_id) {
-            showToast('Please select a branch for this staff account', 'error')
-            return
-          }
-          if (!userForm.basic_salary || isNaN(Number(userForm.basic_salary)) || Number(userForm.basic_salary) <= 0) {
-            showToast('Please enter a valid salary for this account', 'error')
-            return
-          }
-        }
+        // Branch and salary are optional by default (can be assigned later)
       }
     }
 
@@ -226,18 +217,24 @@ export default function SystemPage({ defaultTab = 'users' }) {
           role: userForm.role === 'Store Admin' ? 'Store Administrator' : userForm.role,
           employee_id: userForm.role === 'Customer' ? null : (userForm.employee_id || null),
           customer_id: userForm.role === 'Customer' ? (userForm.customer_id || null) : null,
+          branch_id: userForm.branch_id || null,
           auth_user_id: user?.user_id || 1,
         }
-        delete payload.basic_salary // Salary is fixed and cannot be edited via user account edit
+        delete payload.basic_salary // Basic salary is omitted from standard user edit
         const res = await api.system.updateUser(editUser.user_id, payload)
         setUsers(prev => prev.map(u => u.user_id === editUser.user_id ? (res.user || { ...u, ...payload }) : u))
         showToast('User account updated successfully', 'success')
       } else {
         const rolePayload = userForm.role === 'Store Admin' ? 'Store Administrator' : userForm.role
+        const defaultPos = rolePayload === 'Store Administrator' ? 'Manager (Store Admin)' : 'Cashier (Employee)'
         const payload = {
           ...userForm,
           role: rolePayload,
-          basic_salary: Number(userForm.basic_salary) || 0,
+          position: userForm.position || defaultPos,
+          department: userForm.department || (rolePayload === 'Store Administrator' ? 'Store Admin' : 'Employee'),
+          basic_salary: (userForm.basic_salary !== '' && userForm.basic_salary !== null && !isNaN(Number(userForm.basic_salary))) ? Number(userForm.basic_salary) : null,
+          branch_id: userForm.branch_id || null,
+          attendance_pin: userForm.attendance_pin || null,
           from_admin: true,
         }
         if (rolePayload === 'Administrator') {
@@ -245,6 +242,8 @@ export default function SystemPage({ defaultTab = 'users' }) {
           delete payload.attendance_pin
           delete payload.confirm_attendance_pin
           delete payload.basic_salary
+          payload.position = 'System Administrator'
+          payload.department = 'Administration'
         }
         const res = await api.auth.createUser(payload)
         showToast(res.message || `${rolePayload} account created successfully! Welcome email sent to ${userForm.email}.`, 'success')
@@ -292,6 +291,14 @@ export default function SystemPage({ defaultTab = 'users' }) {
     const emp = u.employee || employeesList.find(e => String(e.employee_id) === String(u.employee_id)) || {}
     const cust = u.customer || customersList.find(c => String(c.customer_id) === String(u.customer_id)) || {}
 
+    let pos = emp.position || ''
+    if (pos === 'Staff' || pos === '') {
+      pos = (u.role === 'Store Administrator' || u.role === 'Store Admin') ? 'Manager (Store Admin)' : (u.role === 'Administrator' ? 'System Administrator' : 'Cashier (Employee)')
+    } else if (pos === 'Store Administrator') {
+      pos = 'Manager (Store Admin)'
+    }
+    const dept = emp.department || (pos === 'Manager (Store Admin)' ? 'Store Admin' : (u.role === 'Administrator' ? 'Administration' : 'Employee'))
+
     setUserForm({
       username: u.username,
       password: '',
@@ -311,8 +318,8 @@ export default function SystemPage({ defaultTab = 'users' }) {
       marital_status: emp.marital_status || cust.marital_status || 'Single',
       email: emp.email || cust.email || '',
       branch_id: emp.branch_id || cust.branch_id || (u.branch ? u.branch.id : '') || '',
-      department: emp.department || '',
-      position: emp.position || (u.role === 'Administrator' ? 'System Administrator' : u.role === 'Store Administrator' ? 'Store Administrator' : ''),
+      department: dept,
+      position: pos,
       working_hours: emp.working_hours || '8 AM to 5 PM',
       basic_salary: emp.basic_salary !== undefined ? emp.basic_salary : '',
       pay_type: emp.pay_type || 'Cash',
@@ -958,14 +965,14 @@ export default function SystemPage({ defaultTab = 'users' }) {
       {/* ─── Setting Edit Modal ─── */}
       {settingModal && (
         <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
-          <div className="relative bg-card border border-border rounded-2xl shadow-2xl w-full max-w-sm animate-[slideUp_0.18s_ease]">
+          <div className="relative bg-card border border-border rounded-2xl shadow-2xl w-full max-w-2xl overflow-hidden animate-[slideUp_0.18s_ease]">
             {/* Header */}
-            <div className="flex items-center justify-between px-5 py-4 border-b border-border">
-              <div className="flex items-center gap-2">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-border bg-muted/20">
+              <div className="flex items-center gap-2.5">
                 <div className="p-1.5 bg-primary/10 rounded-lg">
-                  <FiSettings className="w-3.5 h-3.5 text-primary" />
+                  <FiSettings className="w-4 h-4 text-primary" />
                 </div>
-                <span className="font-bold text-sm text-foreground">{settingModal.label}</span>
+                <span className="font-bold text-base text-foreground">{settingModal.label}</span>
               </div>
               <button
                 type="button"
@@ -977,7 +984,7 @@ export default function SystemPage({ defaultTab = 'users' }) {
             </div>
 
             {/* Body */}
-            <div className="px-5 py-4">
+            <div className="p-6 sm:p-8">
               {settingModal.type === 'logo' ? (
                 <div className="flex flex-col items-center gap-4">
                   <div className="w-24 h-24 rounded-2xl bg-muted border-2 border-dashed border-border overflow-hidden flex items-center justify-center">
@@ -1028,7 +1035,7 @@ export default function SystemPage({ defaultTab = 'users' }) {
             </div>
 
             {/* Footer */}
-            <div className="flex items-center justify-end gap-2 px-5 pb-4">
+            <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-border bg-muted/30">
               <button
                 type="button"
                 onClick={() => setSettingModal(null)}
@@ -1072,7 +1079,7 @@ export default function SystemPage({ defaultTab = 'users' }) {
           isOpen={true}
           title="User Account & Verification Details"
           onClose={() => setSelectedUserDetail(null)}
-          size="lg"
+          size="xl"
         >
           <div className="space-y-4 text-xs">
             {/* Account Information Card */}
@@ -1153,8 +1160,8 @@ export default function SystemPage({ defaultTab = 'users' }) {
               </div>
             )}
 
-            {/* Account Verification Section - Employee/Admin Only */}
-            {selectedUserDetail.role !== 'Customer' && (
+            {/* Account Verification Section - Staff & Regular Employees Only */}
+            {selectedUserDetail.role !== 'Customer' && selectedUserDetail.role !== 'Administrator' && (
               <div className="space-y-2">
                 <span className="text-xs font-bold uppercase tracking-wider text-foreground block">
                   Verification State
@@ -1287,14 +1294,14 @@ export default function SystemPage({ defaultTab = 'users' }) {
           isOpen={true}
           title="Verify User Account"
           onClose={() => !isVerifying && setVerifyConfirmUser(null)}
-          size="md"
+          size="lg"
         >
-          <div className="space-y-3.5 text-xs">
+          <div className="space-y-4 text-xs">
             <p className="text-muted-foreground leading-relaxed">
               Confirm official verification for user <strong className="text-foreground">@{verifyConfirmUser.username}</strong> ({verifyConfirmUser.role}):
             </p>
 
-            <div className="bg-muted/30 border border-border rounded-xl p-3 space-y-1.5">
+            <div className="bg-muted/30 border border-border rounded-xl p-4 space-y-2">
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Full Name:</span>
                 <span className="font-bold text-foreground">
@@ -1315,7 +1322,7 @@ export default function SystemPage({ defaultTab = 'users' }) {
               </div>
             </div>
 
-            <div className="flex justify-end gap-2 pt-2 border-t border-border">
+            <div className="flex justify-end gap-3 pt-4 border-t border-border">
               <button
                 type="button"
                 onClick={() => setVerifyConfirmUser(null)}
@@ -1344,13 +1351,13 @@ export default function SystemPage({ defaultTab = 'users' }) {
           isOpen={true}
           title="Revoke Verification"
           onClose={() => !isVerifying && setRevokeConfirmUser(null)}
-          size="sm"
+          size="lg"
         >
-          <div className="space-y-3.5 text-xs">
+          <div className="space-y-4 text-xs">
             <p className="text-muted-foreground">
               Are you sure you want to revoke account verification for <strong className="text-foreground">@{revokeConfirmUser.username}</strong>?
             </p>
-            <div className="flex justify-end gap-2 pt-2 border-t border-border">
+            <div className="flex justify-end gap-3 pt-4 border-t border-border">
               <button
                 type="button"
                 onClick={() => setRevokeConfirmUser(null)}
@@ -1378,7 +1385,7 @@ export default function SystemPage({ defaultTab = 'users' }) {
           isOpen={true}
           title={editUser ? `Edit User: ${editUser.username}` : 'Add User Account'}
           onClose={() => { setUserModal(false); setEditUser(null); setUserFormStep(1) }}
-          size={editUser ? 'lg' : 'md'}
+          size="xl"
         >
           <form onSubmit={handleSaveUser} className="space-y-4 text-xs">
             {editUser ? (
@@ -1411,13 +1418,21 @@ export default function SystemPage({ defaultTab = 'users' }) {
                       </label>
                       <select
                         value={userForm.role === 'Store Administrator' ? 'Store Admin' : userForm.role}
-                        onChange={e => setUserForm(f => ({ ...f, role: e.target.value }))}
-                        className="w-full border border-border rounded-xl px-3 py-2 text-xs font-semibold bg-card text-foreground cursor-pointer"
+                        onChange={e => {
+                          const newRole = e.target.value
+                          setUserForm(f => ({
+                            ...f,
+                            role: newRole,
+                            position: newRole === 'Store Admin' ? 'Manager (Store Admin)' : (newRole === 'Employee' && f.position === 'Manager (Store Admin)' ? 'Cashier (Employee)' : f.position),
+                            department: newRole === 'Store Admin' ? 'Store Admin' : (newRole === 'Employee' ? 'Employee' : f.department)
+                          }))
+                        }}
+                        className="w-full border border-border rounded-xl px-3 py-2 text-xs font-semibold bg-card text-foreground cursor-pointer [color-scheme:dark] [&>option]:bg-[#0f172a] [&>option]:text-white"
                       >
-                        <option value="Administrator">Administrator</option>
-                        <option value="Store Admin">Store Admin</option>
-                        <option value="Employee">Employee</option>
-                        <option value="Customer">Customer</option>
+                        <option value="Administrator" className="bg-[#0f172a] text-white">Administrator</option>
+                        <option value="Store Admin" className="bg-[#0f172a] text-white">Manager (Store Admin)</option>
+                        <option value="Employee" className="bg-[#0f172a] text-white">Employee</option>
+                        <option value="Customer" className="bg-[#0f172a] text-white">Customer</option>
                       </select>
                     </div>
                     <div>
@@ -1586,15 +1601,41 @@ export default function SystemPage({ defaultTab = 'users' }) {
                       </div>
                       <div>
                         <label className="text-[10px] text-muted-foreground uppercase tracking-wider font-bold mb-1 block">
-                          Position
+                          Position / Role
                         </label>
-                        <input
-                          type="text"
-                          value={userForm.position || ''}
-                          onChange={e => setUserForm(f => ({ ...f, position: e.target.value }))}
-                          placeholder="Position"
-                          className="w-full border border-border rounded-xl px-3 py-2 bg-card text-foreground text-xs font-medium"
-                        />
+                        {userForm.role === 'Administrator' ? (
+                          <input
+                            type="text"
+                            value={userForm.position || 'System Administrator'}
+                            onChange={e => setUserForm(f => ({ ...f, position: e.target.value }))}
+                            placeholder="Position"
+                            className="w-full border border-border rounded-xl px-3 py-2 bg-card text-foreground text-xs font-medium"
+                          />
+                        ) : (
+                          <select
+                            value={userForm.position || (userForm.role === 'Store Admin' || userForm.role === 'Store Administrator' ? 'Manager (Store Admin)' : 'Cashier (Employee)')}
+                            onChange={e => {
+                              const pos = e.target.value
+                              setUserForm(f => ({
+                                ...f,
+                                position: pos,
+                                role: pos === 'Manager (Store Admin)' ? 'Store Admin' : (f.role === 'Store Admin' || f.role === 'Store Administrator' ? 'Store Admin' : 'Employee'),
+                                department: pos === 'Manager (Store Admin)' ? 'Store Admin' : 'Employee'
+                              }))
+                            }}
+                            className="w-full border border-border rounded-xl px-3 py-2 bg-card text-foreground text-xs font-medium cursor-pointer [color-scheme:dark] [&>option]:bg-[#0f172a] [&>option]:text-white font-semibold"
+                          >
+                            {userForm.role === 'Store Admin' || userForm.role === 'Store Administrator' ? (
+                              <option value="Manager (Store Admin)" className="bg-[#0f172a] text-white">Manager (Store Admin)</option>
+                            ) : (
+                              <>
+                                <option value="Cashier (Employee)" className="bg-[#0f172a] text-white">Cashier (Employee)</option>
+                                <option value="Collector (Employee)" className="bg-[#0f172a] text-white">Collector (Employee)</option>
+                                <option value="Utility (Employee)" className="bg-[#0f172a] text-white">Utility (Employee)</option>
+                              </>
+                            )}
+                          </select>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -1716,6 +1757,33 @@ export default function SystemPage({ defaultTab = 'users' }) {
                           />
                         </div>
                       </div>
+                    ) : userForm.role === 'Administrator' ? (
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <label className="text-[10px] text-muted-foreground uppercase tracking-wider font-bold mb-1 block">
+                            System Administrator ID
+                          </label>
+                          <div className="font-bold text-foreground font-mono text-xs py-2 px-3 bg-muted rounded-xl border border-border truncate">
+                            {userForm.employee_code || (userForm.employee_id ? `EMP-${String(userForm.employee_id).padStart(3, '0')}` : 'SYS-001')}
+                          </div>
+                        </div>
+                        <div>
+                          <label className="text-[10px] text-muted-foreground uppercase tracking-wider font-bold mb-1 block">
+                            Department
+                          </label>
+                          <div className="font-semibold text-foreground text-xs py-2 px-3 bg-muted rounded-xl border border-border">
+                            Administration
+                          </div>
+                        </div>
+                        <div className="col-span-2">
+                          <label className="text-[10px] text-muted-foreground uppercase tracking-wider font-bold mb-1 block">
+                            Position
+                          </label>
+                          <div className="font-semibold text-foreground text-xs py-2 px-3 bg-muted rounded-xl border border-border">
+                            System Administrator (Full System Governance)
+                          </div>
+                        </div>
+                      </div>
                     ) : (
                       <div className="grid grid-cols-2 gap-3">
                         <div>
@@ -1728,14 +1796,14 @@ export default function SystemPage({ defaultTab = 'users' }) {
                         </div>
                         <div>
                           <label className="text-[10px] text-muted-foreground uppercase tracking-wider font-bold mb-1 block">
-                            Branch
+                            Branch (Optional)
                           </label>
                           <select
                             value={userForm.branch_id || ''}
                             onChange={e => setUserForm(f => ({ ...f, branch_id: e.target.value }))}
                             className="w-full border border-border rounded-xl px-3 py-2 bg-card text-foreground text-xs font-medium"
                           >
-                            <option value="">Select Branch</option>
+                            <option value="">Unassigned (Assign Later)</option>
                             {registrationOptions.branches.map(b => (
                               <option key={b.id} value={b.id}>{b.name}</option>
                             ))}
@@ -1767,33 +1835,33 @@ export default function SystemPage({ defaultTab = 'users' }) {
                         </div>
                         <div>
                           <label className="text-[10px] text-muted-foreground uppercase tracking-wider font-bold mb-1 block">
-                            Position
+                            Position / Role
                           </label>
-                          <input
-                            type="text"
-                            value={userForm.position || ''}
-                            onChange={e => setUserForm(f => ({ ...f, position: e.target.value }))}
-                            placeholder="Position"
-                            className="w-full border border-border rounded-xl px-3 py-2 bg-card text-foreground text-xs font-medium"
-                          />
+                          <select
+                            value={userForm.position || (userForm.role === 'Store Admin' || userForm.role === 'Store Administrator' ? 'Manager (Store Admin)' : 'Cashier (Employee)')}
+                            onChange={e => {
+                              const pos = e.target.value
+                              setUserForm(f => ({
+                                ...f,
+                                position: pos,
+                                role: pos === 'Manager (Store Admin)' ? 'Store Admin' : (f.role === 'Store Admin' || f.role === 'Store Administrator' ? 'Store Admin' : 'Employee'),
+                                department: pos === 'Manager (Store Admin)' ? 'Store Admin' : 'Employee'
+                              }))
+                            }}
+                            className="w-full border border-border rounded-xl px-3 py-2 bg-card text-foreground text-xs font-medium cursor-pointer [color-scheme:dark] [&>option]:bg-[#0f172a] [&>option]:text-white font-semibold"
+                          >
+                            {userForm.role === 'Store Admin' || userForm.role === 'Store Administrator' ? (
+                              <option value="Manager (Store Admin)" className="bg-[#0f172a] text-white">Manager (Store Admin)</option>
+                            ) : (
+                              <>
+                                <option value="Cashier (Employee)" className="bg-[#0f172a] text-white">Cashier (Employee)</option>
+                                <option value="Collector (Employee)" className="bg-[#0f172a] text-white">Collector (Employee)</option>
+                                <option value="Utility (Employee)" className="bg-[#0f172a] text-white">Utility (Employee)</option>
+                              </>
+                            )}
+                          </select>
                         </div>
                         <div>
-                          <label className="text-[10px] text-muted-foreground uppercase tracking-wider font-bold mb-1 block">
-                            Salary (Fixed)
-                          </label>
-                          <div className="relative">
-                            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground font-semibold text-xs">₱</span>
-                            <input
-                              type="text"
-                              value={userForm.basic_salary ? Number(userForm.basic_salary).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '0.00'}
-                              readOnly
-                              disabled
-                              title="Salary is set upon user account creation and cannot be edited here."
-                              className="w-full pl-7 pr-3 py-2 border border-border/50 rounded-xl bg-muted/40 text-muted-foreground text-xs font-mono font-medium cursor-not-allowed select-none opacity-80"
-                            />
-                          </div>
-                        </div>
-                        <div className="col-span-2">
                           <label className="text-[10px] text-muted-foreground uppercase tracking-wider font-bold mb-1 block">
                             Pay Type
                           </label>
@@ -1838,8 +1906,8 @@ export default function SystemPage({ defaultTab = 'users' }) {
                   <div className="flex flex-col gap-2">
                     {[
                       { value: 'Administrator', label: 'Administrator', icon: FiShield, description: 'Full system access and user management' },
-                      { value: 'Store Admin', label: 'Store Admin', icon: FiHome, description: 'Store settings, reports and staff' },
-                      { value: 'Employee', label: 'Employee', icon: FiBriefcase, description: 'Point of sale and inventory' },
+                      { value: 'Store Admin', label: 'Manager (Store Admin)', icon: FiHome, description: 'Store settings, reports, operations, and branch staff' },
+                      { value: 'Employee', label: 'Employee (Cashier, Collector, Utility)', icon: FiBriefcase, description: 'Point of sale, collection, and store maintenance' },
                     ].map(({ value, label, icon: Icon, description }) => (
                       <button
                         key={value}
@@ -1847,7 +1915,9 @@ export default function SystemPage({ defaultTab = 'users' }) {
                         onClick={() => setUserForm(f => ({
                           ...f,
                           role: value,
-                          basic_salary: f.basic_salary || (value === 'Store Admin' ? '15600.00' : value === 'Employee' ? '13000.00' : '')
+                          position: value === 'Store Admin' ? 'Manager (Store Admin)' : (value === 'Employee' ? (f.position && f.position !== 'Manager (Store Admin)' ? f.position : 'Cashier (Employee)') : 'System Administrator'),
+                          department: value === 'Store Admin' ? 'Store Admin' : (value === 'Employee' ? 'Employee' : 'Administration'),
+                          basic_salary: ''
                         }))}
                         className={`w-full flex items-center gap-3 rounded-xl border p-3 text-left transition-all ${userForm.role === value
                           ? 'border-[#176B87] bg-[#176B87]/10 dark:border-[#64ccc5] dark:bg-[#64ccc5]/10'
@@ -1873,29 +1943,33 @@ export default function SystemPage({ defaultTab = 'users' }) {
                   </div>
                 </div>
 
-                <div className="flex justify-end gap-2 pt-4 mt-2 border-t border-border">
+                <div className="flex items-center justify-end gap-3 pt-4 mt-2 border-t border-border">
                   <button
                     type="button"
                     onClick={() => { setUserModal(false); setEditUser(null); setUserFormStep(1) }}
-                    className="px-4 py-2.5 rounded-xl border border-border hover:bg-muted font-semibold cursor-pointer w-1/2"
+                    className="px-5 py-2.5 rounded-xl border border-border hover:bg-muted font-semibold cursor-pointer"
                   >
                     Cancel
                   </button>
                   <button
                     type="button"
                     onClick={() => setUserFormStep(2)}
-                    className="px-4 py-2.5 bg-primary hover:bg-primary/90 text-primary-foreground font-bold rounded-xl cursor-pointer w-1/2"
+                    className="px-6 py-2.5 bg-primary hover:bg-primary/90 text-primary-foreground font-bold rounded-xl cursor-pointer"
                   >
-                    Next Step
+                    Next Step →
                   </button>
                 </div>
               </>
             ) : (
               <div className="space-y-4 max-h-[70vh] overflow-y-auto px-1 scrollbar-hide">
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
                   <div>
                     <label className="block font-bold text-muted-foreground mb-1">First Name *</label>
                     <input type="text" value={userForm.first_name} onChange={e => setUserForm(f => ({ ...f, first_name: e.target.value }))} placeholder="First Name" required className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground" />
+                  </div>
+                  <div>
+                    <label className="block font-bold text-muted-foreground mb-1">Middle Name (Optional)</label>
+                    <input type="text" value={userForm.middle_name} onChange={e => setUserForm(f => ({ ...f, middle_name: e.target.value }))} placeholder="Middle Name" className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground" />
                   </div>
                   <div>
                     <label className="block font-bold text-muted-foreground mb-1">Last Name *</label>
@@ -1903,22 +1977,18 @@ export default function SystemPage({ defaultTab = 'users' }) {
                   </div>
                 </div>
 
-                <div>
-                  <label className="block font-bold text-muted-foreground mb-1">Middle Name (Optional)</label>
-                  <input type="text" value={userForm.middle_name} onChange={e => setUserForm(f => ({ ...f, middle_name: e.target.value }))} placeholder="Middle Name" className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground" />
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                  <div>
+                    <label className="block font-bold text-muted-foreground mb-1">Phone Number *</label>
+                    <input type="tel" maxLength={11} value={userForm.phone} onChange={e => setUserForm(f => ({ ...f, phone: e.target.value.replace(/\D/g, '').slice(0, 11) }))} placeholder="e.g. 09123456789" required className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground font-mono" />
+                  </div>
+                  <div>
+                    <label className="block font-bold text-muted-foreground mb-1">Complete Address *</label>
+                    <input type="text" value={userForm.address} onChange={e => setUserForm(f => ({ ...f, address: e.target.value }))} placeholder="Street, Barangay, City, Province" required className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground" />
+                  </div>
                 </div>
 
-                <div>
-                  <label className="block font-bold text-muted-foreground mb-1">Phone Number *</label>
-                  <input type="tel" maxLength={11} value={userForm.phone} onChange={e => setUserForm(f => ({ ...f, phone: e.target.value.replace(/\D/g, '').slice(0, 11) }))} placeholder="e.g. 09123456789" required className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground font-mono" />
-                </div>
-
-                <div>
-                  <label className="block font-bold text-muted-foreground mb-1">Complete Address *</label>
-                  <input type="text" value={userForm.address} onChange={e => setUserForm(f => ({ ...f, address: e.target.value }))} placeholder="Street, Barangay, City, Province" required className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground" />
-                </div>
-
-                <div className="grid grid-cols-3 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
                   <div>
                     <label className="block font-bold text-muted-foreground mb-1">Gender *</label>
                     <select value={userForm.gender} onChange={e => setUserForm(f => ({ ...f, gender: e.target.value }))} className="w-full border border-border rounded-xl px-3 py-2 bg-card text-foreground cursor-pointer [color-scheme:dark] [&>option]:bg-[#0f172a] [&>option]:text-white">
@@ -1942,14 +2012,15 @@ export default function SystemPage({ defaultTab = 'users' }) {
                   </div>
                 </div>
 
-                <div>
-                  <label className="block font-bold text-muted-foreground mb-1">Email Address *</label>
-                  <input type="email" value={userForm.email} onChange={e => setUserForm(f => ({ ...f, email: e.target.value }))} placeholder="Email Address" required className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground" />
-                </div>
-
-                <div>
-                  <label className="block font-bold text-muted-foreground mb-1">Username *</label>
-                  <input type="text" value={userForm.username} onChange={e => setUserForm(f => ({ ...f, username: e.target.value }))} placeholder="Username" required autoComplete="username" className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground" />
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                  <div>
+                    <label className="block font-bold text-muted-foreground mb-1">Email Address *</label>
+                    <input type="email" value={userForm.email} onChange={e => setUserForm(f => ({ ...f, email: e.target.value }))} placeholder="Email Address" required className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground" />
+                  </div>
+                  <div>
+                    <label className="block font-bold text-muted-foreground mb-1">Username *</label>
+                    <input type="text" value={userForm.username} onChange={e => setUserForm(f => ({ ...f, username: e.target.value }))} placeholder="Username" required autoComplete="username" className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground" />
+                  </div>
                 </div>
 
                 <div className="grid grid-cols-2 gap-3">
@@ -1965,66 +2036,78 @@ export default function SystemPage({ defaultTab = 'users' }) {
 
                 {userForm.role !== 'Administrator' && (
                   <>
-                    <div>
-                      <label className="block font-bold text-muted-foreground mb-1">
-                        Store/Branch *
-                      </label>
-                      <select
-                        value={userForm.branch_id || ''}
-                        onChange={e => setUserForm(f => ({ ...f, branch_id: e.target.value }))}
-                        required
-                        className="w-full border border-border rounded-xl px-3 py-2 bg-card text-foreground cursor-pointer [color-scheme:dark] [&>option]:bg-[#0f172a] [&>option]:text-white"
-                      >
-                        <option value="" className="bg-[#0f172a] text-white">Select a branch</option>
-                        {registrationOptions.branches.map(b => (
-                          <option key={b.id} value={b.id} className="bg-[#0f172a] text-white">{b.name}</option>
-                        ))}
-                      </select>
-                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block font-bold text-muted-foreground mb-1">
+                          Store/Branch (Optional)
+                        </label>
+                        <select
+                          value={userForm.branch_id || ''}
+                          onChange={e => setUserForm(f => ({ ...f, branch_id: e.target.value }))}
+                          className="w-full border border-border rounded-xl px-3 py-2 bg-card text-foreground cursor-pointer [color-scheme:dark] [&>option]:bg-[#0f172a] [&>option]:text-white text-xs font-medium"
+                        >
+                          <option value="" className="bg-[#0f172a] text-white">Unassigned (Assign Later)</option>
+                          {registrationOptions.branches.map(b => (
+                            <option key={b.id} value={b.id} className="bg-[#0f172a] text-white">{b.name}</option>
+                          ))}
+                        </select>
+                      </div>
 
-                    <div>
-                      <label className="block font-bold text-muted-foreground mb-1">
-                        Salary *
-                      </label>
-                      <div className="relative">
-                        <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-primary font-bold text-sm select-none">₱</span>
-                        <input
-                          type="number"
-                          min="0"
-                          step="0.01"
-                          value={userForm.basic_salary || ''}
-                          onChange={e => setUserForm(f => ({ ...f, basic_salary: e.target.value }))}
-                          placeholder="0.00"
+                      <div>
+                        <label className="block font-bold text-muted-foreground mb-1">
+                          Position / Role *
+                        </label>
+                        <select
+                          value={userForm.position || (userForm.role === 'Store Admin' || userForm.role === 'Store Administrator' ? 'Manager (Store Admin)' : 'Cashier (Employee)')}
+                          onChange={e => {
+                            const pos = e.target.value
+                            setUserForm(f => ({
+                              ...f,
+                              position: pos,
+                              role: pos === 'Manager (Store Admin)' ? 'Store Admin' : 'Employee',
+                              department: pos === 'Manager (Store Admin)' ? 'Store Admin' : 'Employee'
+                            }))
+                          }}
                           required
-                          className="w-full pl-8 pr-3 py-2 rounded-xl border border-border bg-card text-foreground font-mono font-medium focus:outline-none focus:border-primary"
-                        />
+                          className="w-full border border-border rounded-xl px-3 py-2 bg-card text-foreground cursor-pointer [color-scheme:dark] [&>option]:bg-[#0f172a] [&>option]:text-white text-xs font-semibold"
+                        >
+                          {userForm.role === 'Store Admin' || userForm.role === 'Store Administrator' ? (
+                            <option value="Manager (Store Admin)" className="bg-[#0f172a] text-white">Manager (Store Admin)</option>
+                          ) : (
+                            <>
+                              <option value="Cashier (Employee)" className="bg-[#0f172a] text-white">Cashier (Employee)</option>
+                              <option value="Collector (Employee)" className="bg-[#0f172a] text-white">Collector (Employee)</option>
+                              <option value="Utility (Employee)" className="bg-[#0f172a] text-white">Utility (Employee)</option>
+                            </>
+                          )}
+                        </select>
                       </div>
                     </div>
 
                     <div className="grid grid-cols-2 gap-3">
                       <div>
                         <label className="block font-bold text-muted-foreground mb-1">
-                          Attendance PIN (4-6 digits)
+                          Attendance PIN (Optional)
                         </label>
                         <input
                           type="password"
                           maxLength={6}
                           value={userForm.attendance_pin || ''}
                           onChange={e => setUserForm(f => ({ ...f, attendance_pin: e.target.value.replace(/\D/g, '') }))}
-                          placeholder="4-6 numeric digits"
+                          placeholder="Leave blank to assign later"
                           className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground font-mono text-center tracking-widest text-xs"
                         />
                       </div>
                       <div>
                         <label className="block font-bold text-muted-foreground mb-1">
-                          Confirm Attendance PIN
+                          Confirm Attendance PIN (Optional)
                         </label>
                         <input
                           type="password"
                           maxLength={6}
                           value={userForm.confirm_attendance_pin || ''}
                           onChange={e => setUserForm(f => ({ ...f, confirm_attendance_pin: e.target.value.replace(/\D/g, '') }))}
-                          placeholder="••••"
+                          placeholder="Leave blank to assign later"
                           className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground font-mono text-center tracking-widest text-xs"
                         />
                       </div>
@@ -2032,15 +2115,15 @@ export default function SystemPage({ defaultTab = 'users' }) {
                   </>
                 )}
 
-                <div className="flex justify-between gap-2 pt-5 mt-4 border-t border-border">
+                <div className="flex justify-between gap-3 pt-5 mt-4 border-t border-border">
                   <button type="button" onClick={() => setUserFormStep(1)} className="px-4 py-2 rounded-xl border border-border hover:bg-muted font-semibold cursor-pointer text-muted-foreground">
                     ← Back
                   </button>
-                  <div className="flex gap-2">
+                  <div className="flex gap-3">
                     <button type="button" onClick={() => { setUserModal(false); setUserFormStep(1) }} className="px-4 py-2 rounded-xl border border-border hover:bg-muted font-semibold cursor-pointer">
                       Cancel
                     </button>
-                    <button type="submit" className="flex items-center gap-1.5 px-4 py-2 bg-primary hover:bg-primary/90 text-primary-foreground font-bold rounded-xl cursor-pointer">
+                    <button type="submit" className="flex items-center gap-1.5 px-5 py-2 bg-primary hover:bg-primary/90 text-primary-foreground font-bold rounded-xl cursor-pointer">
                       <FiCheckCircle className="w-3.5 h-3.5" />
                       <span>Create User</span>
                     </button>

@@ -160,13 +160,13 @@ export default function SelectProductModal({
 
   return (
     <div
-      className="fixed inset-0 z-[65] flex items-center justify-center p-3 sm:p-5 bg-black/60 backdrop-blur-md animate-[fadeIn_0.2s_ease]"
+      className="fixed inset-0 z-[65] flex items-center justify-center p-4 bg-black/60 backdrop-blur-md animate-[fadeIn_0.2s_ease]"
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
     >
-      <div className="bg-card w-full max-w-4xl rounded-3xl shadow-2xl border border-border flex flex-col max-h-[92vh] overflow-hidden animate-[slideUp_0.2s_ease]">
+      <div className="bg-card w-full max-w-4xl rounded-2xl shadow-2xl border border-border flex flex-col max-h-[90vh] overflow-hidden animate-[slideUp_0.2s_ease]">
 
         {/* ─── Modal Header ─── */}
-        <div className="p-5 sm:p-6 pb-4 border-b border-border/80 bg-muted/20 flex items-start justify-between shrink-0">
+        <div className="px-6 py-4 border-b border-border/80 bg-muted/20 flex items-start justify-between shrink-0">
           <div>
             <div className="flex items-center gap-2">
               <span className="w-8 h-8 rounded-xl bg-purple-100 dark:bg-purple-950/60 text-purple-600 dark:text-purple-300 flex items-center justify-center">
@@ -261,7 +261,7 @@ export default function SelectProductModal({
         </div>
 
         {/* ─── Product Catalog Grid Body ─── */}
-        <div className="p-4 sm:p-6 overflow-y-auto flex-1">
+        <div className="p-6 sm:p-8 overflow-y-auto flex-1">
           {loading ? (
             <div className="py-20 text-center space-y-3">
               <div className="w-10 h-10 border-3 border-purple-600 border-t-transparent rounded-full animate-spin mx-auto"></div>
@@ -429,7 +429,7 @@ export default function SelectProductModal({
         </div>
 
         {/* ─── Sticky Footer Bar ─── */}
-        <div className="p-4 sm:p-5 border-t border-border bg-muted/30 flex flex-col sm:flex-row items-center justify-between gap-3 shrink-0">
+        <div className="px-6 py-4 border-t border-border bg-muted/30 flex flex-col sm:flex-row items-center justify-between gap-3 shrink-0">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-2xl bg-purple-100 dark:bg-purple-950/60 text-purple-600 dark:text-purple-300 flex items-center justify-center font-black">
               {totalSelectedCount}

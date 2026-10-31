@@ -92,7 +92,7 @@ export default function AttendancePage() {
   })
   const [error, setError] = useState('')
   const [schedule, setSchedule] = useState({
-    labels: { time_in: '08:00 AM', cutoff: '08:05 AM', lunch_out: '12:00 PM', lunch_in: '01:00 PM', time_out: '05:00 PM' },
+    labels: { time_in: '08:00 AM', cutoff: '08:00 AM', lunch_out: '12:00 PM', lunch_in: '01:00 PM', time_out: '05:00 PM' },
   })
 
   // Logs & Filters
@@ -471,13 +471,17 @@ export default function AttendancePage() {
     }
   }
 
-  // --- NEW: Poll Backend while waiting for Employee PIN ---
+  // --- Poll Backend while waiting for Employee PIN (1.2s non-overlapping cycle) ---
   useEffect(() => {
     let interval
+    let checkInFlight = false
     if (stationStep === 'waiting' && punchResult?.log_id) {
       interval = setInterval(async () => {
+        if (checkInFlight) return
+        checkInFlight = true
         try {
           const res = await api.attendance.checkVerification(punchResult.log_id)
+          if (!res) return
           if (res.status === 'SUCCESS') {
             clearInterval(interval)
             playTone('success')
@@ -502,8 +506,10 @@ export default function AttendancePage() {
           }
         } catch (err) {
           console.error('Polling error:', err)
+        } finally {
+          checkInFlight = false
         }
-      }, 2000)
+      }, 1200)
     }
     return () => clearInterval(interval)
   }, [stationStep, punchResult?.log_id])
@@ -842,7 +848,7 @@ export default function AttendancePage() {
       {/* Daily Summary Stats */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <StatCard title="Present Today" value={summary?.present?.toString() || '0'} sub="verified punches" icon={<FiCheckCircle className="w-5 h-5 text-emerald-500" />} color="green" />
-        <StatCard title="Late Arrivals" value={summary?.late?.toString() || '0'} sub="after 8:15 AM cutoff" icon={<FiClock className="w-5 h-5 text-amber-500" />} color="yellow" />
+        <StatCard title="Late Arrivals" value={summary?.late?.toString() || '0'} sub="after 8:00 AM cutoff" icon={<FiClock className="w-5 h-5 text-amber-500" />} color="yellow" />
         <StatCard title="Absences" value={summary?.absent?.toString() || '0'} sub="unrecorded attendance" icon={<FiX className="w-5 h-5 text-rose-500" />} color="red" />
         <StatCard title="Half Day / Leave" value={summary?.half_day?.toString() || '0'} sub="partial shift entries" icon={<FiFileText className="w-5 h-5 text-blue-500" />} color="blue" />
       </div>
@@ -1232,9 +1238,9 @@ export default function AttendancePage() {
         <Modal
           title="REQUEST ATTENDANCE QR CODE"
           onClose={() => setQrRequestModalOpen(false)}
-          size="md"
+          size="lg"
           footer={
-            <div className="flex justify-end gap-2 w-full">
+            <div className="flex justify-end gap-3 w-full">
               <Btn variant="outline" size="sm" onClick={() => setQrRequestModalOpen(false)} disabled={submittingRequest}>
                 Cancel
               </Btn>
@@ -1260,11 +1266,11 @@ export default function AttendancePage() {
               </span>
             </div>
 
-            <div className="p-4 rounded-2xl bg-card border border-border space-y-2.5 text-xs">
-              <span className="text-[10px] uppercase font-bold text-muted-foreground block border-b border-border pb-1">
+            <div className="p-4 rounded-2xl bg-card border border-border space-y-3 text-xs">
+              <span className="text-[10px] uppercase font-bold text-muted-foreground block border-b border-border pb-1.5">
                 {isStoreAdmin ? 'Store Administrator Information' : 'Employee Information'}
               </span>
-              <div className="grid grid-cols-2 gap-2.5">
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3.5">
                 <div>
                   <span className="text-[10px] text-muted-foreground uppercase font-bold block">
                     {isStoreAdmin ? 'Store Admin ID' : 'Employee ID'}
@@ -1311,10 +1317,9 @@ export default function AttendancePage() {
               <FiClock className="w-4 h-4 text-primary" />
               <span className="text-xs font-bold uppercase tracking-wider text-foreground">Official Work Schedule</span>
             </div>
-            <div className="grid grid-cols-5 divide-x divide-border text-center">
+            <div className="grid grid-cols-2 sm:grid-cols-4 divide-y sm:divide-y-0 sm:divide-x divide-border text-center">
               {[
                 { key: 'time_in', label: 'Time In', color: 'text-emerald-600' },
-                { key: 'cutoff', label: 'Cut Off', color: 'text-rose-600' },
                 { key: 'lunch_out', label: 'Lunch Out', color: 'text-amber-600' },
                 { key: 'lunch_in', label: 'Lunch In', color: 'text-amber-600' },
                 { key: 'time_out', label: 'Time Out', color: 'text-indigo-600' },

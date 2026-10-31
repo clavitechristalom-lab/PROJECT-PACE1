@@ -43,13 +43,13 @@ const icons = {
   storage: <FiHardDrive className="w-4 h-4 flex-shrink-0" />,
 }
 
-function navByRole(role, onOpenConfig) {
+function navByRole(role, onOpenConfig, pendingLettersCount = 0) {
   if (role === 'Employee') {
     return [
       { label: 'My Dashboard', path: '/employee/dashboard', icon: icons.dashboard },
       { label: 'My Attendance QR', path: '/employee/attendance', icon: icons.attendance },
-      { label: 'My Payroll', path: '/employee/payroll', icon: icons.payroll },
       { label: 'My Payslips', path: '/employee/payslips', icon: icons.payslip },
+      { label: 'Create Excuse / Leave Letter', path: '/employee/excuse-letter', icon: icons.logs },
     ]
   }
 
@@ -129,12 +129,19 @@ function navByRole(role, onOpenConfig) {
 
   base.push({ label: isAdmin ? 'Attendance Logs' : 'Branch Attendance', path: '/attendance', icon: icons.attendance })
 
+  // Admin & Store Admin Excuse Letter menu item (dedicated, strictly separate from Customer Support)
+  base.push({
+    label: 'Excuse Letter',
+    path: '/admin/excuse-letters',
+    icon: icons.logs,
+    badge: pendingLettersCount > 0 ? pendingLettersCount : null,
+  })
+
   base.push({ label: 'Reports', path: '/reports', icon: icons.reports })
 
   base.push({ label: 'Customer Support', path: '/admin/support', icon: icons.support })
 
   if (isAdmin) {
-    base.push({ label: 'Company Configuration', action: onOpenConfig, icon: icons.settings })
     base.push(system)
   }
 
@@ -191,31 +198,299 @@ function SidebarGroup({ group, collapsed }) {
   )
 }
 
+function getCollapsedRailItems(role, onOpenConfig, pendingLettersCount = 0) {
+  if (role === 'Employee') {
+    return [
+      { label: 'My Dashboard', path: '/employee/dashboard', icon: <FiHome className="w-5 h-5" /> },
+      { label: 'My Attendance QR', path: '/employee/attendance', icon: <FiClock className="w-5 h-5" /> },
+      { label: 'My Payslips', path: '/employee/payslips', icon: <FiFileText className="w-5 h-5" /> },
+      { label: 'Create Excuse / Leave Letter', path: '/employee/excuse-letter', icon: <FiFileText className="w-5 h-5" /> },
+      { label: 'Notifications', path: '/employee/notifications', icon: <FiBell className="w-5 h-5" /> },
+    ]
+  }
+
+  if (role === 'Customer') {
+    return [
+      { label: 'My Dashboard', path: '/customer/dashboard', icon: <FiHome className="w-5 h-5" /> },
+    ]
+  }
+
+  const isAdmin = role === 'Administrator'
+
+  const items = [
+    // 1. Dashboard Home
+    { label: 'Dashboard', path: '/dashboard', icon: <FiHome className="w-5 h-5" /> },
+
+    // 2. Business Management / Sales
+    { label: 'Sales Transactions', path: '/sales', icon: <FiShoppingCart className="w-5 h-5" /> },
+
+    // 3. Products / Inventory
+    { label: 'Products / Inventory', path: '/products', icon: <FiPackage className="w-5 h-5" /> },
+
+    // 4. Customers
+    { label: 'Customers', path: '/customers', icon: <FiUser className="w-5 h-5" /> },
+
+    // 5. Create Sale / Cart
+    { label: 'Create Sale', path: '/sales/create', icon: <FiShoppingCart className="w-5 h-5" /> },
+
+    // 6. Transaction History / Activity
+    { label: 'Transaction History', path: '/transactions', icon: <FiActivity className="w-5 h-5 stroke-[2.2]" /> },
+
+    // 7. Installments
+    { label: 'Installment Monitoring', path: '/installments', icon: <FiCreditCard className="w-5 h-5" /> },
+
+    // 8. Payment Schedule
+    { label: 'Payment Schedule', path: '/payment-schedule', icon: <FiCalendar className="w-5 h-5" /> },
+
+    // 9. Calendar / Schedule Details
+    { label: 'Schedule Calendar', path: '/payment-schedule', icon: <FiCalendar className="w-5 h-5" /> },
+
+    // 10. Payments (Peso)
+    { label: 'Payments', path: '/payments', icon: <TbCurrencyPeso className="w-5 h-5 stroke-[2.2]" /> },
+
+    // 11. Finance / Collections (Peso)
+    { label: 'Finance & Collections', path: '/payments', icon: <TbCurrencyPeso className="w-5 h-5 stroke-[2.2]" /> },
+
+    // 12. Employees & QR Badges
+    { label: 'Employees & QR Badges', path: '/employees', icon: <FiUsers className="w-5 h-5" /> },
+  ]
+
+  if (isAdmin) {
+    // 13. QR Requests (Camera)
+    items.push({ label: 'QR Requests', path: '/admin/qr-requests', icon: <FiCamera className="w-5 h-5" /> })
+
+    // 14. Payroll & HR (Peso)
+    items.push({ label: 'Payroll & HR', path: '/payroll', icon: <TbCurrencyPeso className="w-5 h-5 stroke-[2.2]" /> })
+  }
+
+  // 15. Attendance (Clock)
+  items.push({ label: 'Attendance Records', path: '/attendance', icon: <FiClock className="w-5 h-5" /> })
+
+  // 15b. Excuse Letter (FileText)
+  items.push({
+    label: 'Excuse Letter',
+    path: '/admin/excuse-letters',
+    icon: <FiFileText className="w-5 h-5" />,
+    badge: pendingLettersCount > 0 ? pendingLettersCount : null,
+  })
+
+  // 16. Reports (BarChart)
+  items.push({ label: 'Reports', path: '/reports', icon: <FiBarChart2 className="w-5 h-5" /> })
+
+  // 17. Customer Support (Chat)
+  items.push({ label: 'Customer Support', path: '/admin/support', icon: <FiMessageSquare className="w-5 h-5" /> })
+
+  // 18. System Management (Gear)
+  if (isAdmin) {
+    items.push({
+      label: 'System Management',
+      path: '/admin-dashboard',
+      icon: <FiSettings className="w-5 h-5" />,
+      subPaths: ['/branches', '/users', '/settings/carousel', '/system-logs', '/backups', '/storage']
+    })
+  }
+
+  return items
+}
+
 function Sidebar({ collapsed, settings, mobileOpen, onCloseMobile, onOpenConfig }) {
   const { user } = useAuth()
-  const navItems = user ? navByRole(user.role, onOpenConfig) : []
+  const location = useLocation()
+  const [pendingLettersCount, setPendingLettersCount] = useState(0)
+
+  // Real-time pending count for sidebar notification badge
+  useEffect(() => {
+    if (!user || user.role === 'Customer') return
+    let isMounted = true
+    const fetchSummary = async () => {
+      try {
+        const res = await api.employeeLetters.getSummary()
+        if (isMounted && typeof res?.pending_count === 'number') {
+          setPendingLettersCount(res.pending_count)
+        }
+      } catch (_) {}
+    }
+    fetchSummary()
+    return () => { isMounted = false }
+  }, [user])
+
+  useRealtimeSync(() => {
+    if (!user || user.role === 'Customer') return
+    api.employeeLetters.getSummary()
+      .then(res => {
+        if (typeof res?.pending_count === 'number') {
+          setPendingLettersCount(res.pending_count)
+        }
+      })
+      .catch(() => {})
+  }, [user])
+
+  const navItems = user ? navByRole(user.role, onOpenConfig, pendingLettersCount) : []
+  const railItems = user ? getCollapsedRailItems(user.role, onOpenConfig, pendingLettersCount) : []
 
   if (!user || user.role === 'Customer') return null
 
   const companyName = settings?.company_name || 'Z-LICZ'
   const siteName = 'Z-LICZ Appliances'
 
+  const isItemActive = (item) => {
+    if (item.action) return false
+    if (!item.path) return false
+    if (item.path === '/dashboard') {
+      return location.pathname === '/' || location.pathname === '/dashboard'
+    }
+    if (location.pathname === item.path) return true
+    if (item.path !== '/' && location.pathname.startsWith(`${item.path}/`)) return true
+    if (item.subPaths && item.subPaths.some(sp => location.pathname === sp || location.pathname.startsWith(`${sp}/`))) return true
+    return false
+  }
+
   return (
     <>
-      {/* Mobile Drawer Backdrop */}
+      {/* ─── MOBILE DRAWER (SLIDES OUT ON TOGGLE ON MOBILE/TABLET) ─── */}
       {mobileOpen && (
-        <div
-          className="fixed inset-0 bg-black/60 backdrop-blur-xs z-40 lg:hidden animate-[fadeIn_0.15s_ease]"
-          onClick={onCloseMobile}
-        />
+        <>
+          <div
+            className="fixed inset-0 bg-black/60 backdrop-blur-xs z-40 lg:hidden animate-[fadeIn_0.15s_ease]"
+            onClick={onCloseMobile}
+          />
+          <aside
+            className="fixed inset-y-0 left-0 z-50 w-[260px] bg-white dark:bg-[#071328] border-r border-blue-500/20 shadow-2xl flex flex-col h-full overflow-hidden animate-[slideRight_0.2s_ease]"
+          >
+            {/* Drawer Logo */}
+            <div className="flex items-center justify-between px-4 py-4 border-b border-blue-500/15 flex-shrink-0">
+              <div className="flex items-center gap-2.5 min-w-0">
+                {resolveLogoUrl(settings?.logo_url || settings?.logo) ? (
+                  <img
+                    src={resolveLogoUrl(settings?.logo_url || settings?.logo)}
+                    alt="Logo"
+                    className="w-8 h-8 rounded-xl object-contain flex-shrink-0 shadow-xs bg-white p-0.5"
+                    onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                  />
+                ) : (
+                  <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-blue-600 via-indigo-600 to-slate-900 border border-blue-400/30 flex items-center justify-center text-white font-bold text-sm flex-shrink-0 shadow-xs">
+                    {(companyName || 'P').charAt(0).toUpperCase()}
+                  </div>
+                )}
+                <div className="overflow-hidden">
+                  <div className="text-slate-900 dark:text-white font-bold text-sm tracking-wide leading-tight truncate">{companyName}</div>
+                  <div className="text-blue-700 dark:text-blue-300/80 text-[9px] font-mono leading-tight truncate">{siteName}</div>
+                </div>
+              </div>
+              <button
+                onClick={onCloseMobile}
+                className="lg:hidden text-blue-800 dark:text-blue-200 hover:text-foreground p-1 rounded-lg hover:bg-blue-500/15 cursor-pointer"
+                aria-label="Close menu"
+              >
+                <FiX className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Drawer Nav */}
+            <nav className="flex-1 overflow-y-auto py-3 space-y-0.5 px-1.5" onClick={onCloseMobile}>
+              {navItems.map((entry, i) =>
+                entry.items ? (
+                  <SidebarGroup key={i} group={entry} collapsed={false} />
+                ) : entry.action ? (
+                  <button
+                    key={entry.label}
+                    onClick={(e) => { e.preventDefault(); entry.action(); }}
+                    className="w-full text-left flex items-center gap-2.5 px-3 py-2 text-xs rounded-xl transition-all cursor-pointer text-slate-700 dark:text-blue-100/70 hover:bg-blue-500/10 hover:text-blue-950 dark:hover:text-white"
+                  >
+                    <span className="flex-shrink-0 text-blue-700 dark:text-blue-400">{entry.icon}</span>
+                    <span className="truncate flex-1">{entry.label}</span>
+                  </button>
+                ) : (
+                  <NavLink
+                    key={entry.path}
+                    to={entry.path}
+                    className={({ isActive }) =>
+                      `flex items-center gap-2.5 px-3 py-2 text-xs rounded-xl transition-all cursor-pointer ${isActive
+                        ? 'bg-gradient-to-r from-blue-600 via-blue-600 to-indigo-700 text-white font-bold shadow-md shadow-blue-950/40 border border-blue-400/30'
+                        : 'text-slate-700 dark:text-blue-100/70 hover:bg-blue-500/10 hover:text-blue-950 dark:hover:text-white'
+                      }`
+                    }
+                  >
+                    {({ isActive }) => (
+                      <>
+                        <span className={`flex-shrink-0 ${isActive ? 'text-white' : 'text-blue-700 dark:text-blue-400'}`}>{entry.icon}</span>
+                        <span className="truncate flex-1">{entry.label}</span>
+                        {entry.badge && (
+                          <span className="text-[10px] font-bold font-mono bg-rose-600 text-white px-1.5 py-0.2 rounded-full shrink-0">
+                            {entry.badge}
+                          </span>
+                        )}
+                      </>
+                    )}
+                  </NavLink>
+                )
+              )}
+            </nav>
+          </aside>
+        </>
       )}
 
+      {/* ─── PERSISTENT ICON-ONLY MINI SIDEBAR (MOBILE/TABLET ALWAYS, AND DESKTOP WHEN COLLAPSED) ─── */}
       <aside
-        className={`sidebar-shell flex flex-col h-full overflow-hidden flex-shrink-0 transition-all duration-200 print:hidden ${mobileOpen
-          ? 'fixed inset-y-0 left-0 z-50 shadow-2xl flex'
-          : 'hidden lg:flex'
+        className={`sidebar-shell flex-col h-full overflow-hidden flex-shrink-0 select-none z-30 print:hidden transition-all duration-200 border-r border-blue-500/15 bg-white dark:bg-[#071328] ${collapsed ? 'flex w-[68px] min-w-[68px]' : 'flex w-[68px] min-w-[68px] lg:hidden'
           }`}
-        style={{ width: mobileOpen ? 260 : (collapsed ? 64 : 240) }}
+      >
+        <div className="flex-1 overflow-y-auto overflow-x-hidden py-3 px-2 flex flex-col items-center gap-2.5 [scrollbar-width:thin] [scrollbar-color:rgba(59,130,246,0.25)_transparent] [&::-webkit-scrollbar]:w-1 [&::-webkit-scrollbar-thumb]:bg-blue-500/25 [&::-webkit-scrollbar-thumb]:rounded-full">
+          {railItems.map((item, idx) => {
+            const active = isItemActive(item)
+
+            if (item.action) {
+              return (
+                <button
+                  key={`rail-action-${idx}`}
+                  type="button"
+                  onClick={item.action}
+                  title={item.label}
+                  className="relative w-11 h-11 rounded-[14px] text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 hover:bg-blue-50 dark:hover:bg-blue-900/30 flex items-center justify-center cursor-pointer flex-shrink-0 transition-all active:scale-95 group"
+                  aria-label={item.label}
+                >
+                  <span className="flex items-center justify-center [&>svg]:w-5 [&>svg]:h-5 [&>svg]:stroke-[2.2] text-blue-600 dark:text-blue-400">
+                    {item.icon}
+                  </span>
+                  <span className="pointer-events-none absolute left-14 z-50 whitespace-nowrap rounded-lg bg-slate-900 dark:bg-slate-800 px-2.5 py-1 text-xs font-semibold text-white shadow-xl opacity-0 transition-opacity group-hover:opacity-100 hidden md:block">
+                    {item.label}
+                  </span>
+                </button>
+              )
+            }
+
+            return (
+              <NavLink
+                key={`rail-link-${item.path}-${idx}`}
+                to={item.path}
+                title={item.label}
+                className={`relative w-11 h-11 rounded-[14px] flex items-center justify-center cursor-pointer flex-shrink-0 transition-all active:scale-95 group ${active
+                  ? 'bg-gradient-to-b from-blue-600 via-blue-600 to-indigo-600 text-white shadow-[0_8px_20px_-4px_rgba(37,99,235,0.45)]'
+                  : 'text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 hover:bg-blue-50 dark:hover:bg-blue-900/30'
+                  }`}
+                aria-label={item.label}
+              >
+                <span className={`flex items-center justify-center [&>svg]:w-5 [&>svg]:h-5 [&>svg]:stroke-[2.2] ${active ? 'text-white' : 'text-blue-600 dark:text-blue-400'}`}>
+                  {item.icon}
+                </span>
+                {item.badge ? (
+                  <span className="absolute -top-1 -right-1 w-4 h-4 bg-rose-600 text-white text-[9px] font-bold rounded-full flex items-center justify-center shadow-xs">
+                    {item.badge}
+                  </span>
+                ) : null}
+                <span className="pointer-events-none absolute left-14 z-50 whitespace-nowrap rounded-lg bg-slate-900 dark:bg-slate-800 px-2.5 py-1 text-xs font-semibold text-white shadow-xl opacity-0 transition-opacity group-hover:opacity-100 hidden md:block">
+                  {item.label}
+                </span>
+              </NavLink>
+            )
+          })}
+        </div>
+      </aside>
+
+      {/* ─── DESKTOP EXPANDED SIDEBAR (ONLY SHOWN ON LG: WHEN NOT COLLAPSED) ─── */}
+      <aside
+        className={`sidebar-shell hidden lg:flex flex-col h-full overflow-hidden flex-shrink-0 transition-all duration-200 select-none z-30 print:hidden border-r border-blue-500/15 bg-white dark:bg-[#071328] ${collapsed ? 'hidden' : 'w-[240px]'
+          }`}
       >
         {/* Logo */}
         <div className="flex items-center justify-between px-4 py-4 border-b border-blue-500/15 flex-shrink-0">
@@ -232,44 +507,31 @@ function Sidebar({ collapsed, settings, mobileOpen, onCloseMobile, onOpenConfig 
                 {(companyName || 'P').charAt(0).toUpperCase()}
               </div>
             )}
-            {(!collapsed || mobileOpen) && (
-              <div className="overflow-hidden">
-                <div className="text-slate-900 dark:text-white font-bold text-sm tracking-wide leading-tight truncate">{companyName}</div>
-                <div className="text-blue-700 dark:text-blue-300/80 text-[9px] font-mono leading-tight truncate">{siteName}</div>
-              </div>
-            )}
+            <div className="overflow-hidden">
+              <div className="text-slate-900 dark:text-white font-bold text-sm tracking-wide leading-tight truncate">{companyName}</div>
+              <div className="text-blue-700 dark:text-blue-300/80 text-[9px] font-mono leading-tight truncate">{siteName}</div>
+            </div>
           </div>
-          {mobileOpen && (
-            <button
-              onClick={onCloseMobile}
-              className="lg:hidden text-blue-800 dark:text-blue-200 hover:text-foreground p-1 rounded-lg hover:bg-blue-500/15 cursor-pointer"
-              aria-label="Close menu"
-            >
-              <FiX className="w-5 h-5" />
-            </button>
-          )}
         </div>
 
         {/* Nav */}
-        <nav className="flex-1 overflow-y-auto py-3 space-y-0.5 px-1.5" onClick={() => { if (mobileOpen) onCloseMobile() }}>
+        <nav className="flex-1 overflow-y-auto py-3 space-y-0.5 px-1.5">
           {navItems.map((entry, i) =>
             entry.items ? (
-              <SidebarGroup key={i} group={entry} collapsed={collapsed && !mobileOpen} />
+              <SidebarGroup key={i} group={entry} collapsed={false} />
             ) : entry.action ? (
               <button
                 key={entry.label}
                 onClick={(e) => { e.preventDefault(); entry.action(); }}
-                title={collapsed && !mobileOpen ? entry.label : undefined}
                 className="w-full text-left flex items-center gap-2.5 px-3 py-2 text-xs rounded-xl transition-all cursor-pointer text-slate-700 dark:text-blue-100/70 hover:bg-blue-500/10 hover:text-blue-950 dark:hover:text-white"
               >
                 <span className="flex-shrink-0 text-blue-700 dark:text-blue-400">{entry.icon}</span>
-                {(!collapsed || mobileOpen) && <span className="truncate flex-1">{entry.label}</span>}
+                <span className="truncate flex-1">{entry.label}</span>
               </button>
             ) : (
               <NavLink
                 key={entry.path}
                 to={entry.path}
-                title={collapsed && !mobileOpen ? entry.label : undefined}
                 className={({ isActive }) =>
                   `flex items-center gap-2.5 px-3 py-2 text-xs rounded-xl transition-all cursor-pointer ${isActive
                     ? 'bg-gradient-to-r from-blue-600 via-blue-600 to-indigo-700 text-white font-bold shadow-md shadow-blue-950/40 border border-blue-400/30'
@@ -280,8 +542,8 @@ function Sidebar({ collapsed, settings, mobileOpen, onCloseMobile, onOpenConfig 
                 {({ isActive }) => (
                   <>
                     <span className={`flex-shrink-0 ${isActive ? 'text-white' : 'text-blue-700 dark:text-blue-400'}`}>{entry.icon}</span>
-                    {(!collapsed || mobileOpen) && <span className="truncate flex-1">{entry.label}</span>}
-                    {(!collapsed || mobileOpen) && entry.badge && (
+                    <span className="truncate flex-1">{entry.label}</span>
+                    {entry.badge && (
                       <span className="text-[10px] font-bold font-mono bg-rose-600 text-white px-1.5 py-0.2 rounded-full shrink-0">
                         {entry.badge}
                       </span>
@@ -446,19 +708,19 @@ function Header({
   }
 
   return (
-    <header className="header-shell h-14 px-4 flex items-center justify-between gap-4 flex-shrink-0 z-30 print:hidden">
+    <header className="header-shell h-14 px-2.5 sm:px-4 flex items-center justify-between gap-2 sm:gap-4 flex-shrink-0 z-30 print:hidden min-w-0">
       {/* Left: toggle + title */}
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-2 sm:gap-3 min-w-0 shrink-0">
         {user?.role !== 'Customer' && (
           <button
             onClick={onToggle}
-            className="w-8 h-8 rounded-xl border border-blue-500/20 bg-blue-50 dark:bg-[#071328] hover:bg-blue-500/20 flex items-center justify-center text-blue-800 dark:text-blue-200 hover:text-blue-950 dark:hover:text-white transition-colors cursor-pointer"
+            className="w-8 h-8 rounded-xl border border-blue-500/20 bg-blue-50 dark:bg-[#071328] hover:bg-blue-500/20 flex items-center justify-center text-blue-800 dark:text-blue-200 hover:text-blue-950 dark:hover:text-white transition-colors cursor-pointer shrink-0"
             aria-label="Toggle sidebar"
           >
             <FiMenu className="w-4 h-4" />
           </button>
         )}
-        <h1 className="text-sm font-bold text-slate-900 dark:text-white truncate tracking-wide">{title}</h1>
+        <h1 className="text-xs sm:text-sm font-bold text-slate-900 dark:text-white truncate tracking-wide max-w-[100px] sm:max-w-[180px] md:max-w-xs">{title}</h1>
       </div>
 
       {/* Center: Live Global Search Bar */}
@@ -586,7 +848,7 @@ function Header({
       </div>
 
       {/* Right controls */}
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-1 sm:gap-2 shrink-0">
         <RealTimeClock />
 
         {/* Mobile Search Button */}
@@ -596,7 +858,7 @@ function Header({
             setTimeout(() => searchInputRef.current?.focus(), 100)
           }}
           title="Search system"
-          className="sm:hidden w-9 h-9 flex items-center justify-center rounded-xl border border-blue-500/25 bg-blue-50/50 dark:bg-blue-950/40 hover:bg-blue-500/20 text-blue-900 dark:text-blue-100 transition-colors cursor-pointer text-base shadow-2xs"
+          className="sm:hidden w-8 h-8 flex items-center justify-center rounded-xl border border-blue-500/25 bg-blue-50/50 dark:bg-blue-950/40 hover:bg-blue-500/20 text-blue-900 dark:text-blue-100 transition-colors cursor-pointer text-base shadow-2xs shrink-0"
         >
           <FiSearch className="w-4 h-4" />
         </button>
@@ -605,7 +867,7 @@ function Header({
         <button
           onClick={toggleMode}
           title={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
-          className="w-9 h-9 flex items-center justify-center rounded-xl border border-blue-500/25 bg-blue-50/50 dark:bg-blue-950/40 hover:bg-blue-500/20 text-blue-900 dark:text-blue-100 transition-colors cursor-pointer text-base shadow-2xs"
+          className="w-8 h-8 sm:w-9 sm:h-9 flex items-center justify-center rounded-xl border border-blue-500/25 bg-blue-50/50 dark:bg-blue-950/40 hover:bg-blue-500/20 text-blue-900 dark:text-blue-100 transition-colors cursor-pointer text-base shadow-2xs shrink-0"
         >
           {isDark ? <FiSun className="w-4 h-4 text-amber-400 drop-shadow-[0_0_6px_rgba(251,191,36,0.6)]" /> : <FiMoon className="w-4 h-4 text-blue-700 dark:text-blue-300" />}
         </button>
@@ -621,10 +883,10 @@ function Header({
         />
 
         {/* User Menu */}
-        <div className="relative" ref={userRef}>
+        <div className="relative shrink-0" ref={userRef}>
           <button
             onClick={() => setUserOpen(o => !o)}
-            className="flex items-center gap-2 px-2.5 py-1.5 rounded-xl border border-blue-500/25 bg-blue-50/80 dark:bg-[#071328] hover:bg-blue-500/20 transition-colors cursor-pointer shadow-2xs"
+            className="flex items-center gap-1.5 p-1 sm:px-2.5 sm:py-1.5 rounded-xl border border-blue-500/25 bg-blue-50/80 dark:bg-[#071328] hover:bg-blue-500/20 transition-colors cursor-pointer shadow-2xs shrink-0"
           >
             <div className="w-7 h-7 rounded-full bg-gradient-to-br from-blue-600 to-indigo-700 border border-blue-400/30 flex items-center justify-center text-white text-xs font-bold overflow-hidden shadow-xs shrink-0">
               {user?.profile_image ? (
@@ -930,8 +1192,15 @@ export default function AppShell() {
     }
   }
 
+  const roleRaw = (user?.role || 'user').toLowerCase()
+  const roleClass = roleRaw.includes('store')
+    ? 'role-store-admin role-store-administrator'
+    : roleRaw.includes('admin')
+      ? 'role-admin role-administrator'
+      : `role-${roleRaw.replace(/\s+/g, '-')}`
+
   return (
-    <div className="admin-shell flex h-screen bg-transparent text-foreground overflow-hidden font-sans">
+    <div className={`admin-shell ${roleClass} flex h-screen bg-slate-50 dark:bg-[#081026] text-foreground overflow-hidden font-sans`}>
       <Sidebar
         collapsed={collapsed}
         settings={appSettings}
@@ -940,7 +1209,7 @@ export default function AppShell() {
         onOpenConfig={() => setConfigOpen(true)}
       />
 
-      <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
+      <div className="flex flex-col flex-1 min-w-0 overflow-x-hidden h-full">
         <Header
           title={pageTitle}
           onToggle={handleToggle}
@@ -953,8 +1222,8 @@ export default function AppShell() {
           onOpenConfig={() => setConfigOpen(true)}
         />
 
-        <main className="flex-1 overflow-y-auto p-4 md:p-6 bg-transparent">
-          <div className="max-w-7xl mx-auto">
+        <main className="flex-1 overflow-y-auto overflow-x-hidden p-3 sm:p-4 md:p-6 bg-transparent">
+          <div className="max-w-7xl mx-auto w-full min-w-0">
             <Suspense
               fallback={
                 <div className="py-20 flex items-center justify-center">
@@ -1003,7 +1272,7 @@ export default function AppShell() {
                 api.attendance.rejectVerification({
                   scan_log_id: reqId,
                   reason: 'Attendance authorization cancelled by employee.'
-                }).catch(() => {})
+                }).catch(() => { })
               }
               setPendingVerification(null)
               navigate('/attendance?tab=punch')
@@ -1048,7 +1317,7 @@ export default function AppShell() {
                 api.attendance.rejectVerification({
                   scan_log_id: reqId,
                   reason: 'Attendance authorization cancelled by employee.'
-                }).catch(() => {})
+                }).catch(() => { })
               }
               setPendingVerification(null)
               navigate('/attendance?tab=punch')

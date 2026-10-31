@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Badge, Pagination } from '../ui';
 import { fmt } from '../../lib/utils';
-import { FileText, Eye, AlertCircle, Trash2, ShoppingBag, CreditCard } from '../../lib/customIcons';
+import { FiFileText, FiEye, FiAlertCircle, FiTrash2, FiShoppingBag, FiCreditCard } from 'react-icons/fi';
 
 const CASH_METHODS = ['Cash', 'GCash', 'Maya', 'Bank Account'];
 
@@ -27,12 +27,12 @@ function LedgerTable({ title, icon, items, type, onView, onDelete }) {
               <th className="px-4 sm:px-6 py-3">Account No.</th>
               <th className="px-4 sm:px-6 py-3">Product</th>
               <th className="px-4 sm:px-6 py-3">Purchase Date</th>
-              <th className="px-4 sm:px-6 py-3 text-right">Total Amount</th>
+              <th className="px-4 sm:px-6 py-3 text-right">Total Payable</th>
               {type === 'installment' && (
                 <>
-                  <th className="px-6 py-3 text-right">Monthly Pay</th>
-                  <th className="px-6 py-3 text-right">Balance</th>
-                  <th className="px-6 py-3">Next Due</th>
+                  <th className="px-4 sm:px-6 py-3 text-right">Total Paid</th>
+                  <th className="px-4 sm:px-6 py-3 text-right">Remaining Balance</th>
+                  <th className="px-4 sm:px-6 py-3">Next Due</th>
                 </>
               )}
               {type === 'cash' && (
@@ -56,18 +56,18 @@ function LedgerTable({ title, icon, items, type, onView, onDelete }) {
                     />
                   ) : (
                     <div className="w-10 h-10 rounded bg-muted flex items-center justify-center border border-border text-slate-400">
-                      {type === 'cash' ? <ShoppingBag size={16} /> : <FileText size={16} />}
+                      {type === 'cash' ? <FiShoppingBag size={16} /> : <FiFileText size={16} />}
                     </div>
                   )}
                   <span className="font-medium text-foreground">{inst.product}</span>
                 </td>
                 <td className="px-4 sm:px-6 py-3.5">{inst.purchase_date}</td>
-                <td className="px-4 sm:px-6 py-3.5 text-right font-medium">{fmt(inst.total_amount)}</td>
+                <td className="px-4 sm:px-6 py-3.5 text-right font-medium">{fmt(inst.total_payable ?? inst.total_amount)}</td>
                 {type === 'installment' && (
                   <>
-                    <td className="px-4 sm:px-6 py-3.5 text-right">{fmt(inst.monthly_payment)}</td>
+                    <td className="px-4 sm:px-6 py-3.5 text-right text-emerald-600 dark:text-emerald-400 font-semibold">{fmt(inst.total_paid ?? inst.paid_amount ?? 0)}</td>
                     <td className="px-4 sm:px-6 py-3.5 text-right text-red-600 dark:text-red-400 font-medium">{fmt(inst.balance)}</td>
-                    <td className="px-4 sm:px-6 py-3.5">{inst.next_due_date || 'N/A'}</td>
+                    <td className="px-4 sm:px-6 py-3.5">{inst.next_due_date || (Number(inst.balance) <= 0 ? 'Complete Payment' : 'N/A')}</td>
                   </>
                 )}
                 {type === 'cash' && (
@@ -77,9 +77,9 @@ function LedgerTable({ title, icon, items, type, onView, onDelete }) {
                 )}
                 <td className="px-4 sm:px-6 py-3.5">
                   <Badge 
-                    variant={inst.status === 'Active' ? 'success' : (inst.status === 'Completed' ? 'default' : 'warning')}
+                    variant={Number(inst.balance) <= 0 || inst.status === 'Complete Payment' || inst.status === 'Completed' ? 'success' : (inst.status === 'Active' ? 'success' : 'warning')}
                   >
-                    {inst.status}
+                    {Number(inst.balance) <= 0 || inst.status === 'Complete Payment' || inst.status === 'Completed' ? 'Complete Payment' : inst.status}
                   </Badge>
                 </td>
                 <td className="px-4 sm:px-6 py-3.5 text-center whitespace-nowrap">
@@ -88,7 +88,7 @@ function LedgerTable({ title, icon, items, type, onView, onDelete }) {
                     className="p-1.5 text-[#176B87] hover:bg-[#176B87]/10 rounded-md transition-colors"
                     title="View Ledger"
                   >
-                    <Eye size={18} />
+                    <FiEye size={18} />
                   </button>
                   {onDelete && (
                     <button 
@@ -96,7 +96,7 @@ function LedgerTable({ title, icon, items, type, onView, onDelete }) {
                       className="p-1.5 text-rose-500 hover:bg-rose-500/10 rounded-md transition-colors ml-1"
                       title="Delete Ledger"
                     >
-                      <Trash2 size={18} />
+                      <FiTrash2 size={18} />
                     </button>
                   )}
                 </td>
@@ -156,7 +156,7 @@ export default function InstallmentLedger({ installments, onView, onDelete }) {
 
       <LedgerTable
         title={showHistory ? "Archived Installment Ledgers" : "Installment Ledgers"}
-        icon={<CreditCard className="text-[#176B87]" size={20} />}
+        icon={<FiCreditCard className="text-[#176B87]" size={20} />}
         items={installmentLedgers}
         type="installment"
         onView={onView}
@@ -164,7 +164,7 @@ export default function InstallmentLedger({ installments, onView, onDelete }) {
       />
       <LedgerTable
         title={showHistory ? "Archived Cash / Fully Paid" : "Cash / Fully Paid Products"}
-        icon={<ShoppingBag className="text-emerald-500" size={20} />}
+        icon={<FiShoppingBag className="text-emerald-500" size={20} />}
         items={cashLedgers}
         type="cash"
         onView={onView}
@@ -173,7 +173,7 @@ export default function InstallmentLedger({ installments, onView, onDelete }) {
       
       {installmentLedgers.length === 0 && cashLedgers.length === 0 && (
         <div className="bg-[var(--card)] rounded-xl p-8 text-center border border-slate-200 dark:border-slate-800">
-          <AlertCircle size={48} className="mx-auto text-slate-400 mb-4" />
+          <FiAlertCircle size={48} className="mx-auto text-slate-400 mb-4" />
           <h3 className="text-lg font-semibold mb-2">No {showHistory ? 'Archived' : 'Active'} Ledgers</h3>
           <p className="text-slate-500">You do not have any {showHistory ? 'archived' : 'active'} ledgers at the moment.</p>
         </div>

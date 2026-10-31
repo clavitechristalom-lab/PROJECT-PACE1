@@ -221,16 +221,16 @@ export default function CompanyConfigurationModal({ isOpen, onClose, onSave, cur
         className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm"
         onClick={onClose}
       />
-      <div className="relative bg-card rounded-3xl shadow-2xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in-95 duration-200 border border-border">
+      <div className="relative bg-card rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-200 border border-border">
         {/* Modal Header */}
-        <div className="flex items-center justify-between p-6 border-b border-border">
-          <h2 className="text-xl font-bold text-foreground">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-border bg-muted/20 shrink-0">
+          <h2 className="text-base font-bold text-foreground">
             {isStoreAdmin ? 'Branch Configuration' : 'Company Configuration'}
           </h2>
           <button
             onClick={onClose}
             type="button"
-            className="p-2 text-muted-foreground hover:text-foreground rounded-full hover:bg-muted transition-colors cursor-pointer"
+            className="p-2 text-muted-foreground hover:text-foreground rounded-xl hover:bg-muted transition-colors cursor-pointer"
             aria-label="Close modal"
           >
             <FiX className="w-5 h-5" />
@@ -238,30 +238,30 @@ export default function CompanyConfigurationModal({ isOpen, onClose, onSave, cur
         </div>
 
         {/* Modal Body */}
-        <div className="p-6 overflow-y-auto max-h-[75vh]">
+        <div className="p-6 sm:p-8 overflow-y-auto flex-1 space-y-5">
           <form id="configForm" onSubmit={handleSubmit} className="space-y-5">
 
             {/* Logo Section - Admin Only */}
             {!isStoreAdmin && (
-              <div className="flex flex-col items-center justify-center p-5 border-2 border-dashed border-border rounded-2xl bg-muted/30">
+              <div className="flex flex-col items-center justify-center p-4 border-2 border-dashed border-border rounded-2xl bg-muted/30">
                 <div className="relative group">
-                  <label className="w-24 h-24 rounded-2xl bg-card border border-border flex flex-col items-center justify-center shadow-xs cursor-pointer overflow-hidden transition-all hover:border-primary/50 block">
+                  <label className="w-20 h-20 rounded-2xl bg-card border border-border flex flex-col items-center justify-center shadow-xs cursor-pointer overflow-hidden transition-all hover:border-primary/50 block">
                     {logoPreview ? (
                       <img src={logoPreview} alt="Logo" className="w-full h-full object-contain p-2" />
                     ) : (
-                      <div className="text-slate-400 font-medium text-sm flex flex-col items-center justify-center h-full">
+                      <div className="text-slate-400 font-medium text-xs flex flex-col items-center justify-center h-full">
                         No Logo
                       </div>
                     )}
                     <div className="absolute inset-0 bg-black/60 text-white flex flex-col items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity rounded-2xl">
-                      <FiUploadCloud className="w-6 h-6 mb-1 text-blue-400" />
+                      <FiUploadCloud className="w-5 h-5 mb-1 text-blue-400" />
                       <span className="text-[10px] font-semibold tracking-wide">Upload Logo</span>
                     </div>
                     <input type="file" accept="image/*" className="hidden" onChange={handleFileChange} />
                   </label>
                 </div>
                 <div className="flex items-center gap-2 mt-2">
-                  <p className="text-sm font-medium text-muted-foreground">Company Logo</p>
+                  <p className="text-xs font-medium text-muted-foreground">Company Logo</p>
                   {logoFile && (
                     <button
                       type="button"
@@ -276,9 +276,9 @@ export default function CompanyConfigurationModal({ isOpen, onClose, onSave, cur
               </div>
             )}
 
-            <div className="grid grid-cols-1 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               {/* Company / Branch Name */}
-              <div className="space-y-1.5">
+              <div className={`space-y-1.5 ${isStoreAdmin ? 'sm:col-span-2' : ''}`}>
                 <label className="text-xs font-semibold text-foreground">
                   {isStoreAdmin ? 'Branch Name' : 'Company Name'}
                 </label>
@@ -291,7 +291,7 @@ export default function CompanyConfigurationModal({ isOpen, onClose, onSave, cur
                     [isStoreAdmin ? 'branch_name' : 'company_name']: e.target.value,
                     ...(isStoreAdmin ? {} : { name: e.target.value })
                   })}
-                  className="w-full px-4 py-2.5 rounded-xl border border-border bg-card text-foreground focus:ring-2 focus:ring-primary/20 outline-none transition-all text-sm placeholder:text-muted-foreground/60"
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-border bg-card text-foreground focus:ring-2 focus:ring-primary/20 outline-none transition-all text-sm placeholder:text-muted-foreground/60"
                   placeholder={isStoreAdmin ? 'e.g. C-LICZ CDO' : 'PROJECT: PACE Z-LICZ'}
                 />
               </div>
@@ -305,27 +305,27 @@ export default function CompanyConfigurationModal({ isOpen, onClose, onSave, cur
                     name="tax_id"
                     value={formData.tax_id || ''}
                     onChange={(e) => setFormData({ ...formData, tax_id: e.target.value })}
-                    className="w-full px-4 py-2.5 rounded-xl border border-border bg-card text-foreground focus:ring-2 focus:ring-primary/20 outline-none transition-all text-sm placeholder:text-muted-foreground/60"
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-border bg-card text-foreground focus:ring-2 focus:ring-primary/20 outline-none transition-all text-sm placeholder:text-muted-foreground/60"
                     placeholder="000-000-000"
                   />
                 </div>
               )}
 
               {/* Address */}
-              <div className="space-y-1.5">
+              <div className="space-y-1.5 sm:col-span-2">
                 <label className="text-xs font-semibold text-foreground">Address</label>
                 <input
                   type="text"
                   name="address"
                   value={formData.address || ''}
                   onChange={(e) => setFormData({ ...formData, address: e.target.value })}
-                  className="w-full px-4 py-2.5 rounded-xl border border-border bg-card text-foreground focus:ring-2 focus:ring-primary/20 outline-none transition-all text-sm placeholder:text-muted-foreground/60"
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-border bg-card text-foreground focus:ring-2 focus:ring-primary/20 outline-none transition-all text-sm placeholder:text-muted-foreground/60"
                   placeholder="Full business address"
                 />
               </div>
 
               {/* Phone */}
-              <div className="space-y-1.5">
+              <div className={`space-y-1.5 ${isStoreAdmin ? 'sm:col-span-2' : ''}`}>
                 <label className="text-xs font-semibold text-foreground">Phone</label>
                 <input
                   type="tel"
@@ -333,7 +333,7 @@ export default function CompanyConfigurationModal({ isOpen, onClose, onSave, cur
                   name="phone"
                   value={formData.phone || ''}
                   onChange={(e) => setFormData({ ...formData, phone: e.target.value.replace(/\D/g, '').slice(0, 11) })}
-                  className="w-full px-4 py-2.5 rounded-xl border border-border bg-card text-foreground focus:ring-2 focus:ring-primary/20 outline-none transition-all text-sm font-mono placeholder:text-muted-foreground/60"
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-border bg-card text-foreground focus:ring-2 focus:ring-primary/20 outline-none transition-all text-sm font-mono placeholder:text-muted-foreground/60"
                   placeholder="09XXXXXXXXX"
                 />
               </div>
@@ -348,7 +348,7 @@ export default function CompanyConfigurationModal({ isOpen, onClose, onSave, cur
                       name="email"
                       value={formData.email || ''}
                       onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                      className="w-full px-4 py-2.5 rounded-xl border border-border bg-card text-foreground focus:ring-2 focus:ring-primary/20 outline-none transition-all text-sm placeholder:text-muted-foreground/60"
+                      className="w-full px-3.5 py-2.5 rounded-xl border border-border bg-card text-foreground focus:ring-2 focus:ring-primary/20 outline-none transition-all text-sm placeholder:text-muted-foreground/60"
                       placeholder="contact@clicz.com"
                     />
                   </div>
@@ -360,7 +360,7 @@ export default function CompanyConfigurationModal({ isOpen, onClose, onSave, cur
                       name="currency"
                       value={formData.currency || ''}
                       onChange={(e) => setFormData({ ...formData, currency: e.target.value })}
-                      className="w-full px-4 py-2.5 rounded-xl border border-border bg-card text-foreground focus:ring-2 focus:ring-primary/20 outline-none transition-all text-sm placeholder:text-muted-foreground/60"
+                      className="w-full px-3.5 py-2.5 rounded-xl border border-border bg-card text-foreground focus:ring-2 focus:ring-primary/20 outline-none transition-all text-sm placeholder:text-muted-foreground/60"
                       placeholder="PHP"
                     />
                   </div>
@@ -373,7 +373,7 @@ export default function CompanyConfigurationModal({ isOpen, onClose, onSave, cur
                         name="attendance_cutoff"
                         value={formData.attendance_cutoff || ''}
                         onChange={(e) => setFormData({ ...formData, attendance_cutoff: e.target.value, cutoff_time: e.target.value })}
-                        className="w-full px-4 py-2.5 pr-10 rounded-xl border border-border bg-card text-foreground focus:ring-2 focus:ring-primary/20 outline-none transition-all text-sm cursor-pointer"
+                        className="w-full px-3.5 py-2.5 pr-10 rounded-xl border border-border bg-card text-foreground focus:ring-2 focus:ring-primary/20 outline-none transition-all text-sm cursor-pointer"
                       />
                       <FiClock className="absolute right-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
                     </div>
@@ -386,18 +386,18 @@ export default function CompanyConfigurationModal({ isOpen, onClose, onSave, cur
         </div>
 
         {/* Modal Footer */}
-        <div className="p-6 border-t border-border bg-slate-50 dark:bg-slate-800/30 flex justify-end gap-3">
+        <div className="px-6 py-4 border-t border-border bg-muted/20 flex items-center justify-end gap-3 shrink-0">
           <button
             type="button"
             onClick={onClose}
-            className="px-6 py-2.5 rounded-xl font-bold text-muted-foreground bg-card border border-border hover:bg-muted/50 transition-colors cursor-pointer text-sm"
+            className="px-5 py-2.5 rounded-xl font-bold text-muted-foreground bg-card border border-border hover:bg-muted/50 transition-colors cursor-pointer text-sm"
           >
             Cancel
           </button>
           <button
             type="submit"
             form="configForm"
-            className="px-6 py-2.5 rounded-xl font-bold text-white bg-[#007aff] hover:bg-[#0062cc] shadow-sm hover:shadow transition-all flex items-center gap-2 cursor-pointer text-sm active:scale-[0.99]"
+            className="px-5 py-2.5 rounded-xl font-bold text-white bg-[#007aff] hover:bg-[#0062cc] shadow-sm hover:shadow transition-all flex items-center gap-2 cursor-pointer text-sm active:scale-[0.99]"
           >
             <FiSave className="w-4 h-4" /> Save Settings
           </button>

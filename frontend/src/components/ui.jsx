@@ -4,7 +4,7 @@ import { TbCurrencyPeso } from 'react-icons/tb'
 import {
   FiCheckCircle, FiAlertCircle, FiAlertTriangle, FiInfo, FiX, FiTrash2,
   FiChevronLeft, FiChevronRight, FiSearch, FiBell, FiClock, FiCreditCard, FiPackage, FiUser, FiShield,
-  FiActivity, FiInbox, FiSettings, FiShoppingCart, FiFileText, FiFilter, FiXCircle
+  FiActivity, FiInbox, FiSettings, FiShoppingCart, FiFileText, FiFilter, FiXCircle, FiMessageSquare
 } from 'react-icons/fi'
 import {
   showToast,
@@ -184,8 +184,8 @@ export function Badge({ label, text, children, color = 'gray', variant, icon }) 
 }
 
 const STATUS_COLORS = {
-  Active: 'green', Completed: 'green', Paid: 'green', 'Paid in Full': 'green', 'Fully Paid': 'green', Present: 'green', Approved: 'blue', Responded: 'green',
-  Overdue: 'red', Inactive: 'red', Absent: 'red', Cancelled: 'red',
+  Active: 'green', Completed: 'green', 'Complete Payment': 'green', Paid: 'green', 'Paid in Full': 'green', 'Fully Paid': 'green', Present: 'green', Approved: 'blue', Responded: 'green',
+  Overdue: 'red', Inactive: 'red', Absent: 'red', Cancelled: 'red', Rejected: 'red',
   Pending: 'yellow', Draft: 'yellow', Late: 'yellow', Open: 'yellow', 'Half Day': 'yellow',
   'Partially Paid': 'purple', Processing: 'blue', 'On Leave': 'indigo', 'Rest Day': 'gray',
   'In Stock': 'green', 'High Stock': 'blue', 'Medium Stock': 'orange', 'Low Stock': 'yellow', 'Out of Stock': 'red',
@@ -197,18 +197,22 @@ export function StatusBadge({ status }) {
   if (!status) return null
 
   let icon = null
-  const s = String(status).toLowerCase()
+  const s = String(status).toLowerCase().trim()
   if (s === 'inactive' || s.includes('inactive')) {
     icon = <FiAlertCircle className="w-3 h-3" />
-  } else if (s.includes('active') || s.includes('completed') || s.includes('paid') || s.includes('present')) {
+  } else if (s.includes('active') || s.includes('complete') || s.includes('paid') || s.includes('present') || s.includes('approved')) {
     icon = <FiCheckCircle className="w-3 h-3" />
-  } else if (s.includes('overdue') || s.includes('absent') || s.includes('cancelled')) {
+  } else if (s.includes('overdue') || s.includes('absent') || s.includes('cancelled') || s.includes('rejected')) {
     icon = <FiAlertCircle className="w-3 h-3" />
-  } else if (s.includes('pending') || s.includes('late') || s.includes('low stock')) {
-    icon = <FiAlertTriangle className="w-3 h-3" />
+  } else if (s.includes('pending') || s.includes('late') || s.includes('low stock') || s.includes('draft') || s.includes('processing') || s.includes('open')) {
+    icon = <FiClock className="w-3 h-3" />
   }
 
-  return <Badge label={status} color={STATUS_COLORS[status] || 'gray'} icon={icon} />
+  // Resolve color case-insensitively
+  const colorKey = Object.keys(STATUS_COLORS).find(k => k.toLowerCase() === s) || status
+  const color = STATUS_COLORS[colorKey] || STATUS_COLORS[status] || 'gray'
+
+  return <Badge label={status} color={color} icon={icon} />
 }
 
 // ─── Input / Select / Textarea ────────────────────────────────────────────────
@@ -302,35 +306,35 @@ export function Textarea({ label, required, value, onChange, rows = 3, className
 }
 
 // ─── Modal ────────────────────────────────────────────────────────────────────
-export function Modal({ title, onClose, children, footer, size = 'md' }) {
+export function Modal({ title, onClose, children, footer, size = 'lg', className = '' }) {
   useEffect(() => {
     const fn = (e) => { if (e.key === 'Escape') onClose() }
     document.addEventListener('keydown', fn)
     return () => document.removeEventListener('keydown', fn)
   }, [onClose])
 
-  const widths = { sm: 'max-w-sm', md: 'max-w-xl', lg: 'max-w-3xl', xl: 'max-w-5xl' }
+  const widths = { sm: 'max-w-2xl', md: 'max-w-3xl', lg: 'max-w-3xl', xl: 'max-w-4xl', '2xl': 'max-w-4xl' }
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 animate-[fadeIn_0.15s_ease]"
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 animate-[fadeIn_0.15s_ease]"
       style={{ background: 'rgba(15,31,61,0.6)', backdropFilter: 'blur(4px)' }}
       onClick={e => { if (e.target === e.currentTarget) onClose() }}
     >
-      <div className={`bg-card rounded-2xl shadow-2xl border border-border w-full ${widths[size] || widths.md} max-h-[92vh] flex flex-col animate-[slideUp_0.15s_ease] overflow-hidden`}>
-        <div className="flex items-center justify-between px-5 py-3.5 border-b border-border flex-shrink-0 bg-muted/40">
-          <h2 className="font-bold text-foreground text-sm flex items-center gap-2">{title}</h2>
+      <div className={`bg-card rounded-2xl shadow-2xl border border-border w-full ${widths[size] || 'max-w-3xl'} max-h-[90vh] flex flex-col animate-[slideUp_0.15s_ease] overflow-hidden ${className}`}>
+        <div className="flex items-center justify-between px-6 py-4 border-b border-border flex-shrink-0 bg-muted/40">
+          <h2 className="font-bold text-foreground text-base flex items-center gap-2 truncate pr-2">{title}</h2>
           <button
             onClick={onClose}
-            className="w-7 h-7 rounded-xl hover:bg-muted flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+            className="w-8 h-8 rounded-xl hover:bg-muted flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors cursor-pointer shrink-0"
             aria-label="Close"
           >
             <FiX className="w-4 h-4" />
           </button>
         </div>
-        <div className="overflow-y-auto flex-1 px-5 py-4">{children}</div>
+        <div className="overflow-y-auto flex-1 p-6 sm:p-8 space-y-4">{children}</div>
         {footer && (
-          <div className="flex items-center justify-end gap-2 px-5 py-3 border-t border-border bg-muted/50 flex-shrink-0">
+          <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-border bg-muted/50 flex-shrink-0">
             {footer}
           </div>
         )}
@@ -342,31 +346,31 @@ export function Modal({ title, onClose, children, footer, size = 'md' }) {
 // ─── Confirm Dialog ───────────────────────────────────────────────────────────
 export function ConfirmDialog({ title, message, onConfirm, onCancel, confirmLabel = 'Confirm', danger }) {
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/45 dark:bg-black/75 backdrop-blur-sm animate-[fadeIn_0.15s_ease-out]">
-      <div className="relative w-full max-w-[420px] p-6 sm:p-8 bg-white dark:bg-[#081329] text-slate-900 dark:text-white border border-slate-200 dark:border-blue-500/30 rounded-3xl shadow-2xl space-y-4">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 bg-slate-950/45 dark:bg-black/75 backdrop-blur-sm animate-[fadeIn_0.15s_ease-out]">
+      <div className="relative w-full max-w-2xl p-6 sm:p-8 bg-white dark:bg-[#081329] text-slate-900 dark:text-white border border-slate-200 dark:border-blue-500/30 rounded-2xl shadow-2xl space-y-5">
         <div className="flex flex-col items-center text-center">
-          <div className={`w-13 h-13 rounded-2xl flex items-center justify-center shadow-sm mx-auto mb-3.5 border ${
+          <div className={`w-12 h-12 rounded-2xl flex items-center justify-center shadow-sm mx-auto mb-3 border ${
             danger
               ? 'bg-rose-50 dark:bg-rose-950/80 text-rose-600 dark:text-rose-400 border-rose-200 dark:border-rose-500/30'
               : 'bg-blue-50 dark:bg-blue-950/80 text-blue-600 dark:text-blue-400 border-blue-200 dark:border-blue-500/30'
           }`}>
             {danger ? <FiTrash2 className="w-6 h-6" /> : <FiCheckCircle className="w-6 h-6" />}
           </div>
-          <h3 className="font-bold text-xl tracking-tight text-slate-900 dark:text-white mb-1.5">{title}</h3>
-          <p className="text-xs sm:text-sm text-slate-600 dark:text-slate-300 leading-relaxed max-w-[340px]">{message}</p>
+          <h3 className="font-bold text-lg tracking-tight text-slate-900 dark:text-white mb-1">{title}</h3>
+          <p className="text-xs sm:text-sm text-slate-600 dark:text-slate-300 leading-relaxed max-w-xl mx-auto">{message}</p>
         </div>
-        <div className="flex items-center justify-center gap-3 pt-3">
+        <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-200 dark:border-slate-800">
           <button
             type="button"
             onClick={onCancel}
-            className="inline-flex items-center justify-center font-semibold rounded-xl cursor-pointer transition-all active:scale-95 px-5 py-2.5 text-sm bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 dark:text-slate-200 dark:border-slate-700"
+            className="inline-flex items-center justify-center font-semibold rounded-xl cursor-pointer transition-all active:scale-95 px-4 py-2 text-xs sm:text-sm bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 dark:text-slate-200 dark:border-slate-700"
           >
             Cancel
           </button>
           <button
             type="button"
             onClick={onConfirm}
-            className={`inline-flex items-center justify-center font-bold rounded-xl cursor-pointer transition-all active:scale-95 px-6 py-2.5 text-sm ${
+            className={`inline-flex items-center justify-center font-bold rounded-xl cursor-pointer transition-all active:scale-95 px-5 py-2 text-xs sm:text-sm ${
               danger
                 ? 'bg-rose-600 hover:bg-rose-700 text-white shadow-md shadow-rose-600/20'
                 : 'bg-blue-600 hover:bg-blue-700 text-white shadow-md shadow-blue-600/20'
@@ -457,12 +461,12 @@ export function SearchBar({ value, onChange, placeholder = 'Search...', classNam
 // ─── Page Header ──────────────────────────────────────────────────────────────
 export function PageHeader({ title, subtitle, action }) {
   return (
-    <div className="flex flex-col sm:flex-row sm:items-start justify-between mb-5 gap-3">
-      <div>
-        <h1 className="text-lg md:text-xl font-black text-white tracking-tight drop-shadow-sm">{title}</h1>
-        {subtitle && <p className="text-xs text-white/90 mt-0.5 drop-shadow-xs font-medium">{subtitle}</p>}
+    <div className="flex flex-col sm:flex-row sm:items-start justify-between mb-5 gap-3 w-full min-w-0">
+      <div className="min-w-0 flex-1">
+        <h1 className="text-lg md:text-xl font-black text-slate-900 dark:text-white tracking-tight break-words">{title}</h1>
+        {subtitle && <p className="text-xs text-slate-600 dark:text-slate-400 mt-0.5 font-medium break-words">{subtitle}</p>}
       </div>
-      {action && <div className="flex-shrink-0 flex items-center gap-2 flex-wrap">{action}</div>}
+      {action && <div className="flex-shrink-0 flex items-center gap-2 flex-wrap w-full sm:w-auto">{action}</div>}
     </div>
   )
 }
@@ -471,7 +475,7 @@ export function PageHeader({ title, subtitle, action }) {
 export function StatCard({ title, value, sub, icon, color = 'blue' }) {
   const colors = {
     blue: 'bg-blue-500/15 text-blue-700 border-blue-300/80 dark:bg-blue-500/20 dark:text-blue-300 dark:border-blue-500/40 dark:shadow-[0_0_12px_rgba(59,130,246,0.25)]',
-    navy: 'bg-indigo-950/40 text-blue-300 border-blue-800/40 dark:bg-blue-950/60 dark:text-sky-300 dark:border-blue-600/40 dark:shadow-[0_0_12px_rgba(30,58,138,0.3)]',
+    navy: 'bg-blue-900/10 text-blue-900 border-blue-200 dark:bg-blue-950/60 dark:text-sky-300 dark:border-blue-600/40 dark:shadow-[0_0_12px_rgba(30,58,138,0.3)]',
     cyan: 'bg-sky-500/15 text-sky-700 border-sky-300/80 dark:bg-sky-500/20 dark:text-sky-300 dark:border-sky-500/40 dark:shadow-[0_0_12px_rgba(14,165,233,0.25)]',
     indigo: 'bg-indigo-500/15 text-indigo-700 border-indigo-300/80 dark:bg-indigo-500/20 dark:text-indigo-300 dark:border-indigo-500/40 dark:shadow-[0_0_12px_rgba(99,102,241,0.25)]',
     green: 'bg-emerald-500/15 text-emerald-700 border-emerald-300/80 dark:bg-emerald-500/20 dark:text-emerald-300 dark:border-emerald-500/40 dark:shadow-[0_0_12px_rgba(16,185,129,0.25)]',
@@ -480,7 +484,7 @@ export function StatCard({ title, value, sub, icon, color = 'blue' }) {
     purple: 'bg-purple-500/15 text-purple-700 border-purple-300/80 dark:bg-purple-500/20 dark:text-purple-300 dark:border-purple-500/40 dark:shadow-[0_0_12px_rgba(168,85,247,0.25)]',
   }
   return (
-    <div className="bg-card rounded-2xl border border-border p-4 hover:shadow-lg transition-all duration-300 hover:scale-[1.02] backdrop-blur-md">
+    <div className="bg-card rounded-2xl border border-border p-4 hover:shadow-md transition-all duration-300 hover:scale-[1.01]">
       <div className="flex items-start justify-between mb-2.5">
         <span className="text-[11px] font-bold text-slate-700 dark:text-blue-200/80 uppercase tracking-wider leading-tight">{title}</span>
         <span className={`w-8 h-8 rounded-xl flex items-center justify-center text-sm flex-shrink-0 border shadow-2xs ${colors[color] || colors.blue}`}>
@@ -696,7 +700,7 @@ export function EmptyState({ icon, title, description, action }) {
 export function TabBar({ tabs = [], activeTab, active, onChange }) {
   const current = activeTab || active
   return (
-    <div className="flex border-b border-white/20 mb-5 overflow-x-auto gap-2">
+    <div className="flex border-b border-border mb-5 overflow-x-auto gap-2">
       {tabs.map(tab => {
         const id = typeof tab === 'object' && tab !== null ? tab.id : tab
         const label = typeof tab === 'object' && tab !== null ? tab.label : tab
@@ -709,12 +713,12 @@ export function TabBar({ tabs = [], activeTab, active, onChange }) {
             key={id}
             onClick={() => onChange(id)}
             className={`flex items-center gap-2 px-4 py-2.5 text-xs font-bold cursor-pointer transition-all border-b-2 -mb-px whitespace-nowrap ${isActive
-                ? 'border-blue-500 text-blue-600 dark:text-blue-400 drop-shadow-sm font-extrabold'
-                : 'border-transparent text-muted-foreground hover:text-foreground drop-shadow-2xs font-semibold hover:border-blue-500/30'
+                ? 'border-blue-500 text-blue-600 dark:text-blue-400 font-extrabold'
+                : 'border-transparent text-muted-foreground hover:text-foreground font-semibold hover:border-blue-500/30'
               }`}
           >
-            {icon && <span className={`shrink-0 ${isActive ? 'text-blue-600 dark:text-blue-400 drop-shadow-sm' : 'text-muted-foreground'}`}>{icon}</span>}
-            <span className={isActive ? 'text-blue-600 dark:text-blue-400 drop-shadow-sm' : 'text-foreground'}>{label}</span>
+            {icon && <span className={`shrink-0 ${isActive ? 'text-blue-600 dark:text-blue-400' : 'text-muted-foreground'}`}>{icon}</span>}
+            <span className={isActive ? 'text-blue-600 dark:text-blue-400' : 'text-foreground'}>{label}</span>
             {badge && (
               <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-rose-600 text-white font-mono font-bold shadow-xs">
                 {badge}
@@ -773,6 +777,8 @@ export function NotificationBell({
     if (m.includes('inventory') || m.includes('product')) return <FiPackage className="w-4 h-4 text-amber-500" />
     if (m.includes('sale')) return <FiShoppingCart className="w-4 h-4 text-purple-500" />
     if (m.includes('payment') || m.includes('installment')) return <FiCreditCard className="w-4 h-4 text-teal-500" />
+    if (m.includes('message') || m.includes('letter')) return <FiFileText className="w-4 h-4 text-blue-500" />
+    if (m.includes('support')) return <FiMessageSquare className="w-4 h-4 text-blue-500" />
     if (m.includes('system') || m.includes('backup')) return <FiSettings className="w-4 h-4 text-slate-500" />
     return <FiBell className="w-4 h-4 text-primary" />
   }
@@ -799,7 +805,7 @@ export function NotificationBell({
       </button>
 
       {open && (
-        <div className="absolute right-0 mt-2 w-88 sm:w-[420px] !bg-white/95 dark:!bg-[#081329]/95 backdrop-blur-xl rounded-2xl shadow-2xl border border-blue-500/30 z-50 animate-[slideUp_0.15s_ease] overflow-hidden flex flex-col max-h-[520px]">
+        <div className="absolute right-[-40px] sm:right-0 mt-2 w-80 sm:w-[420px] max-w-[calc(100vw-1.5rem)] !bg-white/95 dark:!bg-[#081329]/95 backdrop-blur-xl rounded-2xl shadow-2xl border border-blue-500/30 z-50 animate-[slideUp_0.15s_ease] overflow-hidden flex flex-col max-h-[520px]">
           {/* Header */}
           <div className="px-4 py-3 border-b border-blue-500/20 !bg-blue-50/70 dark:!bg-blue-950/70 shrink-0 space-y-2">
             <div className="flex items-center justify-between">

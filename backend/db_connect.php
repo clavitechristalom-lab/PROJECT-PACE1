@@ -74,13 +74,27 @@ function getMailConfig(): array
         }
     }
 
+    $user = $envVars['GMAIL_USER'] ?? ($envVars['MAIL_USERNAME'] ?? '35barangay@gmail.com');
+    if (strcasecmp($user, 'Z-LICZ@gmail.com') === 0) {
+        $user = '35barangay@gmail.com';
+    }
+    $pass = $envVars['GMAIL_APP_PASSWORD'] ?? ($envVars['MAIL_PASSWORD'] ?? 'sziq apba sink lsch');
+    if ((str_starts_with($pass, '"') && str_ends_with($pass, '"')) ||
+        (str_starts_with($pass, "'") && str_ends_with($pass, "'"))) {
+        $pass = substr($pass, 1, -1);
+    }
+    $fromEmail = $envVars['MAIL_FROM_ADDRESS'] ?? '35barangay@gmail.com';
+    if (strcasecmp($fromEmail, 'Z-LICZ@gmail.com') === 0 || empty($fromEmail)) {
+        $fromEmail = '35barangay@gmail.com';
+    }
+
     return [
         'host'       => $envVars['MAIL_HOST'] ?? 'smtp.gmail.com',
         'port'       => (int)($envVars['MAIL_PORT'] ?? 587),
         'encryption' => $envVars['MAIL_ENCRYPTION'] ?? 'tls',
-        'username'   => $envVars['GMAIL_USER'] ?? ($envVars['MAIL_USERNAME'] ?? ''),
-        'password'   => $envVars['GMAIL_APP_PASSWORD'] ?? ($envVars['MAIL_PASSWORD'] ?? ''),
-        'from_email' => $envVars['MAIL_FROM_ADDRESS'] ?? ($envVars['GMAIL_USER'] ?? ($envVars['MAIL_USERNAME'] ?? '')),
-        'from_name'  => $envVars['MAIL_FROM_NAME'] ?? 'Z-LICZ Furniture & Appliances Trading',
+        'username'   => $user,
+        'password'   => $pass,
+        'from_email' => $fromEmail,
+        'from_name'  => $envVars['MAIL_FROM_NAME'] ?? 'Z-LICZ Furniture & Appliances',
     ];
 }

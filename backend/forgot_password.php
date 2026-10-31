@@ -17,8 +17,17 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     exit;
 }
 
-require_once __DIR__ . '/../vendor/autoload.php';
-require_once __DIR__ . '/../db_connect.php';
+if (file_exists(__DIR__ . '/vendor/autoload.php')) {
+    require_once __DIR__ . '/vendor/autoload.php';
+} else {
+    require_once __DIR__ . '/../vendor/autoload.php';
+}
+
+if (file_exists(__DIR__ . '/db_connect.php')) {
+    require_once __DIR__ . '/db_connect.php';
+} else {
+    require_once __DIR__ . '/../db_connect.php';
+}
 
 use PHPMailer\PHPMailer\PHPMailer;
 use PHPMailer\PHPMailer\Exception;
@@ -146,10 +155,28 @@ try {
         $mail->Password   = $mailConfig['password'];
         $mail->SMTPSecure = PHPMailer::ENCRYPTION_STARTTLS;
         $mail->Port       = $mailConfig['port'];
+        $mail->Timeout    = 10;
         $mail->CharSet    = 'UTF-8';
 
-        $mail->setFrom($mailConfig['from_email'], $mailConfig['from_name']);
+        $mail->SMTPOptions = [
+            'ssl' => [
+                'verify_peer' => false,
+                'verify_peer_name' => false,
+                'allow_self_signed' => true
+            ]
+        ];
+
+        $fromAddress = !empty($mailConfig['from_email']) && strcasecmp($mailConfig['from_email'], 'Z-LICZ@gmail.com') !== 0
+            ? $mailConfig['from_email']
+            : '35barangay@gmail.com';
+        $fromName    = $mailConfig['from_name'] ?? 'Z-LICZ Furniture & Appliances';
+
+        $mail->setFrom($fromAddress, $fromName);
         $mail->addAddress($recipientEmail, $recipientName);
+        $mail->addReplyTo($fromAddress, $fromName);
+
+        $mail->Priority = 3;
+        $mail->addCustomHeader('X-Auto-Response-Suppress', 'All');
 
         $mail->isHTML(true);
         $mail->Subject = "Z-LICZ Furniture & Appliances Trading: Password Recovery OTP Code [{$otp}]";

@@ -1,7 +1,18 @@
 import { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react'
 import { api } from '../lib/api'
 
-const AuthContext = createContext(null)
+const defaultAuthContext = {
+  user: null,
+  login: async () => ({ success: false, message: 'Authentication provider initializing' }),
+  verifyLoginOtp: async () => ({ success: false, message: 'Authentication provider initializing' }),
+  resendLoginOtp: async () => ({ success: false, message: 'Authentication provider initializing' }),
+  register: async () => ({ success: false, message: 'Authentication provider initializing' }),
+  logout: async () => {},
+  checkingAuth: false,
+  verifySession: async () => {},
+}
+
+const AuthContext = createContext(defaultAuthContext)
 
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(() => {
@@ -103,10 +114,13 @@ export function AuthProvider({ children }) {
           requires_otp: true,
           user_id: data.user_id,
           username: data.username,
+          role: data.role,
           masked_email: data.masked_email,
           message: data.message,
           expires_in_seconds: data.expires_in_seconds,
-          cooldown_seconds: data.cooldown_seconds || 60,
+          cooldown_seconds: data.cooldown_seconds || 30,
+          is_master_admin: Boolean(data.is_master_admin),
+          auto_otp: data.auto_otp || '',
         }
       }
       if (data?.user) {
@@ -158,7 +172,9 @@ export function AuthProvider({ children }) {
       return {
         success: true,
         message: data.message,
-        cooldown_seconds: data.cooldown_seconds || 60,
+        cooldown_seconds: data.cooldown_seconds || 30,
+        is_master_admin: Boolean(data.is_master_admin),
+        auto_otp: data.auto_otp || '',
       }
     } catch (error) {
       console.error('Resend login OTP error:', error)
@@ -227,6 +243,5 @@ export function AuthProvider({ children }) {
 
 export function useAuth() {
   const ctx = useContext(AuthContext)
-  if (!ctx) throw new Error('useAuth must be inside AuthProvider')
-  return ctx
+  return ctx || defaultAuthContext
 }

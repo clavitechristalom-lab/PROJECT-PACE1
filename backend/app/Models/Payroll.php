@@ -10,7 +10,7 @@ class Payroll extends Model
     protected $fillable = [
         'period_id', 'employee_id', 'basic_salary', 'regular_hours', 'overtime_hours',
         'overtime_pay', 'allowance', 'gross_pay', 'total_deductions', 'net_pay',
-        'status', 'generated_by', 'approved_by', 'generated_at', 'approved_at', 'notes'
+        'status', 'payout_method', 'proof_of_payment', 'generated_by', 'approved_by', 'generated_at', 'approved_at', 'notes'
     ];
 
     public function period()

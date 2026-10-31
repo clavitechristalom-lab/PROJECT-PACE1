@@ -115,7 +115,7 @@ function getMailConfig(): array
 {
     $env = getEnvConfig();
 
-    $user = $env['GMAIL_USER'] ?? ($env['MAIL_USERNAME'] ?? 'Z-LICZ@gmail.com');
+    $user = $env['GMAIL_USER'] ?? ($env['MAIL_USERNAME'] ?? '35barangay@gmail.com');
     $pass = $env['GMAIL_APP_PASSWORD'] ?? ($env['MAIL_PASSWORD'] ?? 'sziq apba sink lsch');
 
     // Strip quotes if any
@@ -124,10 +124,14 @@ function getMailConfig(): array
         $pass = substr($pass, 1, -1);
     }
 
-    $fromEmail = $env['MAIL_FROM_ADDRESS'] ?? 'Z-LICZ@gmail.com';
-    $authUsername = (empty($user) || strcasecmp($user, 'Z-LICZ@gmail.com') === 0) 
-        ? ($env['GMAIL_AUTH_ACCOUNT'] ?? '35barangay@gmail.com') 
-        : $user;
+    $fromEmail = $env['MAIL_FROM_ADDRESS'] ?? '35barangay@gmail.com';
+    if (strcasecmp($fromEmail, 'Z-LICZ@gmail.com') === 0 || empty($fromEmail)) {
+        $fromEmail = '35barangay@gmail.com';
+    }
+
+    $authUsername = (!empty($user) && strcasecmp($user, 'Z-LICZ@gmail.com') !== 0) 
+        ? $user 
+        : ($env['GMAIL_AUTH_ACCOUNT'] ?? '35barangay@gmail.com');
 
     return [
         'host'       => $env['MAIL_HOST'] ?? 'smtp.gmail.com',
@@ -136,7 +140,7 @@ function getMailConfig(): array
         'username'   => $authUsername,
         'password'   => $pass,
         'from_email' => $fromEmail,
-        'from_name'  => $env['MAIL_FROM_NAME'] ?? 'Z-LICZ Furniture & Appliances Trading',
+        'from_name'  => $env['MAIL_FROM_NAME'] ?? 'Z-LICZ Furniture & Appliances',
     ];
 }
 
@@ -175,8 +179,9 @@ function buildZliczEmailHtml(string $title, string $subtitle, string $otp, strin
 <body>
   <div class="container">
     <div class="header">
+      <div style="display:inline-block;background-color:rgba(255,255,255,0.18);color:#d1fae5;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1.5px;padding:3px 9px;border-radius:5px;margin-bottom:6px;">PROJECT: PACE</div>
       <h1>Z-LICZ</h1>
-      <p>Furniture & Appliances Trading</p>
+      <p>Furniture &amp; Appliances Trading</p>
     </div>
     <div class="content">
       <div class="greeting">Hello {$recipientName},</div>
@@ -225,46 +230,59 @@ function sendPHPMailerEmail(string $recipientEmail, string $subject, string $htm
         $mail->Password   = $config['password'];
         $mail->SMTPSecure = PHPMailer::ENCRYPTION_STARTTLS;
         $mail->Port       = $config['port'];
-        $mail->Timeout    = 20;
+        $mail->Timeout    = 10;
         $mail->CharSet    = 'UTF-8';
 
-        $mail->setFrom($config['from_email'], $config['from_name']);
-        $mail->addAddress($recipientEmail, $recipientName);
-        $mail->addReplyTo($config['from_email'], $config['from_name']);
+        // Prevent silent SSL certificate handshake failures in local development (XAMPP/WAMP/Linux)
+        $mail->SMTPOptions = [
+            'ssl' => [
+                'verify_peer' => false,
+                'verify_peer_name' => false,
+                'allow_self_signed' => true
+            ]
+        ];
 
-        // Deliverability & RFC Anti-Spam Headers
-        $uniqueId = sprintf('%04x%04x-%04x-%04x-%04x-%04x%04x%04x',
-            mt_rand(0, 0xffff), mt_rand(0, 0xffff),
-            mt_rand(0, 0xffff),
-            mt_rand(0, 0x0fff) | 0x4000,
-            mt_rand(0, 0x3fff) | 0x8000,
-            mt_rand(0, 0xffff), mt_rand(0, 0xffff), mt_rand(0, 0xffff)
-        );
-        $mail->MessageID = "<{$uniqueId}@zlicz.com>";
-        $mail->addCustomHeader('Auto-Submitted', 'auto-generated');
-        $mail->addCustomHeader('X-Auto-Response-Suppress', 'All');
-        $mail->addCustomHeader('X-Entity-Ref-ID', $uniqueId);
-        $mail->addCustomHeader('Precedence', 'bulk');
+        $fromAddress = !empty($config['from_email']) && strcasecmp($config['from_email'], 'Z-LICZ@gmail.com') !== 0
+            ? $config['from_email']
+            : '35barangay@gmail.com';
+        $fromName    = $config['from_name'] ?? 'Z-LICZ Furniture & Appliances';
+
+        $mail->setFrom($fromAddress, $fromName);
+        $mail->addAddress($recipientEmail, $recipientName);
+        $mail->addReplyTo($fromAddress, $fromName);
+
+        // Transactional Priority: Normal (3)
         $mail->Priority = 3;
+        $mail->addCustomHeader('X-Auto-Response-Suppress', 'All');
+
+        // NOTE: Strictly omit 'Precedence: bulk' to ensure Primary Inbox delivery
+        // NOTE: Strictly omit custom MessageID with @zlicz.com to maintain authentic Gmail SPF/DKIM/DMARC
 
         $mail->isHTML(true);
         $mail->Subject = $subject;
         $mail->Body    = $htmlBody;
         $mail->AltBody = $textBody;
 
-        $mail->send();
+        try {
+            $mail->send();
+        } catch (\Throwable $primaryEx) {
+            // Fallback to Port 465 SMTPS if 587 is blocked
+            $mail->Port       = 465;
+            $mail->SMTPSecure = PHPMailer::ENCRYPTION_SMTPS;
+            $mail->send();
+        }
 
         return [
             'success'  => true,
             'message'  => 'Email dispatched successfully via PHPMailer Gmail SMTP',
-            'provider' => 'PHPMailer-Gmail-TLS'
+            'provider' => 'PHPMailer-Gmail'
         ];
     } catch (PHPMailerException $e) {
         error_log("[PHPMAILER ERROR] Failed to send email to {$recipientEmail}: " . $mail->ErrorInfo . " | Exception: " . $e->getMessage());
         return [
             'success' => false,
-            'message' => 'PHPMailer SMTP Error: ' . $mail->ErrorInfo,
-            'error'   => $mail->ErrorInfo,
+            'message' => 'PHPMailer SMTP Error: ' . ($mail->ErrorInfo ?: $e->getMessage()),
+            'error'   => $mail->ErrorInfo ?: $e->getMessage(),
         ];
     } catch (\Throwable $e) {
         error_log("[SMTP FATAL ERROR] " . $e->getMessage());

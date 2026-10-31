@@ -5,21 +5,16 @@ namespace App\Services;
 use App\Models\Notification;
 use App\Models\User;
 use App\Models\Employee;
+use App\Http\Controllers\SyncController;
 
 class NotificationService
 {
     /**
-     * Send a notification to a specific user.
+     * Directly create a notification record for a known active user ID.
      */
-    public static function sendToUser($userId, array $data): ?Notification
+    private static function createForUserId($userId, array $data): Notification
     {
-        if (!$userId) return null;
-
-        $user = User::find($userId);
-        if (!$user) return null;
-        if (isset($user->is_active) && $user->is_active === false) return null;
-
-        $notif = Notification::create([
+        return Notification::create([
             'user_id' => $userId,
             'type' => $data['type'] ?? 'system_alert',
             'title' => $data['title'] ?? 'Notification',
@@ -32,8 +27,21 @@ class NotificationService
             'is_read' => false,
             'read_at' => null,
         ]);
+    }
 
-        \Illuminate\Support\Facades\Cache::forget('pace_unified_fingerprint');
+    /**
+     * Send a notification to a specific user.
+     */
+    public static function sendToUser($userId, array $data): ?Notification
+    {
+        if (!$userId) return null;
+
+        $user = User::select(['user_id', 'is_active'])->find($userId);
+        if (!$user) return null;
+        if (isset($user->is_active) && $user->is_active === false) return null;
+
+        $notif = self::createForUserId($userId, $data);
+        SyncController::invalidateFingerprint();
 
         return $notif;
     }
@@ -51,8 +59,11 @@ class NotificationService
 
         $created = [];
         foreach ($adminIds as $adminId) {
-            $notif = self::sendToUser($adminId, $data);
-            if ($notif) $created[] = $notif;
+            $created[] = self::createForUserId($adminId, $data);
+        }
+
+        if (!empty($created)) {
+            SyncController::invalidateFingerprint();
         }
 
         return $created;
@@ -63,8 +74,7 @@ class NotificationService
      */
     public static function sendToStoreAdmins(array $data, ?string $branch = null): array
     {
-        $query = User::with('employee')
-            ->whereIn('role', ['Store Administrator', 'Store Admin'])
+        $query = User::whereIn('role', ['Store Administrator', 'Store Admin'])
             ->where('is_active', true);
 
         if ($branch && $branch !== 'All') {
@@ -77,8 +87,11 @@ class NotificationService
         $created = [];
 
         foreach ($storeAdminIds as $adminId) {
-            $notif = self::sendToUser($adminId, $data);
-            if ($notif) $created[] = $notif;
+            $created[] = self::createForUserId($adminId, $data);
+        }
+
+        if (!empty($created)) {
+            SyncController::invalidateFingerprint();
         }
 
         return $created;
@@ -95,8 +108,11 @@ class NotificationService
 
         $created = [];
         foreach ($userIds as $userId) {
-            $notif = self::sendToUser($userId, $data);
-            if ($notif) $created[] = $notif;
+            $created[] = self::createForUserId($userId, $data);
+        }
+
+        if (!empty($created)) {
+            SyncController::invalidateFingerprint();
         }
 
         return $created;
@@ -109,13 +125,16 @@ class NotificationService
     {
         if (!$employeeId) return null;
 
-        $user = User::where('employee_id', $employeeId)
+        $userId = User::where('employee_id', $employeeId)
             ->where('is_active', true)
-            ->first();
+            ->value('user_id');
 
-        if (!$user) return null;
+        if (!$userId) return null;
 
-        return self::sendToUser($user->user_id, $data);
+        $notif = self::createForUserId($userId, $data);
+        SyncController::invalidateFingerprint();
+
+        return $notif;
     }
 
     /**
@@ -123,8 +142,7 @@ class NotificationService
      */
     public static function sendToCustomers(array $data, ?string $branchId = null): array
     {
-        $query = User::with('customer')
-            ->where('role', 'Customer')
+        $query = User::where('role', 'Customer')
             ->where('is_active', true);
 
         if ($branchId && $branchId !== 'All') {
@@ -137,8 +155,11 @@ class NotificationService
         $created = [];
 
         foreach ($userIds as $userId) {
-            $notif = self::sendToUser($userId, $data);
-            if ($notif) $created[] = $notif;
+            $created[] = self::createForUserId($userId, $data);
+        }
+
+        if (!empty($created)) {
+            SyncController::invalidateFingerprint();
         }
 
         return $created;
@@ -151,12 +172,15 @@ class NotificationService
     {
         if (!$customerId) return null;
 
-        $user = User::where('customer_id', $customerId)
+        $userId = User::where('customer_id', $customerId)
             ->where('is_active', true)
-            ->first();
+            ->value('user_id');
 
-        if (!$user) return null;
+        if (!$userId) return null;
 
-        return self::sendToUser($user->user_id, $data);
+        $notif = self::createForUserId($userId, $data);
+        SyncController::invalidateFingerprint();
+
+        return $notif;
     }
 }

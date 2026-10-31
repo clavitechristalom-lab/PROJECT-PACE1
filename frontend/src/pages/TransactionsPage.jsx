@@ -97,7 +97,7 @@ export default function TransactionsPage() {
     }
   }, [])
 
-  const loadData = async (silent = false) => {
+  const loadData = async (silent = false, signal) => {
     if (inFlightRef.current) return
     inFlightRef.current = true
 
@@ -123,9 +123,9 @@ export default function TransactionsPage() {
         payment_method: providerFilter !== 'All' ? providerFilter : undefined,
         date_from: from,
         date_to: to,
-      })
+      }, signal ? { signal } : {})
 
-      if (!isMountedRef.current) return
+      if (!isMountedRef.current || !res) return
 
       const newTx = res.transactions || []
       const newSummary = res.summary || null
@@ -153,8 +153,8 @@ export default function TransactionsPage() {
     loadData()
   }, [activeChannelTab, typeFilter, providerFilter, dateRange, dateFrom, dateTo])
 
-  useRealtimeSync(() => {
-    loadData(true)
+  useRealtimeSync((_, signal) => {
+    loadData(true, signal)
   }, [activeChannelTab, typeFilter, providerFilter, dateRange, dateFrom, dateTo, search], { periodic: true })
 
   useEffect(() => {
@@ -320,7 +320,7 @@ export default function TransactionsPage() {
           }
         />
 
-        <MySalesChart />
+        <MySalesChart title="Transaction History & Sales" />
 
         {error && <ErrorAlert message={error} onRetry={loadData} />}
 
@@ -393,32 +393,38 @@ export default function TransactionsPage() {
 
         {/* Filters & Search Card */}
         <Card noPad className="p-3.5 border border-border">
-          <div className="flex flex-col md:flex-row gap-3 items-center justify-between">
-            <div className="w-full md:w-80 relative">
+          <div className="flex flex-col lg:flex-row gap-3 items-stretch lg:items-center justify-between">
+            <div className="flex-1 min-w-[260px] md:min-w-[320px] max-w-lg relative">
               <FiSearch className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
               <input
                 type="text"
                 value={search}
                 onChange={e => { setSearch(e.target.value); setPage(1); }}
-                placeholder="Search reference, GCash ref, bank trace, customer..."
+                placeholder="Search reference, trace #, customer..."
+                title="Search reference, GCash ref, bank trace, customer"
+                aria-label="Search transaction history"
                 className="w-full pl-9 pr-8 py-2 rounded-xl border border-border bg-card text-foreground text-xs focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all placeholder:text-muted-foreground/70"
               />
               {search && (
                 <button
+                  type="button"
                   onClick={() => setSearch('')}
                   className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground cursor-pointer"
+                  title="Clear search"
+                  aria-label="Clear search"
                 >
                   <FiX className="w-3.5 h-3.5" />
                 </button>
               )}
             </div>
 
-            <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
+            <div className="flex flex-wrap items-center gap-2 w-full lg:w-auto">
               {/* Type Filter */}
               <select
                 value={typeFilter}
                 onChange={e => { setTypeFilter(e.target.value); setPage(1) }}
                 className="border border-border rounded-xl px-3 py-2 text-xs font-semibold text-foreground bg-card cursor-pointer"
+                aria-label="Filter by record type"
               >
                 <option value="All">All Record Types</option>
                 <option value="Sale">Sale Invoices Only</option>
@@ -430,6 +436,7 @@ export default function TransactionsPage() {
                 value={providerFilter}
                 onChange={e => { setProviderFilter(e.target.value); setPage(1) }}
                 className="border border-border rounded-xl px-3 py-2 text-xs font-semibold text-foreground bg-card cursor-pointer"
+                aria-label="Filter by payment method or provider"
               >
                 <option value="All">All Providers / Methods</option>
                 <option value="GCash">GCash</option>
@@ -442,35 +449,86 @@ export default function TransactionsPage() {
                 <option value="Installment">Installment</option>
               </select>
 
-              {/* Date Range Filter */}
+              {/* Quick Preset Filter */}
               <select
                 value={dateRange}
-                onChange={e => { setDateRange(e.target.value); setPage(1) }}
+                onChange={e => {
+                  const val = e.target.value
+                  setDateRange(val)
+                  const now = new Date()
+                  if (val === 'All') {
+                    setDateFrom('')
+                    setDateTo('')
+                  } else if (val === 'Today') {
+                    const today = now.toISOString().slice(0, 10)
+                    setDateFrom(today)
+                    setDateTo(today)
+                  } else if (val === 'ThisMonth') {
+                    const first = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10)
+                    const last = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().slice(0, 10)
+                    setDateFrom(first)
+                    setDateTo(last)
+                  }
+                  setPage(1)
+                }}
                 className="border border-border rounded-xl px-3 py-2 text-xs font-semibold text-foreground bg-card cursor-pointer"
+                aria-label="Filter by date range"
               >
-                <option value="All">All Time</option>
+                <option value="All">All Dates</option>
                 <option value="Today">Today</option>
                 <option value="ThisMonth">This Month</option>
                 <option value="Custom">Custom Range</option>
               </select>
 
-              {dateRange === 'Custom' && (
-                <div className="flex items-center gap-1.5">
+              {/* From Date — To Date Pickers */}
+              <div className="flex items-center gap-1.5 flex-wrap sm:flex-nowrap">
+                <div className="flex items-center gap-1.5 bg-card border border-border rounded-xl px-2.5 py-1.5">
+                  <span className="text-xs font-semibold text-muted-foreground">From</span>
                   <input
                     type="date"
-                    value={dateFrom}
-                    onChange={e => setDateFrom(e.target.value)}
-                    className="border border-border rounded-xl px-2.5 py-1.5 text-xs bg-card text-foreground font-mono"
-                  />
-                  <span className="text-xs text-muted-foreground">to</span>
-                  <input
-                    type="date"
-                    value={dateTo}
-                    onChange={e => setDateTo(e.target.value)}
-                    className="border border-border rounded-xl px-2.5 py-1.5 text-xs bg-card text-foreground font-mono"
+                    value={dateFrom || ''}
+                    onChange={e => {
+                      setDateRange('Custom')
+                      setDateFrom(e.target.value)
+                      setPage(1)
+                    }}
+                    className="text-xs bg-transparent text-foreground font-mono focus:outline-none cursor-pointer"
+                    title="From Date"
+                    aria-label="From Date"
                   />
                 </div>
-              )}
+                <div className="flex items-center gap-1.5 bg-card border border-border rounded-xl px-2.5 py-1.5">
+                  <span className="text-xs font-semibold text-muted-foreground">To</span>
+                  <input
+                    type="date"
+                    value={dateTo || ''}
+                    min={dateFrom || undefined}
+                    onChange={e => {
+                      setDateRange('Custom')
+                      setDateTo(e.target.value)
+                      setPage(1)
+                    }}
+                    className="text-xs bg-transparent text-foreground font-mono focus:outline-none cursor-pointer"
+                    title="To Date"
+                    aria-label="To Date"
+                  />
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSearch('')
+                    setTypeFilter('All')
+                    setProviderFilter('All')
+                    setDateRange('All')
+                    setDateFrom('')
+                    setDateTo('')
+                    setPage(1)
+                  }}
+                  className="px-3 py-2 border border-border rounded-xl hover:bg-muted font-semibold text-xs text-muted-foreground hover:text-foreground cursor-pointer transition-colors"
+                >
+                  Reset
+                </button>
+              </div>
             </div>
           </div>
         </Card>
@@ -731,9 +789,9 @@ export default function TransactionsPage() {
               : `Official Collection Receipt #${selectedTx.reference_code}`
           }
           onClose={() => setSelectedTx(null)}
-          size="lg"
+          size="xl"
         >
-          <div className="space-y-4 text-xs">
+          <div className="space-y-5 text-xs">
             {/* Header info */}
             <div className="bg-muted/20 border border-border rounded-2xl p-4">
               <div className="flex justify-between items-start mb-3 border-b border-border pb-2">
@@ -809,7 +867,7 @@ export default function TransactionsPage() {
             )}
 
             {/* Modal actions */}
-            <div className="flex justify-between items-center pt-2 border-t border-border">
+            <div className="flex justify-between items-center gap-3 pt-4 border-t border-border">
               <button
                 type="button"
                 onClick={() => window.print()}

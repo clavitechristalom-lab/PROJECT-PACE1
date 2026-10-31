@@ -1,12 +1,14 @@
 import { useState, useEffect, useMemo } from 'react'
 import {
-  FiMessageSquare, FiX, FiCheckCircle, FiSend, FiUser, FiClock, FiTag, FiZap, FiTrash2
+  FiMessageSquare, FiX, FiCheckCircle, FiSend, FiUser, FiClock, FiTag, FiZap, FiTrash2,
+  FiAlertCircle
 } from 'react-icons/fi'
 import {
   PageHeader, Card, StatusBadge, LoadingState, EmptyState, Pagination, SearchBar,
   showToast, showError, confirmDelete
 } from '../components/ui'
 import { api } from '../lib/api'
+import { useAuth } from '../context/AuthContext'
 import { useRealtimeSync, triggerDataSync } from '../lib/realtimeSync'
 
 const QUICK_RESPONSES = [
@@ -43,189 +45,145 @@ function RespondModal({ isOpen, onClose, message, onSend }) {
 
   if (!isOpen || !message) return null
 
-  const customerName = message.customer
-    ? `${message.customer.first_name} ${message.customer.last_name}`
-    : 'Unknown Customer'
+  const senderName = message.customer
+    ? `${message.customer.first_name || ''} ${message.customer.last_name || ''}`.trim()
+    : (message.name || 'Customer')
 
   return (
     <div className="fixed inset-0 z-[99999] flex items-center justify-center p-4">
       <div className="fixed inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose}></div>
-      <div className="relative bg-card border border-border rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col animate-in fade-in zoom-in-95 duration-200">
+      <div className="relative bg-card border border-border rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] overflow-hidden flex flex-col animate-in fade-in zoom-in-95 duration-200">
         {/* Header */}
-        <div className="flex items-center justify-between p-5 border-b border-border bg-gradient-to-r from-primary/5 to-transparent">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-border bg-gradient-to-r from-primary/5 to-transparent">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center">
               <FiMessageSquare className="w-5 h-5 text-primary" />
             </div>
             <div>
-              <h2 className="text-lg font-bold text-foreground">Respond to Feedback</h2>
-              <p className="text-xs text-muted-foreground">Send a response to this customer's feedback</p>
+              <h2 className="text-lg font-bold text-foreground">Respond to Customer Feedback</h2>
+              <p className="text-xs text-muted-foreground">Send an official response to this customer's feedback or inquiry</p>
             </div>
           </div>
-          <button onClick={onClose} className="p-2 hover:bg-muted rounded-xl transition-colors">
+          <button onClick={onClose} className="p-2 hover:bg-muted rounded-xl transition-colors cursor-pointer">
             <FiX className="w-5 h-5 text-muted-foreground" />
           </button>
         </div>
 
-        <div className="flex-1 overflow-y-auto p-5 space-y-5">
-          {/* Customer Feedback Card (Initial Message) */}
+        <div className="flex-1 overflow-y-auto p-6 sm:p-8 space-y-5">
+          {/* Main Message Card */}
           <div className="bg-muted/30 rounded-xl p-4 border border-border space-y-3">
             <div className="flex items-center gap-3">
               <div className="w-9 h-9 rounded-full bg-primary/10 flex items-center justify-center">
                 <FiUser className="w-4 h-4 text-primary" />
               </div>
               <div className="flex-1 min-w-0">
-                <h3 className="font-bold text-foreground text-sm">{customerName}</h3>
-                <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                <h3 className="font-bold text-foreground text-sm flex items-center gap-2">
+                  <span>{senderName}</span>
+                </h3>
+                <div className="flex items-center gap-2 text-xs text-muted-foreground flex-wrap">
                   <FiTag className="w-3 h-3" />
-                  <span>{message.topic}</span>
-                  <span className="mx-1">•</span>
-                  <FiClock className="w-3 h-3" />
-                  <span>{new Date(message.created_at).toLocaleString()}</span>
+                  <span className="font-semibold text-primary">{message.topic}</span>
+                  <span>&bull;</span>
+                  <span className="flex items-center gap-1 font-mono">
+                    <FiClock className="w-3 h-3" />
+                    {new Date(message.created_at).toLocaleString()}
+                  </span>
                 </div>
               </div>
               <StatusBadge status={message.status} />
             </div>
-            <div className="text-sm text-foreground/80 whitespace-pre-wrap leading-relaxed pl-12">
+
+            <div className="text-sm text-foreground/90 whitespace-pre-wrap leading-relaxed bg-card p-3 rounded-xl border border-border/60">
               {message.message}
             </div>
           </div>
 
-          {/* Legacy & New Chat History */}
-          <div className="space-y-4">
-            {message.response && (
-              <div className="ml-12 border-l-2 border-emerald-500 pl-4 py-2 bg-emerald-50/50 dark:bg-emerald-900/10 rounded-r-xl">
-                <div className="flex items-center gap-2 mb-1">
-                  <FiCheckCircle className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
-                  <span className="text-xs font-bold text-emerald-700 dark:text-emerald-400">Admin Response</span>
-                  {message.responded_at && (
-                    <span className="text-xs text-muted-foreground font-mono">
-                      {new Date(message.responded_at).toLocaleString()}
-                    </span>
-                  )}
-                </div>
-                <p className="text-sm text-foreground/80 leading-relaxed">{message.response}</p>
+          {/* Chat History if any */}
+          {message.chat_history && message.chat_history.length > 0 && (
+            <div className="space-y-3 pt-2">
+              <h4 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Conversation History</h4>
+              <div className="space-y-2.5 max-h-56 overflow-y-auto pr-1">
+                {message.chat_history.map((msg, idx) => {
+                  const isStaff = msg.sender_role === 'staff' || msg.sender_role === 'admin'
+                  return (
+                    <div
+                      key={idx}
+                      className={`p-3 rounded-xl text-xs ${
+                        isStaff
+                          ? 'bg-primary/10 border border-primary/20 ml-6 text-foreground'
+                          : 'bg-muted/50 border border-border mr-6 text-foreground'
+                      }`}
+                    >
+                      <div className="flex justify-between items-center mb-1 font-semibold text-[11px] text-muted-foreground">
+                        <span>{isStaff ? 'Staff Support' : senderName}</span>
+                        <span className="font-mono text-[10px]">{msg.created_at ? new Date(msg.created_at).toLocaleTimeString() : ''}</span>
+                      </div>
+                      <div className="whitespace-pre-wrap leading-relaxed">{msg.message}</div>
+                    </div>
+                  )
+                })}
               </div>
-            )}
+            </div>
+          )}
 
-            {message.customer_reply && (
-              <div className="mr-12 border-l-2 border-primary/50 pl-4 py-2 bg-primary/5 rounded-r-xl">
-                <div className="flex items-center gap-2 mb-1">
-                  <FiMessageSquare className="w-3.5 h-3.5 text-primary" />
-                  <span className="text-xs font-bold text-primary">Customer's Reply</span>
-                  {message.customer_reply_at && (
-                    <span className="text-xs text-muted-foreground font-mono">
-                      {new Date(message.customer_reply_at).toLocaleString()}
-                    </span>
-                  )}
-                </div>
-                <p className="text-sm text-foreground/80 leading-relaxed">{message.customer_reply}</p>
-              </div>
-            )}
+          {/* Response Form */}
+          <div>
+            <div className="flex items-center gap-2 mb-3">
+              <FiZap className="w-4 h-4 text-amber-500" />
+              <h4 className="text-sm font-bold text-foreground">Quick Responses</h4>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 max-h-48 overflow-y-auto pr-1 mb-4">
+              {QUICK_RESPONSES.map((qr, i) => (
+                <button
+                  key={i}
+                  type="button"
+                  onClick={() => setResponse(qr)}
+                  className={`text-left px-3.5 py-2.5 rounded-xl border text-xs leading-relaxed transition-all cursor-pointer ${
+                    response === qr
+                      ? 'border-primary bg-primary/10 text-primary font-medium shadow-sm'
+                      : 'border-border hover:border-primary/30 hover:bg-muted/50 text-foreground/80'
+                  }`}
+                >
+                  {qr}
+                </button>
+              ))}
+            </div>
 
-            {message.chat_history?.map((chat, idx) => {
-              const isAdmin = chat.sender !== 'Customer';
-              return (
-                <div key={idx} className={isAdmin ? "ml-12 border-l-2 border-emerald-500 pl-4 py-2 bg-emerald-50/50 dark:bg-emerald-900/10 rounded-r-xl" : "mr-12 border-l-2 border-primary/50 pl-4 py-2 bg-primary/5 rounded-r-xl"}>
-                  <div className="flex items-center gap-2 mb-1">
-                    {isAdmin ? <FiCheckCircle className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" /> : <FiMessageSquare className="w-3.5 h-3.5 text-primary" />}
-                    <span className={`text-xs font-bold ${isAdmin ? 'text-emerald-700 dark:text-emerald-400' : 'text-primary'}`}>{isAdmin ? 'Admin' : 'Customer'}</span>
-                    <span className="text-xs text-muted-foreground font-mono">
-                      {new Date(chat.timestamp).toLocaleString()}
-                    </span>
-                  </div>
-                  <p className="text-sm text-foreground/80 leading-relaxed">{chat.text}</p>
-                </div>
-              )
-            })}
+            <div>
+              <label className="block text-xs font-bold text-muted-foreground mb-2">
+                Your Response {response ? '' : '(select a quick response or type below)'}
+              </label>
+              <textarea
+                value={response}
+                onChange={e => setResponse(e.target.value)}
+                rows={4}
+                placeholder="Type your official customer response here..."
+                className="w-full px-4 py-3 rounded-xl border border-border bg-card text-foreground text-sm resize-none focus:ring-2 focus:ring-primary/30 focus:border-primary transition-all"
+              />
+            </div>
           </div>
-
-          {/* Quick Responses */}
-          {(() => {
-            const legacyCount = 1 + (message.response ? 1 : 0) + (message.customer_reply ? 1 : 0);
-            const historyCount = message.chat_history?.length || 0;
-            const totalMessages = legacyCount + historyCount;
-            const isLocked = totalMessages >= 20;
-
-            if (isLocked) {
-              return (
-                <div className="p-4 bg-muted/50 border border-border rounded-xl text-center">
-                  <p className="text-sm text-muted-foreground font-semibold">Conversation limit reached (20 messages).</p>
-                  <p className="text-xs text-muted-foreground mt-1">Please ask the customer to start a new feedback ticket.</p>
-                </div>
-              );
-            }
-
-            return (
-              <>
-                <div>
-                  <div className="flex items-center gap-2 mb-3">
-                    <FiZap className="w-4 h-4 text-amber-500" />
-                    <h4 className="text-sm font-bold text-foreground">Quick Responses</h4>
-                  </div>
-                  <div className="grid gap-2 max-h-48 overflow-y-auto pr-1">
-                    {QUICK_RESPONSES.map((qr, i) => (
-                      <button
-                        key={i}
-                        type="button"
-                        onClick={() => setResponse(qr)}
-                        className={`text-left px-3.5 py-2.5 rounded-xl border text-xs leading-relaxed transition-all cursor-pointer ${
-                          response === qr
-                            ? 'border-primary bg-primary/10 text-primary font-medium shadow-sm'
-                            : 'border-border hover:border-primary/30 hover:bg-muted/50 text-foreground/80'
-                        }`}
-                      >
-                        {qr}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-muted-foreground mb-2">
-                    Your Response {response ? '' : '(select a quick response or type below)'}
-                  </label>
-                  <textarea
-                    value={response}
-                    onChange={e => setResponse(e.target.value)}
-                    rows={4}
-                    placeholder="Type your response here..."
-                    className="w-full px-4 py-3 rounded-xl border border-border bg-card text-foreground text-sm resize-none focus:ring-2 focus:ring-primary/30 focus:border-primary transition-all"
-                  />
-                </div>
-              </>
-            );
-          })()}
         </div>
 
         {/* Footer */}
-        <div className="p-5 border-t border-border flex items-center justify-end gap-3">
+        <div className="px-6 py-4 border-t border-border bg-muted/20 flex items-center justify-end gap-3">
           <button
             onClick={onClose}
-            className="px-5 py-2.5 text-sm font-bold text-muted-foreground hover:text-foreground rounded-xl border border-border hover:bg-muted transition-colors"
+            className="px-5 py-2.5 text-sm font-bold text-muted-foreground hover:text-foreground rounded-xl border border-border hover:bg-muted transition-colors cursor-pointer"
           >
             Cancel
           </button>
-          {(() => {
-            const legacyCount = 1 + (message.response ? 1 : 0) + (message.customer_reply ? 1 : 0);
-            const historyCount = message.chat_history?.length || 0;
-            const isLocked = (legacyCount + historyCount) >= 20;
-            if (!isLocked) {
-              return (
-                <button
-                  onClick={handleSend}
-                  disabled={sending || !response.trim()}
-                  className="flex items-center gap-2 px-6 py-2.5 bg-primary hover:bg-primary/90 text-primary-foreground font-bold rounded-xl text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  {sending ? (
-                    <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
-                  ) : (
-                    <FiSend className="w-4 h-4" />
-                  )}
-                  <span>{sending ? 'Sending...' : 'Send'}</span>
-                </button>
-              );
-            }
-          })()}
+          <button
+            onClick={handleSend}
+            disabled={sending || !response.trim()}
+            className="flex items-center gap-2 px-6 py-2.5 bg-primary hover:bg-primary/90 text-primary-foreground font-bold rounded-xl text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer shadow-xs active:scale-95"
+          >
+            {sending ? (
+              <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+            ) : (
+              <FiSend className="w-4 h-4" />
+            )}
+            <span>{sending ? 'Sending...' : 'Send Response'}</span>
+          </button>
         </div>
       </div>
     </div>
@@ -233,6 +191,7 @@ function RespondModal({ isOpen, onClose, message, onSend }) {
 }
 
 export default function SupportPage() {
+  const { user } = useAuth()
   const [messages, setMessages] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -247,7 +206,10 @@ export default function SupportPage() {
     if (!silent) setError('')
     try {
       const data = await api.supportMessages.getAll()
-      setMessages(data.messages || [])
+      // Filter out any employee letter messages so Customer Support is strictly dedicated to customers
+      const allMsgs = data.messages || []
+      const customerMsgs = allMsgs.filter(m => m.message_type !== 'employee_letter' && !m.employee_id)
+      setMessages(customerMsgs)
     } catch (err) {
       console.error(err)
       if (!silent) setError('Failed to load support messages')
@@ -266,11 +228,17 @@ export default function SupportPage() {
 
   const filtered = useMemo(() => {
     return messages.filter(m => {
+      // Status filter
       if (statusFilter !== 'All' && m.status !== statusFilter) return false
+
+      // Search filter
       if (search.trim()) {
         const q = search.toLowerCase()
-        const cust = m.customer ? `${m.customer.first_name} ${m.customer.last_name}`.toLowerCase() : ''
-        return cust.includes(q) || m.topic.toLowerCase().includes(q) || m.message.toLowerCase().includes(q)
+        const cust = m.customer ? `${m.customer.first_name || ''} ${m.customer.last_name || ''}`.toLowerCase() : ''
+        const name = (m.name || '').toLowerCase()
+        const topic = (m.topic || '').toLowerCase()
+        const text = (m.message || '').toLowerCase()
+        return cust.includes(q) || name.includes(q) || topic.includes(q) || text.includes(q)
       }
       return true
     })
@@ -279,14 +247,15 @@ export default function SupportPage() {
   const paginated = filtered.slice((page - 1) * pageSize, page * pageSize)
   const total = filtered.length
   const pendingCount = messages.filter(m => m.status === 'Pending').length
-  const respondedCount = messages.filter(m => m.status === 'Responded').length
+  const resolvedCount = messages.filter(m => m.status === 'Approved' || m.status === 'Responded').length
 
   const handleSendResponse = async (id, responseText) => {
     try {
       await api.supportMessages.update(id, { new_message: responseText })
       loadMessages(true)
       triggerDataSync('support')
-      showToast('Response sent to customer successfully', 'success')
+      triggerDataSync('notifications')
+      showToast('Response sent successfully to customer!', 'success')
     } catch (err) {
       showError('Failed to Send', err.message || 'Could not send response')
     }
@@ -294,18 +263,19 @@ export default function SupportPage() {
 
   const handleDeleteMessage = async (id) => {
     const confirmed = await confirmDelete(
-      'this support conversation',
-      'This will permanently delete this conversation and all its history.'
+      'this support inquiry',
+      'This will permanently delete this customer inquiry.'
     )
     if (confirmed) {
       try {
         await api.supportMessages.delete(id)
         loadMessages(true)
         triggerDataSync('support')
-        showToast('Support conversation deleted successfully', 'success')
+        triggerDataSync('notifications')
+        showToast('Inquiry deleted successfully', 'success')
       } catch (err) {
         console.error(err)
-        showError('Delete Failed', err.message || 'Failed to delete support message.')
+        showError('Delete Failed', err.message || 'Failed to delete message.')
       }
     }
   }
@@ -314,7 +284,7 @@ export default function SupportPage() {
     <div className="space-y-6">
       <PageHeader
         title="Customer Support"
-        subtitle="Manage and respond to customer feedback and inquiries in real-time"
+        subtitle="Manage customer feedback, inquiries, and support messages in real-time"
       />
 
       {/* Stats Row */}
@@ -325,7 +295,7 @@ export default function SupportPage() {
           </div>
           <div>
             <p className="text-2xl font-extrabold text-foreground">{messages.length}</p>
-            <p className="text-xs text-muted-foreground font-medium">Total Messages</p>
+            <p className="text-xs text-muted-foreground font-medium">Total Customer Inquiries</p>
           </div>
         </Card>
         <Card className="p-4 border border-border flex items-center gap-4">
@@ -333,8 +303,8 @@ export default function SupportPage() {
             <FiClock className="w-5 h-5 text-amber-600 dark:text-amber-400" />
           </div>
           <div>
-            <p className="text-2xl font-extrabold text-foreground">{pendingCount}</p>
-            <p className="text-xs text-muted-foreground font-medium">Pending</p>
+            <p className="text-2xl font-extrabold text-amber-600 dark:text-amber-400">{pendingCount}</p>
+            <p className="text-xs text-muted-foreground font-medium">Pending Inquiries</p>
           </div>
         </Card>
         <Card className="p-4 border border-border flex items-center gap-4">
@@ -342,22 +312,23 @@ export default function SupportPage() {
             <FiCheckCircle className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
           </div>
           <div>
-            <p className="text-2xl font-extrabold text-foreground">{respondedCount}</p>
-            <p className="text-xs text-muted-foreground font-medium">Responded</p>
+            <p className="text-2xl font-extrabold text-foreground">{resolvedCount}</p>
+            <p className="text-xs text-muted-foreground font-medium">Responded Inquiries</p>
           </div>
         </Card>
       </div>
 
+      {/* Search and Status Dropdown Card */}
       <Card noPad className="p-3.5 border border-border">
         <div className="flex flex-col sm:flex-row gap-3 justify-between items-center">
           <div className="w-full sm:flex-1">
-            <SearchBar value={search} onChange={setSearch} placeholder="Search by customer name, topic, or message..." />
+            <SearchBar value={search} onChange={setSearch} placeholder="Search customer name, topic, or message content..." />
           </div>
-          <div className="flex gap-2">
+          <div className="flex gap-2 w-full sm:w-auto">
             <select
               value={statusFilter}
               onChange={e => { setStatusFilter(e.target.value); setPage(1); }}
-              className="border border-border rounded-xl px-3 py-2 text-xs font-semibold text-foreground bg-card cursor-pointer"
+              className="border border-border rounded-xl px-3 py-2 text-xs font-semibold text-foreground bg-card cursor-pointer w-full sm:w-auto"
             >
               <option value="All">All Statuses</option>
               <option value="Pending">Pending</option>
@@ -367,60 +338,81 @@ export default function SupportPage() {
         </div>
       </Card>
 
+      {/* Messages List */}
       <div className="grid gap-4">
         {loading ? (
-          <LoadingState />
+          <LoadingState message="Loading customer support messages from live database..." />
         ) : filtered.length === 0 ? (
           <EmptyState
             icon={<FiMessageSquare className="w-12 h-12 text-muted-foreground/30 mx-auto" />}
-            title="No messages found"
-            description="You're all caught up with customer inquiries."
+            title="No customer inquiries found"
+            description="All customer support messages have been addressed or no inquiries match your filter."
           />
         ) : (
           <>
             {paginated.map(m => {
-              const customerName = m.customer ? `${m.customer.first_name} ${m.customer.last_name}` : 'Unknown Customer'
+              const custName = m.customer
+                ? `${m.customer.first_name || ''} ${m.customer.last_name || ''}`.trim()
+                : (m.name || 'Customer Inquiry')
+
               return (
                 <Card key={m.id} className="p-5 relative group border border-border hover:border-primary/30 transition-colors">
                   <div className="flex flex-col gap-4">
-                    <div className="flex flex-col sm:flex-row gap-4 justify-between items-start">
+                    <div className="flex flex-col lg:flex-row gap-4 justify-between items-start">
                       <div className="flex-1 min-w-0">
+                        {/* Header Badge & Name */}
                         <div className="flex items-center gap-3 mb-2 flex-wrap">
-                          <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center">
-                            <FiUser className="w-4 h-4 text-primary" />
+                          <div className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0 bg-primary/10 text-primary">
+                            <FiUser className="w-4 h-4" />
                           </div>
-                          <h3 className="font-bold text-foreground text-base">{customerName}</h3>
-                          <StatusBadge status={m.status} />
-                          <span className="text-xs text-muted-foreground font-mono">
-                            {new Date(m.created_at).toLocaleString()}
-                          </span>
+                          <div>
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <h3 className="font-bold text-foreground text-base leading-tight">{custName}</h3>
+                              <StatusBadge status={m.status} />
+                            </div>
+                            {m.email && (
+                              <p className="text-[11px] text-muted-foreground mt-0.5">{m.email}</p>
+                            )}
+                          </div>
                         </div>
-                        <div className="text-xs font-bold text-primary uppercase tracking-wider mb-2 pl-11">
-                          Topic: {m.topic}
+
+                        {/* Topic & Timestamp */}
+                        <div className="pl-12 space-y-1 mb-2">
+                          <div className="flex items-center gap-3 text-xs text-muted-foreground flex-wrap">
+                            <span className="font-bold text-primary">{m.topic}</span>
+                            <span className="mx-1">&bull;</span>
+                            <span className="flex items-center gap-1 font-mono">
+                              <FiClock className="w-3 h-3" />
+                              {new Date(m.created_at).toLocaleString()}
+                            </span>
+                          </div>
                         </div>
-                        <div className="text-sm text-foreground/80 whitespace-pre-wrap leading-relaxed max-w-4xl pl-11">
+
+                        {/* Message Preview */}
+                        <div className="text-sm text-foreground/80 whitespace-pre-wrap leading-relaxed max-w-4xl pl-12 bg-muted/20 p-3 rounded-xl border border-border/50">
                           {m.message}
                         </div>
                       </div>
-                      <div className="shrink-0 flex items-center gap-2">
+
+                      {/* Action Buttons */}
+                      <div className="shrink-0 flex items-center gap-2 flex-wrap lg:flex-nowrap">
                         <button
                           onClick={() => setRespondModal({ open: true, message: m })}
                           className="flex items-center gap-2 px-4 py-2 bg-primary/10 text-primary hover:bg-primary/20 rounded-xl text-xs font-bold transition-colors cursor-pointer"
                         >
                           <FiSend className="w-4 h-4" />
-                          {m.customer_reply ? 'View Conversation' : m.status === 'Pending' ? 'Respond' : 'View / Re-respond'}
+                          <span>{m.status === 'Pending' ? 'Respond' : 'View / Re-respond'}</span>
                         </button>
+
                         <button
                           onClick={() => handleDeleteMessage(m.id)}
-                          className="flex items-center gap-2 px-4 py-2 bg-rose-500/10 text-rose-600 hover:bg-rose-500/20 rounded-xl text-xs font-bold transition-colors cursor-pointer"
+                          className="flex items-center gap-2 px-3.5 py-2 bg-rose-500/10 text-rose-600 hover:bg-rose-500/20 rounded-xl text-xs font-bold transition-colors cursor-pointer"
                           title="Delete Message"
                         >
                           <FiTrash2 className="w-4 h-4" />
                         </button>
                       </div>
                     </div>
-
-                    {/* Responses are now hidden in the list view. Click the button to view full conversation. */}
                   </div>
                 </Card>
               )

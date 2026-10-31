@@ -33,6 +33,7 @@ class ProductController extends Controller
                 'c' => $request->query('category', ''),
                 'st' => $request->query('status', ''),
                 'ss' => $request->query('stock_status', ''),
+                'b' => $request->query('branch', $request->query('branch_id', '')),
             ])) . '_' . $fp;
 
             $cached = Cache::get($cacheKey);
@@ -41,21 +42,14 @@ class ProductController extends Controller
             }
         }
 
-        $query = Product::with('branch');
+        $query = Product::with('branch:id,name');
 
         if ($user) {
             if ($user->role === 'Customer') {
-                $customerId = $user->customer_id ?? ($user->customer ? $user->customer->customer_id : null);
-                if (!$customerId) {
-                    $cust = \App\Models\Customer::where('email', $user->username)->first();
-                    if ($cust) {
-                        $customerId = $cust->customer_id;
-                    }
-                }
                 $branchId = null;
-                if ($customerId) {
-                    $cust = \App\Models\Customer::find($customerId);
-                    $branchId = $cust ? $cust->branch_id : null;
+                $cust = $user->customer ?: ($user->customer_id ? \App\Models\Customer::find($user->customer_id) : \App\Models\Customer::where('email', $user->username)->first());
+                if ($cust) {
+                    $branchId = $cust->branch_id;
                 }
                 if ($branchId) {
                     $query->where(function ($q) use ($branchId) {
@@ -71,6 +65,12 @@ class ProductController extends Controller
                 }
             }
             // Administrators see all products
+        }
+
+        // Branch filter (for Administrator or explicit branch filter)
+        $branchQuery = $request->query('branch', $request->query('branch_id'));
+        if ($branchQuery && !in_array($branchQuery, ['All', 'all'])) {
+            $query->where('branch_id', $branchQuery);
         }
 
         if ($request->filled('search')) {
@@ -122,7 +122,7 @@ class ProductController extends Controller
 
             return $this->exportCsv(
                 'products_export_' . date('Y-m-d') . '.csv',
-                ['Product ID', 'Product Code', 'Product Name', 'Brand', 'Category', 'Description', 'Price', 'Cost', 'Stock', 'Reorder Level', 'Status', 'Created Date'],
+                ['Product ID', 'Product Code', 'Product Name', 'Brand', 'Category', 'Branch', 'Description', 'Price', 'Cost', 'Stock', 'Reorder Level', 'Status', 'Created Date'],
                 $query->orderBy('product_name'),
                 function ($p) {
                     return [
@@ -131,6 +131,7 @@ class ProductController extends Controller
                         $p->product_name,
                         $p->brand,
                         $p->category,
+                        $p->branch ? ($p->branch->name ?? $p->branch->branch ?? 'Branch #' . $p->branch_id) : 'All Branches (Global)',
                         $p->description,
                         $p->unit_price,
                         $p->cost_price,
@@ -169,6 +170,10 @@ class ProductController extends Controller
     public function store(Request $request)
     {
         $user = $request->user();
+
+        if ($request->has('branch_id') && ($request->input('branch_id') === 'all' || $request->input('branch_id') === '')) {
+            $request->merge(['branch_id' => null]);
+        }
 
         $validated = $request->validate([
             'branch_id' => 'nullable|exists:branch_profiles,id',
@@ -223,8 +228,8 @@ class ProductController extends Controller
             }
             $validated['branch_id'] = $employee->branch_id;
         } elseif ($user && $user->role === 'Administrator') {
-            if (empty($validated['branch_id'])) {
-                return response()->json(['message' => 'Branch ID is required for Administrator.'], 422);
+            if (empty($validated['branch_id']) || $validated['branch_id'] === 'all') {
+                $validated['branch_id'] = null;
             }
         }
 
@@ -293,6 +298,10 @@ class ProductController extends Controller
         }
         $user = $request->user();
 
+        if ($request->has('branch_id') && ($request->input('branch_id') === 'all' || $request->input('branch_id') === '')) {
+            $request->merge(['branch_id' => null]);
+        }
+
         if ($user && in_array($user->role, ['Store Administrator', 'Store Admin'])) {
             $employee = \App\Models\Employee::where('employee_id', $user->employee_id)->first();
             if (!$employee || $employee->branch_id !== $product->branch_id) {
@@ -323,8 +332,8 @@ class ProductController extends Controller
         if ($user && in_array($user->role, ['Store Administrator', 'Store Admin'])) {
             unset($validated['branch_id']); // Store admin cannot change branch
         } elseif ($user && $user->role === 'Administrator') {
-             if (empty($validated['branch_id'])) {
-                return response()->json(['message' => 'Branch ID is required for Administrator.'], 422);
+            if (empty($validated['branch_id']) || $validated['branch_id'] === 'all') {
+                $validated['branch_id'] = null;
             }
         }
 
@@ -381,6 +390,8 @@ class ProductController extends Controller
             'user_agent' => $request->userAgent(),
         ]);
 
+        SyncController::invalidateFingerprint();
+
         return response()->json([
             'message' => 'Product updated successfully',
             'product' => $product,
@@ -414,6 +425,8 @@ class ProductController extends Controller
             'ip_address' => $request->ip(),
             'user_agent' => $request->userAgent(),
         ]);
+
+        SyncController::invalidateFingerprint();
 
         return response()->json(['message' => 'Product deleted successfully']);
     }

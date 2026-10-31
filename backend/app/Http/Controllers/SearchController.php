@@ -57,6 +57,7 @@ class SearchController extends Controller
             ['title' => 'Payment Records', 'subtitle' => 'Official Receipts & Collections', 'keywords' => ['payment', 'payments', 'receipt', 'receipts', 'collection', 'collections', 'cash in'], 'route' => '/payments', 'icon' => '💵', 'module' => 'Navigation', 'roles' => ['Administrator', 'Store Administrator']],
             ['title' => 'Employee Management', 'subtitle' => 'Personnel Profiles, QR Badges & PINs', 'keywords' => ['employee', 'employees', 'staff', 'personnel', 'hr', 'worker', 'workers', 'team', 'qr badge'], 'route' => '/employees', 'icon' => '👥', 'module' => 'Navigation', 'roles' => ['Administrator']],
             ['title' => 'Attendance Records', 'subtitle' => 'Time In, Time Out & Verification Station', 'keywords' => ['attendance', 'time in', 'time out', 'timesheet', 'clock in', 'clock out', 'tardy', 'present', 'absent', 'punch', 'qr scanner', 'terminal'], 'route' => $isEmployee ? '/employee/attendance' : '/attendance', 'icon' => '⏱️', 'module' => 'Navigation', 'roles' => ['Administrator', 'Store Administrator', 'Employee']],
+            ['title' => 'Excuse Letter', 'subtitle' => 'Employee Absence & Leave Requests Management', 'keywords' => ['excuse', 'letter', 'leave', 'sick leave', 'vacation', 'maternity', 'important matter', 'absence', 'excuse letter'], 'route' => $isEmployee ? '/employee/excuse-letter' : '/admin/excuse-letters', 'icon' => '📝', 'module' => 'Navigation', 'roles' => ['Administrator', 'Store Administrator', 'Employee']],
             ['title' => 'Payroll & Payslips', 'subtitle' => 'Salary Periods, 13th Month & Contributions', 'keywords' => ['payroll', 'payslip', 'payslips', 'salary', 'compensation', 'wage', 'wages', '13th month', 'deductions', 'sss', 'philhealth', 'pagibig'], 'route' => $isEmployee ? '/employee/payroll' : '/payroll', 'icon' => '💰', 'module' => 'Navigation', 'roles' => ['Administrator', 'Employee']],
             ['title' => 'Reports & Audits', 'subtitle' => 'Financial Summaries & Export Center', 'keywords' => ['report', 'reports', 'export', 'summary', 'audit', 'financial report', 'sales report'], 'route' => '/reports', 'icon' => '📈', 'module' => 'Navigation', 'roles' => ['Administrator', 'Store Administrator']],
             ['title' => 'User Management', 'subtitle' => 'System Accounts, Passwords & Permissions', 'keywords' => ['user', 'users', 'account', 'accounts', 'login', 'admin account', 'permission', 'roles'], 'route' => '/users', 'icon' => '🔑', 'module' => 'Navigation', 'roles' => ['Administrator']],
@@ -449,6 +450,46 @@ class SearchController extends Controller
                     'url' => "/system-logs?search=" . urlencode($log->module),
                     'route' => "/system-logs?search=" . urlencode($log->module),
                     'icon' => '📜',
+                ];
+            }
+        }
+
+        // ─── 11. EXCUSE & LEAVE LETTERS ─────────────────────────────────────────
+        if ($isAdmin || $isStoreAdmin || $isEmployee) {
+            $letterQuery = \App\Models\EmployeeLetter::with('employee')
+                ->where(function($query) use ($q) {
+                    $query->where('category', 'like', "%{$q}%")
+                          ->orWhere('title', 'like', "%{$q}%")
+                          ->orWhere('reason', 'like', "%{$q}%")
+                          ->orWhereHas('employee', function($sub) use ($q) {
+                              $sub->where('first_name', 'like', "%{$q}%")
+                                  ->orWhere('last_name', 'like', "%{$q}%")
+                                  ->orWhere('employee_code', 'like', "%{$q}%");
+                          });
+                });
+
+            if ($isEmployee) {
+                $letterQuery->where('employee_id', $user->employee_id ?? 0);
+            } elseif ($isStoreAdmin && $branchId) {
+                $letterQuery->whereHas('employee', function($sub) use ($branchId) {
+                    $sub->where('branch_id', $branchId);
+                });
+            }
+
+            $letters = $letterQuery->latest('created_at')->limit(5)->get();
+            foreach ($letters as $let) {
+                $empName = $let->employee ? trim("{$let->employee->first_name} {$let->employee->last_name}") : 'Employee';
+                $results[] = [
+                    'id' => 'let_' . $let->letter_id,
+                    'record_id' => $let->letter_id,
+                    'type' => 'employee_letter',
+                    'module' => 'Excuse Letters',
+                    'title' => "{$let->category} — {$empName}",
+                    'subtitle' => "Status: {$let->status} · Dates: " . ($let->start_date ? $let->start_date->format('M d') : '—') . " to " . ($let->end_date ? $let->end_date->format('M d, Y') : '—'),
+                    'description' => "Reason: " . ($let->reason ?: 'No reason provided') . " · " . ($let->admin_remarks ? "Remarks: {$let->admin_remarks}" : 'Awaiting review'),
+                    'url' => $isEmployee ? '/employee/excuse-letter' : '/admin/excuse-letters',
+                    'route' => $isEmployee ? '/employee/excuse-letter' : '/admin/excuse-letters',
+                    'icon' => '📝',
                 ];
             }
         }

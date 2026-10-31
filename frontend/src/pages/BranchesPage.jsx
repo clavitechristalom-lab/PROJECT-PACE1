@@ -339,8 +339,8 @@ export default function BranchesPage() {
 
       {/* EDIT MODAL */}
       {editItem && (
-        <Modal onClose={() => setEditItem(null)} title="Edit Branch Details" size="md">
-          <form onSubmit={handleEditSubmit} className="space-y-4 p-1">
+        <Modal onClose={() => setEditItem(null)} title="Edit Branch Details" size="lg">
+          <form onSubmit={handleEditSubmit} className="space-y-4">
             {/* Branch Image */}
             <div className="space-y-1.5">
               <label className="text-xs font-bold text-muted-foreground uppercase flex items-center justify-between">
@@ -479,7 +479,7 @@ export default function BranchesPage() {
               </div>
             </div>
 
-            <div className="pt-4 flex justify-end gap-2 border-t border-border mt-6">
+            <div className="pt-4 flex justify-end gap-3 border-t border-border mt-6">
               <Btn variant="outline" onClick={() => setEditItem(null)} type="button">Cancel</Btn>
               <Btn variant="primary" type="submit" loading={saving}>Save Changes</Btn>
             </div>

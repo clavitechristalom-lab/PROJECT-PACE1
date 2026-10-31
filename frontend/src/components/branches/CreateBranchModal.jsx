@@ -49,7 +49,7 @@ export default function CreateBranchModal({ isOpen, onClose, onCreate }) {
   if (!isOpen) return null;
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title="Register New Branch">
+    <Modal isOpen={isOpen} onClose={onClose} title="Register New Branch" size="lg">
       <form onSubmit={handleSubmit} className="space-y-4">
         
         {/* Name */}
@@ -65,7 +65,7 @@ export default function CreateBranchModal({ isOpen, onClose, onCreate }) {
         </div>
 
         {/* Location & Contact */}
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div className="space-y-1">
             <label className="text-xs font-bold text-muted-foreground uppercase flex items-center gap-1">
               <FiMapPin className="w-3 h-3" /> Location
@@ -107,18 +107,18 @@ export default function CreateBranchModal({ isOpen, onClose, onCreate }) {
         </div>
 
         {/* Action Buttons */}
-        <div className="pt-4 flex justify-end gap-2 border-t border-border">
+        <div className="pt-4 flex items-center justify-end gap-3 border-t border-border">
           <button 
             type="button" 
             onClick={onClose}
-            className="px-4 py-2 text-sm font-bold text-muted-foreground bg-muted hover:bg-muted/80 rounded-xl"
+            className="px-4 py-2 text-sm font-bold text-muted-foreground bg-muted hover:bg-muted/80 rounded-xl cursor-pointer"
             disabled={loading}
           >
             Cancel
           </button>
           <button 
             type="submit"
-            className="px-4 py-2 text-sm font-bold text-white bg-primary hover:bg-primary/90 rounded-xl flex items-center gap-2"
+            className="px-4 py-2 text-sm font-bold text-white bg-primary hover:bg-primary/90 rounded-xl flex items-center gap-2 cursor-pointer"
             disabled={loading}
           >
             {loading ? 'Creating...' : 'Create Branch'}

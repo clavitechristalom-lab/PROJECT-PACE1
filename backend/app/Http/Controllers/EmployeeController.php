@@ -7,9 +7,11 @@ use App\Models\Employee;
 use App\Models\SystemLog;
 use App\Models\AttendanceScanLog;
 use App\Models\Attendance;
+use App\Models\User;
 use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
 
 class EmployeeController extends Controller
 {
@@ -34,7 +36,7 @@ class EmployeeController extends Controller
             return response()->json($cached);
         }
 
-        $query = Employee::with('branch');
+        $query = Employee::with('branch:id,name');
 
         // Role-based Access Control
         if ($user && $user->role === 'Employee') {
@@ -90,13 +92,35 @@ class EmployeeController extends Controller
             $latestScan = $latestScanLogs->get($emp->employee_id);
             $todayAtt = $todayAttendances->get($emp->employee_id);
 
-            $qrStatus = empty($emp->qr_token) 
-                ? 'NOT GENERATED' 
-                : ($emp->qr_active ? 'ACTIVE' : 'REVOKED');
+            $isAdmin = in_array($emp->position, ['System Administrator', 'Administrator', 'Main Administrator']) ||
+                       str_starts_with(strtoupper($emp->employee_code), 'SYS-') ||
+                       ($emp->user && in_array($emp->user->role, ['Administrator', 'Admin']));
 
-            $emp->qr_status = $qrStatus;
-            $emp->has_qr = !empty($emp->qr_token);
-            $emp->has_pin = !empty($emp->attendance_pin);
+            if ($isAdmin) {
+                $emp->basic_salary = 0.00;
+                $emp->daily_rate = 0.00;
+                $emp->hourly_rate = 0.00;
+                $emp->qr_token = null;
+                $emp->qr_code = null;
+                $emp->qr_active = 0;
+                $emp->qr_status = null;
+                $emp->has_qr = false;
+                $emp->has_pin = false;
+                $emp->attendance_pin = null;
+                $emp->is_admin_account = true;
+                $emp->information_verified = 1;
+                $emp->account_verified = 1;
+            } else {
+                $qrStatus = empty($emp->qr_token) 
+                    ? 'NOT GENERATED' 
+                    : ($emp->qr_active ? 'ACTIVE' : 'REVOKED');
+
+                $emp->qr_status = $qrStatus;
+                $emp->has_qr = !empty($emp->qr_token);
+                $emp->has_pin = !empty($emp->attendance_pin);
+                $emp->is_admin_account = false;
+            }
+
             $emp->last_scan = ($latestScan && $latestScan->scan_time) ? $latestScan->scan_time->format('M d, Y h:i A') : 'Never';
             $emp->issued_date = $emp->qr_generated_at ? $emp->qr_generated_at->format('M d, Y h:i A') : '—';
             $emp->issued_by = $emp->has_qr ? 'Administrator' : '—';
@@ -140,10 +164,31 @@ class EmployeeController extends Controller
             }
         }
 
-        $employee->has_pin = !empty($employee->attendance_pin);
-        $employee->qr_status = empty($employee->qr_token) 
-            ? 'NOT GENERATED' 
-            : ($employee->qr_active ? 'ACTIVE' : 'REVOKED');
+        $isEmpAdminAccount = in_array($employee->position, ['System Administrator', 'Administrator', 'Main Administrator']) ||
+            str_starts_with(strtoupper($employee->employee_code), 'SYS-') ||
+            ($employee->user && in_array($employee->user->role, ['Administrator', 'Admin']));
+
+        if ($isEmpAdminAccount) {
+            $employee->basic_salary = 0.00;
+            $employee->daily_rate = 0.00;
+            $employee->hourly_rate = 0.00;
+            $employee->qr_token = null;
+            $employee->qr_code = null;
+            $employee->qr_active = 0;
+            $employee->qr_status = null;
+            $employee->has_qr = false;
+            $employee->has_pin = false;
+            $employee->attendance_pin = null;
+            $employee->is_admin_account = true;
+            $employee->information_verified = 1;
+            $employee->account_verified = 1;
+        } else {
+            $employee->has_pin = !empty($employee->attendance_pin);
+            $employee->qr_status = empty($employee->qr_token) 
+                ? 'NOT GENERATED' 
+                : ($employee->qr_active ? 'ACTIVE' : 'REVOKED');
+            $employee->is_admin_account = false;
+        }
 
         $attendance = $employee->attendances->map(function ($a) {
             return [
@@ -197,7 +242,7 @@ class EmployeeController extends Controller
             'department' => 'nullable|string|max:255',
             'branch_id' => 'nullable|integer|exists:branch_profiles,id',
             'pay_type' => 'required|string',
-            'basic_salary' => 'required|numeric|min:0',
+            'basic_salary' => 'nullable|numeric|min:0',
             'phone' => ['nullable', 'string', 'regex:/^(09\d{9}|639\d{9})$/'],
             'email' => 'nullable|email|max:255',
             'address' => 'nullable|string',
@@ -227,18 +272,25 @@ class EmployeeController extends Controller
             $validated['working_hours'] = '8 AM to 5 PM';
         }
 
+        if (empty($validated['department'])) {
+            $validated['department'] = $validated['position'] === 'Manager (Store Admin)' ? 'Store Admin' : 'Employee';
+        }
+
         if (empty($validated['employee_code'])) {
             $count = Employee::count() + 1;
             $validated['employee_code'] = 'EMP-' . str_pad($count, 3, '0', STR_PAD_LEFT);
         }
 
-        $salary = (float)$validated['basic_salary'];
-        // Assume basic_salary is always Monthly as per UI
-        $validated['daily_rate'] = round($salary / 26, 2);
-        $validated['hourly_rate'] = round($validated['daily_rate'] / 8, 2);
+        $salary = (isset($validated['basic_salary']) && $validated['basic_salary'] !== '' && $validated['basic_salary'] !== null && is_numeric($validated['basic_salary'])) 
+            ? (float)$validated['basic_salary'] 
+            : 0.00;
+        $validated['basic_salary'] = $salary;
+        $validated['daily_rate'] = $salary > 0 ? round($salary / 26, 2) : 0.00;
+        $validated['hourly_rate'] = $salary > 0 ? round($validated['daily_rate'] / 8, 2) : 0.00;
 
-        // QR is NOT generated automatically upon creation; only when Admin issues QR
+        // QR is NOT generated automatically upon creation; starts completely empty
         $validated['qr_token'] = null;
+        $validated['qr_code'] = null;
         $validated['qr_active'] = false;
         $validated['qr_generated_at'] = null;
 
@@ -246,11 +298,11 @@ class EmployeeController extends Controller
         if ($pin) {
             $validated['attendance_pin'] = Hash::make($pin);
         } else {
-            unset($validated['attendance_pin']);
+            $validated['attendance_pin'] = null;
         }
 
         $employee = Employee::create($validated);
-        $employee->has_pin = true;
+        $employee->has_pin = !empty($pin);
         $employee->qr_status = 'NOT GENERATED';
 
         SystemLog::create([
@@ -304,6 +356,10 @@ class EmployeeController extends Controller
             'attendance_pin' => 'nullable|string|min:4|max:6',
         ]);
 
+        if (empty($validated['department']) && !empty($validated['position'])) {
+            $validated['department'] = $validated['position'] === 'Manager (Store Admin)' ? 'Store Admin' : 'Employee';
+        }
+
         if (!empty($validated['branch_id']) && $validated['branch_id'] != $employee->branch_id) {
             $isStoreAdmin = \App\Models\User::where('employee_id', $employee->employee_id)
                 ->whereIn('role', ['Store Administrator', 'Store Admin'])
@@ -334,13 +390,42 @@ class EmployeeController extends Controller
             $validated['working_hours'] = '8 AM to 5 PM';
         }
 
-        // Salary is fixed upon account creation - remove from update payload to prevent editing
-        unset($validated['basic_salary'], $validated['daily_rate'], $validated['hourly_rate']);
-
-        if (!empty($validated['attendance_pin'])) {
-            $validated['attendance_pin'] = Hash::make($validated['attendance_pin']);
+        // Basic salary can be updated if provided, accepts empty/null cleanly
+        if ($request->has('basic_salary')) {
+            $sal = $request->input('basic_salary');
+            $salVal = ($sal !== '' && $sal !== null && is_numeric($sal)) ? (float)$sal : 0.00;
+            $validated['basic_salary'] = $salVal;
+            $validated['daily_rate'] = $salVal > 0 ? round($salVal / 26, 2) : 0.00;
+            $validated['hourly_rate'] = $salVal > 0 ? round($salVal / 208, 2) : 0.00;
         } else {
-            unset($validated['attendance_pin']);
+            unset($validated['basic_salary'], $validated['daily_rate'], $validated['hourly_rate']);
+        }
+
+        if (array_key_exists('branch_id', $validated)) {
+            $validated['branch_id'] = !empty($validated['branch_id']) ? $validated['branch_id'] : null;
+            if ($validated['branch_id']) {
+                $bp = \App\Models\BranchProfile::find($validated['branch_id']);
+                $validated['branch'] = $bp ? $bp->name : null;
+            } else {
+                $validated['branch'] = null;
+            }
+        }
+
+        if (array_key_exists('qr_token', $validated) || array_key_exists('permanent_qr', $request->all())) {
+            $qr = trim($request->input('qr_token') ?? ($request->input('permanent_qr') ?? ''));
+            $validated['qr_token'] = !empty($qr) ? $qr : null;
+            if (empty($qr)) {
+                $validated['qr_active'] = false;
+                $validated['qr_generated_at'] = null;
+            }
+        }
+
+        if (array_key_exists('attendance_pin', $validated)) {
+            if (!empty($validated['attendance_pin'])) {
+                $validated['attendance_pin'] = Hash::make($validated['attendance_pin']);
+            } else {
+                unset($validated['attendance_pin']);
+            }
         }
 
         $user = auth()->user();
@@ -361,10 +446,31 @@ class EmployeeController extends Controller
             'user_agent' => $request->userAgent(),
         ]);
 
-        $employee->has_pin = !empty($employee->attendance_pin);
-        $employee->qr_status = empty($employee->qr_token) 
-            ? 'NOT GENERATED' 
-            : ($employee->qr_active ? 'ACTIVE' : 'REVOKED');
+        $isEmpAdminAccount = in_array($employee->position, ['System Administrator', 'Administrator', 'Main Administrator']) ||
+            str_starts_with(strtoupper($employee->employee_code), 'SYS-') ||
+            ($employee->user && in_array($employee->user->role, ['Administrator', 'Admin']));
+
+        if ($isEmpAdminAccount) {
+            $employee->basic_salary = 0.00;
+            $employee->daily_rate = 0.00;
+            $employee->hourly_rate = 0.00;
+            $employee->qr_token = null;
+            $employee->qr_code = null;
+            $employee->qr_active = 0;
+            $employee->qr_status = null;
+            $employee->has_qr = false;
+            $employee->has_pin = false;
+            $employee->attendance_pin = null;
+            $employee->is_admin_account = true;
+            $employee->information_verified = 1;
+            $employee->account_verified = 1;
+        } else {
+            $employee->has_pin = !empty($employee->attendance_pin);
+            $employee->qr_status = empty($employee->qr_token) 
+                ? 'NOT GENERATED' 
+                : ($employee->qr_active ? 'ACTIVE' : 'REVOKED');
+            $employee->is_admin_account = false;
+        }
 
         return response()->json([
             'message' => 'Employee updated successfully',
@@ -374,20 +480,69 @@ class EmployeeController extends Controller
 
     public function destroy(Request $request, $id)
     {
+        $user = $request->user();
+        if ($user && !in_array($user->role, ['Administrator', 'Admin'])) {
+            return response()->json(['message' => 'Unauthorized. Only Administrators can delete employee records.'], 403);
+        }
+
         $employee = Employee::findOrFail($id);
+
+        if ($user && $user->employee_id == $employee->employee_id) {
+            return response()->json(['message' => 'You cannot delete your own employee record while logged in.'], 422);
+        }
+
         $name = "{$employee->first_name} {$employee->last_name}";
         $code = $employee->employee_code;
 
-        $employee->delete();
+        DB::transaction(function () use ($employee, $request, $name, $code) {
+            // Unlink or deactivate any user account linked to this employee
+            $linkedUsers = User::where('employee_id', $employee->employee_id)->get();
+            foreach ($linkedUsers as $linkedUser) {
+                if (in_array($linkedUser->role, ['Employee', 'Store Administrator', 'Store Admin'])) {
+                    $linkedUser->tokens()->delete();
+                    $linkedUser->update([
+                        'is_active' => false,
+                        'employee_id' => null,
+                    ]);
+                } else {
+                    $linkedUser->update([
+                        'employee_id' => null,
+                    ]);
+                }
+            }
 
-        SystemLog::create([
-            'user_id' => $request->user() ? $request->user()->user_id : $request->input('user_id'),
-            'action' => 'DELETE',
-            'module' => 'Employees',
-            'description' => "Deleted employee: {$name} ({$code})",
-            'ip_address' => $request->ip(),
-            'user_agent' => $request->userAgent(),
-        ]);
+            // Clean related financial tables
+            DB::table('employee_allowances')->where('employee_id', $employee->employee_id)->delete();
+            DB::table('employee_bonuses')->where('employee_id', $employee->employee_id)->delete();
+            DB::table('employee_deductions')->where('employee_id', $employee->employee_id)->delete();
+            DB::table('employee_loans')->where('employee_id', $employee->employee_id)->delete();
+
+            // Nullify scan logs reference
+            DB::table('attendance_scan_logs')->where('employee_id', $employee->employee_id)->update(['employee_id' => null]);
+            DB::table('qr_requests')->where('employee_id', $employee->employee_id)->delete();
+
+            // Clean attendance & payroll records
+            DB::table('attendance')->where('employee_id', $employee->employee_id)->delete();
+            $payrollIds = DB::table('payroll')->where('employee_id', $employee->employee_id)->pluck('payroll_id');
+            if ($payrollIds->isNotEmpty()) {
+                DB::table('payroll_deductions')->whereIn('payroll_id', $payrollIds)->delete();
+                DB::table('payroll')->whereIn('payroll_id', $payrollIds)->delete();
+            }
+
+            $employee->delete();
+
+            SystemLog::create([
+                'user_id' => $request->user() ? $request->user()->user_id : $request->input('user_id'),
+                'action' => 'DELETE',
+                'module' => 'Employees',
+                'description' => "Deleted employee: {$name} ({$code})",
+                'ip_address' => $request->ip(),
+                'user_agent' => $request->userAgent(),
+            ]);
+        });
+
+        // Invalidate cached employee lists
+        Cache::flush();
 
         return response()->json(['message' => 'Employee deleted successfully']);
     }
@@ -778,8 +933,21 @@ class EmployeeController extends Controller
             ->latest('request_id')
             ->first();
 
+        $isAdminAccount = in_array($employee->position, ['System Administrator', 'Administrator', 'Main Administrator']) ||
+            str_starts_with(strtoupper($employee->employee_code), 'SYS-') ||
+            ($employee->user && in_array($employee->user->role, ['Administrator', 'Admin']));
+
         $qrStatus = 'NOT GENERATED';
-        if ($employee->qr_active && !empty($employee->qr_token)) {
+        if ($isAdminAccount) {
+            $employee->basic_salary = 0.00;
+            $employee->daily_rate = 0.00;
+            $employee->hourly_rate = 0.00;
+            $employee->qr_token = null;
+            $employee->qr_code = null;
+            $employee->qr_active = 0;
+            $employee->attendance_pin = null;
+            $qrStatus = null;
+        } elseif ($employee->qr_active && !empty($employee->qr_token)) {
             $qrStatus = 'ACTIVE';
         } elseif ($latestRequest) {
             if ($latestRequest->status === 'PENDING') {

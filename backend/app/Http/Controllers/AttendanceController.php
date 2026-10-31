@@ -52,7 +52,29 @@ class AttendanceController extends Controller
             }
         }
 
-        $query = Attendance::with(['employee.branch', 'scannedBy.employee']);
+        $query = Attendance::with([
+            'employee:employee_id,first_name,last_name,employee_code,department,position,branch_id',
+            'employee.branch:id,name',
+            'scannedBy:user_id,username,employee_id',
+            'scannedBy.employee:employee_id,first_name,last_name'
+        ])->select([
+            'attendance_id',
+            'employee_id',
+            'scanned_by',
+            'attendance_date',
+            'time_in',
+            'time_out',
+            'break_out',
+            'break_in',
+            'lunch_out',
+            'lunch_in',
+            'total_hours',
+            'overtime_hours',
+            'status',
+            'verification_method',
+            'verified_by_name',
+            'remarks'
+        ]);
 
         // Role-based scoping
         if ($user && $user->role === 'Employee') {
@@ -675,6 +697,8 @@ class AttendanceController extends Controller
                 'user_agent'  => $request->userAgent(),
             ]);
             \Illuminate\Support\Facades\Cache::forget('pace_unified_fingerprint');
+            SyncController::invalidateFingerprint();
+            \App\Http\Controllers\PayrollController::recalculateDraftPayrollForEmployee($employee);
             
             \Illuminate\Support\Facades\DB::commit();
 
@@ -1000,6 +1024,13 @@ class AttendanceController extends Controller
         ]);
         \Illuminate\Support\Facades\Cache::forget('pace_unified_fingerprint');
 
+        // Immediately recalculate active weekly draft payroll for this employee
+        try {
+            \App\Http\Controllers\PayrollController::recalculateDraftPayrollForEmployee($employee);
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::warning("Draft payroll recalculation error for employee {$employee->employee_id}: " . $e->getMessage());
+        }
+
         return response()->json([
             'success' => true,
             'message' => 'Attendance authorized successfully.'
@@ -1037,6 +1068,8 @@ class AttendanceController extends Controller
             ]);
 
             \Illuminate\Support\Facades\Cache::forget('pace_unified_fingerprint');
+            SyncController::invalidateFingerprint();
+            \App\Http\Controllers\PayrollController::recalculateDraftPayrollForEmployee($employee);
 
             try {
                 SystemLog::create([

@@ -158,9 +158,13 @@ class NotificationController extends Controller
 
         $this->syncSystemAlerts($user);
 
-        $unreadCount = Notification::forUser($user->user_id)->unread()->count();
-        $criticalCount = Notification::forUser($user->user_id)->unread()->where('priority', 'critical')->count();
-        $highCount = Notification::forUser($user->user_id)->unread()->where('priority', 'high')->count();
+        $counts = Notification::forUser($user->user_id)->unread()
+            ->selectRaw("COUNT(*) as total, SUM(CASE WHEN priority = 'critical' THEN 1 ELSE 0 END) as critical, SUM(CASE WHEN priority = 'high' THEN 1 ELSE 0 END) as high")
+            ->first();
+
+        $unreadCount = (int)($counts->total ?? 0);
+        $criticalCount = (int)($counts->critical ?? 0);
+        $highCount = (int)($counts->high ?? 0);
 
         return response()->json([
             'unread_count' => $unreadCount,

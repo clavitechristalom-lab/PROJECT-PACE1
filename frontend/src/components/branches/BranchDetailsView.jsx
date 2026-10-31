@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react'
+import React, { useState, useRef, useEffect } from 'react'
 import { 
   FiArrowLeft, FiPackage, FiUsers, FiShoppingCart, 
   FiCalendar, FiCreditCard, FiClock, FiMapPin, FiPhone, FiCamera, FiEdit2, FiTrash2
@@ -6,6 +6,8 @@ import {
 import { Badge, StatCard, showToast, showError, showLoading, closeLoading, ConfirmDialog } from '../ui'
 import { fmt } from '../../lib/utils'
 import { api } from '../../lib/api'
+import { useAuth } from '../../context/AuthContext'
+import { triggerDataSync, fastDeepEqual } from '../../lib/realtimeSync'
 import EditBranchModal from './EditBranchModal'
 
 // Embedded pages
@@ -22,8 +24,10 @@ export default function BranchDetailsView({ branchData, onBack }) {
   const [isUploading, setIsUploading] = useState(false)
   const fileInputRef = useRef(null)
 
-  const user = JSON.parse(localStorage.getItem('user')) || {}
-  const canEditImage = user.role === 'admin' || user.role === 'store_admin'
+  const { user: authUser } = useAuth()
+  const storedUser = authUser || JSON.parse(localStorage.getItem('user') || 'null') || {}
+  const roleNorm = String(storedUser.role || '').toLowerCase()
+  const canEditImage = ['admin', 'administrator', 'store_admin', 'store administrator', 'store admin'].includes(roleNorm)
 
   // We maintain a local copy of branchData so updates are reflected immediately
   const [localBranchData, setLocalBranchData] = useState(branchData)
@@ -35,6 +39,15 @@ export default function BranchDetailsView({ branchData, onBack }) {
   const [heroImage, setHeroImage] = useState(
     localBranchData.image_url || localBranchData.image || ''
   )
+
+  useEffect(() => {
+    if (!branchData) return
+    setLocalBranchData(prev => (fastDeepEqual(prev, branchData) ? prev : branchData))
+    const nextImg = branchData.image_url || branchData.image || ''
+    if (nextImg) {
+      setHeroImage(prev => (prev === nextImg ? prev : nextImg))
+    }
+  }, [branchData])
 
   const handleImageUpload = async (e) => {
     const file = e.target.files?.[0]
@@ -55,6 +68,7 @@ export default function BranchDetailsView({ branchData, onBack }) {
           image_url: newImg,
           image: newImg,
         }))
+        triggerDataSync('branches')
         showToast('Photo changed successfully', 'success')
       }
     } catch (error) {
@@ -91,6 +105,7 @@ export default function BranchDetailsView({ branchData, onBack }) {
         if (newImg) {
           setHeroImage(newImg)
         }
+        triggerDataSync('branches')
         showToast('Branch updated successfully', 'success')
       }
     } catch (error) {
@@ -105,6 +120,7 @@ export default function BranchDetailsView({ branchData, onBack }) {
     try {
       showLoading('Deleting branch...')
       await api.branches.delete(localBranchData.id)
+      triggerDataSync('branches')
       showToast('Branch deleted successfully', 'success')
       // The parent component should ideally refresh, but calling onBack will take us out of this view
       if (onBack) onBack(true) // Pass a flag to indicate deletion if parent supports it
@@ -200,7 +216,7 @@ export default function BranchDetailsView({ branchData, onBack }) {
         </div>
 
         {/* ─── BRANCH STATS ─── */}
-        <div className="grid grid-cols-2 md:grid-cols-4 divide-x divide-y md:divide-y-0 divide-border bg-card/50 backdrop-blur-md">
+        <div className="grid grid-cols-2 divide-x divide-y divide-border bg-card/50 backdrop-blur-md">
           <div className="p-4 sm:p-5 flex flex-col gap-1">
             <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Total Sales</span>
             <span className="text-xl sm:text-2xl font-mono font-black text-blue-600 dark:text-blue-400">

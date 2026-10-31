@@ -1,29 +1,57 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { FiImage } from 'react-icons/fi';
 import { api } from '../../lib/api';
-import { useRealtimeSync } from '../../lib/realtimeSync';
+import { useRealtimeSync, fastDeepEqual } from '../../lib/realtimeSync';
 import { useAuth } from '../../context/AuthContext';
 
 export default function ImageCarousel() {
   const { user } = useAuth();
-  const [images, setImages] = useState([]);
+  const [images, setImages] = useState(() => {
+    try {
+      const saved = sessionStorage.getItem('pace_cached_carousel_images');
+      return saved ? JSON.parse(saved) : [];
+    } catch { return []; }
+  });
   const [currentIndex, setCurrentIndex] = useState(0);
+  const inFlightRef = useRef(false);
 
   const branchDisplay = user?.branch_name ? `${user.branch_name}` : '';
 
-  const fetchImages = async (source) => {
-    try {
-      const data = await api.carouselImages.getActive();
-      setImages(data || []);
-    } catch (err) {
-      console.error('Failed to load carousel images', err);
-    }
+  const normalizeImg = (url) => {
+    if (!url) return '';
+    const str = String(url).trim();
+    if (str.includes('/storage/')) return str.substring(str.indexOf('/storage/'));
+    return str;
   };
 
-  useEffect(() => {
-    fetchImages('initial');
+  const fetchImages = useCallback(async (_silent = false, signal) => {
+    if (inFlightRef.current) return;
+    inFlightRef.current = true;
+    try {
+      const data = await api.carouselImages.getActive({ signal });
+      if (signal?.aborted) return;
+      const list = data || [];
+      setImages(prev => {
+        if (fastDeepEqual(prev, list)) return prev;
+        try {
+          sessionStorage.setItem('pace_cached_carousel_images', JSON.stringify(list));
+        } catch (e) {}
+        return list;
+      });
+    } catch (err) {
+      if (err?.name !== 'AbortError') {
+        console.error('Failed to load carousel images', err);
+      }
+    } finally {
+      inFlightRef.current = false;
+    }
   }, []);
 
-  useRealtimeSync(fetchImages, []);
+  useEffect(() => {
+    fetchImages(false);
+  }, [fetchImages]);
+
+  useRealtimeSync(fetchImages, [fetchImages]);
 
   useEffect(() => {
     if (images.length <= 1) return;
@@ -37,9 +65,7 @@ export default function ImageCarousel() {
     return (
       <div className="relative w-full h-[250px] sm:h-[350px] md:h-[400px] rounded-2xl overflow-hidden shadow-sm mb-6 flex items-center justify-center bg-muted border border-dashed border-border">
         <div className="text-center text-slate-400 dark:text-slate-500 p-6">
-          <svg className="w-16 h-16 mx-auto mb-4 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-          </svg>
+          <FiImage className="w-16 h-16 mx-auto mb-4 opacity-50" />
           <h3 className="text-lg font-medium mb-1">Welcome to {branchDisplay}</h3>
           <p className="text-sm">Exciting deals and products will be featured here soon.</p>
         </div>
@@ -52,12 +78,15 @@ export default function ImageCarousel() {
       {images.map((img, index) => (
         <div
           key={img.id}
-          className={`absolute inset-0 transition-opacity duration-1000 ${index === currentIndex ? 'opacity-100 z-10' : 'opacity-0 z-0'
+          className={`absolute inset-0 transition-opacity duration-300 ${index === currentIndex ? 'opacity-100 z-10' : 'opacity-0 z-0 pointer-events-none'
             }`}
         >
           <img
-            src={img.image_url}
+            src={normalizeImg(img.image_url)}
             alt="Promotional Banner"
+            loading="eager"
+            decoding="async"
+            fetchPriority="high"
             className="w-full h-full object-cover"
           />
           <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent"></div>

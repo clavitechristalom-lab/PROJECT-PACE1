@@ -412,7 +412,7 @@ export default function QrRequestsPage() {
         <Modal
           title="VERIFY QR REQUEST"
           onClose={() => setReviewModalOpen(false)}
-          size="lg"
+          size="xl"
           footer={
             <div className="flex justify-between items-center w-full gap-3">
               <Btn
@@ -425,7 +425,7 @@ export default function QrRequestsPage() {
                 Reject Request
               </Btn>
 
-              <div className="flex gap-2">
+              <div className="flex gap-3">
                 <Btn variant="outline" size="sm" onClick={() => setReviewModalOpen(false)}>
                   Close
                 </Btn>
@@ -556,7 +556,7 @@ export default function QrRequestsPage() {
                 )}
               </div>
 
-              <div className="space-y-2 pt-1">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">
                 {[
                   { key: 'identity_verified', label: 'Identity information verified' },
                   { key: 'employee_info_verified', label: 'Employee/Staff information verified' },
@@ -595,9 +595,9 @@ export default function QrRequestsPage() {
         <Modal
           title="APPROVE QR REQUEST"
           onClose={() => setApproveModalOpen(false)}
-          size="md"
+          size="lg"
           footer={
-            <div className="flex justify-end gap-2 w-full">
+            <div className="flex justify-end gap-3 w-full">
               <Btn variant="outline" size="sm" onClick={() => setApproveModalOpen(false)} disabled={approving}>
                 Cancel
               </Btn>
@@ -620,12 +620,12 @@ export default function QrRequestsPage() {
 
             <div className="space-y-1">
               <h3 className="text-base font-bold text-foreground">Confirm QR Issuance</h3>
-              <p className="text-xs text-muted-foreground max-w-sm mx-auto">
+              <p className="text-xs text-muted-foreground max-w-md mx-auto">
                 After approval, a permanent cryptographic QR code will be generated and assigned to this account.
               </p>
             </div>
 
-            <div className="p-3.5 rounded-2xl bg-muted/30 border border-border text-xs space-y-1.5 text-left">
+            <div className="p-4 rounded-2xl bg-muted/30 border border-border text-xs space-y-2 text-left">
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Employee:</span>
                 <span className="font-bold text-foreground">{selectedRequest.name}</span>
@@ -652,9 +652,9 @@ export default function QrRequestsPage() {
         <Modal
           title="REJECT QR REQUEST"
           onClose={() => setRejectModalOpen(false)}
-          size="md"
+          size="lg"
           footer={
-            <div className="flex justify-end gap-2 w-full">
+            <div className="flex justify-end gap-3 w-full">
               <Btn variant="outline" size="sm" onClick={() => setRejectModalOpen(false)} disabled={rejecting}>
                 Cancel
               </Btn>

@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { api } from './api'
+export { fastDeepEqual, setIfChanged } from './diff'
 
 let syncInterval = null
 let broadcastChannel = null
