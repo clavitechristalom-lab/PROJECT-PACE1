@@ -326,8 +326,8 @@ class CustomerController extends Controller
         $user = auth()->user();
         if ($user && in_array($user->role, ['Store Administrator', 'Store Admin'])) {
             // Default to Store Admin's assigned branch if not explicitly chosen
-            if (empty($validated['branch_id']) && $user->employee && $user->employee->branch_id) {
-                $validated['branch_id'] = $user->employee->branch_id;
+            if (empty($validated['branch_id'])) {
+                $validated['branch_id'] = $user->employee?->branch_id ?? $user->branch_id ?? null;
             }
         }
 
@@ -395,8 +395,8 @@ class CustomerController extends Controller
 
         $user = auth()->user();
         if ($user && in_array($user->role, ['Store Administrator', 'Store Admin'])) {
-            if (empty($validated['branch_id']) && $user->employee && $user->employee->branch_id) {
-                $validated['branch_id'] = $user->employee->branch_id;
+            if (empty($validated['branch_id'])) {
+                $validated['branch_id'] = $user->employee?->branch_id ?? $user->branch_id ?? null;
             }
         }
 

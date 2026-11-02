@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react'
 import {
   FiCheckCircle, FiAlertCircle, FiX, FiChevronRight, FiChevronLeft,
-  FiUser, FiLayers, FiShield, FiCreditCard, FiCheck, FiSearch,
+  FiUser, FiLayers, FiCreditCard, FiCheck, FiSearch,
   FiClock, FiTrendingDown, FiDollarSign, FiCalendar, FiArrowRight,
   FiPrinter, FiFileText, FiPlus, FiMinus, FiAlertTriangle, FiLock,
   FiUsers
@@ -46,43 +46,22 @@ export default function PayrollWorkflowModal({
   const [undertimeMinutes, setUndertimeMinutes] = useState('0')
   const [overtimeHours, setOvertimeHours] = useState('0')
 
-  // Step 4: Government Contributions & Taxes - Strictly Mutually Exclusive
+  // Step 4: Government Contributions & Taxes
   const [includeSss, setIncludeSss] = useState(true)
-  const [includePagibig, setIncludePagibig] = useState(false)
-  const [includePhilhealth, setIncludePhilhealth] = useState(false)
+  const [includePagibig, setIncludePagibig] = useState(true)
+  const [includePhilhealth, setIncludePhilhealth] = useState(true)
   const [includeTax, setIncludeTax] = useState(false)
   const [includeCustomDeductions, setIncludeCustomDeductions] = useState(true)
   const [includeLoans, setIncludeLoans] = useState(true)
 
-  // Strict Exclusivity Handler: Selecting one statutory clears the others
+  // Statutory Deduction Toggle Handler
   const handleToggleStatutory = (type) => {
     if (type === 'sss') {
-      setIncludeSss(prev => {
-        const next = !prev
-        if (next) {
-          setIncludePhilhealth(false)
-          setIncludePagibig(false)
-        }
-        return next
-      })
+      setIncludeSss(prev => !prev)
     } else if (type === 'philhealth') {
-      setIncludePhilhealth(prev => {
-        const next = !prev
-        if (next) {
-          setIncludeSss(false)
-          setIncludePagibig(false)
-        }
-        return next
-      })
+      setIncludePhilhealth(prev => !prev)
     } else if (type === 'pagibig') {
-      setIncludePagibig(prev => {
-        const next = !prev
-        if (next) {
-          setIncludeSss(false)
-          setIncludePhilhealth(false)
-        }
-        return next
-      })
+      setIncludePagibig(prev => !prev)
     }
   }
 
@@ -463,25 +442,10 @@ export default function PayrollWorkflowModal({
     const undertimeHours = round2(numUndertimeMinutes / 60)
     const undertimeDeduction = round2((numUndertimeMinutes / 60) * hourlyRate)
 
-    // Strictly Mutually Exclusive Statutory Contributions:
-    // Only one contribution can be active; unselected evaluate strictly to 0.00
-    let sss = 0
-    let philhealth = 0
-    let pagibig = 0
-
-    if (includeSss) {
-      sss = Number(previewData?.calculation?.sss ?? round2(weeklyBase * 0.045))
-      philhealth = 0
-      pagibig = 0
-    } else if (includePhilhealth) {
-      sss = 0
-      philhealth = Number(previewData?.calculation?.philhealth ?? round2(weeklyBase * 0.025))
-      pagibig = 0
-    } else if (includePagibig) {
-      sss = 0
-      philhealth = 0
-      pagibig = Number(previewData?.calculation?.pagibig ?? Math.min(50, round2(weeklyBase * 0.02)))
-    }
+    // Standard Statutory Contributions (SSS, PhilHealth, Pag-IBIG):
+    const sss = includeSss ? Number(previewData?.calculation?.sss ?? round2(weeklyBase * 0.045)) : 0
+    const philhealth = includePhilhealth ? Number(previewData?.calculation?.philhealth ?? round2(weeklyBase * 0.025)) : 0
+    const pagibig = includePagibig ? Number(previewData?.calculation?.pagibig ?? Math.min(50, round2(weeklyBase * 0.02))) : 0
 
     const withholdingTax = includeTax ? Number(previewData?.calculation?.withholding_tax || 0) : 0
 
@@ -2189,73 +2153,6 @@ export default function PayrollWorkflowModal({
                     </div>
                   )}
 
-                  {/* Exclusive Statutory Contribution Selection Bar */}
-                  <div className="p-3.5 rounded-xl border border-border bg-card space-y-2">
-                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
-                      <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
-                        <FiShield className="w-3.5 h-3.5 text-blue-500" />
-                        <span>Strict Statutory Exclusivity Selection</span>
-                      </span>
-                      <span className="text-[10px] font-semibold text-emerald-600 dark:text-emerald-400">
-                        {includeSss ? 'SSS Active (PhilHealth & Pag-IBIG: ₱0.00)' : (includePhilhealth ? 'PhilHealth Active (SSS & Pag-IBIG: ₱0.00)' : (includePagibig ? 'Pag-IBIG Active (SSS & PhilHealth: ₱0.00)' : 'None Active (Statutory: ₱0.00)'))}
-                      </span>
-                    </div>
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
-                      <button
-                        type="button"
-                        onClick={() => handleToggleStatutory('sss')}
-                        className={`p-2 rounded-xl border text-center transition-all cursor-pointer font-bold ${
-                          includeSss
-                            ? 'border-emerald-500 bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 ring-1 ring-emerald-500/30 shadow-xs'
-                            : 'border-border bg-muted/20 text-muted-foreground hover:bg-muted/40 opacity-70'
-                        }`}
-                      >
-                        <div>SSS Only</div>
-                        <div className="text-[10px] font-mono font-normal opacity-80">{includeSss ? `-${fmt(clientComputation.sss)}` : '4.5% Exclusive'}</div>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleToggleStatutory('philhealth')}
-                        className={`p-2 rounded-xl border text-center transition-all cursor-pointer font-bold ${
-                          includePhilhealth
-                            ? 'border-teal-500 bg-teal-500/15 text-teal-600 dark:text-teal-400 ring-1 ring-teal-500/30 shadow-xs'
-                            : 'border-border bg-muted/20 text-muted-foreground hover:bg-muted/40 opacity-70'
-                        }`}
-                      >
-                        <div>PhilHealth Only</div>
-                        <div className="text-[10px] font-mono font-normal opacity-80">{includePhilhealth ? `-${fmt(clientComputation.philhealth)}` : '2.5% Exclusive'}</div>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleToggleStatutory('pagibig')}
-                        className={`p-2 rounded-xl border text-center transition-all cursor-pointer font-bold ${
-                          includePagibig
-                            ? 'border-amber-500 bg-amber-500/15 text-amber-600 dark:text-amber-400 ring-1 ring-amber-500/30 shadow-xs'
-                            : 'border-border bg-muted/20 text-muted-foreground hover:bg-muted/40 opacity-70'
-                        }`}
-                      >
-                        <div>Pag-IBIG Only</div>
-                        <div className="text-[10px] font-mono font-normal opacity-80">{includePagibig ? `-${fmt(clientComputation.pagibig)}` : 'Cap ₱50 Exclusive'}</div>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setIncludeSss(false)
-                          setIncludePhilhealth(false)
-                          setIncludePagibig(false)
-                        }}
-                        className={`p-2 rounded-xl border text-center transition-all cursor-pointer font-bold ${
-                          !includeSss && !includePhilhealth && !includePagibig
-                            ? 'border-slate-500 bg-slate-500/15 text-foreground ring-1 ring-slate-500/30 shadow-xs'
-                            : 'border-border bg-muted/20 text-muted-foreground hover:bg-muted/40 opacity-70'
-                        }`}
-                      >
-                        <div>None</div>
-                        <div className="text-[10px] font-mono font-normal opacity-80">₱0.00 Statutory</div>
-                      </button>
-                    </div>
-                  </div>
-
                   {/* Two-Column Ledger: Earnings vs Deductions */}
                   <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                     {/* Column 1: Gross Earnings */}
@@ -2314,19 +2211,19 @@ export default function PayrollWorkflowModal({
                               </span>
                             </div>
                             <div className="flex justify-between text-muted-foreground">
-                              <span>SSS Contribution ({includeSss ? 'Active' : 'Disabled'}):</span>
+                              <span>SSS Contribution:</span>
                               <span className="font-mono text-rose-500 font-medium">
                                 -{fmt(includeSss ? (batchAttendanceSummary?.totalSss || 0) : 0)}
                               </span>
                             </div>
                             <div className="flex justify-between text-muted-foreground">
-                              <span>PhilHealth ({includePhilhealth ? 'Active' : 'Disabled'}):</span>
+                              <span>PhilHealth:</span>
                               <span className="font-mono text-rose-500 font-medium">
                                 -{fmt(includePhilhealth ? (batchAttendanceSummary?.totalPhilhealth || 0) : 0)}
                               </span>
                             </div>
                             <div className="flex justify-between text-muted-foreground">
-                              <span>Pag-IBIG ({includePagibig ? 'Active' : 'Disabled'}):</span>
+                              <span>Pag-IBIG:</span>
                               <span className="font-mono text-rose-500 font-medium">
                                 -{fmt(includePagibig ? (batchAttendanceSummary?.totalPagibig || 0) : 0)}
                               </span>

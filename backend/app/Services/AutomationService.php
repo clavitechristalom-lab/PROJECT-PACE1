@@ -16,6 +16,63 @@ use Illuminate\Support\Facades\DB;
 class AutomationService
 {
     /**
+     * Delete expired entries from Laravel's file cache store.
+     *
+     * The list/dashboard endpoints use short-lived (1-2s) cache keys that include the data fingerprint,
+     * so every data change creates a new set of cache files. The file driver only removes an expired file
+     * when that exact key is read again, which never happens for old fingerprints, so the cache directory
+     * grew without bound (15k+ files), slowing every cache read/write on Windows.
+     */
+    public static function pruneExpiredFileCache(int $maxFiles = 50000): int
+    {
+        try {
+            if (config('cache.default') !== 'file') {
+                return 0;
+            }
+            $dir = config('cache.stores.file.path');
+            if (!$dir || !is_dir($dir)) {
+                return 0;
+            }
+
+            $now = time();
+            $deleted = 0;
+            $scanned = 0;
+            $iterator = new \RecursiveIteratorIterator(
+                new \RecursiveDirectoryIterator($dir, \FilesystemIterator::SKIP_DOTS),
+                \RecursiveIteratorIterator::CHILD_FIRST
+            );
+
+            foreach ($iterator as $file) {
+                if ($scanned++ >= $maxFiles) {
+                    break;
+                }
+                $path = $file->getPathname();
+                if ($file->isDir()) {
+                    @rmdir($path); // only succeeds when the directory is empty
+                    continue;
+                }
+                if ($file->getFilename() === '.gitignore') {
+                    continue;
+                }
+                // File cache format: the first 10 bytes are the UNIX expiry timestamp.
+                $handle = @fopen($path, 'rb');
+                if ($handle === false) {
+                    continue;
+                }
+                $expiry = (int) fread($handle, 10);
+                fclose($handle);
+                if ($expiry > 0 && $expiry < $now && @unlink($path)) {
+                    $deleted++;
+                }
+            }
+
+            return $deleted;
+        } catch (\Throwable $e) {
+            return 0;
+        }
+    }
+
+    /**
      * Run all scheduled system automations with throttling (max once per minute).
      */
     public static function runAllAutomations(bool $force = false): array
@@ -32,6 +89,13 @@ class AutomationService
         }
 
         Cache::put('automation_last_run', $now, 3600);
+
+        // Housekeeping: purge expired file-cache entries after the response is sent (non-blocking for the user).
+        if (function_exists('app') && app()->bound('events')) {
+            app()->terminating(static function () {
+                self::pruneExpiredFileCache();
+            });
+        }
 
         $results = [
             'overdue_installments' => self::checkOverdueInstallments(),

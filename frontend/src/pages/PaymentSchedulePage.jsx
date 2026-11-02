@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import {
   FiCalendar, FiClock, FiAlertTriangle, FiCheckCircle,
-  FiSearch, FiList, FiGrid, FiCreditCard, FiX
+  FiSearch, FiList, FiGrid, FiCreditCard, FiX, FiMapPin
 } from 'react-icons/fi'
 import {
   Btn, StatusBadge, Table, TR, TD, SearchBar, PageHeader, StatCard, Card, Pagination,
@@ -10,11 +10,17 @@ import {
 import { fmt, filterBySearch } from '../lib/utils'
 import { api } from '../lib/api'
 import { useRealtimeSync } from '../lib/realtimeSync'
+import { useAuth } from '../context/AuthContext'
 import { TbCurrencyPeso } from 'react-icons/tb'
 import { InstallmentAccountDetailsModal } from '../components/customer/CustomerModals'
 
 export default function PaymentSchedulePage({ branchFilter: propBranchFilter, embedded }) {
+  const { user } = useAuth()
+  const isStoreAdmin = user?.role === 'Store Administrator' || user?.role === 'Store Admin'
+  const userBranchName = user?.employee?.branch?.name || (typeof user?.employee?.branch === 'string' ? user.employee.branch : '')
+
   const [schedules, setSchedules] = useState([])
+  const [branches, setBranches] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [search, setSearch] = useState('')
@@ -29,9 +35,26 @@ export default function PaymentSchedulePage({ branchFilter: propBranchFilter, em
   const tDate = new Date();
   const localTodayStr = `${tDate.getFullYear()}-${String(tDate.getMonth() + 1).padStart(2, '0')}-${String(tDate.getDate()).padStart(2, '0')}`
 
-
-  const [localBranchFilter, setLocalBranchFilter] = useState('All')
+  const [localBranchFilter, setLocalBranchFilter] = useState(() => {
+    if (propBranchFilter) return propBranchFilter
+    if (isStoreAdmin && userBranchName) return userBranchName
+    return 'All'
+  })
   const branchFilter = propBranchFilter || localBranchFilter
+
+  // Load active store branches
+  useEffect(() => {
+    let isMounted = true
+    api.branches.getAll()
+      .then(res => {
+        if (isMounted) {
+          const list = Array.isArray(res) ? res : (res?.branches || [])
+          setBranches(list)
+        }
+      })
+      .catch(err => console.error('Failed to load branches:', err))
+    return () => { isMounted = false }
+  }, [])
 
   const loadSchedules = async (silent = false) => {
     if (!silent) setLoading(true)
@@ -40,7 +63,7 @@ export default function PaymentSchedulePage({ branchFilter: propBranchFilter, em
       const data = await api.payments.getSchedules({
         search: search || undefined,
         status: statusFilter !== 'All' ? statusFilter : undefined,
-        branch: branchFilter || undefined,
+        branch: branchFilter !== 'All' ? branchFilter : undefined,
       })
       const fetched = data.schedules || []
       setSchedules(fetched)
@@ -70,7 +93,7 @@ export default function PaymentSchedulePage({ branchFilter: propBranchFilter, em
   }, [statusFilter, branchFilter, search])
 
   const filtered = useMemo(() => {
-    return filterBySearch(schedules, search, ['account_no', 'customer_name', 'due_date'])
+    return filterBySearch(schedules, search, ['account_no', 'customer_name', 'due_date', 'branch'])
   }, [schedules, search])
 
   const total = filtered.length
@@ -123,7 +146,7 @@ export default function PaymentSchedulePage({ branchFilter: propBranchFilter, em
             )}
           </div>
 
-          <div className="flex gap-2 items-center w-full sm:w-auto">
+          <div className="flex flex-wrap gap-2 items-center w-full sm:w-auto">
             <div className="flex bg-muted/60 border border-border rounded-xl p-0.5">
               <button 
                 onClick={() => setViewMode('list')}
@@ -145,6 +168,22 @@ export default function PaymentSchedulePage({ branchFilter: propBranchFilter, em
               </button>
             </div>
 
+            {/* Branch Filter Dropdown */}
+            <select
+              value={branchFilter}
+              disabled={isStoreAdmin || !!propBranchFilter}
+              onChange={e => { setLocalBranchFilter(e.target.value); setPage(1); }}
+              className="border border-border rounded-xl px-3 py-2 text-xs font-semibold text-foreground bg-card cursor-pointer disabled:opacity-70 disabled:cursor-not-allowed"
+              title={isStoreAdmin ? `Branch locked to ${userBranchName || 'Assigned Branch'}` : 'Filter by Branch'}
+            >
+              <option value="All">All Branches</option>
+              {branches.map(b => (
+                <option key={b.id || b.branch_id} value={b.name || b.branch_name}>
+                  {b.name || b.branch_name}
+                </option>
+              ))}
+            </select>
+
             <select
               value={statusFilter}
               onChange={e => { setStatusFilter(e.target.value); setPage(1) }}
@@ -162,21 +201,22 @@ export default function PaymentSchedulePage({ branchFilter: propBranchFilter, em
       {/* Content */}
       <Card noPad={viewMode === 'list'} className={viewMode === 'calendar' ? 'bg-transparent shadow-none border-none p-0' : 'border border-border overflow-hidden'}>
         {loading ? (
-          <TableSkeleton rows={6} cols={7} />
+          <TableSkeleton rows={6} cols={9} />
         ) : filtered.length === 0 ? (
           <EmptyState
             icon={<FiCalendar className="w-12 h-12 text-muted-foreground/30 mx-auto" />}
             title="No payment schedules found"
-            description={search || statusFilter !== 'All' ? 'Try adjusting your search query or filters' : 'Schedules are automatically generated when installment sales are created'}
+            description={search || statusFilter !== 'All' || branchFilter !== 'All' ? 'Try adjusting your search query or filters' : 'Schedules are automatically generated when installment sales are created'}
           />
         ) : viewMode === 'list' ? (
           <>
             <div className="overflow-x-auto">
-              <table className="w-full text-xs min-w-[750px]">
+              <table className="w-full text-xs min-w-[850px]">
                 <thead>
                   <tr className="border-b border-border bg-muted/50 text-muted-foreground uppercase font-semibold text-[11px]">
                     <th className="py-3 px-4 text-left">Account No</th>
                     <th className="py-3 px-4 text-left">Customer Name</th>
+                    <th className="py-3 px-4 text-left">Branch</th>
                     <th className="py-3 px-4 text-left">Installment #</th>
                     <th className="py-3 px-4 text-left">Due Date</th>
                     <th className="py-3 px-4 text-right">Amount Due</th>
@@ -190,6 +230,12 @@ export default function PaymentSchedulePage({ branchFilter: propBranchFilter, em
                     <tr key={s.schedule_id || i} className={`hover:bg-muted/40 transition-colors ${i % 2 === 1 ? 'bg-muted/10' : ''}`}>
                       <td className="py-3 px-4 font-mono font-bold text-primary">{s.account_no}</td>
                       <td className="py-3 px-4 font-semibold text-foreground">{s.customer_name}</td>
+                      <td className="py-3 px-4">
+                        <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-md bg-blue-500/10 text-blue-700 dark:text-blue-300 border border-blue-500/20">
+                          <FiMapPin className="w-3 h-3 text-blue-500 flex-shrink-0" />
+                          <span>{s.branch || 'Main Branch'}</span>
+                        </span>
+                      </td>
                       <td className="py-3 px-4 font-mono text-muted-foreground">#{s.installment_no}</td>
                       <td className="py-3 px-4 font-mono">{s.status === 'Paid' && s.paid_date ? s.paid_date : s.due_date}</td>
                       <td className="py-3 px-4 text-right font-mono font-bold text-foreground">{fmt(s.amount_due)}</td>
@@ -299,7 +345,10 @@ export default function PaymentSchedulePage({ branchFilter: propBranchFilter, em
 
                           return (
                             <div key={s.schedule_id} onClick={() => setSelectedInstallmentId(s.installment_id)} className={`p-2 rounded-lg border text-[10px] leading-tight cursor-pointer hover:shadow-md transition-all ${bgColor}`} title={`${s.customer_name} - ${fmt(s.balance_due)}`}>
-                              <div className="opacity-70 mb-0.5 text-[9px] uppercase tracking-wide">Acc: {s.account_no}</div>
+                              <div className="flex justify-between items-center opacity-70 mb-0.5 text-[9px] uppercase tracking-wide">
+                                <span>Acc: {s.account_no}</span>
+                                {s.branch && <span className="font-semibold text-primary truncate max-w-[80px]" title={s.branch}>{s.branch}</span>}
+                              </div>
                               <div className="font-bold truncate text-[11px] mb-1">{s.customer_name}</div>
                               <div className="flex justify-between items-center mt-1 pt-1 border-t border-black/5 dark:border-white/10">
                                 <span className="opacity-80">{s.notes === 'Full Payment' ? 'Full Pay' : `Inst #${s.installment_no}`}</span>

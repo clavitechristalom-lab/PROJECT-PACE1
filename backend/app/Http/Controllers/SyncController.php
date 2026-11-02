@@ -99,8 +99,11 @@ class SyncController extends Controller
         $role = $user ? $user->role : '';
         $empId = $user ? ($user->employee_id ?? 0) : 0;
 
-        $cacheKey = "pace_sync_status_{$userId}_{$latestLogId}";
-        $data = Cache::remember($cacheKey, 1, function () use ($user, $userId, $role, $empId, $latestLogId) {
+        // Computed directly: these are 1-3 indexed aggregate queries (~1ms). The previous
+        // Cache::remember("pace_sync_status_{$userId}_{$latestLogId}", 1, ...) created a brand-new cache
+        // file for every user/fingerprint combination; the file store never deletes expired entries,
+        // so tens of thousands of stale files piled up and each poll paid a disk write.
+        $data = (function () use ($user, $userId, $role, $empId, $latestLogId) {
             $latestNotifId = 0;
             $unreadNotifs = 0;
             if ($user && $userId) {
@@ -132,7 +135,7 @@ class SyncController extends Controller
                 'pending_verifications' => (int)$pendingVerifications,
                 'pending_qr_requests' => (int)$pendingQrRequests,
             ];
-        });
+        })();
 
         $data['timestamp'] = now()->toISOString();
         $data['automations'] = $autoResults;

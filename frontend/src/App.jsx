@@ -2,7 +2,7 @@ import { useEffect, useState, lazy, Suspense } from 'react'
 import { HashRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import { AuthProvider, useAuth } from './context/AuthContext'
 import { ToastContainer, ErrorBoundary, Spinner } from './components/ui'
-import { startRealtimeEngine, triggerDataSync } from './lib/realtimeSync'
+import { triggerDataSync } from './lib/realtimeSync'
 import AppShell from './components/layout/AppShell'
 import LoginPage from './pages/LoginPage'
 
@@ -363,11 +363,6 @@ function AppRoutes() {
 }
 
 export default function App() {
-  useEffect(() => {
-    const cleanup = startRealtimeEngine()
-    return cleanup
-  }, [])
-
   return (
     <ErrorBoundary>
       <AuthProvider>

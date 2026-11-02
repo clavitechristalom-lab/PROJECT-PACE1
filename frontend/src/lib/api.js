@@ -18,13 +18,36 @@ const responseCache = new Map();
 const CACHE_TTL_MS = 800; 
 // 800ms TTL for sub-second de-duplication while ensuring fresh 1-2s auto-refresh
 
-export function clearApiCache() {
-  responseCache.clear();
+export function clearApiCache(endpointPrefix = null) {
+  if (!endpointPrefix) {
+    responseCache.clear();
+    return;
+  }
+  for (const key of responseCache.keys()) {
+    if (key.includes(endpointPrefix)) {
+      responseCache.delete(key);
+    }
+  }
+}
+
+export function clearApiCacheForModule(module, targetId = null) {
+  if (!module) return;
+  const modLower = String(module).toLowerCase();
+  for (const key of responseCache.keys()) {
+    const keyLower = key.toLowerCase();
+    if (keyLower.includes(`/${modLower}`) || keyLower.includes(`module=${modLower}`)) {
+      if (targetId === null || targetId === undefined || key.includes(String(targetId))) {
+        responseCache.delete(key);
+      }
+    }
+  }
 }
 
 if (typeof window !== 'undefined') {
-  window.addEventListener('pace:data-sync', () => {
-    responseCache.clear();
+  window.addEventListener('pace:on-demand-sync', (e) => {
+    if (e.detail?.module) {
+      clearApiCacheForModule(e.detail.module, e.detail.targetId);
+    }
   });
 }
 
@@ -550,9 +573,13 @@ export const api = {
     },
     getDaily: async (params = {}, options = {}) => {
       const qs = new URLSearchParams(cleanParams(params)).toString();
+      const sumQs = new URLSearchParams(cleanParams({
+        date: params.date,
+        branch: params.branch,
+      })).toString();
       const [attData, summaryData] = await Promise.all([
         request(`/attendance${qs ? `?${qs}` : ''}`, options),
-        request(`/attendance/summary${params.date ? `?date=${params.date}` : ''}`, options).catch(() => null),
+        request(`/attendance/summary${sumQs ? `?${sumQs}` : ''}`, options).catch(() => null),
       ]);
       return {
         records: attData?.attendance || attData?.records || [],

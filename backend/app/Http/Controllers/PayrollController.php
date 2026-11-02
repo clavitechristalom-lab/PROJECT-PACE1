@@ -835,11 +835,11 @@ class PayrollController extends Controller
         $skippedCount = 0;
         $noAttendanceCount = 0;
 
-        // Resolve strict Contribution Tax Exclusivity
+        // Resolve Contribution Tax Settings
         $preset = $request->input('gov_tax_deduction_preset');
-        $includeSss = $request->boolean('include_sss', false);
-        $includePhilhealth = $request->boolean('include_philhealth', false);
-        $includePagibig = $request->boolean('include_pagibig', false);
+        $includeSss = $request->has('include_sss') ? $request->boolean('include_sss') : true;
+        $includePhilhealth = $request->has('include_philhealth') ? $request->boolean('include_philhealth') : true;
+        $includePagibig = $request->has('include_pagibig') ? $request->boolean('include_pagibig') : true;
 
         if ($preset === 'sss') {
             $includeSss = true; $includePhilhealth = false; $includePagibig = false;
@@ -849,12 +849,8 @@ class PayrollController extends Controller
             $includePagibig = true; $includeSss = false; $includePhilhealth = false;
         } elseif ($preset === 'none') {
             $includeSss = false; $includePhilhealth = false; $includePagibig = false;
-        } elseif ($includeSss) {
-            $includePhilhealth = false; $includePagibig = false;
-        } elseif ($includePhilhealth) {
-            $includeSss = false; $includePagibig = false;
-        } elseif ($includePagibig) {
-            $includeSss = false; $includePhilhealth = false;
+        } elseif ($preset === 'all') {
+            $includeSss = true; $includePhilhealth = true; $includePagibig = true;
         }
 
         $todayStr = date('Y-m-d');
@@ -1018,27 +1014,29 @@ class PayrollController extends Controller
                         ]);
                     }
 
-                    // 4. Exclusive Statutory Deductions
+                    // 4. Statutory Deductions
                     if ($details['sss'] > 0) {
                         PayrollDeduction::create([
                             'payroll_id' => $payroll->payroll_id,
                             'deduction_type' => 'SSS',
                             'amount' => $details['sss'],
-                            'notes' => 'SSS Contribution (Exclusive Approved)',
+                            'notes' => 'SSS Contribution',
                         ]);
-                    } elseif ($details['philhealth'] > 0) {
+                    }
+                    if ($details['philhealth'] > 0) {
                         PayrollDeduction::create([
                             'payroll_id' => $payroll->payroll_id,
                             'deduction_type' => 'PhilHealth',
                             'amount' => $details['philhealth'],
-                            'notes' => 'PhilHealth Contribution (Exclusive Approved)',
+                            'notes' => 'PhilHealth Contribution',
                         ]);
-                    } elseif ($details['pagibig'] > 0) {
+                    }
+                    if ($details['pagibig'] > 0) {
                         PayrollDeduction::create([
                             'payroll_id' => $payroll->payroll_id,
                             'deduction_type' => 'Pag-IBIG',
                             'amount' => $details['pagibig'],
-                            'notes' => 'Pag-IBIG (HDMF) Contribution (Exclusive Approved)',
+                            'notes' => 'Pag-IBIG (HDMF) Contribution',
                         ]);
                     }
 
@@ -1552,10 +1550,9 @@ class PayrollController extends Controller
 
     /**
      * Compute Philippine statutory deductions (SSS, PhilHealth, Pag-IBIG) and Withholding Tax.
-     * Enforces strict mutual exclusivity:
-     * - If SSS is selected: Only SSS is calculated and deducted. PhilHealth and Pag-IBIG strictly evaluate to ₱0.00.
-     * - If PhilHealth is selected: Only PhilHealth is calculated and deducted. SSS and Pag-IBIG strictly evaluate to ₱0.00.
-     * - If Pag-IBIG is selected: Only Pag-IBIG is calculated and deducted. SSS and PhilHealth strictly evaluate to ₱0.00.
+     * - SSS: 4.5% employee share
+     * - PhilHealth: 2.5% employee share
+     * - Pag-IBIG: 2% of basic pay (capped standard ceiling)
      * - Zero Hours Rule: If basicPay <= 0 or grossPay <= 0, all statutory deductions strictly evaluate to ₱0.00.
      */
     private function computeStatutoryDeductions(float $basicPay, float $grossPay, array $options = []): array
@@ -1564,19 +1561,6 @@ class PayrollController extends Controller
         $includePhilhealth = !empty($options['include_philhealth']);
         $includePagibig = !empty($options['include_pagibig']);
         $includeTax = !empty($options['include_tax']);
-
-        // Strict Mutual Exclusivity Enforcement Gate:
-        // Selecting one statutory contribution strictly zeroes out and excludes the others
-        if ($includeSss) {
-            $includePhilhealth = false;
-            $includePagibig = false;
-        } elseif ($includePhilhealth) {
-            $includeSss = false;
-            $includePagibig = false;
-        } elseif ($includePagibig) {
-            $includeSss = false;
-            $includePhilhealth = false;
-        }
 
         $cutoffType = strtolower($options['cutoff_type'] ?? 'weekly');
         $isWeekly = ($cutoffType === 'weekly' || !empty($options['is_weekly']));
@@ -1602,22 +1586,6 @@ class PayrollController extends Controller
         // Monthly: ₱200.00 | Semi-monthly (50% split): ₱100.00 | Weekly (25% split): ₱50.00
         $pagibigCap = $isWeekly ? 50.00 : ($isMonthly ? 200.00 : 100.00);
         $pagibig = ($includePagibig && $basicPay > 0) ? min($pagibigCap, round($basicPay * 0.02, 2)) : 0.0;
-
-        // Post-calculation exclusivity check: strictly eliminate any residual amounts
-        if ($includeSss) {
-            $philhealth = 0.0;
-            $pagibig = 0.0;
-        } elseif ($includePhilhealth) {
-            $sss = 0.0;
-            $pagibig = 0.0;
-        } elseif ($includePagibig) {
-            $sss = 0.0;
-            $philhealth = 0.0;
-        } else {
-            $sss = 0.0;
-            $philhealth = 0.0;
-            $pagibig = 0.0;
-        }
 
         // Withholding Tax: Semi-monthly/weekly/monthly TRAIN Law revised withholding tax table
         $tax = 0.0;
@@ -1665,7 +1633,7 @@ class PayrollController extends Controller
      * - Weekly Cutoff Cycle: Monday to Saturday (6 working days / 48 standard hours).
      * - Zero Hours Rule: working_hours = 0 strictly yields ₱0.00 computed salary.
      * - Daily Calculation to Weekly Payday Total: dynamic wage based on daily hours, daily rates, and logs.
-     * - Strict Exclusive Contribution Tax selection.
+     * - Standard Statutory Contribution (SSS, PhilHealth, Pag-IBIG) calculation.
      */
     private function calculateEmployeePayrollDetails(Employee $emp, PayrollPeriod $period, array $options = []): array
     {
@@ -1872,7 +1840,7 @@ class PayrollController extends Controller
 
         $grossPay = round($periodBasePay + $allowance + $overtimePay, 2);
 
-        // ─── STRICT EXCLUSIVE CONTRIBUTION TAX SELECTION ─────────────────
+        // ─── STATUTORY CONTRIBUTION TAX COMPUTATION ─────────────────────
         $includeSss = !empty($options['include_sss']);
         $includePhilhealth = !empty($options['include_philhealth']);
         $includePagibig = !empty($options['include_pagibig']);
@@ -1888,36 +1856,11 @@ class PayrollController extends Controller
         $approvedPagibig = $dedsByName->get('Pag-IBIG (HDMF)')?->amount ?? $dedsByName->get('Pag-IBIG')?->amount;
         $approvedTax = $dedsByName->get('Withholding Tax')?->amount ?? $dedsByName->get('Tax')?->amount;
 
-        // If no explicit toggle options passed, check which exclusive contribution is approved in database
+        // If no explicit toggle options passed, check which contributions are active in database
         if (!isset($options['include_sss']) && !isset($options['include_philhealth']) && !isset($options['include_pagibig'])) {
-            if ($approvedSss !== null && (float)$approvedSss > 0) {
-                $includeSss = true;
-                $includePhilhealth = false;
-                $includePagibig = false;
-            } elseif ($approvedPhic !== null && (float)$approvedPhic > 0) {
-                $includePhilhealth = true;
-                $includeSss = false;
-                $includePagibig = false;
-            } elseif ($approvedPagibig !== null && (float)$approvedPagibig > 0) {
-                $includePagibig = true;
-                $includeSss = false;
-                $includePhilhealth = false;
-            }
-        }
-
-        // Enforce strict exclusivity gate:
-        // Selecting SSS forces PhilHealth & Pag-IBIG to ₱0.00
-        // Selecting PhilHealth forces SSS & Pag-IBIG to ₱0.00
-        // Selecting Pag-IBIG forces SSS & PhilHealth to ₱0.00
-        if ($includeSss) {
-            $includePhilhealth = false;
-            $includePagibig = false;
-        } elseif ($includePhilhealth) {
-            $includeSss = false;
-            $includePagibig = false;
-        } elseif ($includePagibig) {
-            $includeSss = false;
-            $includePhilhealth = false;
+            $includeSss = ($approvedSss !== null && (float)$approvedSss > 0);
+            $includePhilhealth = ($approvedPhic !== null && (float)$approvedPhic > 0);
+            $includePagibig = ($approvedPagibig !== null && (float)$approvedPagibig > 0);
         }
 
         $autoStatutory = $this->computeStatutoryDeductions($periodBasePay, $grossPay, [
@@ -1952,22 +1895,6 @@ class PayrollController extends Controller
                 ? (float)$options['custom_tax']
                 : ($approvedTax !== null ? (float)$approvedTax : (float)$autoStatutory['withholding_tax']))
             : 0.0;
-
-        // Post-validation exclusivity check: guarantees 0.00 for unselected
-        if ($includeSss) {
-            $philhealth = 0.0;
-            $pagibig = 0.0;
-        } elseif ($includePhilhealth) {
-            $sss = 0.0;
-            $pagibig = 0.0;
-        } elseif ($includePagibig) {
-            $sss = 0.0;
-            $philhealth = 0.0;
-        } else {
-            $sss = 0.0;
-            $philhealth = 0.0;
-            $pagibig = 0.0;
-        }
 
         // Custom Deductions (filtered in-memory)
         $customDeductions = [];
@@ -2128,21 +2055,9 @@ class PayrollController extends Controller
                 : $this->resolveOrCreateCurrentPeriod($user);
         }
 
-        $includeSss = $request->boolean('include_sss', false);
-        $includePhilhealth = $request->boolean('include_philhealth', false);
-        $includePagibig = $request->boolean('include_pagibig', false);
-
-        // Enforce strict statutory contribution exclusivity
-        if ($includeSss) {
-            $includePhilhealth = false;
-            $includePagibig = false;
-        } elseif ($includePhilhealth) {
-            $includeSss = false;
-            $includePagibig = false;
-        } elseif ($includePagibig) {
-            $includeSss = false;
-            $includePhilhealth = false;
-        }
+        $includeSss = $request->has('include_sss') ? $request->boolean('include_sss') : true;
+        $includePhilhealth = $request->has('include_philhealth') ? $request->boolean('include_philhealth') : true;
+        $includePagibig = $request->has('include_pagibig') ? $request->boolean('include_pagibig') : true;
 
         $options = [
             'from_date' => $request->input('from_date'),
@@ -2346,18 +2261,6 @@ class PayrollController extends Controller
         $includePagibig = $request->boolean('include_pagibig', false);
         $includeTax = $request->boolean('include_tax', false);
 
-        // Strict Statutory Contribution Exclusivity Enforcement Gate
-        if ($includeSss) {
-            $includePhilhealth = false;
-            $includePagibig = false;
-        } elseif ($includePhilhealth) {
-            $includeSss = false;
-            $includePagibig = false;
-        } elseif ($includePagibig) {
-            $includeSss = false;
-            $includePhilhealth = false;
-        }
-
         // Resolve rates
         [$weeklyBase, $dailyRate, $hourlyRate, $minuteRate, $monthlyBasic] = $this->resolveEmployeeRates($employee);
 
@@ -2396,22 +2299,6 @@ class PayrollController extends Controller
         $pagibigAmount = $includePagibig
             ? (isset($request->custom_pagibig) && is_numeric($request->custom_pagibig) ? round((float)$request->custom_pagibig, 2) : $calculatedPagibig)
             : 0.0;
-
-        // Strict mutual exclusivity zero-out check: guarantees unselected contributions strictly evaluate to ₱0.00
-        if ($includeSss) {
-            $philhealthAmount = 0.0;
-            $pagibigAmount = 0.0;
-        } elseif ($includePhilhealth) {
-            $sssAmount = 0.0;
-            $pagibigAmount = 0.0;
-        } elseif ($includePagibig) {
-            $sssAmount = 0.0;
-            $philhealthAmount = 0.0;
-        } else {
-            $sssAmount = 0.0;
-            $philhealthAmount = 0.0;
-            $pagibigAmount = 0.0;
-        }
 
         // 4. Withholding Tax (TRAIN Law)
         $taxAmount = 0.0;
@@ -2640,21 +2527,9 @@ class PayrollController extends Controller
                 : $this->resolveOrCreateCurrentPeriod($user);
         }
 
-        $includeSss = $request->boolean('include_sss', false);
-        $includePhilhealth = $request->boolean('include_philhealth', false);
-        $includePagibig = $request->boolean('include_pagibig', false);
-
-        // Enforce strict statutory contribution exclusivity
-        if ($includeSss) {
-            $includePhilhealth = false;
-            $includePagibig = false;
-        } elseif ($includePhilhealth) {
-            $includeSss = false;
-            $includePagibig = false;
-        } elseif ($includePagibig) {
-            $includeSss = false;
-            $includePhilhealth = false;
-        }
+        $includeSss = $request->has('include_sss') ? $request->boolean('include_sss') : true;
+        $includePhilhealth = $request->has('include_philhealth') ? $request->boolean('include_philhealth') : true;
+        $includePagibig = $request->has('include_pagibig') ? $request->boolean('include_pagibig') : true;
 
         $options = [
             'from_date' => $request->input('from_date'),
@@ -3555,7 +3430,7 @@ class PayrollController extends Controller
     /**
      * Automatically generate and finalize weekly payroll calculations upon reaching the weekly payday cutoff.
      * Computes wages dynamically based on daily working hours, daily rates, and live attendance logs.
-     * Enforces the Zero Hours Rule (0 hours = ₱0.00 salary) and strict exclusive statutory deductions.
+     * Enforces the Zero Hours Rule (0 hours = ₱0.00 salary) and standard statutory deductions.
      */
     public static function autoFinalizeWeeklyPaydayCutoff(?PayrollPeriod $targetPeriod = null): array
     {
@@ -3682,21 +3557,23 @@ class PayrollController extends Controller
                                 'payroll_id' => $payroll->payroll_id,
                                 'deduction_type' => 'SSS',
                                 'amount' => $details['sss'],
-                                'notes' => 'SSS Statutory Contribution (Exclusive Approved)',
+                                'notes' => 'SSS Statutory Contribution',
                             ]);
-                        } elseif ($details['philhealth'] > 0) {
+                        }
+                        if ($details['philhealth'] > 0) {
                             PayrollDeduction::create([
                                 'payroll_id' => $payroll->payroll_id,
                                 'deduction_type' => 'PhilHealth',
                                 'amount' => $details['philhealth'],
-                                'notes' => 'PhilHealth Statutory Contribution (Exclusive Approved)',
+                                'notes' => 'PhilHealth Statutory Contribution',
                             ]);
-                        } elseif ($details['pagibig'] > 0) {
+                        }
+                        if ($details['pagibig'] > 0) {
                             PayrollDeduction::create([
                                 'payroll_id' => $payroll->payroll_id,
                                 'deduction_type' => 'Pag-IBIG',
                                 'amount' => $details['pagibig'],
-                                'notes' => 'Pag-IBIG Statutory Contribution (Exclusive Approved)',
+                                'notes' => 'Pag-IBIG Statutory Contribution',
                             ]);
                         }
 
@@ -3863,21 +3740,23 @@ class PayrollController extends Controller
                         'payroll_id' => $existing->payroll_id,
                         'deduction_type' => 'SSS',
                         'amount' => $details['sss'],
-                        'notes' => 'SSS Contribution (Exclusive Approved)',
+                        'notes' => 'SSS Contribution',
                     ]);
-                } elseif ($details['philhealth'] > 0) {
+                }
+                if ($details['philhealth'] > 0) {
                     PayrollDeduction::create([
                         'payroll_id' => $existing->payroll_id,
                         'deduction_type' => 'PhilHealth',
                         'amount' => $details['philhealth'],
-                        'notes' => 'PhilHealth Contribution (Exclusive Approved)',
+                        'notes' => 'PhilHealth Contribution',
                     ]);
-                } elseif ($details['pagibig'] > 0) {
+                }
+                if ($details['pagibig'] > 0) {
                     PayrollDeduction::create([
                         'payroll_id' => $existing->payroll_id,
                         'deduction_type' => 'Pag-IBIG',
                         'amount' => $details['pagibig'],
-                        'notes' => 'Pag-IBIG (HDMF) Contribution (Exclusive Approved)',
+                        'notes' => 'Pag-IBIG (HDMF) Contribution',
                     ]);
                 }
 

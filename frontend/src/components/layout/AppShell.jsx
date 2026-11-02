@@ -308,21 +308,10 @@ function Sidebar({ collapsed, settings, mobileOpen, onCloseMobile, onOpenConfig 
         if (isMounted && typeof res?.pending_count === 'number') {
           setPendingLettersCount(res.pending_count)
         }
-      } catch (_) {}
+      } catch (_) { }
     }
     fetchSummary()
     return () => { isMounted = false }
-  }, [user])
-
-  useRealtimeSync(() => {
-    if (!user || user.role === 'Customer') return
-    api.employeeLetters.getSummary()
-      .then(res => {
-        if (typeof res?.pending_count === 'number') {
-          setPendingLettersCount(res.pending_count)
-        }
-      })
-      .catch(() => {})
   }, [user])
 
   const navItems = user ? navByRole(user.role, onOpenConfig, pendingLettersCount) : []
@@ -358,32 +347,24 @@ function Sidebar({ collapsed, settings, mobileOpen, onCloseMobile, onOpenConfig 
             className="fixed inset-y-0 left-0 z-50 w-[260px] bg-white dark:bg-[#071328] border-r border-blue-500/20 shadow-2xl flex flex-col h-full overflow-hidden animate-[slideRight_0.2s_ease]"
           >
             {/* Drawer Logo */}
-            <div className="flex items-center justify-between px-4 py-4 border-b border-blue-500/15 flex-shrink-0">
-              <div className="flex items-center gap-2.5 min-w-0">
-                {resolveLogoUrl(settings?.logo_url || settings?.logo) ? (
-                  <img
-                    src={resolveLogoUrl(settings?.logo_url || settings?.logo)}
-                    alt="Logo"
-                    className="w-8 h-8 rounded-xl object-contain flex-shrink-0 shadow-xs bg-white p-0.5"
-                    onError={(e) => { e.currentTarget.style.display = 'none'; }}
-                  />
-                ) : (
-                  <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-blue-600 via-indigo-600 to-slate-900 border border-blue-400/30 flex items-center justify-center text-white font-bold text-sm flex-shrink-0 shadow-xs">
-                    {(companyName || 'P').charAt(0).toUpperCase()}
-                  </div>
-                )}
-                <div className="overflow-hidden">
-                  <div className="text-slate-900 dark:text-white font-bold text-sm tracking-wide leading-tight truncate">{companyName}</div>
-                  <div className="text-blue-700 dark:text-blue-300/80 text-[9px] font-mono leading-tight truncate">{siteName}</div>
-                </div>
-              </div>
+            <div className="relative flex flex-col items-center justify-center px-3 py-4 sm:py-5 border-b border-slate-200 dark:border-slate-800 flex-shrink-0 overflow-hidden">
               <button
                 onClick={onCloseMobile}
-                className="lg:hidden text-blue-800 dark:text-blue-200 hover:text-foreground p-1 rounded-lg hover:bg-blue-500/15 cursor-pointer"
+                className="absolute top-3 right-3 text-slate-500 dark:text-slate-400 hover:text-foreground p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800/60 cursor-pointer transition-colors z-10"
                 aria-label="Close menu"
               >
                 <FiX className="w-5 h-5" />
               </button>
+              <img
+                src={resolveLogoUrl(settings?.logo_url || settings?.logo) || '/zlicz-logo.png'}
+                alt="Z-LICZ Furniture & Appliances Trading"
+                className="w-full max-w-[220px] h-24 sm:h-28 object-contain mx-auto drop-shadow-md"
+                onError={(e) => {
+                  if (e.currentTarget.src !== window.location.origin + '/zlicz-logo.png' && !e.currentTarget.src.endsWith('/zlicz-logo.png')) {
+                    e.currentTarget.src = '/zlicz-logo.png'
+                  }
+                }}
+              />
             </div>
 
             {/* Drawer Nav */}
@@ -430,131 +411,124 @@ function Sidebar({ collapsed, settings, mobileOpen, onCloseMobile, onOpenConfig 
         </>
       )}
 
-      {/* ─── PERSISTENT ICON-ONLY MINI SIDEBAR (MOBILE/TABLET ALWAYS, AND DESKTOP WHEN COLLAPSED) ─── */}
-      <aside
-        className={`sidebar-shell flex-col h-full overflow-hidden flex-shrink-0 select-none z-30 print:hidden transition-all duration-200 border-r border-blue-500/15 bg-white dark:bg-[#071328] ${collapsed ? 'flex w-[68px] min-w-[68px]' : 'flex w-[68px] min-w-[68px] lg:hidden'
-          }`}
-      >
-        <div className="flex-1 overflow-y-auto overflow-x-hidden py-3 px-2 flex flex-col items-center gap-2.5 [scrollbar-width:thin] [scrollbar-color:rgba(59,130,246,0.25)_transparent] [&::-webkit-scrollbar]:w-1 [&::-webkit-scrollbar-thumb]:bg-blue-500/25 [&::-webkit-scrollbar-thumb]:rounded-full">
-          {railItems.map((item, idx) => {
-            const active = isItemActive(item)
+      {/* ─── SIDEBAR: TOGGLED BETWEEN ICON-ONLY MINI RAIL AND FULL EXPANDED SIDEBAR ─── */}
+      {collapsed ? (
+        /* Icon-Only Mini Sidebar */
+        <aside
+          className="sidebar-shell flex flex-col h-full overflow-hidden flex-shrink-0 select-none z-30 print:hidden transition-all duration-200 border-r border-blue-500/15 bg-white dark:bg-[#071328] w-[68px] min-w-[68px]"
+        >
+          <div className="flex-1 overflow-y-auto overflow-x-hidden py-3 px-2 flex flex-col items-center gap-2.5 [scrollbar-width:thin] [scrollbar-color:rgba(59,130,246,0.25)_transparent] [&::-webkit-scrollbar]:w-1 [&::-webkit-scrollbar-thumb]:bg-blue-500/25 [&::-webkit-scrollbar-thumb]:rounded-full">
+            {railItems.map((item, idx) => {
+              const active = isItemActive(item)
 
-            if (item.action) {
+              if (item.action) {
+                return (
+                  <button
+                    key={`rail-action-${idx}`}
+                    type="button"
+                    onClick={item.action}
+                    title={item.label}
+                    className="relative w-11 h-11 rounded-[14px] text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 hover:bg-blue-50 dark:hover:bg-blue-900/30 flex items-center justify-center cursor-pointer flex-shrink-0 transition-all active:scale-95 group"
+                    aria-label={item.label}
+                  >
+                    <span className="flex items-center justify-center [&>svg]:w-5 [&>svg]:h-5 [&>svg]:stroke-[2.2] text-blue-600 dark:text-blue-400">
+                      {item.icon}
+                    </span>
+                    <span className="pointer-events-none absolute left-14 z-50 whitespace-nowrap rounded-lg bg-slate-900 dark:bg-slate-800 px-2.5 py-1 text-xs font-semibold text-white shadow-xl opacity-0 transition-opacity group-hover:opacity-100 hidden md:block">
+                      {item.label}
+                    </span>
+                  </button>
+                )
+              }
+
               return (
-                <button
-                  key={`rail-action-${idx}`}
-                  type="button"
-                  onClick={item.action}
+                <NavLink
+                  key={`rail-link-${item.path}-${idx}`}
+                  to={item.path}
                   title={item.label}
-                  className="relative w-11 h-11 rounded-[14px] text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 hover:bg-blue-50 dark:hover:bg-blue-900/30 flex items-center justify-center cursor-pointer flex-shrink-0 transition-all active:scale-95 group"
+                  className={`relative w-11 h-11 rounded-[14px] flex items-center justify-center cursor-pointer flex-shrink-0 transition-all active:scale-95 group ${active
+                    ? 'bg-gradient-to-b from-blue-600 via-blue-600 to-indigo-600 text-white shadow-[0_8px_20px_-4px_rgba(37,99,235,0.45)]'
+                    : 'text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 hover:bg-blue-50 dark:hover:bg-blue-900/30'
+                    }`}
                   aria-label={item.label}
                 >
-                  <span className="flex items-center justify-center [&>svg]:w-5 [&>svg]:h-5 [&>svg]:stroke-[2.2] text-blue-600 dark:text-blue-400">
+                  <span className={`flex items-center justify-center [&>svg]:w-5 [&>svg]:h-5 [&>svg]:stroke-[2.2] ${active ? 'text-white' : 'text-blue-600 dark:text-blue-400'}`}>
                     {item.icon}
                   </span>
+                  {item.badge ? (
+                    <span className="absolute -top-1 -right-1 w-4 h-4 bg-rose-600 text-white text-[9px] font-bold rounded-full flex items-center justify-center shadow-xs">
+                      {item.badge}
+                    </span>
+                  ) : null}
                   <span className="pointer-events-none absolute left-14 z-50 whitespace-nowrap rounded-lg bg-slate-900 dark:bg-slate-800 px-2.5 py-1 text-xs font-semibold text-white shadow-xl opacity-0 transition-opacity group-hover:opacity-100 hidden md:block">
                     {item.label}
                   </span>
-                </button>
+                </NavLink>
               )
-            }
-
-            return (
-              <NavLink
-                key={`rail-link-${item.path}-${idx}`}
-                to={item.path}
-                title={item.label}
-                className={`relative w-11 h-11 rounded-[14px] flex items-center justify-center cursor-pointer flex-shrink-0 transition-all active:scale-95 group ${active
-                  ? 'bg-gradient-to-b from-blue-600 via-blue-600 to-indigo-600 text-white shadow-[0_8px_20px_-4px_rgba(37,99,235,0.45)]'
-                  : 'text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 hover:bg-blue-50 dark:hover:bg-blue-900/30'
-                  }`}
-                aria-label={item.label}
-              >
-                <span className={`flex items-center justify-center [&>svg]:w-5 [&>svg]:h-5 [&>svg]:stroke-[2.2] ${active ? 'text-white' : 'text-blue-600 dark:text-blue-400'}`}>
-                  {item.icon}
-                </span>
-                {item.badge ? (
-                  <span className="absolute -top-1 -right-1 w-4 h-4 bg-rose-600 text-white text-[9px] font-bold rounded-full flex items-center justify-center shadow-xs">
-                    {item.badge}
-                  </span>
-                ) : null}
-                <span className="pointer-events-none absolute left-14 z-50 whitespace-nowrap rounded-lg bg-slate-900 dark:bg-slate-800 px-2.5 py-1 text-xs font-semibold text-white shadow-xl opacity-0 transition-opacity group-hover:opacity-100 hidden md:block">
-                  {item.label}
-                </span>
-              </NavLink>
-            )
-          })}
-        </div>
-      </aside>
-
-      {/* ─── DESKTOP EXPANDED SIDEBAR (ONLY SHOWN ON LG: WHEN NOT COLLAPSED) ─── */}
-      <aside
-        className={`sidebar-shell hidden lg:flex flex-col h-full overflow-hidden flex-shrink-0 transition-all duration-200 select-none z-30 print:hidden border-r border-blue-500/15 bg-white dark:bg-[#071328] ${collapsed ? 'hidden' : 'w-[240px]'
-          }`}
-      >
-        {/* Logo */}
-        <div className="flex items-center justify-between px-4 py-4 border-b border-blue-500/15 flex-shrink-0">
-          <div className="flex items-center gap-2.5 min-w-0">
-            {resolveLogoUrl(settings?.logo_url || settings?.logo) ? (
-              <img
-                src={resolveLogoUrl(settings?.logo_url || settings?.logo)}
-                alt="Logo"
-                className="w-8 h-8 rounded-xl object-contain flex-shrink-0 shadow-xs bg-white p-0.5"
-                onError={(e) => { e.currentTarget.style.display = 'none'; }}
-              />
-            ) : (
-              <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-blue-600 via-indigo-600 to-slate-900 border border-blue-400/30 flex items-center justify-center text-white font-bold text-sm flex-shrink-0 shadow-xs">
-                {(companyName || 'P').charAt(0).toUpperCase()}
-              </div>
-            )}
-            <div className="overflow-hidden">
-              <div className="text-slate-900 dark:text-white font-bold text-sm tracking-wide leading-tight truncate">{companyName}</div>
-              <div className="text-blue-700 dark:text-blue-300/80 text-[9px] font-mono leading-tight truncate">{siteName}</div>
-            </div>
+            })}
           </div>
-        </div>
-
-        {/* Nav */}
-        <nav className="flex-1 overflow-y-auto py-3 space-y-0.5 px-1.5">
-          {navItems.map((entry, i) =>
-            entry.items ? (
-              <SidebarGroup key={i} group={entry} collapsed={false} />
-            ) : entry.action ? (
-              <button
-                key={entry.label}
-                onClick={(e) => { e.preventDefault(); entry.action(); }}
-                className="w-full text-left flex items-center gap-2.5 px-3 py-2 text-xs rounded-xl transition-all cursor-pointer text-slate-700 dark:text-blue-100/70 hover:bg-blue-500/10 hover:text-blue-950 dark:hover:text-white"
-              >
-                <span className="flex-shrink-0 text-blue-700 dark:text-blue-400">{entry.icon}</span>
-                <span className="truncate flex-1">{entry.label}</span>
-              </button>
-            ) : (
-              <NavLink
-                key={entry.path}
-                to={entry.path}
-                className={({ isActive }) =>
-                  `flex items-center gap-2.5 px-3 py-2 text-xs rounded-xl transition-all cursor-pointer ${isActive
-                    ? 'bg-gradient-to-r from-blue-600 via-blue-600 to-indigo-700 text-white font-bold shadow-md shadow-blue-950/40 border border-blue-400/30'
-                    : 'text-slate-700 dark:text-blue-100/70 hover:bg-blue-500/10 hover:text-blue-950 dark:hover:text-white'
-                  }`
+        </aside>
+      ) : (
+        /* Full Expanded Sidebar */
+        <aside
+          className="sidebar-shell flex flex-col h-full overflow-hidden flex-shrink-0 transition-all duration-200 select-none z-30 print:hidden border-r border-blue-500/15 bg-white dark:bg-[#071328] w-[240px] min-w-[240px]"
+        >
+          {/* Brand Logo Header */}
+          <div className="flex flex-col items-center justify-center px-3 py-4 sm:py-5 border-b border-slate-200 dark:border-slate-800 flex-shrink-0 overflow-hidden">
+            <img
+              src={resolveLogoUrl(settings?.logo_url || settings?.logo) || '/zlicz-logo.png'}
+              alt="Z-LICZ Furniture & Appliances Trading"
+              className="w-full max-w-[216px] h-24 sm:h-28 object-contain mx-auto drop-shadow-md transition-transform duration-300 hover:scale-105"
+              onError={(e) => {
+                if (e.currentTarget.src !== window.location.origin + '/zlicz-logo.png' && !e.currentTarget.src.endsWith('/zlicz-logo.png')) {
+                  e.currentTarget.src = '/zlicz-logo.png'
                 }
-              >
-                {({ isActive }) => (
-                  <>
-                    <span className={`flex-shrink-0 ${isActive ? 'text-white' : 'text-blue-700 dark:text-blue-400'}`}>{entry.icon}</span>
-                    <span className="truncate flex-1">{entry.label}</span>
-                    {entry.badge && (
-                      <span className="text-[10px] font-bold font-mono bg-rose-600 text-white px-1.5 py-0.2 rounded-full shrink-0">
-                        {entry.badge}
-                      </span>
-                    )}
-                  </>
-                )}
-              </NavLink>
-            )
-          )}
-        </nav>
-      </aside>
+              }}
+            />
+          </div>
+
+          {/* Nav */}
+          <nav className="flex-1 overflow-y-auto py-3 space-y-0.5 px-1.5">
+            {navItems.map((entry, i) =>
+              entry.items ? (
+                <SidebarGroup key={i} group={entry} collapsed={false} />
+              ) : entry.action ? (
+                <button
+                  key={entry.label}
+                  onClick={(e) => { e.preventDefault(); entry.action(); }}
+                  className="w-full text-left flex items-center gap-2.5 px-3 py-2 text-xs rounded-xl transition-all cursor-pointer text-slate-700 dark:text-blue-100/70 hover:bg-blue-500/10 hover:text-blue-950 dark:hover:text-white"
+                >
+                  <span className="flex-shrink-0 text-blue-700 dark:text-blue-400">{entry.icon}</span>
+                  <span className="truncate flex-1">{entry.label}</span>
+                </button>
+              ) : (
+                <NavLink
+                  key={entry.path}
+                  to={entry.path}
+                  className={({ isActive }) =>
+                    `flex items-center gap-2.5 px-3 py-2 text-xs rounded-xl transition-all cursor-pointer ${isActive
+                      ? 'bg-gradient-to-r from-blue-600 via-blue-600 to-indigo-700 text-white font-bold shadow-md shadow-blue-950/40 border border-blue-400/30'
+                      : 'text-slate-700 dark:text-blue-100/70 hover:bg-blue-500/10 hover:text-blue-950 dark:hover:text-white'
+                    }`
+                  }
+                >
+                  {({ isActive }) => (
+                    <>
+                      <span className={`flex-shrink-0 ${isActive ? 'text-white' : 'text-blue-700 dark:text-blue-400'}`}>{entry.icon}</span>
+                      <span className="truncate flex-1">{entry.label}</span>
+                      {entry.badge && (
+                        <span className="text-[10px] font-bold font-mono bg-rose-600 text-white px-1.5 py-0.2 rounded-full shrink-0">
+                          {entry.badge}
+                        </span>
+                      )}
+                    </>
+                  )}
+                </NavLink>
+              )
+            )}
+          </nav>
+        </aside>
+      )}
     </>
   )
 }
@@ -1006,11 +980,8 @@ export default function AppShell() {
   }, [location.pathname])
 
   const handleToggle = () => {
-    if (window.innerWidth < 1024) {
-      setMobileMenuOpen(prev => !prev)
-    } else {
-      setCollapsed(c => !c)
-    }
+    setCollapsed(c => !c)
+    setMobileMenuOpen(false)
   }
 
   const playNotificationChime = () => {
@@ -1150,10 +1121,6 @@ export default function AppShell() {
       document.title = `${appSettings.company_name} | ${pageTitle}`
     }
   }, [appSettings?.company_name, pageTitle])
-
-  useRealtimeSync((source) => {
-    loadData({ includeSettings: source === 'database' || source === 'mutation' })
-  }, [user], { periodic: true })
 
   const handleMarkAllRead = async () => {
     try {

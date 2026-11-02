@@ -173,8 +173,7 @@ export default function AdminExcuseLettersPage() {
   // Modals
   const [activeLetter, setActiveLetter] = useState(null)
   const [reviewModalOpen, setReviewModalOpen] = useState(false)
-  const [reviewDecision, setReviewDecision] = useState('Approved')
-  const [leaveType, setLeaveType] = useState('with_pay') // 'with_pay' | 'without_pay'
+  const [reviewDecision, setReviewDecision] = useState(null) // 'Approved' | 'Rejected' | null
   const [adminRemarks, setAdminRemarks] = useState('')
   const [submittingReview, setSubmittingReview] = useState(false)
 
@@ -222,24 +221,24 @@ export default function AdminExcuseLettersPage() {
   }, [selectedCategory, statusFilter, searchTerm, dateFrom, dateTo])
 
   // Handle Review submission
-  const handleReviewSubmit = async (e) => {
-    if (e) e.preventDefault()
+  const handleReviewSubmit = async (e, decisionOverride = null) => {
+    if (e && e.preventDefault) e.preventDefault()
     if (!activeLetter) return
 
+    const finalDecision = decisionOverride || (reviewDecision === 'Rejected' ? 'Rejected' : 'Approved')
     setSubmittingReview(true)
     try {
       const payload = {
-        status: reviewDecision,
-        leave_type: reviewDecision === 'Approved' ? leaveType : undefined,
+        status: finalDecision,
+        leave_type: 'with_pay',
         admin_remarks: adminRemarks.trim() || undefined,
       }
 
       await api.employeeLetters.update(activeLetter.letter_id || activeLetter.id, payload)
 
-      const leaveTypeFormatted = leaveType === 'with_pay' ? 'Leave with Pay (₱0.00 Deduction)' : 'Leave without Pay (Wage Deducted)'
-      const successMsg = reviewDecision === 'Approved'
-        ? `Letter approved as ${leaveTypeFormatted}! Payroll & attendance synchronized.`
-        : `Letter marked as ${reviewDecision}.`
+      const successMsg = finalDecision === 'Approved'
+        ? 'Letter approved successfully! Attendance and payroll records synchronized.'
+        : 'Letter marked as Rejected.'
 
       showToast(successMsg, 'success')
       setReviewModalOpen(false)
@@ -259,12 +258,10 @@ export default function AdminExcuseLettersPage() {
     }
   }
 
-  // Open review modal with specific preset decision and leave type
-  const openReviewModal = (letter, decision = 'Approved', presetLeaveType = null) => {
+  // Open review or details modal
+  const openReviewModal = (letter, decision = null) => {
     setActiveLetter(letter)
     setReviewDecision(decision)
-    const initialLt = presetLeaveType || (letter.leave_type === 'without_pay' ? 'without_pay' : 'with_pay')
-    setLeaveType(initialLt)
     setAdminRemarks(letter.admin_remarks || '')
     setReviewModalOpen(true)
   }
@@ -569,17 +566,6 @@ export default function AdminExcuseLettersPage() {
                       <td className="py-3.5 px-3 align-middle text-center">
                         <div className="flex flex-col items-center gap-1">
                           <StatusBadge status={letter.status} />
-                          {letter.status === 'Approved' && (
-                            <span
-                              className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold border ${
-                                (letter.leave_type === 'with_pay' || letter.is_paid)
-                                  ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/30'
-                                  : 'bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/30'
-                              }`}
-                            >
-                              {(letter.leave_type === 'with_pay' || letter.is_paid) ? 'With Pay' : 'Without Pay'}
-                            </span>
-                          )}
                           {letter.is_archived && (
                             <span
                               className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-purple-500/15 text-purple-600 dark:text-purple-400 border border-purple-500/30"
@@ -596,13 +582,7 @@ export default function AdminExcuseLettersPage() {
                       <td className="py-3.5 px-4 align-middle text-right space-x-1.5 whitespace-nowrap">
                         <button
                           type="button"
-                          onClick={() => {
-                            setActiveLetter(letter)
-                            setReviewDecision(letter.status === 'Approved' ? 'Approved' : 'Approved')
-                            setLeaveType(letter.leave_type === 'without_pay' ? 'without_pay' : 'with_pay')
-                            setAdminRemarks(letter.admin_remarks || '')
-                            setReviewModalOpen(true)
-                          }}
+                          onClick={() => openReviewModal(letter, null)}
                           className="px-2.5 py-1.5 rounded-lg bg-card border border-border hover:bg-muted text-foreground font-bold text-xs inline-flex items-center gap-1 cursor-pointer transition-colors shadow-xs"
                           title="View Full Letter Details"
                         >
@@ -643,9 +623,9 @@ export default function AdminExcuseLettersPage() {
                           <>
                             <button
                               type="button"
-                              onClick={() => openReviewModal(letter, 'Approved', letter.leave_type || 'with_pay')}
+                              onClick={() => openReviewModal(letter, 'Approved')}
                               className="px-2.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs inline-flex items-center gap-1 cursor-pointer transition-colors shadow-xs active:scale-95"
-                              title="Approve Letter & Select Leave Type (Leave with Pay vs Leave without Pay)"
+                              title="Approve Letter"
                             >
                               <FiCheckCircle className="w-3.5 h-3.5" />
                               <span>Approve</span>
@@ -676,7 +656,13 @@ export default function AdminExcuseLettersPage() {
         <Modal
           open={reviewModalOpen}
           onClose={() => setReviewModalOpen(false)}
-          title={`Letter Details — #${activeLetter.letter_id || activeLetter.id} (${activeLetter.category || 'Excuse Letter'})`}
+          title={
+            reviewDecision === 'Approved'
+              ? `Approve Letter — #${activeLetter.letter_id || activeLetter.id} (${activeLetter.category || 'Excuse Letter'})`
+              : reviewDecision === 'Rejected'
+              ? `Reject Letter — #${activeLetter.letter_id || activeLetter.id} (${activeLetter.category || 'Excuse Letter'})`
+              : `Letter Details — #${activeLetter.letter_id || activeLetter.id} (${activeLetter.category || 'Excuse Letter'})`
+          }
           size="lg"
         >
           <div className="space-y-5 text-xs">
@@ -732,15 +718,6 @@ export default function AdminExcuseLettersPage() {
                     </button>
                   )}
                   <StatusBadge status={activeLetter.status} />
-                  {activeLetter.status === 'Approved' && (
-                    <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold border ${
-                      (activeLetter.leave_type === 'with_pay' || activeLetter.is_paid)
-                        ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/30'
-                        : 'bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/30'
-                    }`}>
-                      {(activeLetter.leave_type === 'with_pay' || activeLetter.is_paid) ? 'Leave with Pay' : 'Leave without Pay'}
-                    </span>
-                  )}
                   {activeLetter.is_archived && (
                     <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold bg-purple-500/15 text-purple-600 dark:text-purple-400 border border-purple-500/30">
                       <FiArchive className="w-3 h-3" />
@@ -820,198 +797,118 @@ export default function AdminExcuseLettersPage() {
               </div>
             )}
 
-            {/* Review Decision Form */}
-            {(() => {
-              const activeEmployeeSalary = Number(activeLetter?.employee?.basic_salary || activeLetter?.user?.employee?.basic_salary || 3000)
-              const activeDailyRate = activeEmployeeSalary > 0 ? (activeEmployeeSalary / 6) : 500
-              const activeTotalDays = Number(activeLetter?.total_days || 1)
-              const activeTotalDeduction = activeTotalDays * activeDailyRate
-
-              return (
-                <form onSubmit={handleReviewSubmit} className="pt-3 border-t border-border space-y-4">
-                  <div className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
-                    Management Decision & Leave Classification
-                  </div>
-
-                  {/* Action Choice: Approve vs Reject */}
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setReviewDecision('Approved')}
-                      className={`flex-1 py-2.5 px-3 rounded-xl font-bold text-xs border flex items-center justify-center gap-1.5 cursor-pointer transition-all ${
-                        reviewDecision === 'Approved'
-                          ? 'bg-emerald-600 text-white border-emerald-600 shadow-sm'
-                          : 'bg-card text-foreground border-border hover:bg-muted'
-                      }`}
-                    >
-                      <FiCheckCircle className="w-4 h-4" />
-                      <span>Approve Letter</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setReviewDecision('Rejected')}
-                      className={`flex-1 py-2.5 px-3 rounded-xl font-bold text-xs border flex items-center justify-center gap-1.5 cursor-pointer transition-all ${
-                        reviewDecision === 'Rejected'
-                          ? 'bg-rose-600 text-white border-rose-600 shadow-sm'
-                          : 'bg-card text-foreground border-border hover:bg-muted'
-                      }`}
-                    >
-                      <FiXCircle className="w-4 h-4" />
-                      <span>Reject Letter</span>
-                    </button>
-                  </div>
-
-                  {/* Leave Type Selection when Approved */}
-                  {reviewDecision === 'Approved' && (
-                    <div className="space-y-2.5 p-3.5 rounded-xl bg-muted/40 border border-border">
-                      <div className="flex items-center justify-between">
-                        <span className="text-[11px] font-bold text-foreground uppercase tracking-wide">
-                          Select Leave Classification:
-                        </span>
-                        <span className="text-[11px] font-mono text-muted-foreground">
-                          Daily Rate: ₱{activeDailyRate.toFixed(2)} &bull; {activeTotalDays} Day{activeTotalDays > 1 ? 's' : ''}
-                        </span>
-                      </div>
-
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                        {/* Option 1: Leave with Pay */}
-                        <div
-                          onClick={() => setLeaveType('with_pay')}
-                          className={`p-3.5 rounded-xl border-2 cursor-pointer transition-all flex flex-col justify-between ${
-                            leaveType === 'with_pay'
-                              ? 'border-emerald-500 bg-emerald-500/10 shadow-xs ring-2 ring-emerald-500/20'
-                              : 'border-border bg-card hover:bg-muted/50'
-                          }`}
-                        >
-                          <div className="flex items-start gap-2.5">
-                            <input
-                              type="radio"
-                              id="lt_with_pay"
-                              name="leaveTypeSelection"
-                              value="with_pay"
-                              checked={leaveType === 'with_pay'}
-                              onChange={() => setLeaveType('with_pay')}
-                              className="mt-0.5 text-emerald-600 focus:ring-emerald-500 cursor-pointer"
-                            />
-                            <div>
-                              <label htmlFor="lt_with_pay" className="font-bold text-xs text-foreground flex items-center gap-1.5 cursor-pointer">
-                                <span>Leave with Pay</span>
-                                <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-emerald-500/20 text-emerald-600 dark:text-emerald-400">
-                                  Paid Leave
-                                </span>
-                              </label>
-                              <p className="text-[11px] text-muted-foreground mt-1 leading-relaxed">
-                                Marks absence as excused/paid. Recorded as absent in attendance, but <strong>NO wage deduction</strong> is applied to weekly payroll (base pay remains intact for these dates).
-                              </p>
-                            </div>
-                          </div>
-                          <div className="mt-3 pt-2.5 border-t border-border/60 flex items-center justify-between text-[11px]">
-                            <span className="text-muted-foreground">Payroll Deduction:</span>
-                            <span className="font-mono font-bold text-emerald-600 dark:text-emerald-400">
-                              ₱0.00 (Base Pay Intact)
-                            </span>
-                          </div>
-                        </div>
-
-                        {/* Option 2: Leave without Pay */}
-                        <div
-                          onClick={() => setLeaveType('without_pay')}
-                          className={`p-3.5 rounded-xl border-2 cursor-pointer transition-all flex flex-col justify-between ${
-                            leaveType === 'without_pay'
-                              ? 'border-amber-500 bg-amber-500/10 shadow-xs ring-2 ring-amber-500/20'
-                              : 'border-border bg-card hover:bg-muted/50'
-                          }`}
-                        >
-                          <div className="flex items-start gap-2.5">
-                            <input
-                              type="radio"
-                              id="lt_without_pay"
-                              name="leaveTypeSelection"
-                              value="without_pay"
-                              checked={leaveType === 'without_pay'}
-                              onChange={() => setLeaveType('without_pay')}
-                              className="mt-0.5 text-amber-600 focus:ring-amber-500 cursor-pointer"
-                            />
-                            <div>
-                              <label htmlFor="lt_without_pay" className="font-bold text-xs text-foreground flex items-center gap-1.5 cursor-pointer">
-                                <span>Leave without Pay</span>
-                                <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-amber-500/20 text-amber-600 dark:text-amber-400">
-                                  Unpaid Leave
-                                </span>
-                              </label>
-                              <p className="text-[11px] text-muted-foreground mt-1 leading-relaxed">
-                                Marks absence as unexcused/unpaid. Recorded as absent, and the system <strong>automatically computes and subtracts an absence deduction</strong> from weekly payroll.
-                              </p>
-                            </div>
-                          </div>
-                          <div className="mt-3 pt-2.5 border-t border-border/60 flex items-center justify-between text-[11px]">
-                            <span className="text-muted-foreground">Payroll Deduction:</span>
-                            <span className="font-mono font-bold text-rose-600 dark:text-rose-400">
-                              -₱{activeTotalDeduction.toFixed(2)} ({activeTotalDays}d @ ₱{activeDailyRate.toFixed(2)})
-                            </span>
-                          </div>
-                        </div>
-                      </div>
+            {/* Review Decision / Actions Section */}
+            {activeLetter.status === 'Pending' ? (
+              <form onSubmit={(e) => handleReviewSubmit(e, reviewDecision || 'Approved')} className="pt-3 border-t border-border space-y-3">
+                {reviewDecision === 'Rejected' && (
+                  <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/20 text-xs text-rose-600 dark:text-rose-400 space-y-1">
+                    <div className="font-bold flex items-center gap-1.5">
+                      <FiAlertCircle className="w-4 h-4" />
+                      <span>Rejecting Excuse / Leave Letter</span>
                     </div>
-                  )}
-
-                  {/* Rejection Notice */}
-                  {reviewDecision === 'Rejected' && (
-                    <div className="p-3.5 rounded-xl bg-rose-500/10 border border-rose-500/20 text-xs text-rose-600 dark:text-rose-400 space-y-1">
-                      <div className="font-bold flex items-center gap-1.5">
-                        <FiAlertCircle className="w-4 h-4" />
-                        <span>Rejecting Excuse / Leave Letter</span>
-                      </div>
-                      <p className="text-[11px] leading-relaxed">
-                        This letter will be marked as Rejected. Missed work days will be recorded as unexcused absences and automatically deducted from weekly payroll.
-                      </p>
-                    </div>
-                  )}
-
-                  <div>
-                    <label className="block text-[11px] font-bold text-muted-foreground uppercase mb-1">
-                      Admin Remarks / Notes to Employee
-                    </label>
-                    <textarea
-                      rows={2}
-                      value={adminRemarks}
-                      onChange={(e) => setAdminRemarks(e.target.value)}
-                      placeholder={
-                        reviewDecision === 'Approved'
-                          ? (leaveType === 'with_pay' ? 'e.g., Approved with Pay. Medical certificate verified.' : 'e.g., Approved without Pay per leave policy.')
-                          : 'e.g., Insufficient notice or unverified supporting documents...'
-                      }
-                      className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground text-xs focus:outline-none focus:ring-2 focus:ring-primary/30 resize-none"
-                    />
+                    <p className="text-[11px] leading-relaxed">
+                      This letter will be marked as Rejected.
+                    </p>
                   </div>
+                )}
 
-                  <div className="flex items-center justify-end gap-2 pt-2">
+                <div>
+                  <label className="block text-[11px] font-bold text-muted-foreground uppercase mb-1">
+                    Admin Remarks / Notes to Employee {reviewDecision === 'Rejected' ? '(Required)' : '(Optional)'}
+                  </label>
+                  <textarea
+                    rows={2}
+                    value={adminRemarks}
+                    onChange={(e) => setAdminRemarks(e.target.value)}
+                    placeholder={
+                      reviewDecision === 'Rejected'
+                        ? 'e.g., Insufficient notice or unverified supporting documents...'
+                        : 'e.g., Supporting proof verified, excuse letter approved.'
+                    }
+                    className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground text-xs focus:outline-none focus:ring-2 focus:ring-primary/30 resize-none"
+                  />
+                </div>
+
+                <div className="flex items-center justify-end gap-2 pt-1">
+                  <Btn
+                    variant="outline"
+                    size="sm"
+                    type="button"
+                    onClick={() => setReviewModalOpen(false)}
+                    disabled={submittingReview}
+                  >
+                    Cancel
+                  </Btn>
+                  {reviewDecision === 'Rejected' ? (
                     <Btn
-                      variant="outline"
-                      size="sm"
-                      type="button"
-                      onClick={() => setReviewModalOpen(false)}
-                      disabled={submittingReview}
-                    >
-                      Cancel
-                    </Btn>
-                    <Btn
-                      variant={reviewDecision === 'Approved' ? 'primary' : 'danger'}
+                      variant="danger"
                       size="sm"
                       type="submit"
                       disabled={submittingReview}
-                      icon={reviewDecision === 'Approved' ? <FiCheckCircle className="w-4 h-4" /> : <FiXCircle className="w-4 h-4" />}
+                      icon={<FiXCircle className="w-4 h-4" />}
                     >
-                      {submittingReview
-                        ? 'Saving...'
-                        : (reviewDecision === 'Approved'
-                            ? `Confirm Approval (${leaveType === 'with_pay' ? 'With Pay' : 'Without Pay'})`
-                            : 'Confirm Rejection')}
+                      {submittingReview ? 'Saving...' : 'Confirm Rejection'}
                     </Btn>
+                  ) : reviewDecision === 'Approved' ? (
+                    <Btn
+                      variant="primary"
+                      size="sm"
+                      type="submit"
+                      disabled={submittingReview}
+                      icon={<FiCheckCircle className="w-4 h-4" />}
+                    >
+                      {submittingReview ? 'Saving...' : 'Confirm Approval'}
+                    </Btn>
+                  ) : (
+                    <>
+                      <Btn
+                        variant="danger"
+                        size="sm"
+                        type="button"
+                        disabled={submittingReview}
+                        onClick={(e) => handleReviewSubmit(e, 'Rejected')}
+                        icon={<FiXCircle className="w-4 h-4" />}
+                      >
+                        Reject Letter
+                      </Btn>
+                      <Btn
+                        variant="primary"
+                        size="sm"
+                        type="button"
+                        disabled={submittingReview}
+                        onClick={(e) => handleReviewSubmit(e, 'Approved')}
+                        icon={<FiCheckCircle className="w-4 h-4" />}
+                      >
+                        Approve Letter
+                      </Btn>
+                    </>
+                  )}
+                </div>
+              </form>
+            ) : (
+              <div className="pt-3 border-t border-border space-y-3">
+                {activeLetter.admin_remarks && (
+                  <div className="p-3.5 rounded-xl bg-muted/40 border border-border space-y-1">
+                    <div className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
+                      Admin Remarks / Notes
+                    </div>
+                    <p className="text-foreground text-xs leading-relaxed">
+                      {activeLetter.admin_remarks}
+                    </p>
                   </div>
-                </form>
-              )
-            })()}
+                )}
+                <div className="flex items-center justify-end pt-1">
+                  <Btn
+                    variant="outline"
+                    size="sm"
+                    type="button"
+                    onClick={() => setReviewModalOpen(false)}
+                  >
+                    Close
+                  </Btn>
+                </div>
+              </div>
+            )}
           </div>
         </Modal>
       )}

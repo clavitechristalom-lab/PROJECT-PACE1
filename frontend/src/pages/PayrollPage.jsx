@@ -112,12 +112,11 @@ export default function PayrollPage() {
   const [eligibleCount, setEligibleCount] = useState(0)
 
   // Gov Tax Deduction State (SSS, Philhealth, Pag-ibig)
-  const [govTaxDeductionPreset, setGovTaxDeductionPreset] = useState('sss')
+  const [govTaxDeductionPreset, setGovTaxDeductionPreset] = useState('all')
   const [deductSss, setDeductSss] = useState(true)
-  const [deductPhilhealth, setDeductPhilhealth] = useState(false)
-  const [deductPagibig, setDeductPagibig] = useState(false)
+  const [deductPhilhealth, setDeductPhilhealth] = useState(true)
+  const [deductPagibig, setDeductPagibig] = useState(true)
 
-  // Strict Exclusivity Preset Handler: Only SSS, PhilHealth, Pag-IBIG, or None
   const handleGovTaxPresetChange = (preset) => {
     setGovTaxDeductionPreset(preset)
     if (preset === 'sss') {
@@ -128,37 +127,15 @@ export default function PayrollPage() {
       setDeductSss(false); setDeductPhilhealth(false); setDeductPagibig(true)
     } else if (preset === 'none') {
       setDeductSss(false); setDeductPhilhealth(false); setDeductPagibig(false)
+    } else if (preset === 'all') {
+      setDeductSss(true); setDeductPhilhealth(true); setDeductPagibig(true)
     }
   }
 
-  // Strict Mutual Exclusivity Checkbox Toggle Handler:
-  // Checking SSS activates SSS and zeros out PhilHealth and Pag-IBIG.
-  // Checking PhilHealth activates PhilHealth and zeros out SSS and Pag-IBIG.
-  // Checking Pag-IBIG activates Pag-IBIG and zeros out SSS and PhilHealth.
   const handleToggleDeduction = (type, val) => {
-    if (val) {
-      if (type === 'sss') {
-        setDeductSss(true)
-        setDeductPhilhealth(false)
-        setDeductPagibig(false)
-        setGovTaxDeductionPreset('sss')
-      } else if (type === 'philhealth') {
-        setDeductSss(false)
-        setDeductPhilhealth(true)
-        setDeductPagibig(false)
-        setGovTaxDeductionPreset('philhealth')
-      } else if (type === 'pagibig') {
-        setDeductSss(false)
-        setDeductPhilhealth(false)
-        setDeductPagibig(true)
-        setGovTaxDeductionPreset('pagibig')
-      }
-    } else {
-      setDeductSss(false)
-      setDeductPhilhealth(false)
-      setDeductPagibig(false)
-      setGovTaxDeductionPreset('none')
-    }
+    if (type === 'sss') setDeductSss(Boolean(val))
+    else if (type === 'philhealth') setDeductPhilhealth(Boolean(val))
+    else if (type === 'pagibig') setDeductPagibig(Boolean(val))
   }
 
   const selectedEmp = useMemo(
@@ -720,14 +697,14 @@ export default function PayrollPage() {
         <StatCard
           title="Total Absences"
           value={`${totalAbsenceDays} days`}
-          sub={`-₱${fmt(totalAbsenceDeductions)} (-₱500/day)`}
+          sub={`-${fmt(totalAbsenceDeductions)} (-₱500/day)`}
           icon={<FiAlertCircle className="w-5 h-5 text-rose-500" />}
           color="red"
         />
         <StatCard
           title="Late & Undertime"
           value={`${totalLateMinutes}m / ${totalUndertimeMinutes}m`}
-          sub={`-₱${fmt(totalLateAndUtDeds)} tardiness`}
+          sub={`-${fmt(totalLateAndUtDeds)} tardiness`}
           icon={<FiAlertTriangle className="w-5 h-5 text-amber-500" />}
           color="amber"
         />
@@ -986,7 +963,7 @@ export default function PayrollPage() {
                       {/* Weekly Base Pay */}
                       <td className="py-3 px-3 text-right font-mono">
                         <div className="font-bold text-foreground">{fmt(p.weekly_base_pay || p.basic_salary)}</div>
-                        <div className="text-[10px] text-muted-foreground">₱{fmt(p.daily_rate || 500)}/d</div>
+                        <div className="text-[10px] text-muted-foreground">{fmt(p.daily_rate || 500)}/d</div>
                       </td>
                       {/* Total Work Hours */}
                       <td className="py-3 px-3 text-right font-mono">
@@ -999,7 +976,7 @@ export default function PayrollPage() {
                           {p.absence_days > 0 ? `${p.absence_days}d` : '0d'}
                         </div>
                         <div className="text-[10px] text-muted-foreground">
-                          {p.absence_deduction > 0 ? `-₱${fmt(p.absence_deduction)}` : 'No absence'}
+                          {p.absence_deduction > 0 ? `-${fmt(p.absence_deduction)}` : 'No absence'}
                         </div>
                       </td>
                       {/* Total Late */}
@@ -1008,7 +985,7 @@ export default function PayrollPage() {
                           {p.late_minutes > 0 ? `${p.late_minutes}m` : '0m'}
                         </div>
                         <div className="text-[10px] text-rose-500">
-                          {p.late_deduction > 0 || p.late_penalty > 0 ? `-₱${fmt(p.late_deduction || p.late_penalty)}` : 'On time'}
+                          {p.late_deduction > 0 || p.late_penalty > 0 ? `-${fmt(p.late_deduction || p.late_penalty)}` : 'On time'}
                         </div>
                       </td>
                       {/* Total Undertime */}
@@ -1017,16 +994,16 @@ export default function PayrollPage() {
                           {p.undertime_minutes > 0 ? `${p.undertime_minutes}m` : '0m'}
                         </div>
                         <div className="text-[10px] text-rose-500">
-                          {p.undertime_deduction > 0 ? `-₱${fmt(p.undertime_deduction)}` : 'Full shift'}
+                          {p.undertime_deduction > 0 ? `-${fmt(p.undertime_deduction)}` : 'Full shift'}
                         </div>
                       </td>
                       {/* Total Deductions */}
                       <td className="py-3 px-3 text-right font-mono font-bold text-rose-600 dark:text-rose-400">
-                        - ₱{fmt(p.total_deductions)}
+                        -{fmt(p.total_deductions)}
                       </td>
                       {/* Final Take-Home Pay (Net Pay) */}
                       <td className="py-3 px-3 text-right font-mono font-bold text-emerald-600 dark:text-emerald-400 text-sm">
-                        ₱{fmt(p.net_pay)}
+                        {fmt(p.net_pay)}
                       </td>
                       <td className="py-3 px-3 text-center whitespace-nowrap align-middle"><StatusBadge status={p.status} /></td>
                       <td className="py-2.5 px-3 text-center align-middle whitespace-nowrap">
@@ -1536,43 +1513,18 @@ export function GovernmentContributionsModal({
 
   // Statutory Contribution Toggles & Schedule Split
   const [includeSss, setIncludeSss] = useState(true)
-  const [includePhilhealth, setIncludePhilhealth] = useState(false)
-  const [includePagibig, setIncludePagibig] = useState(false)
+  const [includePhilhealth, setIncludePhilhealth] = useState(true)
+  const [includePagibig, setIncludePagibig] = useState(true)
   // Schedule: strictly weekly cutoff basis per system requirements
   const [cutoffType, setCutoffType] = useState('weekly')
 
-  // Handle strictly mutually exclusive statutory contribution toggles:
-  // Selecting SSS clears PhilHealth & Pag-IBIG
-  // Selecting PhilHealth clears SSS & Pag-IBIG
-  // Selecting Pag-IBIG clears SSS & PhilHealth
   const handleToggleStatutory = (type) => {
     if (type === 'sss') {
-      setIncludeSss(prev => {
-        const next = !prev
-        if (next) {
-          setIncludePhilhealth(false)
-          setIncludePagibig(false)
-        }
-        return next
-      })
+      setIncludeSss(prev => !prev)
     } else if (type === 'philhealth') {
-      setIncludePhilhealth(prev => {
-        const next = !prev
-        if (next) {
-          setIncludeSss(false)
-          setIncludePagibig(false)
-        }
-        return next
-      })
+      setIncludePhilhealth(prev => !prev)
     } else if (type === 'pagibig') {
-      setIncludePagibig(prev => {
-        const next = !prev
-        if (next) {
-          setIncludeSss(false)
-          setIncludePhilhealth(false)
-        }
-        return next
-      })
+      setIncludePagibig(prev => !prev)
     }
   }
 
@@ -1598,8 +1550,8 @@ export function GovernmentContributionsModal({
       setApprovalResult(null)
       setErrorMessage('')
       setIncludeSss(true)
-      setIncludePhilhealth(false)
-      setIncludePagibig(false)
+      setIncludePhilhealth(true)
+      setIncludePagibig(true)
       setCutoffType('weekly')
       fetchEmployees(userBranch || 'All')
     }
@@ -1724,27 +1676,10 @@ export function GovernmentContributionsModal({
     const rawPagibig = Math.round(basePay * 0.02 * 100) / 100
     const calculatedPagibig = basePay > 0 ? Math.min(pagibigCap, rawPagibig) : 0
 
-    // STRICT MUTUAL EXCLUSIVITY ENFORCEMENT:
-    // - If SSS is selected: PhilHealth & Pag-IBIG strictly evaluate to ₱0.00 and are excluded.
-    // - If PhilHealth is selected: SSS & Pag-IBIG strictly evaluate to ₱0.00 and are excluded.
-    // - If Pag-IBIG is selected: SSS & PhilHealth strictly evaluate to ₱0.00 and are excluded.
-    let sss_amount = 0
-    let philhealth_amount = 0
-    let pagibig_amount = 0
-
-    if (includeSss) {
-      sss_amount = calculatedSss
-      philhealth_amount = 0
-      pagibig_amount = 0
-    } else if (includePhilhealth) {
-      sss_amount = 0
-      philhealth_amount = calculatedPhilhealth
-      pagibig_amount = 0
-    } else if (includePagibig) {
-      sss_amount = 0
-      philhealth_amount = 0
-      pagibig_amount = calculatedPagibig
-    }
+    // Standard Statutory Contributions:
+    const sss_amount = includeSss ? calculatedSss : 0
+    const philhealth_amount = includePhilhealth ? calculatedPhilhealth : 0
+    const pagibig_amount = includePagibig ? calculatedPagibig : 0
 
     const total_deductions = Math.round((sss_amount + philhealth_amount + pagibig_amount) * 100) / 100
     const netRemaining = Math.max(0, Math.round((basePay - total_deductions) * 100) / 100)
@@ -1782,13 +1717,14 @@ export function GovernmentContributionsModal({
     setErrorMessage('')
 
     // Immediate optimistic state update (< 1000ms target)
-    // Strictly enforce single exclusive statutory deduction
     const optimisticDeductions = []
     if (includeSss && computation.sss > 0) {
       optimisticDeductions.push({ id: 'opt-sss', name: 'SSS Contribution', amount: computation.sss, is_active: true })
-    } else if (includePhilhealth && computation.philhealth > 0) {
+    }
+    if (includePhilhealth && computation.philhealth > 0) {
       optimisticDeductions.push({ id: 'opt-ph', name: 'PhilHealth Contribution', amount: computation.philhealth, is_active: true })
-    } else if (includePagibig && computation.pagibig > 0) {
+    }
+    if (includePagibig && computation.pagibig > 0) {
       optimisticDeductions.push({ id: 'opt-pi', name: 'Pag-IBIG (HDMF)', amount: computation.pagibig, is_active: true })
     }
     const nonStatutory = activeLedgerDeductions.filter(
@@ -1921,7 +1857,7 @@ export function GovernmentContributionsModal({
                 </span>
               </div>
               <p className="text-xs text-slate-300 leading-relaxed">
-                The statutory deductions (Total: <strong className="text-emerald-400 font-mono">₱{fmt(approvalResult.total_statutory_deductions)}</strong>) have been written directly to <code className="px-1.5 py-0.5 rounded bg-slate-900 border border-emerald-500/30 text-emerald-300 font-mono text-[11px]">employee_deductions</code> and synced with open payroll ledger records.
+                The statutory deductions (Total: <strong className="text-emerald-400 font-mono">{fmt(approvalResult.total_statutory_deductions)}</strong>) have been written directly to <code className="px-1.5 py-0.5 rounded bg-slate-900 border border-emerald-500/30 text-emerald-300 font-mono text-[11px]">employee_deductions</code> and synced with open payroll ledger records.
               </p>
               <div className="flex flex-wrap gap-2 pt-1">
                 {approvalResult.applied_deductions?.map((d, i) => (
@@ -1930,7 +1866,7 @@ export function GovernmentContributionsModal({
                     className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl bg-emerald-500/15 text-xs font-mono font-bold text-emerald-300 border border-emerald-500/30"
                   >
                     <span>{d.name}:</span>
-                    <span className="text-emerald-400">-₱{fmt(d.amount)}</span>
+                    <span className="text-emerald-400">-{fmt(d.amount)}</span>
                   </span>
                 ))}
               </div>
@@ -2062,10 +1998,10 @@ export function GovernmentContributionsModal({
                     <div className="text-right">
                       <span className="text-[10px] text-slate-400 block uppercase font-bold tracking-wider">Basic Salary</span>
                       <span className="text-sm font-mono font-bold text-emerald-400">
-                        ₱{fmt(selectedEmployee.basic_salary || (selectedEmployee.daily_rate * 26))}
+                        {fmt(selectedEmployee.basic_salary || (selectedEmployee.daily_rate * 26))}
                       </span>
                       <span className="text-[10px] text-slate-500 block">
-                        Cutoff Base ({cutoffType}): <strong className="text-slate-300 font-mono">₱{fmt(computation.cutoffBase)}</strong>
+                        Cutoff Base ({cutoffType}): <strong className="text-slate-300 font-mono">{fmt(computation.cutoffBase)}</strong>
                       </span>
                     </div>
                   </div>
@@ -2119,7 +2055,7 @@ export function GovernmentContributionsModal({
                             }`}
                           >
                             <span className="font-semibold">{d.name}:</span>
-                            <span className="text-rose-400 font-bold">-₱{fmt(d.amount)}</span>
+                            <span className="text-rose-400 font-bold">-{fmt(d.amount)}</span>
                             {d.is_active && <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />}
                           </span>
                         ))}
@@ -2178,17 +2114,6 @@ export function GovernmentContributionsModal({
                 </div>
               </div>
 
-              {/* Strict Exclusivity Banner */}
-              <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
-                <div className="flex items-center gap-2 text-emerald-400 font-semibold">
-                  <LuSparkles className="w-4 h-4 shrink-0 text-emerald-400" />
-                  <span>Strict Exclusivity Enforced: Selecting one contribution automatically excludes and zeroes out the others.</span>
-                </div>
-                <span className="px-2.5 py-0.5 rounded text-[10px] bg-emerald-500/20 text-emerald-300 font-mono font-bold shrink-0">
-                  {includeSss ? 'SSS Active Only' : (includePhilhealth ? 'PhilHealth Active Only' : (includePagibig ? 'Pag-IBIG Active Only' : 'All Excluded (₱0.00)'))}
-                </span>
-              </div>
-
               {/* 3 Statutory Cards (SSS, PhilHealth, Pag-IBIG) */}
               <div className="grid grid-cols-1 md:grid-cols-3 gap-3.5">
                 {/* SSS Contribution */}
@@ -2214,7 +2139,7 @@ export function GovernmentContributionsModal({
                         <div className="text-xs font-bold text-slate-100 flex items-center gap-1.5">
                           <span>SSS Contribution</span>
                           <span className="px-1.5 py-0.2 rounded text-[9px] bg-emerald-500/20 text-emerald-300 font-bold border border-emerald-500/30">
-                            4.5% Exclusive
+                            4.5%
                           </span>
                         </div>
                         <p className="text-[10px] text-slate-400 mt-0.5 leading-snug">
@@ -2224,7 +2149,7 @@ export function GovernmentContributionsModal({
                     </div>
                     <div className="text-right shrink-0">
                       <span className={`font-mono font-bold text-xs block ${includeSss ? 'text-rose-400' : 'text-slate-500'}`}>
-                        {includeSss ? `-₱${fmt(computation.sss)}` : '-₱0.00'}
+                        {includeSss ? `-${fmt(computation.sss)}` : '-₱0.00'}
                       </span>
                     </div>
                   </div>
@@ -2257,7 +2182,7 @@ export function GovernmentContributionsModal({
                         <div className="text-xs font-bold text-slate-100 flex items-center gap-1.5">
                           <span>PhilHealth Premium</span>
                           <span className="px-1.5 py-0.2 rounded text-[9px] bg-teal-500/20 text-teal-300 font-bold border border-teal-500/30">
-                            2.5% Exclusive
+                            2.5%
                           </span>
                         </div>
                         <p className="text-[10px] text-slate-400 mt-0.5 leading-snug">
@@ -2267,7 +2192,7 @@ export function GovernmentContributionsModal({
                     </div>
                     <div className="text-right shrink-0">
                       <span className={`font-mono font-bold text-xs block ${includePhilhealth ? 'text-rose-400' : 'text-slate-500'}`}>
-                        {includePhilhealth ? `-₱${fmt(computation.philhealth)}` : '-₱0.00'}
+                        {includePhilhealth ? `-${fmt(computation.philhealth)}` : '-₱0.00'}
                       </span>
                     </div>
                   </div>
@@ -2300,7 +2225,7 @@ export function GovernmentContributionsModal({
                         <div className="text-xs font-bold text-slate-100 flex items-center gap-1.5">
                           <span>Pag-IBIG / HDMF</span>
                           <span className="px-1.5 py-0.2 rounded text-[9px] bg-amber-500/20 text-amber-300 font-bold border border-amber-500/30">
-                            Cap ₱{cutoffType === 'weekly' ? '50' : (cutoffType === 'monthly' ? '200' : '100')} Exclusive
+                            Cap ₱{cutoffType === 'weekly' ? '50' : (cutoffType === 'monthly' ? '200' : '100')}
                           </span>
                         </div>
                         <p className="text-[10px] text-slate-400 mt-0.5 leading-snug">
@@ -2310,7 +2235,7 @@ export function GovernmentContributionsModal({
                     </div>
                     <div className="text-right shrink-0">
                       <span className={`font-mono font-bold text-xs block ${includePagibig ? 'text-rose-400' : 'text-slate-500'}`}>
-                        {includePagibig ? `-₱${fmt(computation.pagibig)}` : '-₱0.00'}
+                        {includePagibig ? `-${fmt(computation.pagibig)}` : '-₱0.00'}
                       </span>
                     </div>
                   </div>
@@ -2334,10 +2259,10 @@ export function GovernmentContributionsModal({
                   </div>
                   <div className="flex items-center gap-2.5 mt-1">
                     <span className="text-xl font-mono font-extrabold text-rose-400">
-                      -₱{fmt(computation.total)}
+                      -{fmt(computation.total)}
                     </span>
                     <span className="text-xs text-slate-400 font-mono">
-                      deducted from ₱{fmt(computation.cutoffBase)} cycle base pay
+                      deducted from {fmt(computation.cutoffBase)} cycle base pay
                     </span>
                   </div>
                 </div>
@@ -2346,7 +2271,7 @@ export function GovernmentContributionsModal({
                   <div className="text-right">
                     <span className="text-[10px] text-slate-400 font-semibold uppercase tracking-wider block">Estimated Net Take-Home</span>
                     <span className="text-lg font-mono font-extrabold text-emerald-400">
-                      ₱{fmt(computation.netRemaining)}
+                      {fmt(computation.netRemaining)}
                     </span>
                   </div>
                 </div>
@@ -3118,7 +3043,7 @@ export function DetailedPayrollViewModal({
                             </div>
                             {isLate ? (
                               <div className="mt-1 font-mono text-[10px] font-bold text-rose-500">
-                                -₱{fmt(dayLateDed)}
+                                -{fmt(dayLateDed)}
                               </div>
                             ) : (
                               <span className="inline-block mt-1 text-[9px] font-semibold text-emerald-600 dark:text-emerald-400">
@@ -3133,7 +3058,7 @@ export function DetailedPayrollViewModal({
                           {metrics.lateMinutes} <span className="text-xs font-sans font-normal">mins</span>
                         </div>
                         <div className="text-[10px] font-mono font-bold text-rose-500 mt-1">
-                          -₱{fmt(metrics.latePenalty)} Tardiness
+                          -{fmt(metrics.latePenalty)} Tardiness
                         </div>
                       </td>
                     </tr>
@@ -3184,7 +3109,7 @@ export function DetailedPayrollViewModal({
                           {metrics.absenceDays} <span className="text-xs font-sans font-normal">day(s)</span>
                         </div>
                         <div className="text-[10px] font-mono font-bold text-rose-500 mt-1">
-                          -₱{fmt(metrics.absenceDeduction)} Absence
+                          -{fmt(metrics.absenceDeduction)} Absence
                         </div>
                       </td>
                     </tr>
@@ -3219,7 +3144,7 @@ export function DetailedPayrollViewModal({
                             </div>
                             {hasUt ? (
                               <div className="mt-1 font-mono text-[10px] font-bold text-rose-500">
-                                -₱{fmt(dayUtDed)}
+                                -{fmt(dayUtDed)}
                               </div>
                             ) : (
                               <span className="inline-block mt-1 text-[9px] font-semibold text-emerald-600 dark:text-emerald-400">
@@ -3234,7 +3159,7 @@ export function DetailedPayrollViewModal({
                           {metrics.undertimeMinutes} <span className="text-xs font-sans font-normal">mins</span>
                         </div>
                         <div className="text-[10px] font-mono font-bold text-rose-500 mt-1">
-                          -₱{fmt(metrics.undertimeDeduction)} Undertime
+                          -{fmt(metrics.undertimeDeduction)} Undertime
                         </div>
                       </td>
                     </tr>
@@ -3277,7 +3202,7 @@ export function DetailedPayrollViewModal({
                   {metrics.undertimeMinutes} <span className="text-xs font-sans font-normal opacity-80">mins</span>
                 </div>
                 <p className="text-[10px] text-muted-foreground font-medium pt-1 border-t border-amber-500/20">
-                  {metrics.undertimeHours > 0 ? `${metrics.undertimeHours}h logged` : 'No undertime'} • Deduction: <strong className="text-rose-500 font-mono">-₱{fmt(metrics.undertimeDeduction)}</strong>
+                  {metrics.undertimeHours > 0 ? `${metrics.undertimeHours}h logged` : 'No undertime'} • Deduction: <strong className="text-rose-500 font-mono">-{fmt(metrics.undertimeDeduction)}</strong>
                 </p>
               </div>
 
@@ -3295,7 +3220,7 @@ export function DetailedPayrollViewModal({
                   {metrics.lateMinutes} <span className="text-xs font-sans font-normal opacity-80">mins</span>
                 </div>
                 <p className="text-[10px] text-muted-foreground font-medium pt-1 border-t border-rose-500/20">
-                  Tardiness penalty: <strong className="text-rose-500 font-mono">-₱{fmt(metrics.latePenalty)}</strong> ({metrics.lateMinutes}m @ ₱{metrics.minuteRate ? metrics.minuteRate.toFixed(2) : '1.04'}/m)
+                  Tardiness penalty: <strong className="text-rose-500 font-mono">-{fmt(metrics.latePenalty)}</strong> ({metrics.lateMinutes}m @ ₱{metrics.minuteRate ? metrics.minuteRate.toFixed(2) : '1.04'}/m)
                 </p>
               </div>
 
@@ -3313,7 +3238,7 @@ export function DetailedPayrollViewModal({
                   {metrics.absenceDays} <span className="text-xs font-sans font-normal opacity-80">day(s)</span>
                 </div>
                 <p className="text-[10px] text-muted-foreground font-medium pt-1 border-t border-rose-500/20">
-                  Absence deduction: <strong className="text-rose-500 font-mono">-₱{fmt(metrics.absenceDeduction)}</strong> (-₱{fmt(metrics.dailyRate || 500)}/d)
+                  Absence deduction: <strong className="text-rose-500 font-mono">-{fmt(metrics.absenceDeduction)}</strong> (-{fmt(metrics.dailyRate || 500)}/d)
                 </p>
               </div>
             </div>
@@ -3331,18 +3256,18 @@ export function DetailedPayrollViewModal({
                 <span className="text-muted-foreground">•</span>
                 <span className="text-muted-foreground">OT Premium Pay:</span>
                 <span className="font-mono font-bold text-amber-600 dark:text-amber-400">
-                  +₱{fmt(metrics.overtimePay)}
+                  +{fmt(metrics.overtimePay)}
                 </span>
               </div>
               <div className="flex items-center gap-3">
                 <span className="text-muted-foreground">Weekly Base:</span>
-                <span className="font-mono font-bold text-foreground">₱{fmt(metrics.weeklyBasePay)}</span>
+                <span className="font-mono font-bold text-foreground">{fmt(metrics.weeklyBasePay)}</span>
                 <span className="text-muted-foreground">•</span>
                 <span className="text-muted-foreground">Daily Rate:</span>
-                <span className="font-mono font-bold text-foreground">₱{fmt(metrics.dailyRate)}/day</span>
+                <span className="font-mono font-bold text-foreground">{fmt(metrics.dailyRate)}/day</span>
                 <span className="text-muted-foreground">•</span>
                 <span className="text-muted-foreground">Hourly:</span>
-                <span className="font-mono font-bold text-foreground">₱{fmt(metrics.hourlyRate)}/hr</span>
+                <span className="font-mono font-bold text-foreground">{fmt(metrics.hourlyRate)}/hr</span>
               </div>
             </div>
           </div>
@@ -3355,7 +3280,7 @@ export function DetailedPayrollViewModal({
                 <span>Itemized Deductions Breakdown</span>
               </h3>
               <span className="text-xs font-mono font-bold text-rose-600 dark:text-rose-400">
-                Total: -₱{fmt(metrics.totalDeductions)}
+                Total: -{fmt(metrics.totalDeductions)}
               </span>
             </div>
 
@@ -3383,7 +3308,7 @@ export function DetailedPayrollViewModal({
                       </span>
                     </div>
                     <span className={`font-mono font-bold ${Number(activeRecord.sss_deduction || 0) > 0 ? 'text-rose-600 dark:text-rose-400' : 'text-slate-400 dark:text-slate-500'}`}>
-                      -₱{fmt(Number(activeRecord.sss_deduction || 0))}
+                      -{fmt(Number(activeRecord.sss_deduction || 0))}
                     </span>
                   </div>
 
@@ -3399,7 +3324,7 @@ export function DetailedPayrollViewModal({
                       </span>
                     </div>
                     <span className={`font-mono font-bold ${Number(activeRecord.philhealth_deduction || 0) > 0 ? 'text-rose-600 dark:text-rose-400' : 'text-slate-400 dark:text-slate-500'}`}>
-                      -₱{fmt(Number(activeRecord.philhealth_deduction || 0))}
+                      -{fmt(Number(activeRecord.philhealth_deduction || 0))}
                     </span>
                   </div>
 
@@ -3415,7 +3340,7 @@ export function DetailedPayrollViewModal({
                       </span>
                     </div>
                     <span className={`font-mono font-bold ${Number(activeRecord.pagibig_deduction || 0) > 0 ? 'text-rose-600 dark:text-rose-400' : 'text-slate-400 dark:text-slate-500'}`}>
-                      -₱{fmt(Number(activeRecord.pagibig_deduction || 0))}
+                      -{fmt(Number(activeRecord.pagibig_deduction || 0))}
                     </span>
                   </div>
 
@@ -3431,7 +3356,7 @@ export function DetailedPayrollViewModal({
                       </span>
                     </div>
                     <span className={`font-mono font-bold ${Number(activeRecord.withholding_tax_deduction || 0) > 0 ? 'text-rose-600 dark:text-rose-400' : 'text-slate-400 dark:text-slate-500'}`}>
-                      -₱{fmt(Number(activeRecord.withholding_tax_deduction || 0))}
+                      -{fmt(Number(activeRecord.withholding_tax_deduction || 0))}
                     </span>
                   </div>
                 </div>
@@ -3454,11 +3379,11 @@ export function DetailedPayrollViewModal({
                       <div>
                         <div className="font-bold text-foreground">Absences Deduction</div>
                         <span className="text-[10px] text-muted-foreground">
-                          {metrics.absenceDays} day(s) missed {metrics.dailyRate > 0 ? `(₱${fmt(metrics.dailyRate)}/day)` : ''}
+                          {metrics.absenceDays} day(s) missed {metrics.dailyRate > 0 ? `(${fmt(metrics.dailyRate)}/day)` : ''}
                         </span>
                       </div>
                       <span className="font-mono font-bold text-rose-600 dark:text-rose-400">
-                        -₱{fmt(metrics.absenceDeduction)}
+                        -{fmt(metrics.absenceDeduction)}
                       </span>
                     </div>
 
@@ -3491,7 +3416,7 @@ export function DetailedPayrollViewModal({
                                 </span>
                               </div>
                               <span className={`font-mono font-bold ${isPaid ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}`}>
-                                {isPaid ? '₱0.00 (Paid Leave)' : `-₱${fmt(ab.amount)}`}
+                                {isPaid ? '₱0.00 (Paid Leave)' : `-${fmt(ab.amount)}`}
                               </span>
                             </div>
                           )
@@ -3509,7 +3434,7 @@ export function DetailedPayrollViewModal({
                       </span>
                     </div>
                     <span className="font-mono font-bold text-rose-600 dark:text-rose-400">
-                      -₱{fmt(metrics.latePenalty)}
+                      -{fmt(metrics.latePenalty)}
                     </span>
                   </div>
 
@@ -3522,7 +3447,7 @@ export function DetailedPayrollViewModal({
                       </span>
                     </div>
                     <span className="font-mono font-bold text-rose-600 dark:text-rose-400">
-                      -₱{fmt(metrics.undertimeDeduction)}
+                      -{fmt(metrics.undertimeDeduction)}
                     </span>
                   </div>
                 </div>
@@ -3545,10 +3470,10 @@ export function DetailedPayrollViewModal({
                   Total Gross Earnings
                 </span>
                 <div className="text-xl font-mono font-bold text-foreground">
-                  ₱{fmt(metrics.grossPay)}
+                  {fmt(metrics.grossPay)}
                 </div>
                 <p className="text-[10px] text-muted-foreground">
-                  Basic Pay + OT (₱{fmt(metrics.overtimePay)}) + Allowances (₱{fmt(metrics.allowance)})
+                  Basic Pay + OT ({fmt(metrics.overtimePay)}) + Allowances ({fmt(metrics.allowance)})
                 </p>
               </div>
 
@@ -3558,7 +3483,7 @@ export function DetailedPayrollViewModal({
                   Total Deductions
                 </span>
                 <div className="text-xl font-mono font-bold text-rose-600 dark:text-rose-400">
-                  -₱{fmt(metrics.totalDeductions)}
+                  -{fmt(metrics.totalDeductions)}
                 </div>
                 <p className="text-[10px] text-muted-foreground">
                   Statutory, attendance tardiness &amp; missed shift penalties
@@ -3571,7 +3496,7 @@ export function DetailedPayrollViewModal({
                   Net Take-Home Pay
                 </span>
                 <div className="text-2xl font-mono font-bold text-emerald-600 dark:text-emerald-400">
-                  ₱{fmt(metrics.netPay)}
+                  {fmt(metrics.netPay)}
                 </div>
                 <p className="text-[10px] text-emerald-700/80 dark:text-emerald-300/80 font-medium">
                   Direct net payable to employee
@@ -3584,15 +3509,15 @@ export function DetailedPayrollViewModal({
               <div className="flex flex-wrap items-center gap-4">
                 <div>
                   <span className="text-[10px] text-muted-foreground uppercase block font-semibold">Monthly Basic</span>
-                  <span className="font-mono font-bold text-foreground">₱{fmt(metrics.basicMonthly)}</span>
+                  <span className="font-mono font-bold text-foreground">{fmt(metrics.basicMonthly)}</span>
                 </div>
                 <div className="border-l border-border/60 pl-4">
                   <span className="text-[10px] text-muted-foreground uppercase block font-semibold">Daily Rate</span>
-                  <span className="font-mono font-bold text-foreground">₱{fmt(metrics.dailyRate)}</span>
+                  <span className="font-mono font-bold text-foreground">{fmt(metrics.dailyRate)}</span>
                 </div>
                 <div className="border-l border-border/60 pl-4">
                   <span className="text-[10px] text-muted-foreground uppercase block font-semibold">Hourly Rate</span>
-                  <span className="font-mono font-bold text-foreground">₱{fmt(metrics.hourlyRate)}</span>
+                  <span className="font-mono font-bold text-foreground">{fmt(metrics.hourlyRate)}</span>
                 </div>
               </div>
 

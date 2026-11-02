@@ -362,37 +362,37 @@ function AdminBusinessDashboard() {
       </div>
 
       {/* ─── SECTION 1: CORE BUSINESS STATS ─── */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 sm:gap-4">
         <StatCard
-          title="Total Gross Sales"
+          title="TOTAL GROSS SALES"
           value={fmt(stats?.total_sales || 0)}
           sub="cash & installment totals"
           icon={<TbCurrencyPeso className="w-5 h-5" />}
           color="blue"
         />
         <StatCard
-          title="Total Collections"
+          title="TOTAL COLLECTIONS"
           value={fmt(stats?.total_collections || 0)}
           sub="actual payments received"
           icon={<FiCheckCircle className="w-5 h-5" />}
           color="navy"
         />
         <StatCard
-          title="Installment Sales"
+          title="INSTALLMENT SALES"
           value={fmt(stats?.total_installment_sales || 0)}
           sub="credit financing volume"
           icon={<FiCreditCard className="w-5 h-5" />}
           color="purple"
         />
         <StatCard
-          title="Outstanding Balance"
+          title="OUTSTANDING BALANCE"
           value={fmt(stats?.total_outstanding_balance || 0)}
           sub="receivables portfolio"
           icon={<FiTrendingDown className="w-5 h-5 text-rose-500" />}
           color="red"
         />
         <StatCard
-          title="Active Accounts"
+          title="ACTIVE ACCOUNTS"
           value={stats?.active_installments?.toString() || '0'}
           sub={`${stats?.overdue_installments || 0} overdue`}
           icon={<FiActivity className="w-5 h-5" />}
@@ -401,11 +401,11 @@ function AdminBusinessDashboard() {
       </div>
 
       {/* ─── SECTION 2: TIMEFRAME PERFORMANCE FILTER ─── */}
-      <Card noPad className="border border-border overflow-hidden">
-        <div className="p-4 border-b border-border bg-blue-950/10 dark:bg-blue-950/30 flex flex-col md:flex-row md:items-center justify-between gap-3">
+      <Card noPad className="border border-border dark:border-slate-800 bg-card dark:bg-[#0F172A] rounded-2xl sm:rounded-3xl overflow-hidden shadow-sm">
+        <div className="p-4 sm:p-5 border-b border-border dark:border-slate-800 bg-slate-50/50 dark:bg-[#0B1120]/60 flex flex-col md:flex-row md:items-center justify-between gap-3 rounded-t-2xl sm:rounded-t-3xl">
           <div>
-            <h3 className="text-sm font-bold text-foreground">Business Performance Breakdown</h3>
-            <p className="text-xs text-muted-foreground">Filter sales, collections, and overdue recovery by timeframe</p>
+            <h3 className="text-sm sm:text-base font-bold text-foreground dark:text-white">Business Performance Breakdown</h3>
+            <p className="text-xs text-muted-foreground dark:text-slate-400 mt-0.5">Filter sales, collections, and overdue recovery by timeframe</p>
           </div>
 
           <div className="flex items-center gap-1.5 flex-wrap">
@@ -420,8 +420,8 @@ function AdminBusinessDashboard() {
                 key={t.id}
                 onClick={() => handleTimeframeChange(t.id)}
                 className={`px-3 py-1.5 rounded-xl text-xs font-semibold cursor-pointer transition-all ${timeframe === t.id
-                  ? 'bg-gradient-to-r from-blue-600 to-indigo-700 text-white shadow-xs border border-blue-400/30'
-                  : 'bg-card/70 border border-blue-500/20 text-muted-foreground hover:text-foreground hover:bg-blue-500/10'
+                  ? 'bg-blue-600 hover:bg-blue-500 text-white shadow-xs border border-blue-400/30'
+                  : 'bg-card/70 dark:bg-slate-900 border border-slate-700/60 text-muted-foreground hover:text-foreground dark:hover:text-white hover:bg-blue-500/10'
                   }`}
               >
                 {t.label}
@@ -431,28 +431,28 @@ function AdminBusinessDashboard() {
         </div>
 
         {timeframe === 'custom' && (
-          <form onSubmit={handleCustomDateSubmit} className="p-3 bg-muted/20 border-b border-border flex items-center gap-3 flex-wrap text-xs">
+          <form onSubmit={handleCustomDateSubmit} className="p-3 bg-muted/20 border-b border-border dark:border-slate-800 flex items-center gap-3 flex-wrap text-xs">
             <div className="flex items-center gap-2">
-              <span className="font-semibold text-muted-foreground">From:</span>
+              <span className="font-semibold text-muted-foreground dark:text-slate-400">From:</span>
               <input
                 type="date"
                 value={customStart}
                 onChange={e => setCustomStart(e.target.value)}
-                className="px-2.5 py-1 rounded-xl border border-border bg-card text-foreground font-mono"
+                className="px-2.5 py-1 rounded-xl border border-border dark:border-slate-700 bg-card dark:bg-[#0B1120] text-foreground dark:text-white font-mono"
               />
             </div>
             <div className="flex items-center gap-2">
-              <span className="font-semibold text-muted-foreground">To:</span>
+              <span className="font-semibold text-muted-foreground dark:text-slate-400">To:</span>
               <input
                 type="date"
                 value={customEnd}
                 onChange={e => setCustomEnd(e.target.value)}
-                className="px-2.5 py-1 rounded-xl border border-border bg-card text-foreground font-mono"
+                className="px-2.5 py-1 rounded-xl border border-border dark:border-slate-700 bg-card dark:bg-[#0B1120] text-foreground dark:text-white font-mono"
               />
             </div>
             <button
               type="submit"
-              className="px-3 py-1 bg-gradient-to-r from-blue-600 to-indigo-700 text-white font-bold rounded-xl border border-blue-400/30 shadow-xs cursor-pointer"
+              className="px-3.5 py-1.5 bg-gradient-to-r from-blue-600 to-indigo-700 hover:from-blue-500 hover:to-indigo-600 text-white font-bold rounded-xl border border-blue-400/30 shadow-xs cursor-pointer transition-all active:scale-95"
             >
               Apply Custom Filter
             </button>
@@ -462,72 +462,106 @@ function AdminBusinessDashboard() {
         {perfLoading ? (
           <LoadingState message="Recalculating business metrics for selected timeframe..." />
         ) : (
-          <div className="p-4 grid grid-cols-1 md:grid-cols-3 gap-4">
-            {/* Sales Breakdown */}
-            <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-[#0c1a3a]/60 border border-border dark:border-blue-500/20 space-y-2 text-xs">
-              <div className="font-bold text-foreground border-b border-border pb-1.5 flex justify-between">
-                <span>Sales Revenue</span>
-                <span className="font-mono text-blue-600 dark:text-blue-400">{perfData?.sales?.transactions || 0} Transactions</span>
+          <div className="p-4 sm:p-5 grid grid-cols-1 md:grid-cols-3 gap-4">
+            {/* Sales Revenue */}
+            <div className="min-h-fit h-auto flex flex-col justify-between p-4 sm:p-5 pb-5 rounded-2xl bg-slate-50/80 dark:bg-[#0B1120] border border-border dark:border-slate-800 transition-all shadow-xs overflow-hidden">
+              <div className="space-y-3">
+                <div className="border-b border-border dark:border-slate-800/80 pb-2.5 flex items-center justify-between">
+                  <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 tracking-wider uppercase">Sales Revenue</span>
+                  <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20">
+                    {perfData?.sales?.transactions || 0} Transactions
+                  </span>
+                </div>
+                
+                <div className="space-y-2 text-xs">
+                  <div className="flex items-center justify-between">
+                    <span className="text-muted-foreground dark:text-slate-400">Gross Sales:</span>
+                    <span className="font-sans font-semibold text-foreground dark:text-slate-200">{fmt(perfData?.sales?.gross_sales || 0)}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-muted-foreground dark:text-slate-400">Discounts Given:</span>
+                    <span className="font-sans font-semibold text-rose-500">- {fmt(perfData?.sales?.discounts || 0)}</span>
+                  </div>
+                  <div className="flex items-center justify-between border-t border-border dark:border-slate-800/60 pt-2 font-bold">
+                    <span className="text-foreground dark:text-white">Net Sales:</span>
+                    <span className="font-sans font-bold text-base text-blue-600 dark:text-blue-400">{fmt(perfData?.sales?.net_sales || 0)}</span>
+                  </div>
+                </div>
               </div>
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Gross Sales:</span>
-                <span className="font-mono font-semibold text-foreground">{fmt(perfData?.sales?.gross_sales || 0)}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Discounts Given:</span>
-                <span className="font-mono text-rose-600">- {fmt(perfData?.sales?.discounts || 0)}</span>
-              </div>
-              <div className="flex justify-between border-t border-border pt-1 font-bold">
-                <span className="text-foreground">Net Sales:</span>
-                <span className="font-mono text-blue-600 dark:text-blue-400">{fmt(perfData?.sales?.net_sales || 0)}</span>
-              </div>
-              <div className="pt-1 text-[11px] text-muted-foreground flex justify-between">
+
+              <div className="mt-4 pt-3 border-t border-border dark:border-slate-800/80 text-xs text-muted-foreground dark:text-slate-400 flex items-center justify-between">
                 <span>Cash vs Financing:</span>
-                <span className="font-mono">{fmt(perfData?.sales?.cash_sales || 0)} / {fmt(perfData?.sales?.installment_sales || 0)}</span>
+                <span className="font-sans font-medium text-foreground dark:text-slate-300">
+                  {fmt(perfData?.sales?.cash_sales || 0)} / {fmt(perfData?.sales?.installment_sales || 0)}
+                </span>
               </div>
             </div>
 
-            {/* Collections Breakdown */}
-            <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-[#0c1a3a]/60 border border-border dark:border-blue-500/20 space-y-2 text-xs">
-              <div className="font-bold text-foreground border-b border-border pb-1.5 flex justify-between">
-                <span>Payment Collections</span>
-                <span className="font-mono text-sky-600 dark:text-sky-400">{perfData?.collections?.payments_count || 0} Receipts</span>
+            {/* Payment Collections */}
+            <div className="min-h-fit h-auto flex flex-col justify-between p-4 sm:p-5 pb-5 rounded-2xl bg-slate-50/80 dark:bg-[#0B1120] border border-border dark:border-slate-800 transition-all shadow-xs overflow-hidden">
+              <div className="space-y-3">
+                <div className="border-b border-border dark:border-slate-800/80 pb-2.5 flex items-center justify-between">
+                  <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 tracking-wider uppercase">Payment Collections</span>
+                  <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-sky-500/10 text-sky-600 dark:text-sky-400 border border-sky-500/20">
+                    {perfData?.collections?.payments_count || 0} Receipts
+                  </span>
+                </div>
+
+                <div className="space-y-2 text-xs">
+                  <div className="flex items-center justify-between">
+                    <span className="text-muted-foreground dark:text-slate-400">Cash Payments:</span>
+                    <span className="font-sans font-semibold text-foreground dark:text-slate-200">{fmt(perfData?.collections?.cash_collections || 0)}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-muted-foreground dark:text-slate-400">Digital (GCash/Maya/Bank):</span>
+                    <span className="font-sans font-semibold text-foreground dark:text-slate-200">{fmt(perfData?.collections?.digital_collections || 0)}</span>
+                  </div>
+                  <div className="flex items-center justify-between border-t border-border dark:border-slate-800/60 pt-2 font-bold">
+                    <span className="text-foreground dark:text-white">Total Collections:</span>
+                    <span className="font-sans font-bold text-base text-sky-600 dark:text-sky-400">{fmt(perfData?.collections?.total_collected || 0)}</span>
+                  </div>
+                </div>
               </div>
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Cash Payments:</span>
-                <span className="font-mono font-semibold text-foreground">{fmt(perfData?.collections?.cash_collections || 0)}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Digital (GCash/Maya/Bank):</span>
-                <span className="font-mono font-semibold text-foreground">{fmt(perfData?.collections?.digital_collections || 0)}</span>
-              </div>
-              <div className="flex justify-between border-t border-border pt-1 font-bold">
-                <span className="text-foreground">Total Collections:</span>
-                <span className="font-mono text-sky-600 dark:text-sky-400">{fmt(perfData?.collections?.total_collected || 0)}</span>
-              </div>
-              <div className="pt-1 text-[11px] text-muted-foreground flex justify-between">
+
+              <div className="mt-4 pt-3 border-t border-border dark:border-slate-800/80 text-xs text-muted-foreground dark:text-slate-400 flex items-center justify-between">
                 <span>Down Payments Collected:</span>
-                <span className="font-mono text-blue-600 dark:text-blue-400">{fmt(perfData?.collections?.down_payments || 0)}</span>
+                <span className="font-sans font-medium text-foreground dark:text-slate-300">
+                  {fmt(perfData?.collections?.down_payments || 0)}
+                </span>
               </div>
             </div>
 
-            {/* Overdue & Receivables Recovery */}
-            <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-[#0c1a3a]/60 border border-border dark:border-blue-500/20 space-y-2 text-xs">
-              <div className="font-bold text-foreground border-b border-border pb-1.5 flex justify-between">
-                <span>Receivables & Overdue</span>
-                <span className="font-mono text-amber-600 dark:text-amber-400">Recovery</span>
+            {/* Receivables & Overdue */}
+            <div className="min-h-fit h-auto flex flex-col justify-between p-4 sm:p-5 pb-5 rounded-2xl bg-slate-50/80 dark:bg-[#0B1120] border border-border dark:border-slate-800 transition-all shadow-xs overflow-hidden">
+              <div className="space-y-3">
+                <div className="border-b border-border dark:border-slate-800/80 pb-2.5 flex items-center justify-between">
+                  <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 tracking-wider uppercase">Receivables & Overdue</span>
+                  <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">
+                    Recovery
+                  </span>
+                </div>
+
+                <div className="space-y-2 text-xs">
+                  <div className="flex items-center justify-between">
+                    <span className="text-muted-foreground dark:text-slate-400">Overdue Payments Collected:</span>
+                    <span className="font-sans font-semibold text-blue-600 dark:text-blue-400">{fmt(perfData?.overdue_collected || 0)}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-muted-foreground dark:text-slate-400">Total Financed Credit:</span>
+                    <span className="font-sans font-semibold text-foreground dark:text-slate-200">{fmt(perfData?.installment_monitoring?.total_financed || stats?.total_sales || 0)}</span>
+                  </div>
+                  <div className="flex items-center justify-between border-t border-border dark:border-slate-800/60 pt-2 font-bold">
+                    <span className="text-foreground dark:text-white">Active Receivables:</span>
+                    <span className="font-sans font-bold text-base text-rose-500">{fmt(stats?.total_outstanding_balance || 0)}</span>
+                  </div>
+                </div>
               </div>
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Overdue Payments Collected:</span>
-                <span className="font-mono font-semibold text-blue-600 dark:text-blue-400">{fmt(perfData?.overdue_collected || 0)}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Total Financed Credit:</span>
-                <span className="font-mono font-semibold text-foreground">{fmt(perfData?.installment_monitoring?.total_financed || stats?.total_sales || 0)}</span>
-              </div>
-              <div className="flex justify-between border-t border-border pt-1 font-bold">
-                <span className="text-foreground">Uncollected Portfolio:</span>
-                <span className="font-mono text-rose-600">{fmt(stats?.total_outstanding_balance || 0)}</span>
+
+              <div className="mt-4 pt-3 border-t border-border dark:border-slate-800/80 text-xs text-muted-foreground dark:text-slate-400 flex items-center justify-between">
+                <span>Uncollected Portfolio:</span>
+                <span className="font-sans font-semibold text-rose-500">
+                  {fmt(stats?.total_outstanding_balance || 0)}
+                </span>
               </div>
             </div>
           </div>

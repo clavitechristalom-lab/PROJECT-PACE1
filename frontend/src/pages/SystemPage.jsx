@@ -150,14 +150,6 @@ export default function SystemPage({ defaultTab = 'users' }) {
   }, [activeTab, logModule])
 
   useEffect(() => {
-    if (activeTab !== 'logs') return
-    const timer = setInterval(() => {
-      loadTabData('logs', true)
-    }, 10000)
-    return () => clearInterval(timer)
-  }, [activeTab, logModule])
-
-  useEffect(() => {
     const id = searchParams.get('id')
     const search = searchParams.get('search')
     if (activeTab === 'users' && id && users.length > 0) {

@@ -241,9 +241,16 @@ export default function CustomersPage({ branchFilter, embedded }) {
 
     setSaving(true)
     try {
+      let branchIdVal = form.branch_id === '' || form.branch_id === null ? null : parseInt(form.branch_id)
+      if (isStoreAdmin && !branchIdVal) {
+        const storeAdminBranch = user?.employee?.branch_id || user?.branch_id
+        if (storeAdminBranch) {
+          branchIdVal = parseInt(storeAdminBranch)
+        }
+      }
       const payload = {
         ...form,
-        branch_id: form.branch_id === '' || form.branch_id === null ? null : parseInt(form.branch_id)
+        branch_id: branchIdVal
       }
       if (editItem) {
         const res = await api.customers.update(editItem.customer_id, payload)
@@ -362,7 +369,9 @@ export default function CustomersPage({ branchFilter, embedded }) {
                       ? String(branchFilter)
                       : (user?.employee?.branch_id
                         ? String(user.employee.branch_id)
-                        : (branches[0]?.id ? String(branches[0].id) : ''))
+                        : (user?.branch_id
+                          ? String(user.branch_id)
+                          : (isAdmin && branches[0]?.id ? String(branches[0].id) : '')))
                     setForm({ ...emptyForm, branch_id: defaultBranch })
                     setEditItem(null)
                     setAddModal(true)
@@ -810,32 +819,34 @@ export default function CustomersPage({ branchFilter, embedded }) {
               </div>
             </div>
 
-            <div className="bg-muted/20 p-3.5 rounded-xl border border-border">
-              <label className="block font-bold text-foreground mb-1.5 flex items-center justify-between">
-                <span className="flex items-center gap-1.5">
-                  <FiGitBranch className="w-4 h-4 text-primary" />
-                  <span>Assigned Store Branch</span>
-                </span>
-                <span className="text-[10px] font-normal text-muted-foreground">
-                  (Associates customer with branch ledger)
-                </span>
-              </label>
-              <select
-                value={form.branch_id || ''}
-                onChange={e => setForm(f => ({ ...f, branch_id: e.target.value }))}
-                className="w-full px-3 py-2.5 rounded-xl border border-border bg-card text-foreground font-semibold text-xs focus:outline-none focus:ring-2 focus:ring-primary/20 cursor-pointer"
-              >
-                <option value="">— Unassigned (No Branch) —</option>
-                {branches.map(b => (
-                  <option key={b.id || b.branch_id || b.name} value={String(b.id || b.branch_id)}>
-                    {b.name || b.branch_name}
-                  </option>
-                ))}
-              </select>
-              <p className="text-[11px] text-muted-foreground mt-1">
-                Customer purchases, installments, and payment schedules will be scoped to this store branch in the ledger.
-              </p>
-            </div>
+            {!isStoreAdmin && (
+              <div className="bg-muted/20 p-3.5 rounded-xl border border-border">
+                <label className="block font-bold text-foreground mb-1.5 flex items-center justify-between">
+                  <span className="flex items-center gap-1.5">
+                    <FiGitBranch className="w-4 h-4 text-primary" />
+                    <span>Assigned Store Branch</span>
+                  </span>
+                  <span className="text-[10px] font-normal text-muted-foreground">
+                    (Associates customer with branch ledger)
+                  </span>
+                </label>
+                <select
+                  value={form.branch_id || ''}
+                  onChange={e => setForm(f => ({ ...f, branch_id: e.target.value }))}
+                  className="w-full px-3 py-2.5 rounded-xl border border-border bg-card text-foreground font-semibold text-xs focus:outline-none focus:ring-2 focus:ring-primary/20 cursor-pointer"
+                >
+                  <option value="">— Unassigned (No Branch) —</option>
+                  {branches.map(b => (
+                    <option key={b.id || b.branch_id || b.name} value={String(b.id || b.branch_id)}>
+                      {b.name || b.branch_name}
+                    </option>
+                  ))}
+                </select>
+                <p className="text-[11px] text-muted-foreground mt-1">
+                  Customer purchases, installments, and payment schedules will be scoped to this store branch in the ledger.
+                </p>
+              </div>
+            )}
 
             <div>
               <label className="block font-bold text-muted-foreground mb-1">Notes & Remarks</label>

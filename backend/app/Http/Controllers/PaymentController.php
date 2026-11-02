@@ -9,6 +9,7 @@ use App\Models\InstallmentAccount;
 use App\Models\SaleTransaction;
 use App\Models\SystemLog;
 use App\Models\EWalletDeposit;
+use App\Models\BranchProfile;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Cache;
 use App\Services\NotificationService;
@@ -841,7 +842,11 @@ class PaymentController extends Controller
         $user = $request->user();
         $today = date('Y-m-d');
 
-        $query = PaymentSchedule::with(['installmentAccount.customer', 'installmentAccount.sale.processedBy.employee']);
+        $query = PaymentSchedule::with([
+            'installmentAccount.customer.branch',
+            'installmentAccount.sale.branch',
+            'installmentAccount.sale.processedBy.employee.branch'
+        ]);
 
         if ($user && in_array($user->role, ['Store Administrator', 'Store Admin'])) {
             $userBranch = $user->employee ? $user->employee->branch_id : null;
@@ -856,11 +861,27 @@ class PaymentController extends Controller
             }
         } elseif ($request->filled('branch') && $request->query('branch') !== 'All') {
             $branch = $request->query('branch');
-            $query->whereHas('installmentAccount', function ($iq) use ($branch) {
-                $iq->whereHas('customer', function ($cq) use ($branch) {
-                    $cq->where('branch_id', $branch);
-                })->orWhereHas('sale', function ($sq) use ($branch) {
-                    $sq->where('branch_id', $branch);
+            $branchId = is_numeric($branch) ? (int)$branch : optional(BranchProfile::where('name', $branch)->first())->id;
+            $query->whereHas('installmentAccount', function ($iq) use ($branch, $branchId) {
+                $iq->whereHas('customer', function ($cq) use ($branch, $branchId) {
+                    $cq->where(function ($sub) use ($branch, $branchId) {
+                        if ($branchId) {
+                            $sub->where('branch_id', $branchId);
+                        }
+                        $sub->orWhere('branch', $branch)
+                            ->orWhereHas('branch', function ($bq) use ($branch) {
+                                $bq->where('name', $branch);
+                            });
+                    });
+                })->orWhereHas('sale', function ($sq) use ($branch, $branchId) {
+                    $sq->where(function ($sub) use ($branch, $branchId) {
+                        if ($branchId) {
+                            $sub->where('branch_id', $branchId);
+                        }
+                        $sub->orWhereHas('branch', function ($bq) use ($branch) {
+                            $bq->where('name', $branch);
+                        });
+                    });
                 });
             });
         }
@@ -885,6 +906,19 @@ class PaymentController extends Controller
         $schedules = $query->orderBy('due_date')->get()->map(function ($s) use ($today) {
             $inst = $s->installmentAccount;
             $cust = $inst ? $inst->customer : null;
+            $sale = $inst ? $inst->sale : null;
+
+            $branchId = $cust ? $cust->branch_id : ($sale ? $sale->branch_id : null);
+            $branchName = null;
+            if ($cust && $cust->branch_name) {
+                $branchName = $cust->branch_name;
+            } elseif ($cust && $cust->branch) {
+                $branchName = $cust->branch->name;
+            } elseif ($sale && $sale->branch) {
+                $branchName = $sale->branch->name;
+            } elseif ($branchId) {
+                $branchName = BranchProfile::getNameById($branchId);
+            }
 
             $status = $s->status;
             if ((float)$s->balance_due <= 0) {
@@ -904,6 +938,8 @@ class PaymentController extends Controller
                 'account_no' => $inst ? $inst->account_no : 'N/A',
                 'customer_name' => $cust ? "{$cust->first_name} {$cust->last_name}" : 'Customer',
                 'customer_phone' => $cust ? $cust->phone : '',
+                'branch' => $branchName ?: 'Main Branch',
+                'branch_id' => $branchId,
                 'due_date' => $s->due_date,
                 'amount_due' => (float)$s->amount_due,
                 'amount_paid' => (float)$s->amount_paid,

@@ -40,6 +40,11 @@ class Employee extends Model
         'attendance_pin',
     ];
 
+    protected $appends = [
+        'is_verified',
+        'branch_name',
+    ];
+
     protected $casts = [
         'qr_active' => 'boolean',
         'qr_generated_at' => 'datetime',

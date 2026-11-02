@@ -1,338 +1,221 @@
-import { useEffect, useRef } from 'react'
-import { api } from './api'
+import { useState, useEffect, useRef, useCallback } from 'react'
+import { clearApiCacheForModule } from './api'
 export { fastDeepEqual, setIfChanged } from './diff'
 
-let syncInterval = null
-let broadcastChannel = null
-let lastLogId = null
-let lastNotifId = null
-let lastUnreadCount = null
-let lastVerifCount = null
-let lastQrCount = null
-let isPolling = false
+// Active sync locks registry: tracks module/targetId currently in an active sync operation
+const activeSyncLocks = new Set()
+// Debounce timestamps registry: prevents rapid multi-clicks
+const syncDebounceTimestamps = new Map()
+// Active AbortControllers: to cleanly cancel an in-flight operation if needed
+const syncAbortControllers = new Map()
 
-let eventSource = null
-
-// Initialize BroadcastChannel if supported
-try {
-  if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
-    broadcastChannel = new BroadcastChannel('pace_realtime_sync')
-    broadcastChannel.onmessage = (event) => {
-      if (event.data?.type === 'pace:data-sync') {
-        window.dispatchEvent(new CustomEvent('pace:data-sync', { detail: event.data }))
-      }
-    }
-  }
-} catch (e) {
-  // Fallback to storage event
+/**
+ * Checks whether an on-demand sync is currently in-flight for a specific key
+ * @param {string} [key='general']
+ * @returns {boolean}
+ */
+export function isSyncing(key = 'general') {
+  return activeSyncLocks.has(key)
 }
 
-// Fallback for cross-tab sync via localStorage
-if (typeof window !== 'undefined') {
-  window.addEventListener('storage', (e) => {
-    if (e.key === 'pace_cross_tab_sync' && e.newValue) {
-      try {
-        const payload = JSON.parse(e.newValue)
-        window.dispatchEvent(new CustomEvent('pace:data-sync', { detail: payload }))
-      } catch (_) {}
+/**
+ * Strictly on-demand, click-driven sync execution handler.
+ * Enforces single-run locking, debouncing, and strictly targeted cache & payload dispatching.
+ *
+ * @param {Object} options
+ * @param {string} [options.module='general'] - Targeted module (e.g. 'customers', 'employees', 'notifications')
+ * @param {string|number|null} [options.targetId=null] - Specific entity ID being synced/updated
+ * @param {string} [options.action='sync'] - Action verb (e.g. 'refresh', 'mutation', 'click')
+ * @param {Object|null} [options.payload=null] - Minimal targeted payload (only target ID/action, never full DB)
+ * @param {Function|null} [options.syncFn=null] - Targeted async network/sync fetcher to execute
+ * @param {Function|null} [options.onSuccess=null] - Targeted success callback
+ * @param {Function|null} [options.onError=null] - Targeted error callback
+ * @returns {Promise<{ status: string, result?: any, error?: any, reason?: string }>}
+ */
+export async function executeOnDemandSync({
+  module = 'general',
+  targetId = null,
+  action = 'sync',
+  payload = null,
+  syncFn = null,
+  onSuccess = null,
+  onError = null
+} = {}) {
+  const lockKey = targetId !== null && targetId !== undefined ? `${module}:${targetId}` : module
+
+  // 1. Single-Run Locking Guard: If sync is already in progress, safely ignore subsequent clicks
+  if (activeSyncLocks.has(lockKey) || activeSyncLocks.has(`${module}:all`)) {
+    return { status: 'ignored', reason: 'already_syncing' }
+  }
+
+  // 2. Debounce Guard: 400ms cooldown to block rapid-fire multi-clicks
+  const now = Date.now()
+  const lastTime = syncDebounceTimestamps.get(lockKey) || 0
+  if (now - lastTime < 400) {
+    return { status: 'ignored', reason: 'debounced' }
+  }
+  syncDebounceTimestamps.set(lockKey, now)
+
+  // 3. Acquire Lock
+  activeSyncLocks.add(lockKey)
+
+  // Manage AbortController for clean cancellation
+  if (syncAbortControllers.has(lockKey)) {
+    try { syncAbortControllers.get(lockKey).abort() } catch (_) {}
+  }
+  const controller = new AbortController()
+  syncAbortControllers.set(lockKey, controller)
+
+  try {
+    let result = null
+    if (typeof syncFn === 'function') {
+      result = await syncFn({
+        module,
+        targetId,
+        action,
+        payload,
+        signal: controller.signal
+      })
+    }
+
+    // 4. Targeted Cache Invalidation: Only clear cache keys related to this module & targetId
+    if (module) {
+      clearApiCacheForModule(module, targetId)
+    }
+
+    // 5. Targeted Event Dispatch: Restrict payload to ONLY specific item/ID/action, NEVER whole database state
+    const eventDetail = {
+      module,
+      targetId: targetId ?? null,
+      action: action || 'sync',
+      timestamp: Date.now()
+    }
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('pace:on-demand-sync', { detail: eventDetail }))
+    }
+
+    if (typeof onSuccess === 'function') {
+      onSuccess({ module, targetId, action, result })
+    }
+
+    return { status: 'success', result }
+  } catch (err) {
+    if (err?.name !== 'AbortError') {
+      // Clean, targeted error logging strictly for the explicit user-triggered action
+      console.error(`[RealtimeSync] Action failed for ${module}${targetId ? ` (ID: ${targetId})` : ''}:`, err?.message || err)
+      if (typeof onError === 'function') {
+        onError(err)
+      }
+    }
+    return { status: 'error', error: err }
+  } finally {
+    // 6. Release Lock
+    activeSyncLocks.delete(lockKey)
+    syncAbortControllers.delete(lockKey)
+  }
+}
+
+/**
+ * On-demand data sync trigger for user actions (create, edit, delete, status toggle).
+ * Restricts payload to ONLY the specific item/target and drops duplicate clicks.
+ */
+export function triggerDataSync(module = 'general', extra = {}) {
+  const targetId = extra?.id || extra?.targetId || null
+  const action = extra?.action || 'mutation'
+
+  return executeOnDemandSync({
+    module,
+    targetId,
+    action,
+    payload: {
+      module,
+      targetId,
+      action,
+      timestamp: Date.now()
     }
   })
 }
 
-let lastEventSourceAttempt = 0
-let sseSupported = true
-
 /**
- * Connect to live Server-Sent Events (SSE) stream
- */
-function connectEventSource() {
-  if (!sseSupported || typeof window === 'undefined' || typeof EventSource === 'undefined') return
-
-  // Prevent frantic reconnection loops (wait at least 15s between connection attempts)
-  const now = Date.now()
-  if (now - lastEventSourceAttempt < 15000) return
-  lastEventSourceAttempt = now
-
-  try {
-    const raw = sessionStorage.getItem('pace_session') || localStorage.getItem('pace_session')
-    let token = null
-    if (raw) {
-      try {
-        const parsed = JSON.parse(raw)
-        token = parsed.token || parsed.access_token
-      } catch (_) {}
-    }
-
-    if (!token) return
-
-    if (eventSource) {
-      eventSource.close()
-      eventSource = null
-    }
-
-    const streamUrl = `/api/sync/stream?token=${encodeURIComponent(token)}`
-    eventSource = new EventSource(streamUrl)
-
-    eventSource.addEventListener('connected', (e) => {
-      try {
-        const data = JSON.parse(e.data)
-        if (data?.cli_server) {
-          // Single-threaded PHP CLI server immediately closes SSE streams; rely on pollStatus() instead of reconnecting every 15s
-          sseSupported = false
-          if (eventSource) {
-            eventSource.close()
-            eventSource = null
-          }
-        }
-      } catch (_) {}
-    })
-
-    eventSource.addEventListener('sync', (e) => {
-      try {
-        const data = JSON.parse(e.data)
-        window.dispatchEvent(new CustomEvent('pace:data-sync', { detail: data }))
-        if (data.type === 'notifications') {
-          window.dispatchEvent(new CustomEvent('pace:notifications-sync', { detail: data }))
-        }
-      } catch (_) {}
-    })
-
-    eventSource.onerror = () => {
-      if (eventSource) {
-        eventSource.close()
-        eventSource = null
-      }
-    }
-  } catch (err) {
-    // Falls back seamlessly to pollStatus
-  }
-}
-
-/**
- * Trigger an immediate data sync across all components, open tabs, and connected users
- */
-export function triggerDataSync(module = 'general', extra = {}) {
-  const detail = { type: 'mutation', module, timestamp: Date.now(), ...extra }
-  
-  // 1. Local window dispatch
-  window.dispatchEvent(new CustomEvent('pace:data-sync', { detail }))
-  if (module === 'notifications') {
-    window.dispatchEvent(new CustomEvent('pace:notifications-sync', { detail }))
-  }
-
-  // 2. Cross-tab broadcast
-  try {
-    if (broadcastChannel) {
-      broadcastChannel.postMessage(detail)
-    }
-    localStorage.setItem('pace_cross_tab_sync', JSON.stringify(detail))
-  } catch (e) {}
-
-  // 3. Inform server so other remote dashboards receive instant SSE notification
-  if (api.sync?.triggerSync) {
-    api.sync.triggerSync(module).catch(() => {})
-  }
-}
-
-/**
- * Poll sync status from backend (high-reliability fallback)
- */
-let pollAbortController = null
-
-async function pollStatus() {
-  if (isPolling) return
-  isPolling = true
-
-  // Cancel prior hung poll if any
-  if (pollAbortController) {
-    try { pollAbortController.abort() } catch (_) {}
-  }
-  pollAbortController = new AbortController()
-
-  try {
-    const raw = sessionStorage.getItem('pace_session') || localStorage.getItem('pace_session')
-    if (!raw) return
-
-    const res = await api.sync.getStatus({ signal: pollAbortController.signal })
-    if (!res) return
-
-    // 1. Database log changes
-    if (lastLogId !== null && res.latest_log_id !== lastLogId) {
-      window.dispatchEvent(new CustomEvent('pace:data-sync', { 
-        detail: { type: 'database', logId: res.latest_log_id, previousLogId: lastLogId } 
-      }))
-    }
-    lastLogId = res.latest_log_id
-
-    // 2. Notifications changes (ID changed or unread count changed)
-    const notifsChanged = (
-      lastNotifId !== null && (
-        res.latest_notif_id !== lastNotifId ||
-        res.unread_notifications !== lastUnreadCount
-      )
-    )
-
-    if (notifsChanged) {
-      window.dispatchEvent(new CustomEvent('pace:notifications-sync', { detail: res }))
-    }
-    lastNotifId = res.latest_notif_id
-    lastUnreadCount = res.unread_notifications
-
-    // 3. Attendance verifications
-    if (lastVerifCount !== null && res.pending_verifications !== lastVerifCount) {
-      window.dispatchEvent(new CustomEvent('pace:verifications-sync', { detail: res }))
-    }
-    lastVerifCount = res.pending_verifications
-
-    // 4. QR requests
-    if (lastQrCount !== null && res.pending_qr_requests !== lastQrCount) {
-      window.dispatchEvent(new CustomEvent('pace:qr-requests-sync', { detail: res }))
-    }
-    lastQrCount = res.pending_qr_requests
-
-    // 5. Centralized periodic tick (fires every 1.4s for synchronized 1-2s auto-refresh)
-    window.dispatchEvent(new CustomEvent('pace:periodic-tick', { detail: res }))
-
-  } catch (err) {
-    // Silent fail on background poll (aborted, token expired, network momentary drop)
-  } finally {
-    isPolling = false
-    pollAbortController = null
-  }
-}
-
-/**
- * Start global real-time synchronization engine with strict 1.2s - 1.5s refresh cycle
- */
-export function startRealtimeEngine() {
-  if (syncInterval) clearInterval(syncInterval)
-  
-  // 1. Initial status check & SSE stream connection
-  pollStatus()
-  connectEventSource()
-
-  // 2. Fast 1.4s background polling (target 1 to 2 seconds refresh)
-  syncInterval = setInterval(() => {
-    if (document.visibilityState === 'visible') {
-      pollStatus()
-      if (!eventSource) {
-        connectEventSource()
-      }
-    }
-  }, 1400)
-
-  // 3. When tab becomes visible again, immediately check for updates
-  const handleVisibility = () => {
-    if (document.visibilityState === 'visible') {
-      pollStatus()
-      if (!eventSource) {
-        connectEventSource()
-      }
-    }
-  }
-  document.addEventListener('visibilitychange', handleVisibility)
-
-  return () => {
-    if (syncInterval) clearInterval(syncInterval)
-    if (eventSource) {
-      eventSource.close()
-      eventSource = null
-    }
-    if (pollAbortController) {
-      try { pollAbortController.abort() } catch (_) {}
-      pollAbortController = null
-    }
-    document.removeEventListener('visibilitychange', handleVisibility)
-  }
-}
-
-/**
- * React hook to automatically keep any page or component updated in real time
- * with non-blocking execution, overlapping request cancellation, and strict 1-2s tick support.
- * 
- * @param {Function} refreshFn - The callback to execute when data should be refreshed (receives source, signal)
+ * React hook for strictly on-demand, click-driven synchronization.
+ * Completely eliminates background intervals, auto-sync useEffects, and global polling.
+ * Returns { sync, isSyncing } to attach explicitly to user-clicked elements (e.g. Refresh/Sync buttons).
+ *
+ * @param {Function} refreshFn - Sync callback to execute when user clicks (receives source, signal, extraData)
  * @param {Array} deps - Dependency array
- * @param {Object} options - { interval: ms, enabled: boolean, periodic: boolean }
+ * @param {Object} options - { enabled?: boolean, module?: string }
  */
 export function useRealtimeSync(refreshFn, deps = [], options = {}) {
-  const { enabled = true, interval = 0, periodic = true } = options
-  const isRefreshingRef = useRef(false)
-  const lastRefreshTimeRef = useRef(0)
+  const { enabled = true, module = null } = typeof options === 'object' ? options : {}
+  const [isSyncingState, setIsSyncingState] = useState(false)
   const refreshFnRef = useRef(refreshFn)
-  const activeAbortRef = useRef(null)
 
   useEffect(() => {
     refreshFnRef.current = refreshFn
   }, [refreshFn])
 
-  useEffect(() => {
+  // Explicit, click-driven sync trigger with concurrency locking
+  const handleManualSync = useCallback(async (targetId = null, extraData = null) => {
     if (!enabled) return
 
-    const executeRefresh = async (source = 'auto') => {
-      // Async lock: prevent request pile-up
-      if (isRefreshingRef.current) return
-      
-      const now = Date.now()
-      // Responsive debounce: allow smooth 1-2s refreshes while blocking redundant sub-second bursts
-      if (source !== 'mutation' && now - lastRefreshTimeRef.current < 750) return
-      
-      // Cancel previous in-flight request if still running
-      if (activeAbortRef.current) {
-        try { activeAbortRef.current.abort() } catch (_) {}
-      }
-      activeAbortRef.current = new AbortController()
+    const lockKey = module ? (targetId !== null && targetId !== undefined ? `${module}:${targetId}` : module) : 'manual_sync'
+    if (activeSyncLocks.has(lockKey)) {
+      return // Single-run locking: safely ignore duplicate concurrent clicks
+    }
 
-      isRefreshingRef.current = true
-      lastRefreshTimeRef.current = now
-
-      try {
-        await refreshFnRef.current(source, activeAbortRef.current.signal)
-      } catch (err) {
-        if (err?.name !== 'AbortError') {
-          console.warn(`[RealtimeSync] Auto-refresh (${source}) error:`, err)
+    setIsSyncingState(true)
+    try {
+      await executeOnDemandSync({
+        module: module || 'manual',
+        targetId,
+        action: 'manual-click',
+        syncFn: async ({ signal }) => {
+          if (refreshFnRef.current) {
+            await refreshFnRef.current('manual', signal, extraData)
+          }
         }
-      } finally {
-        isRefreshingRef.current = false
-        activeAbortRef.current = null
+      })
+    } finally {
+      setIsSyncingState(false)
+    }
+  }, [enabled, module])
+
+  // Optional: Listen ONLY to targeted on-demand events explicitly matching this module
+  useEffect(() => {
+    if (!enabled || !module) return
+
+    const handleTargetedSync = (e) => {
+      const detail = e?.detail
+      if (detail && detail.module === module) {
+        handleManualSync(detail.targetId)
       }
     }
 
-    // 1. Listen for system-wide sync events (fired on actual data mutation or DB change)
-    const handleSync = (e) => {
-      executeRefresh(e.detail?.type || 'event')
-    }
-    window.addEventListener('pace:data-sync', handleSync)
-
-    // 2. Synchronized periodic tick (hooked into central 1.4s pulse)
-    const handlePeriodic = () => {
-      if (document.visibilityState === 'visible') {
-        executeRefresh('timer')
-      }
-    }
-    if (periodic) {
-      window.addEventListener('pace:periodic-tick', handlePeriodic)
-    }
-
-    // 3. Fallback standalone timer if custom interval specified
-    let customTimer = null
-    if (interval > 0) {
-      customTimer = setInterval(() => {
-        if (document.visibilityState === 'visible') {
-          executeRefresh('timer')
-        }
-      }, interval)
-    }
-
+    window.addEventListener('pace:on-demand-sync', handleTargetedSync)
     return () => {
-      window.removeEventListener('pace:data-sync', handleSync)
-      if (periodic) {
-        window.removeEventListener('pace:periodic-tick', handlePeriodic)
-      }
-      if (customTimer) clearInterval(customTimer)
-      if (activeAbortRef.current) {
-        try { activeAbortRef.current.abort() } catch (_) {}
-        activeAbortRef.current = null
-      }
+      window.removeEventListener('pace:on-demand-sync', handleTargetedSync)
     }
-  }, [enabled, interval, periodic, ...deps])
+  }, [enabled, module, handleManualSync])
+
+  return {
+    sync: handleManualSync,
+    isSyncing: isSyncingState
+  }
 }
+
+/**
+ * Dedicated hook for binding on-demand sync to specific UI action buttons
+ */
+export function useOnDemandSync(module, syncFn, options = {}) {
+  return useRealtimeSync(syncFn, [], { ...options, module })
+}
+
+/**
+ * Retained for backward-compatibility.
+ * Background auto-engine is permanently disabled to eliminate background lag.
+ */
+export function startRealtimeEngine() {
+  return () => {}
+}
+

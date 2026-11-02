@@ -472,7 +472,7 @@ export function PageHeader({ title, subtitle, action }) {
 }
 
 // ─── Stat Card ────────────────────────────────────────────────────────────────
-export function StatCard({ title, value, sub, icon, color = 'blue' }) {
+export function StatCard({ title, value, sub, icon, color = 'blue', className = '' }) {
   const colors = {
     blue: 'bg-blue-500/15 text-blue-700 border-blue-300/80 dark:bg-blue-500/20 dark:text-blue-300 dark:border-blue-500/40 dark:shadow-[0_0_12px_rgba(59,130,246,0.25)]',
     navy: 'bg-blue-900/10 text-blue-900 border-blue-200 dark:bg-blue-950/60 dark:text-sky-300 dark:border-blue-600/40 dark:shadow-[0_0_12px_rgba(30,58,138,0.3)]',
@@ -484,15 +484,17 @@ export function StatCard({ title, value, sub, icon, color = 'blue' }) {
     purple: 'bg-purple-500/15 text-purple-700 border-purple-300/80 dark:bg-purple-500/20 dark:text-purple-300 dark:border-purple-500/40 dark:shadow-[0_0_12px_rgba(168,85,247,0.25)]',
   }
   return (
-    <div className="bg-card rounded-2xl border border-border p-4 hover:shadow-md transition-all duration-300 hover:scale-[1.01]">
-      <div className="flex items-start justify-between mb-2.5">
-        <span className="text-[11px] font-bold text-slate-700 dark:text-blue-200/80 uppercase tracking-wider leading-tight">{title}</span>
+    <div className={`bg-card dark:bg-[#0F172A] rounded-2xl border border-border dark:border-slate-800 p-4 sm:p-5 flex flex-col justify-between h-full hover:shadow-md transition-all duration-300 hover:scale-[1.01] overflow-hidden ${className}`}>
+      <div className="flex items-start justify-between gap-2 mb-2.5">
+        <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider leading-tight">{title}</span>
         <span className={`w-8 h-8 rounded-xl flex items-center justify-center text-sm flex-shrink-0 border shadow-2xs ${colors[color] || colors.blue}`}>
           {icon}
         </span>
       </div>
-      <div className="text-xl md:text-2xl font-black text-slate-900 dark:text-white tracking-tight font-mono">{value !== undefined ? value : '—'}</div>
-      {sub && <div className="text-[11px] text-slate-600 dark:text-slate-400 mt-1 font-mono">{sub}</div>}
+      <div>
+        <div className="text-xl sm:text-2xl font-sans font-bold text-slate-900 dark:text-white tracking-tight truncate">{value !== undefined ? value : '—'}</div>
+        {sub && <div className="text-xs text-slate-500 dark:text-slate-400 font-normal mt-1 truncate">{sub}</div>}
+      </div>
     </div>
   )
 }
@@ -500,7 +502,7 @@ export function StatCard({ title, value, sub, icon, color = 'blue' }) {
 // ─── Card ─────────────────────────────────────────────────────────────────────
 export function Card({ children, className = '', noPad }) {
   return (
-    <div className={`bg-card rounded-2xl border border-border ${noPad ? '' : 'p-4'} ${className}`}>
+    <div className={`bg-card rounded-2xl border border-border overflow-hidden ${noPad ? '' : 'p-4'} ${className}`}>
       {children}
     </div>
   )

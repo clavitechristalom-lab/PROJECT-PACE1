@@ -58,7 +58,7 @@ const playTone = (type) => {
   }
 }
 
-export default function AttendancePage() {
+export default function AttendancePage({ branchFilter: propBranchFilter, embedded }) {
   const { user } = useAuth()
   const navigate = useNavigate()
   const isAdmin = user?.role === 'Administrator'
@@ -70,6 +70,26 @@ export default function AttendancePage() {
   const [searchParams] = useSearchParams()
   const [qrMonitoringOpen, setQrMonitoringOpen] = useState(false)
   const [faceAuthModalOpen, setFaceAuthModalOpen] = useState(false)
+
+  // Branch Selection & Filter
+  const [branches, setBranches] = useState([])
+  const [localBranchFilter, setLocalBranchFilter] = useState(() => {
+    if (propBranchFilter) return propBranchFilter
+    if (isStoreAdmin && userBranch && userBranch !== 'All Branches') return userBranch
+    return 'All'
+  })
+  const branchFilter = propBranchFilter || localBranchFilter
+
+  useEffect(() => {
+    api.branches.getAll()
+      .then(res => {
+        if (res) {
+          const list = Array.isArray(res) ? res : (res?.branches || [])
+          setBranches(list)
+        }
+      })
+      .catch(err => console.error('Failed to load branches in AttendancePage:', err))
+  }, [])
 
   // Default tab based on role
   const [activeTab, setActiveTab] = useState(
@@ -94,6 +114,24 @@ export default function AttendancePage() {
   const [schedule, setSchedule] = useState({
     labels: { time_in: '08:00 AM', cutoff: '08:00 AM', lunch_out: '12:00 PM', lunch_in: '01:00 PM', time_out: '05:00 PM' },
   })
+
+  // Branch Options List
+  const branchOptions = useMemo(() => {
+    const names = new Set()
+    branches.forEach(b => {
+      const n = b.name || b.branch_name
+      if (n) names.add(n)
+    })
+    records.forEach(r => {
+      const n = r.branch?.name || (typeof r.branch === 'string' ? r.branch : '')
+      if (n && n !== '—') names.add(n)
+    })
+    if (names.size === 0) {
+      names.add('Z-LICS / ILIGAN')
+      names.add('C-LICZ / C.D.O')
+    }
+    return Array.from(names)
+  }, [branches, records])
 
   // Logs & Filters
   const [search, setSearch] = useState('')
@@ -172,6 +210,7 @@ export default function AttendancePage() {
         date: selectedDate || undefined,
         department: deptFilter !== 'All' ? deptFilter : undefined,
         status: statusFilter !== 'All' ? statusFilter : undefined,
+        branch: branchFilter !== 'All' ? branchFilter : undefined,
       })
       if (!isMountedRef.current) return
       const newRecords = data.records || data.attendance || []
@@ -182,7 +221,7 @@ export default function AttendancePage() {
         setSchedule(prev => (fastDeepEqual(prev, data.schedule) ? prev : data.schedule))
       }
       try {
-        if (!selectedDate && deptFilter === 'All' && statusFilter === 'All') {
+        if (!selectedDate && deptFilter === 'All' && statusFilter === 'All' && branchFilter === 'All') {
           sessionStorage.setItem('pace_cached_attendance_records', JSON.stringify(newRecords))
           if (newSummary) {
             sessionStorage.setItem('pace_cached_attendance_summary', JSON.stringify(newSummary))
@@ -206,6 +245,7 @@ export default function AttendancePage() {
         page: scanLogsPage,
         status: scanLogsStatusFilter !== 'All' ? scanLogsStatusFilter : undefined,
         action_type: scanLogsActionFilter !== 'All' ? scanLogsActionFilter : undefined,
+        branch: branchFilter !== 'All' ? branchFilter : undefined,
       })
       const newLogs = res.logs || []
       setScanLogs(prev => (fastDeepEqual(prev, newLogs) ? prev : newLogs))
@@ -263,7 +303,7 @@ export default function AttendancePage() {
     } else if (activeTab === 'audit') {
       loadScanLogs()
     }
-  }, [activeTab, selectedDate, deptFilter, statusFilter, scanLogsPage, scanLogsStatusFilter, scanLogsActionFilter])
+  }, [activeTab, selectedDate, deptFilter, statusFilter, branchFilter, scanLogsPage, scanLogsStatusFilter, scanLogsActionFilter])
 
   useRealtimeSync(() => {
     if (activeTab === 'log' || activeTab === 'timesheet') {
@@ -274,7 +314,7 @@ export default function AttendancePage() {
     if (isEmployee || isStoreAdmin) {
       loadMyProfile(true)
     }
-  }, [activeTab, selectedDate, deptFilter, statusFilter, scanLogsPage, scanLogsStatusFilter, scanLogsActionFilter, isEmployee, isStoreAdmin], { periodic: true })
+  }, [activeTab, selectedDate, deptFilter, statusFilter, branchFilter, scanLogsPage, scanLogsStatusFilter, scanLogsActionFilter, isEmployee, isStoreAdmin], { periodic: true })
 
   useEffect(() => {
     const searchParam = searchParams.get('search')
@@ -715,8 +755,15 @@ export default function AttendancePage() {
   }
 
   const filtered = useMemo(() => {
-    return filterBySearch(records, search, ['employee_name', 'employee_code', 'department'])
-  }, [records, search])
+    let result = filterBySearch(records, search, ['employee_name', 'employee_code', 'department'])
+    if (branchFilter && branchFilter !== 'All') {
+      result = result.filter(r => {
+        const b = r.branch?.name || (typeof r.branch === 'string' ? r.branch : '')
+        return b.toLowerCase() === branchFilter.toLowerCase()
+      })
+    }
+    return result
+  }, [records, search, branchFilter])
 
   const total = filtered.length
   const paginated = filtered.slice((page - 1) * pageSize, page * pageSize)
@@ -729,6 +776,7 @@ export default function AttendancePage() {
         date: selectedDate || undefined,
         department: deptFilter !== 'All' ? deptFilter : undefined,
         status: statusFilter !== 'All' ? statusFilter : undefined,
+        branch: branchFilter !== 'All' ? branchFilter : undefined,
       })
       showToast('Attendance exported successfully', 'success')
     } catch (err) {
@@ -739,7 +787,14 @@ export default function AttendancePage() {
   }
 
   const timesheetSummary = useMemo(() => {
-    return Object.values(records.reduce((acc, a) => {
+    let sourceRecords = records
+    if (branchFilter && branchFilter !== 'All') {
+      sourceRecords = sourceRecords.filter(r => {
+        const b = r.branch?.name || (typeof r.branch === 'string' ? r.branch : '')
+        return b.toLowerCase() === branchFilter.toLowerCase()
+      })
+    }
+    return Object.values(sourceRecords.reduce((acc, a) => {
       if (!acc[a.employee_id]) {
         acc[a.employee_id] = {
           employee_id: a.employee_id,
@@ -761,7 +816,7 @@ export default function AttendancePage() {
       if (a.status === 'Present' || a.status === 'Late' || a.status === 'COMPLETE') emp.present_count++
       return acc
     }, {}))
-  }, [records])
+  }, [records, branchFilter])
 
   // Determine Tab Options
   const tabList = isEmployee
@@ -1361,6 +1416,19 @@ export default function AttendancePage() {
                   className="border border-border rounded-xl px-3 py-2 text-xs font-semibold text-foreground bg-card cursor-pointer"
                 />
                 <select
+                  value={branchFilter}
+                  disabled={isStoreAdmin || !!propBranchFilter}
+                  onChange={e => { setLocalBranchFilter(e.target.value); setPage(1) }}
+                  className="border border-border rounded-xl px-3 py-2 text-xs font-semibold text-foreground bg-card cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
+                >
+                  <option value="All">All Branches</option>
+                  {branchOptions.map(bName => (
+                    <option key={bName} value={bName}>
+                      {bName}
+                    </option>
+                  ))}
+                </select>
+                <select
                   value={deptFilter}
                   onChange={e => { setDeptFilter(e.target.value); setPage(1) }}
                   className="border border-border rounded-xl px-3 py-2 text-xs font-semibold text-foreground bg-card cursor-pointer"
@@ -1385,7 +1453,7 @@ export default function AttendancePage() {
               <EmptyState
                 icon={<FiClock className="w-12 h-12 text-muted-foreground/30 mx-auto" />}
                 title="No attendance records found"
-                description={search || selectedDate || deptFilter !== 'All' ? 'Try adjusting your date or filter options' : 'Punches made via the QR terminal will appear here'}
+                description={search || selectedDate || deptFilter !== 'All' || branchFilter !== 'All' ? 'Try adjusting your date or filter options' : 'Punches made via the QR terminal will appear here'}
                 action={isStoreAdmin ? <Btn size="sm" onClick={() => setActiveTab('punch')}>Open QR Terminal Scanner</Btn> : null}
               />
             ) : (
@@ -1499,6 +1567,20 @@ export default function AttendancePage() {
           <Card noPad className="p-3.5 border border-border">
             <div className="flex flex-col sm:flex-row gap-3 items-center justify-between">
               <div className="flex gap-2 flex-wrap sm:flex-nowrap">
+                <select
+                  value={branchFilter}
+                  disabled={isStoreAdmin || !!propBranchFilter}
+                  onChange={e => { setLocalBranchFilter(e.target.value); setScanLogsPage(1) }}
+                  className="border border-border rounded-xl px-3 py-2 text-xs font-semibold text-foreground bg-card cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
+                >
+                  <option value="All">All Branches</option>
+                  {branchOptions.map(bName => (
+                    <option key={bName} value={bName}>
+                      {bName}
+                    </option>
+                  ))}
+                </select>
+
                 <select
                   value={scanLogsStatusFilter}
                   onChange={e => { setScanLogsStatusFilter(e.target.value); setScanLogsPage(1) }}

@@ -81,13 +81,27 @@ class AttendanceController extends Controller
             $query->where('employee_id', $user->employee_id);
         } elseif ($user && in_array($user->role, ['Store Administrator', 'Store Admin'])) {
             $branch = $user->employee ? $user->employee->branch_id : null;
-            $query->whereHas('employee', function ($eq) use ($branch) {
-                $eq->where('branch_id', $branch);
+            $userBranchName = $user->employee ? ($user->employee->branch_name ?? $user->employee->branch) : null;
+            $query->whereHas('employee', function ($eq) use ($branch, $userBranchName) {
+                $eq->where(function ($sub) use ($branch, $userBranchName) {
+                    if ($branch) $sub->where('branch_id', $branch);
+                    if ($userBranchName) {
+                        $sub->orWhere('branch', $userBranchName)
+                            ->orWhereHas('branch', fn($bq) => $bq->where('name', $userBranchName));
+                    }
+                });
             });
         } elseif ($request->filled('branch') && $request->query('branch') !== 'All') {
             $branch = $request->query('branch');
             $query->whereHas('employee', function ($eq) use ($branch) {
-                $eq->where('branch_id', $branch);
+                if (is_numeric($branch)) {
+                    $eq->where('branch_id', $branch);
+                } else {
+                    $eq->where(function ($sub) use ($branch) {
+                        $sub->where('branch', $branch)
+                            ->orWhereHas('branch', fn($bq) => $bq->where('name', $branch));
+                    });
+                }
             });
         }
 
@@ -279,13 +293,27 @@ class AttendanceController extends Controller
         $query = Attendance::query();
         if ($user && in_array($user->role, ['Store Administrator', 'Store Admin'])) {
             $branch = $user->employee ? $user->employee->branch_id : null;
-            $query->whereHas('employee', function ($eq) use ($branch) {
-                $eq->where('branch_id', $branch);
+            $userBranchName = $user->employee ? ($user->employee->branch_name ?? $user->employee->branch) : null;
+            $query->whereHas('employee', function ($eq) use ($branch, $userBranchName) {
+                $eq->where(function ($sub) use ($branch, $userBranchName) {
+                    if ($branch) $sub->where('branch_id', $branch);
+                    if ($userBranchName) {
+                        $sub->orWhere('branch', $userBranchName)
+                            ->orWhereHas('branch', fn($bq) => $bq->where('name', $userBranchName));
+                    }
+                });
             });
         } elseif ($request->filled('branch') && $request->query('branch') !== 'All') {
             $branch = $request->query('branch');
             $query->whereHas('employee', function ($eq) use ($branch) {
-                $eq->where('branch_id', $branch);
+                if (is_numeric($branch)) {
+                    $eq->where('branch_id', $branch);
+                } else {
+                    $eq->where(function ($sub) use ($branch) {
+                        $sub->where('branch', $branch)
+                            ->orWhereHas('branch', fn($bq) => $bq->where('name', $branch));
+                    });
+                }
             });
         }
 
@@ -736,7 +764,24 @@ class AttendanceController extends Controller
 
         if ($user && in_array($user->role, ['Store Administrator', 'Store Admin'])) {
             $branch = $user->employee ? $user->employee->branch_id : null;
-            $query->where('branch', $branch);
+            $userBranchName = $user->employee ? ($user->employee->branch_name ?? $user->employee->branch) : null;
+            $query->where(function ($q) use ($branch, $userBranchName) {
+                if ($branch) $q->where('branch', $branch);
+                if ($userBranchName) $q->orWhere('branch', $userBranchName);
+            });
+        } elseif ($request->filled('branch') && $request->query('branch') !== 'All') {
+            $branch = $request->query('branch');
+            $query->where(function ($q) use ($branch) {
+                $q->where('branch', $branch)
+                  ->orWhereHas('employee', function ($eq) use ($branch) {
+                      if (is_numeric($branch)) {
+                          $eq->where('branch_id', $branch);
+                      } else {
+                          $eq->where('branch', $branch)
+                             ->orWhereHas('branch', fn($bq) => $bq->where('name', $branch));
+                      }
+                  });
+            });
         }
 
         if ($request->filled('date')) {
