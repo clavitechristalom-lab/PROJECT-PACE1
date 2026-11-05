@@ -95,6 +95,11 @@ class Employee extends Model
         return $this->hasMany(Attendance::class, 'employee_id', 'employee_id');
     }
 
+    public function payslips()
+    {
+        return $this->hasMany(Payslip::class, 'employee_id', 'employee_id');
+    }
+
     public function branch()
     {
         return $this->belongsTo(BranchProfile::class, 'branch_id', 'id');

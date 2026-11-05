@@ -6,12 +6,24 @@ class SaleItem extends Model
 {
     protected $primaryKey = 'sale_item_id';
     protected $table = 'sale_items';
-    public $timestamps = false; // As per your SQL, this only has a "created_at" timestamp
+    public $timestamps = false; // As per SQL, this only has a "created_at" timestamp
 
     protected $fillable = [
         'sale_id', 'product_id', 'quantity', 'unit_price', 
         'discount_amount', 'line_total'
     ];
+
+    protected $appends = ['discount', 'total_price'];
+
+    public function getDiscountAttribute()
+    {
+        return $this->discount_amount;
+    }
+
+    public function getTotalPriceAttribute()
+    {
+        return $this->line_total;
+    }
 
     // Relationships
     public function saleTransaction()

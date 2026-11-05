@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Modal, LoadingState, EmptyState, Badge, StatusBadge, showToast, showSuccess, showError, showWarning, confirmDelete } from '../ui';
 import { api } from '../../lib/api';
 import { fmt } from '../../lib/utils';
-import { FiPackage, FiCalendar, FiClock, FiCreditCard, FiAlertCircle, FiCheckCircle, FiFileText, FiMessageCircle, FiChevronLeft, FiChevronRight, FiShoppingCart, FiX, FiTrash2 } from 'react-icons/fi';
+import { FiPackage, FiCalendar, FiClock, FiCreditCard, FiAlertCircle, FiCheckCircle, FiFileText, FiMessageCircle, FiChevronLeft, FiChevronRight, FiShoppingCart, FiX, FiTrash2, FiPrinter, FiSearch, FiRefreshCw, FiMaximize2, FiMinimize2, FiZoomIn } from 'react-icons/fi';
 import { TbCurrencyPeso } from 'react-icons/tb';
 import { useAuth } from '../../context/AuthContext';
 import { triggerDataSync, useRealtimeSync, fastDeepEqual } from '../../lib/realtimeSync';
@@ -260,12 +260,18 @@ function ProductDetailModal({ product, onClose, onBuyProduct }) {
   const availableImages = [product.image_url, product.image_url_2, product.image_url_3, product.image_url_4].filter(Boolean);
   const images = availableImages.length > 0 ? availableImages : [];
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
+  const [isFullScreen, setIsFullScreen] = useState(false);
+  const fullScreenRef = useRef(null);
 
   // Keyboard navigation
   useEffect(() => {
     const handleKeyDown = (e) => {
       if (e.key === 'Escape') {
-        onClose();
+        if (isFullScreen) {
+          setIsFullScreen(false);
+        } else {
+          onClose();
+        }
       } else if (e.key === 'ArrowRight') {
         if (currentImageIndex < images.length - 1) setCurrentImageIndex(prev => prev + 1);
       } else if (e.key === 'ArrowLeft') {
@@ -274,7 +280,21 @@ function ProductDetailModal({ product, onClose, onBuyProduct }) {
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [currentImageIndex, images.length, onClose]);
+  }, [currentImageIndex, images.length, onClose, isFullScreen]);
+
+  const toggleNativeFullScreen = () => {
+    if (!document.fullscreenElement) {
+      if (fullScreenRef.current?.requestFullscreen) {
+        fullScreenRef.current.requestFullscreen().catch(() => {});
+      } else if (document.documentElement.requestFullscreen) {
+        document.documentElement.requestFullscreen().catch(() => {});
+      }
+    } else {
+      if (document.exitFullscreen) {
+        document.exitFullscreen().catch(() => {});
+      }
+    }
+  };
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-[fadeIn_0.2s_ease]">
@@ -294,17 +314,35 @@ function ProductDetailModal({ product, onClose, onBuyProduct }) {
         {/* Scrollable Body */}
         <div className="p-6 sm:p-8 space-y-5 overflow-y-auto flex-1">
           {/* Image Gallery */}
-          <div className="w-full bg-muted rounded-2xl overflow-hidden border border-border relative flex flex-col">
-            <div className="relative h-64">
+          <div className="w-full bg-slate-900/90 dark:bg-slate-950 rounded-2xl overflow-hidden border border-border relative flex flex-col group">
+            <div 
+              className="relative h-72 sm:h-80 cursor-zoom-in"
+              onClick={() => images.length > 0 && setIsFullScreen(true)}
+              title="Click to view product in full screen"
+            >
               {images.length > 0 ? (
                 <>
                   <img 
                     src={images[currentImageIndex]} 
                     alt={product.product_name} 
-                    className="w-full h-full object-contain p-4 absolute inset-0" 
+                    className="w-full h-full object-contain p-2 absolute inset-0 transition-transform duration-300 group-hover:scale-[1.02]" 
                     onError={(e) => { e.target.style.display = 'none'; }}
                   />
-                  <div className="absolute inset-0 bg-gradient-to-t from-black/20 to-transparent pointer-events-none"></div>
+                  <div className="absolute inset-0 bg-gradient-to-t from-black/40 via-transparent to-black/10 pointer-events-none"></div>
+
+                  {/* Fullscreen Pill Button */}
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setIsFullScreen(true);
+                    }}
+                    className="absolute top-3 right-3 z-10 flex items-center gap-1.5 px-3 py-1.5 bg-black/60 hover:bg-black/80 text-white rounded-xl text-xs font-semibold backdrop-blur-md border border-white/10 shadow-lg transition-all cursor-pointer hover:scale-105 active:scale-95"
+                    title="Open Full Screen"
+                  >
+                    <FiMaximize2 className="w-3.5 h-3.5" />
+                    <span>Full Screen</span>
+                  </button>
                 </>
               ) : (
                 <div className="w-full h-full flex flex-col items-center justify-center p-6 text-muted-foreground">
@@ -315,7 +353,7 @@ function ProductDetailModal({ product, onClose, onBuyProduct }) {
 
               {/* Gallery Counter */}
               {images.length > 1 && (
-                <div className="absolute bottom-3 right-3 bg-black/50 text-white text-xs font-mono px-2 py-1 rounded backdrop-blur-md">
+                <div className="absolute bottom-3 right-3 bg-black/60 text-white text-xs font-mono px-2.5 py-1 rounded-lg backdrop-blur-md border border-white/10">
                   {currentImageIndex + 1} / {images.length}
                 </div>
               )}
@@ -324,16 +362,26 @@ function ProductDetailModal({ product, onClose, onBuyProduct }) {
               {images.length > 1 && (
                 <>
                   <button
-                    onClick={() => setCurrentImageIndex(prev => Math.max(0, prev - 1))}
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setCurrentImageIndex(prev => Math.max(0, prev - 1));
+                    }}
                     disabled={currentImageIndex === 0}
-                    className="absolute left-2 top-1/2 -translate-y-1/2 bg-black/30 hover:bg-black/60 text-white rounded-full p-1.5 disabled:opacity-0 transition-all"
+                    className="absolute left-2.5 top-1/2 -translate-y-1/2 bg-black/40 hover:bg-black/70 text-white rounded-full p-2 disabled:opacity-0 transition-all cursor-pointer backdrop-blur-sm z-10"
+                    title="Previous Image"
                   >
                     <FiChevronLeft className="w-5 h-5" />
                   </button>
                   <button
-                    onClick={() => setCurrentImageIndex(prev => Math.min(images.length - 1, prev + 1))}
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setCurrentImageIndex(prev => Math.min(images.length - 1, prev + 1));
+                    }}
                     disabled={currentImageIndex === images.length - 1}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 bg-black/30 hover:bg-black/60 text-white rounded-full p-1.5 disabled:opacity-0 transition-all"
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 bg-black/40 hover:bg-black/70 text-white rounded-full p-2 disabled:opacity-0 transition-all cursor-pointer backdrop-blur-sm z-10"
+                    title="Next Image"
                   >
                     <FiChevronRight className="w-5 h-5" />
                   </button>
@@ -343,14 +391,17 @@ function ProductDetailModal({ product, onClose, onBuyProduct }) {
 
             {/* Thumbnails */}
             {images.length > 1 && (
-              <div className="flex gap-2 p-2.5 bg-slate-200 dark:bg-slate-900 overflow-x-auto">
+              <div className="flex gap-2 p-2.5 bg-slate-900/60 dark:bg-black/40 border-t border-white/5 overflow-x-auto">
                 {images.map((img, idx) => (
                   <button
                     key={idx}
+                    type="button"
                     onClick={() => setCurrentImageIndex(idx)}
-                    className={`w-14 h-10 shrink-0 rounded overflow-hidden border-2 transition-colors ${idx === currentImageIndex ? 'border-[#176B87]' : 'border-transparent'}`}
+                    className={`w-14 h-11 shrink-0 rounded-lg overflow-hidden border-2 transition-all cursor-pointer ${
+                      idx === currentImageIndex ? 'border-[#176B87] ring-2 ring-[#176B87]/30 scale-105' : 'border-white/10 opacity-70 hover:opacity-100'
+                    }`}
                   >
-                    <img src={img} className="w-full h-full object-cover" />
+                    <img src={img} className="w-full h-full object-cover" alt="" />
                   </button>
                 ))}
               </div>
@@ -445,6 +496,113 @@ function ProductDetailModal({ product, onClose, onBuyProduct }) {
         </div>
 
       </div>
+
+      {/* FULL SCREEN PRODUCT VIEWER */}
+      {isFullScreen && images.length > 0 && (
+        <div 
+          ref={fullScreenRef}
+          className="fixed inset-0 z-[100] bg-black/95 backdrop-blur-xl flex flex-col justify-between p-4 sm:p-6 animate-[fadeIn_0.2s_ease]"
+          onClick={() => setIsFullScreen(false)}
+        >
+          {/* Top Fullscreen Bar */}
+          <div 
+            className="flex items-center justify-between z-20 shrink-0"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center gap-3 min-w-0">
+              <span className="font-bold text-base text-white truncate max-w-xs sm:max-w-md">
+                {product.product_name}
+              </span>
+              <span className="font-mono text-sm font-bold text-emerald-400 px-2.5 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 shrink-0">
+                {fmt(product.discount_price || product.unit_price)}
+              </span>
+            </div>
+
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                type="button"
+                onClick={toggleNativeFullScreen}
+                className="w-10 h-10 rounded-xl bg-white/10 hover:bg-white/20 text-white flex items-center justify-center transition-colors cursor-pointer"
+                title="Toggle Native Browser Full Screen"
+              >
+                <FiMaximize2 className="w-5 h-5" />
+              </button>
+              <button
+                type="button"
+                onClick={() => setIsFullScreen(false)}
+                className="w-10 h-10 rounded-xl bg-white/10 hover:bg-white/20 text-white flex items-center justify-center transition-colors cursor-pointer"
+                title="Exit Full Screen (Esc)"
+              >
+                <FiX className="w-5 h-5" />
+              </button>
+            </div>
+          </div>
+
+          {/* Center Main Image */}
+          <div 
+            className="relative flex-1 flex items-center justify-center overflow-hidden my-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <img
+              src={images[currentImageIndex]}
+              alt={product.product_name}
+              className="w-full h-full max-w-[95vw] max-h-[82vh] object-contain drop-shadow-2xl select-none"
+            />
+
+            {/* Navigation Arrows in Full Screen */}
+            {images.length > 1 && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => setCurrentImageIndex(prev => Math.max(0, prev - 1))}
+                  disabled={currentImageIndex === 0}
+                  className="absolute left-2 sm:left-6 top-1/2 -translate-y-1/2 bg-black/60 hover:bg-black/90 text-white rounded-full p-3 disabled:opacity-0 transition-all cursor-pointer border border-white/20 shadow-xl backdrop-blur-md"
+                  title="Previous (Left Arrow)"
+                >
+                  <FiChevronLeft className="w-7 h-7" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setCurrentImageIndex(prev => Math.min(images.length - 1, prev + 1))}
+                  disabled={currentImageIndex === images.length - 1}
+                  className="absolute right-2 sm:right-6 top-1/2 -translate-y-1/2 bg-black/60 hover:bg-black/90 text-white rounded-full p-3 disabled:opacity-0 transition-all cursor-pointer border border-white/20 shadow-xl backdrop-blur-md"
+                  title="Next (Right Arrow)"
+                >
+                  <FiChevronRight className="w-7 h-7" />
+                </button>
+              </>
+            )}
+          </div>
+
+          {/* Bottom Fullscreen Bar: Thumbnails & Counter */}
+          <div 
+            className="flex flex-col items-center gap-2 z-20 shrink-0"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {images.length > 1 && (
+              <div className="flex items-center gap-2.5 p-2 bg-black/50 backdrop-blur-md rounded-2xl border border-white/10 max-w-full overflow-x-auto">
+                {images.map((img, idx) => (
+                  <button
+                    key={idx}
+                    type="button"
+                    onClick={() => setCurrentImageIndex(idx)}
+                    className={`w-16 h-12 rounded-xl overflow-hidden border-2 transition-all cursor-pointer shrink-0 ${
+                      idx === currentImageIndex 
+                        ? 'border-emerald-400 ring-2 ring-emerald-400/40 scale-105' 
+                        : 'border-white/10 opacity-60 hover:opacity-100'
+                    }`}
+                  >
+                    <img src={img} className="w-full h-full object-cover" alt="" />
+                  </button>
+                ))}
+              </div>
+            )}
+            <div className="text-white/60 text-xs font-mono">
+              {currentImageIndex + 1} of {images.length} • Press ESC to exit
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -1006,10 +1164,94 @@ export function InstallmentAccountDetailsModal({ isOpen, onClose, installmentId 
   );
 }
 
-export function StatementModal({ isOpen, onClose }) {
+export function StatementModal({ isOpen, onClose, installments = [], user = null, stats = null }) {
   const [statements, setStatements] = useState([]);
+  const [customerData, setCustomerData] = useState(null);
+  const [summaryData, setSummaryData] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [filterType, setFilterType] = useState('All'); // 'All' | 'Purchase' | 'Payment'
+  const [searchQuery, setSearchQuery] = useState('');
   const inFlightRef = useRef(false);
+
+  // Fallback builder from installments
+  const buildFallbackStatements = useCallback(() => {
+    const list = [];
+    (installments || []).forEach(inst => {
+      // Purchase entry
+      if (Number(inst.total_amount || 0) > 0) {
+        list.push({
+          id: `INST-${inst.installment_id || inst.account_no}`,
+          date: inst.purchase_date || '—',
+          rawDate: inst.purchase_date ? new Date(inst.purchase_date).getTime() : 0,
+          reference: inst.account_no || 'ORD-000',
+          type: 'Purchase',
+          category: 'Debit',
+          description: inst.product || 'Product Purchase',
+          payment_method: inst.payment_method || 'Installment Plan',
+          amount: Number(inst.total_amount || 0),
+          status: inst.status || 'Active',
+          account_no: inst.account_no,
+        });
+      }
+
+      // Payments from installments.payments if available
+      if (Array.isArray(inst.payments) && inst.payments.length > 0) {
+        inst.payments.forEach(p => {
+          list.push({
+            id: `PAY-${p.payment_id || p.receipt_no}`,
+            date: p.payment_date || '—',
+            rawDate: p.payment_date ? new Date(p.payment_date).getTime() : 0,
+            reference: p.receipt_no || ('REC-' + p.payment_id),
+            type: 'Payment',
+            category: 'Credit',
+            description: p.notes || `Payment for ${inst.account_no} (${inst.product})`,
+            payment_method: p.payment_method || 'Payment',
+            amount: Number(p.amount || 0),
+            status: p.status || 'Completed',
+            account_no: inst.account_no,
+          });
+        });
+      } else {
+        // From paymentSchedules
+        (inst.paymentSchedules || []).forEach(s => {
+          if (s.status === 'Paid' || Number(s.amount_paid || 0) > 0) {
+            list.push({
+              id: `SCHED-${s.schedule_id}`,
+              date: s.paid_date || s.due_date || '—',
+              rawDate: new Date(s.paid_date || s.due_date).getTime(),
+              reference: `SCHED-#${s.installment_no}`,
+              type: 'Payment',
+              category: 'Credit',
+              description: `Payment for ${inst.product} (Schedule #${s.installment_no})`,
+              payment_method: inst.payment_method || 'Installment Payment',
+              amount: Number(s.amount_paid || s.amount_due || 0),
+              status: 'Completed',
+              account_no: inst.account_no,
+            });
+          }
+        });
+
+        // Or direct paid_amount if no schedule rows matched
+        if (Number(inst.paid_amount || 0) > 0 && !list.some(x => x.account_no === inst.account_no && x.type === 'Payment')) {
+          list.push({
+            id: `DP-${inst.account_no}`,
+            date: inst.purchase_date || '—',
+            rawDate: inst.purchase_date ? new Date(inst.purchase_date).getTime() : 0,
+            reference: `PAY-${inst.account_no}`,
+            type: 'Payment',
+            category: 'Credit',
+            description: `Payment / Downpayment for ${inst.product}`,
+            payment_method: 'Payment',
+            amount: Number(inst.paid_amount || 0),
+            status: 'Completed',
+            account_no: inst.account_no,
+          });
+        }
+      }
+    });
+
+    return list.sort((a, b) => b.rawDate - a.rawDate);
+  }, [installments]);
 
   const loadStatements = useCallback((silent = false, signal) => {
     if (!isOpen) return;
@@ -1017,41 +1259,33 @@ export function StatementModal({ isOpen, onClose }) {
     if (inFlightRef.current && isSilent) return;
     inFlightRef.current = true;
     if (!isSilent) setLoading(true);
-    Promise.all([
-      api.transactions.getAll({ type: 'Sale' }, { signal }),
-      api.payments.getAll({}, { signal })
-    ])
-      .then(([salesRes, paymentsRes]) => {
+
+    api.customerApp.getStatements({ signal })
+      .then(res => {
         if (signal?.aborted) return;
-        const sales = (salesRes.transactions || []).map(s => ({
-          date: s.date,
-          reference: s.reference_code,
-          type: 'Purchase',
-          amount: Number(s.amount || 0),
-          status: s.status,
-          rawDate: new Date(s.date).getTime()
-        }));
-
-        const payments = (paymentsRes.payments || []).map(p => ({
-          date: p.payment_date,
-          reference: p.receipt_no,
-          type: 'Payment',
-          amount: parseFloat(p.amount),
-          status: p.status,
-          rawDate: new Date(p.payment_date).getTime()
-        }));
-
-        const combined = [...sales, ...payments].sort((a, b) => b.rawDate - a.rawDate);
-        setStatements(prev => (fastDeepEqual(prev, combined) ? prev : combined));
+        if (res && res.statements && res.statements.length > 0) {
+          setStatements(prev => (fastDeepEqual(prev, res.statements) ? prev : res.statements));
+          setCustomerData(prev => (fastDeepEqual(prev, res.customer) ? prev : res.customer));
+          setSummaryData(prev => (fastDeepEqual(prev, res.summary) ? prev : res.summary));
+        } else {
+          const fallback = buildFallbackStatements();
+          setStatements(prev => (fastDeepEqual(prev, fallback) ? prev : fallback));
+          if (res?.customer) setCustomerData(prev => (fastDeepEqual(prev, res.customer) ? prev : res.customer));
+          if (res?.summary) setSummaryData(prev => (fastDeepEqual(prev, res.summary) ? prev : res.summary));
+        }
       })
       .catch(err => {
-        if (err?.name !== 'AbortError') console.error(err);
+        if (err?.name !== 'AbortError') {
+          console.warn('Dedicated customer statement load error, using fallback:', err);
+          const fallback = buildFallbackStatements();
+          setStatements(prev => (fastDeepEqual(prev, fallback) ? prev : fallback));
+        }
       })
       .finally(() => {
         inFlightRef.current = false;
         if (!isSilent) setLoading(false);
       });
-  }, [isOpen]);
+  }, [isOpen, buildFallbackStatements]);
 
   useEffect(() => {
     if (isOpen) {
@@ -1065,38 +1299,328 @@ export function StatementModal({ isOpen, onClose }) {
 
   if (!isOpen) return null;
 
-  return (
-    <Modal isOpen={isOpen} onClose={onClose} title="Statement of Account" size="xl">
-      {loading ? (
-        <LoadingState message="Loading your statement..." />
-      ) : statements.length === 0 ? (
-        <EmptyState icon={<FiFileText className="w-12 h-12 text-muted-foreground/30 mx-auto" />} title="No statements available" description="You don't have any transaction history yet." />
-      ) : (
-        <div className="overflow-x-auto border border-border rounded-xl max-h-[60vh]">
-          <table className="w-full text-xs">
-            <thead className="bg-muted/50 text-muted-foreground sticky top-0 shadow-sm">
+  const calculatedTotalPurchases = summaryData?.total_purchases ?? (
+    statements.filter(s => s.type === 'Purchase').reduce((sum, s) => sum + Number(s.amount || 0), 0)
+    || installments.reduce((sum, i) => sum + Number(i.total_amount || 0), 0)
+  );
+
+  const calculatedTotalPaid = summaryData?.total_paid ?? (
+    statements.filter(s => s.type === 'Payment' || s.type === 'Down Payment').reduce((sum, s) => sum + Number(s.amount || 0), 0)
+    || installments.reduce((sum, i) => sum + Number(i.paid_amount || 0), 0)
+  );
+
+  const calculatedBalance = summaryData?.total_balance ?? (
+    stats?.total_credit_balance ?? Math.max(0, calculatedTotalPurchases - calculatedTotalPaid)
+  );
+
+  const nextDue = summaryData?.next_due_date || (
+    installments.map(i => i.next_due_date).filter(Boolean).sort()[0] || null
+  );
+  const monthlyPay = summaryData?.next_due_amount || stats?.monthly_payment || (
+    installments.reduce((sum, i) => sum + Number(i.monthly_payment || 0), 0)
+  );
+
+  const displayName = customerData?.name || (user ? `${user.first_name || ''} ${user.last_name || ''}`.trim() : '') || 'Valued Customer';
+  const customerCode = customerData?.customer_code || user?.customer_code || user?.customer?.customer_code || '—';
+  const customerBranch = customerData?.branch_name || user?.branch || 'Z-LICZ Trading';
+  const customerContact = customerData?.phone || user?.phone_number || customerData?.email || user?.email || '—';
+
+  const filteredStatements = statements.filter(s => {
+    if (filterType === 'Purchase' && s.type !== 'Purchase') return false;
+    if (filterType === 'Payment' && (s.type !== 'Payment' && s.type !== 'Down Payment')) return false;
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase();
+      const ref = (s.reference || '').toLowerCase();
+      const desc = (s.description || '').toLowerCase();
+      const method = (s.payment_method || '').toLowerCase();
+      const acct = (s.account_no || '').toLowerCase();
+      return ref.includes(q) || desc.includes(q) || method.includes(q) || acct.includes(q);
+    }
+    return true;
+  });
+
+  const handlePrint = () => {
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) return;
+
+    const rowsHtml = statements.map(s => `
+      <tr>
+        <td style="padding: 8px; border-bottom: 1px solid #e5e7eb; font-family: monospace;">${s.date}</td>
+        <td style="padding: 8px; border-bottom: 1px solid #e5e7eb; font-family: monospace; font-weight: bold; color: #176B87;">${s.reference || '—'}</td>
+        <td style="padding: 8px; border-bottom: 1px solid #e5e7eb;">
+          <div style="font-weight: 600;">${s.description || '—'}</div>
+          ${s.account_no ? `<div style="font-size: 11px; color: #6b7280; font-family: monospace;">Acct: ${s.account_no}</div>` : ''}
+        </td>
+        <td style="padding: 8px; border-bottom: 1px solid #e5e7eb;">${s.payment_method || '—'}</td>
+        <td style="padding: 8px; border-bottom: 1px solid #e5e7eb; text-align: center;">
+          <span style="display: inline-block; padding: 2px 8px; border-radius: 9999px; font-size: 11px; font-weight: bold; ${s.type === 'Payment' || s.type === 'Down Payment' ? 'background: #dcfce7; color: #166534;' : 'background: #f1f5f9; color: #334155;'}">
+            ${s.type}
+          </span>
+        </td>
+        <td style="padding: 8px; border-bottom: 1px solid #e5e7eb; text-align: right; font-family: monospace; font-weight: bold; ${s.type === 'Payment' || s.type === 'Down Payment' ? 'color: #059669;' : 'color: #111827;'}">
+          ${s.type === 'Payment' || s.type === 'Down Payment' ? '-' : ''}${fmt(s.amount)}
+        </td>
+      </tr>
+    `).join('');
+
+    printWindow.document.write(`
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <title>Statement of Account - ${displayName}</title>
+          <style>
+            body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; padding: 30px; color: #111827; }
+            .header { display: flex; justify-content: space-between; border-bottom: 2px solid #176B87; padding-bottom: 15px; margin-bottom: 20px; }
+            .company { font-size: 20px; font-weight: 900; color: #176B87; letter-spacing: 0.5px; }
+            .sub { font-size: 12px; color: #4b5563; margin-top: 3px; }
+            .meta-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; background: #f8fafc; padding: 15px; border-radius: 8px; margin-bottom: 20px; font-size: 12px; border: 1px solid #e2e8f0; }
+            .summary-cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 20px; }
+            .card { padding: 12px; border: 1px solid #e2e8f0; border-radius: 8px; text-align: center; }
+            .card-title { font-size: 11px; text-transform: uppercase; font-weight: 700; color: #64748b; margin-bottom: 4px; }
+            .card-val { font-size: 16px; font-family: monospace; font-weight: 800; }
+            table { width: 100%; border-collapse: collapse; font-size: 12px; }
+            th { text-align: left; padding: 8px; background: #f1f5f9; color: #475569; font-weight: 700; border-bottom: 1px solid #cbd5e1; }
+            @media print { body { padding: 10px; } }
+          </style>
+        </head>
+        <body>
+          <div class="header">
+            <div>
+              <div class="company">Z-LICZ FURNITURE & APPLIANCES TRADING</div>
+              <div class="sub">Official Customer Statement of Account &bull; ${customerBranch}</div>
+            </div>
+            <div style="text-align: right; font-size: 12px; color: #64748b;">
+              <div><strong>Statement Date:</strong> ${new Date().toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' })}</div>
+              <div><strong>Status:</strong> ${Number(calculatedBalance) <= 0 ? 'Fully Paid' : 'Active Account'}</div>
+            </div>
+          </div>
+
+          <div class="meta-grid">
+            <div><strong>Customer Name:</strong> ${displayName}</div>
+            <div><strong>Customer Code:</strong> ${customerCode}</div>
+            <div><strong>Contact:</strong> ${customerContact}</div>
+            <div><strong>Store Branch:</strong> ${customerBranch}</div>
+          </div>
+
+          <div class="summary-cards">
+            <div class="card" style="background: #f8fafc;">
+              <div class="card-title">Total Purchases / Value</div>
+              <div class="card-val" style="color: #0f172a;">${fmt(calculatedTotalPurchases)}</div>
+            </div>
+            <div class="card" style="background: #f0fdf4;">
+              <div class="card-title" style="color: #166534;">Total Paid to Date</div>
+              <div class="card-val" style="color: #15803d;">${fmt(calculatedTotalPaid)}</div>
+            </div>
+            <div class="card" style="background: ${Number(calculatedBalance) > 0 ? '#fff1f2' : '#f0fdf4'};">
+              <div class="card-title" style="color: ${Number(calculatedBalance) > 0 ? '#9f1239' : '#166534'};">Outstanding Balance</div>
+              <div class="card-val" style="color: ${Number(calculatedBalance) > 0 ? '#e11d48' : '#15803d'};">${fmt(calculatedBalance)}</div>
+            </div>
+          </div>
+
+          <h3 style="font-size: 14px; font-weight: 700; margin-bottom: 10px; color: #0f172a;">Transaction & Payment Ledger</h3>
+          <table>
+            <thead>
               <tr>
-                <th className="py-2 px-3 text-left">Date</th>
-                <th className="py-2 px-3 text-left">Reference</th>
-                <th className="py-2 px-3 text-left">Type</th>
-                <th className="py-2 px-3 text-right">Amount</th>
+                <th>Date</th>
+                <th>Reference #</th>
+                <th>Description</th>
+                <th>Method</th>
+                <th style="text-align: center;">Type</th>
+                <th style="text-align: right;">Amount (PHP)</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-border bg-card">
-              {statements.map((s, i) => (
-                <tr key={i} className="hover:bg-muted/40 transition-colors">
-                  <td className="py-3 px-3 font-mono">{s.date}</td>
-                  <td className="py-3 px-3 font-mono text-primary font-semibold">{s.reference}</td>
-                  <td className="py-3 px-3">
-                    <Badge variant={s.type === 'Payment' ? 'success' : 'secondary'}>{s.type}</Badge>
-                  </td>
-                  <td className={`py-3 px-3 text-right font-mono font-bold ${s.type === 'Payment' ? 'text-emerald-600' : 'text-foreground'}`}>
-                    {s.type === 'Payment' ? '-' : ''}{fmt(s.amount)}
-                  </td>
-                </tr>
-              ))}
+            <tbody>
+              ${rowsHtml || '<tr><td colspan="6" style="text-align: center; padding: 20px; color: #94a3b8;">No transaction history available</td></tr>'}
             </tbody>
           </table>
+
+          <div style="margin-top: 40px; border-top: 1px dashed #cbd5e1; padding-top: 15px; font-size: 11px; color: #64748b; display: flex; justify-content: space-between;">
+            <div>This is a system-generated statement. For inquiries, please contact your store branch.</div>
+            <div>Generated by Z-LICZ Core System</div>
+          </div>
+        </body>
+      </html>
+    `);
+    printWindow.document.close();
+    printWindow.focus();
+    setTimeout(() => {
+      printWindow.print();
+    }, 350);
+  };
+
+  return (
+    <Modal isOpen={isOpen} onClose={onClose} title="Statement of Account" size="2xl">
+      {loading ? (
+        <LoadingState message="Loading your statement and ledger records..." />
+      ) : statements.length === 0 ? (
+        <EmptyState
+          icon={<FiFileText className="w-12 h-12 text-muted-foreground/30 mx-auto" />}
+          title="No statements available"
+          description="You don't have any purchase or payment history registered to your account yet."
+        />
+      ) : (
+        <div className="space-y-4 text-xs">
+          {/* Customer & Branch Header Card */}
+          <div className="p-3.5 bg-muted/30 border border-border rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="space-y-0.5">
+              <div className="text-sm font-bold text-foreground flex items-center gap-2">
+                <span>{displayName}</span>
+                <span className="font-mono text-[10px] px-1.5 py-0.5 bg-primary/10 text-primary font-bold rounded">
+                  {customerCode}
+                </span>
+              </div>
+              <div className="text-[11px] text-muted-foreground flex flex-wrap items-center gap-2">
+                <span>Branch: <strong className="text-foreground">{customerBranch}</strong></span>
+                <span>•</span>
+                <span>Contact: <strong className="text-foreground">{customerContact}</strong></span>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 self-end sm:self-auto shrink-0">
+              <button
+                type="button"
+                onClick={() => loadStatements(false)}
+                className="flex items-center gap-1.5 px-3 py-1.5 border border-border rounded-lg text-xs font-medium hover:bg-muted/50 transition-colors cursor-pointer"
+                title="Refresh statement"
+              >
+                <FiRefreshCw className="w-3.5 h-3.5" />
+                <span>Refresh</span>
+              </button>
+              <button
+                type="button"
+                onClick={handlePrint}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-[#176B87] hover:bg-[#176B87]/90 text-white rounded-lg text-xs font-semibold shadow-sm transition-colors cursor-pointer"
+              >
+                <FiPrinter className="w-3.5 h-3.5" />
+                <span>Print SOA</span>
+              </button>
+            </div>
+          </div>
+
+          {/* 4 Financial Stat Cards */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+            <div className="p-3 bg-card border border-border rounded-xl">
+              <div className="text-[10px] uppercase font-bold text-muted-foreground mb-1">Total Purchases</div>
+              <div className="font-mono font-bold text-sm sm:text-base text-foreground">{fmt(calculatedTotalPurchases)}</div>
+            </div>
+            <div className="p-3 bg-emerald-50/50 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-800 rounded-xl">
+              <div className="text-[10px] uppercase font-bold text-emerald-600 dark:text-emerald-400 mb-1">Total Paid</div>
+              <div className="font-mono font-bold text-sm sm:text-base text-emerald-700 dark:text-emerald-300">{fmt(calculatedTotalPaid)}</div>
+            </div>
+            <div className="p-3 bg-rose-50/50 dark:bg-rose-950/20 border border-rose-200 dark:border-rose-800 rounded-xl">
+              <div className="text-[10px] uppercase font-bold text-rose-600 dark:text-rose-400 mb-1">Remaining Balance</div>
+              <div className="font-mono font-bold text-sm sm:text-base text-rose-700 dark:text-rose-300">{fmt(calculatedBalance)}</div>
+            </div>
+            <div className="p-3 bg-blue-50/50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-800 rounded-xl">
+              <div className="text-[10px] uppercase font-bold text-blue-600 dark:text-blue-400 mb-1">
+                {nextDue ? `Next Due: ${nextDue}` : 'Monthly Amort.'}
+              </div>
+              <div className="font-mono font-bold text-sm sm:text-base text-blue-700 dark:text-blue-300">
+                {monthlyPay > 0 ? fmt(monthlyPay) : '₱0.00'}
+              </div>
+            </div>
+          </div>
+
+          {/* Filter Tabs & Search */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pt-1">
+            <div className="flex items-center gap-1 bg-muted/40 p-0.5 rounded-lg border border-border/60 self-start">
+              {['All', 'Purchase', 'Payment'].map(type => {
+                const count = type === 'All' 
+                  ? statements.length 
+                  : type === 'Purchase' 
+                    ? statements.filter(s => s.type === 'Purchase').length 
+                    : statements.filter(s => s.type === 'Payment' || s.type === 'Down Payment').length;
+                return (
+                  <button
+                    key={type}
+                    type="button"
+                    onClick={() => setFilterType(type)}
+                    className={`px-2.5 py-1 text-xs font-semibold rounded-md transition-colors ${
+                      filterType === type 
+                        ? 'bg-card text-foreground shadow-sm' 
+                        : 'text-muted-foreground hover:text-foreground'
+                    }`}
+                  >
+                    {type === 'All' ? 'All Transactions' : type === 'Purchase' ? 'Purchases' : 'Payments'} ({count})
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="relative w-full sm:w-64">
+              <FiSearch className="w-3.5 h-3.5 text-muted-foreground absolute left-2.5 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={e => setSearchQuery(e.target.value)}
+                placeholder="Search reference, product, note..."
+                className="w-full pl-8 pr-3 py-1.5 bg-card border border-border rounded-lg text-xs placeholder:text-muted-foreground/60 focus:outline-none focus:ring-1 focus:ring-primary"
+              />
+              {searchQuery && (
+                <button
+                  type="button"
+                  onClick={() => setSearchQuery('')}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                >
+                  <FiX className="w-3 h-3" />
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Statement Ledger Table */}
+          <div className="overflow-x-auto border border-border rounded-xl max-h-[50vh] shadow-inner bg-card">
+            <table className="w-full text-xs">
+              <thead className="bg-muted/60 text-muted-foreground sticky top-0 shadow-sm z-10">
+                <tr>
+                  <th className="py-2.5 px-3 text-left font-semibold">Date</th>
+                  <th className="py-2.5 px-3 text-left font-semibold">Reference</th>
+                  <th className="py-2.5 px-3 text-left font-semibold">Description</th>
+                  <th className="py-2.5 px-3 text-left font-semibold">Method</th>
+                  <th className="py-2.5 px-3 text-center font-semibold">Type</th>
+                  <th className="py-2.5 px-3 text-right font-semibold">Amount</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {filteredStatements.length === 0 ? (
+                  <tr>
+                    <td colSpan="6" className="py-8 text-center text-muted-foreground">
+                      No matching records found.
+                    </td>
+                  </tr>
+                ) : (
+                  filteredStatements.map((s, i) => {
+                    const isPayment = s.type === 'Payment' || s.type === 'Down Payment';
+                    return (
+                      <tr key={s.id || i} className="hover:bg-muted/40 transition-colors">
+                        <td className="py-2.5 px-3 font-mono text-muted-foreground whitespace-nowrap">{s.date}</td>
+                        <td className="py-2.5 px-3 font-mono font-bold text-primary whitespace-nowrap">{s.reference || '—'}</td>
+                        <td className="py-2.5 px-3 max-w-[220px]">
+                          <div className="font-medium text-foreground truncate" title={s.description}>
+                            {s.description || '—'}
+                          </div>
+                          {s.account_no && (
+                            <div className="font-mono text-[10px] text-muted-foreground">Acct: {s.account_no}</div>
+                          )}
+                        </td>
+                        <td className="py-2.5 px-3 text-muted-foreground whitespace-nowrap">{s.payment_method || '—'}</td>
+                        <td className="py-2.5 px-3 text-center whitespace-nowrap">
+                          <Badge variant={isPayment ? 'success' : 'secondary'}>
+                            {s.type}
+                          </Badge>
+                        </td>
+                        <td className={`py-2.5 px-3 text-right font-mono font-bold whitespace-nowrap ${
+                          isPayment ? 'text-emerald-600 dark:text-emerald-400' : 'text-foreground'
+                        }`}>
+                          {isPayment ? '-' : ''}{fmt(s.amount)}
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
     </Modal>

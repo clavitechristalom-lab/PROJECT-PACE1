@@ -15,7 +15,7 @@ export default function ImageCarousel() {
   const [currentIndex, setCurrentIndex] = useState(0);
   const inFlightRef = useRef(false);
 
-  const branchDisplay = user?.branch_name ? `${user.branch_name}` : '';
+  const branchDisplay = user?.branch_name ? `${user.branch_name}` : 'Z-Lics Iligan';
 
   const normalizeImg = (url) => {
     if (!url) return '';
@@ -63,18 +63,18 @@ export default function ImageCarousel() {
 
   if (images.length === 0) {
     return (
-      <div className="relative w-full h-[250px] sm:h-[350px] md:h-[400px] rounded-2xl overflow-hidden shadow-sm mb-6 flex items-center justify-center bg-muted border border-dashed border-border">
+      <div className="relative w-full h-[200px] sm:h-[260px] md:h-[300px] rounded-[2.5rem] overflow-hidden shadow-xs flex items-center justify-center bg-blue-50/40 dark:bg-slate-900/40 border border-dashed border-blue-200/70 dark:border-blue-900/50 transition-all">
         <div className="text-center text-slate-400 dark:text-slate-500 p-6">
-          <FiImage className="w-16 h-16 mx-auto mb-4 opacity-50" />
-          <h3 className="text-lg font-medium mb-1">Welcome to {branchDisplay}</h3>
-          <p className="text-sm">Exciting deals and products will be featured here soon.</p>
+          <FiImage className="w-16 h-16 mx-auto mb-3 text-blue-400/40 dark:text-blue-500/40" />
+          <h3 className="text-lg sm:text-xl font-bold text-slate-700 dark:text-slate-300 mb-1">Welcome to {branchDisplay}</h3>
+          <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400">Exciting deals and products will be featured here soon.</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="relative w-full h-[250px] sm:h-[350px] md:h-[400px] rounded-2xl overflow-hidden shadow-lg mb-6 group">
+    <div className="relative w-full h-[220px] sm:h-[300px] md:h-[340px] rounded-[2.5rem] overflow-hidden shadow-md group border border-border/60">
       {images.map((img, index) => (
         <div
           key={img.id}

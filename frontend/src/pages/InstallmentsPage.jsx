@@ -14,7 +14,7 @@ import {
 import { fmt, fmtDate, fastDeepEqual } from '../lib/utils'
 import { useAuth } from '../context/AuthContext'
 import api, { downloadCsv } from '../lib/api'
-import { useRealtimeSync, triggerDataSync } from '../lib/realtimeSync'
+import { useRealtimeSync, triggerDataSync, SyncButton } from '../lib/realtimeSync'
 import { TbCurrencyPeso } from 'react-icons/tb'
 import { FiDownload } from 'react-icons/fi'
 
@@ -185,7 +185,12 @@ export default function InstallmentsPage({ branchFilter: propBranchFilter, embed
     loadInitialData()
   }, [branchFilter, search, statusFilter, activeTab])
 
-  useRealtimeSync((_, signal) => loadInitialData(true, signal), [branchFilter, search, statusFilter, activeTab], { periodic: true })
+  // On-demand click-driven synchronization
+  const { sync: syncInstallments, isSyncing: isSyncingInstallments } = useRealtimeSync(
+    (_, signal) => loadInitialData(false, signal),
+    [],
+    { module: 'installments' }
+  )
 
   useEffect(() => {
     const id = searchParams.get('id')
@@ -576,6 +581,7 @@ export default function InstallmentsPage({ branchFilter: propBranchFilter, embed
           }
           action={
             <div className="flex gap-2">
+              <SyncButton sync={syncInstallments} isSyncing={isSyncingInstallments} label="Sync" />
               <button
                 onClick={handleExportCSV}
                 disabled={exporting}

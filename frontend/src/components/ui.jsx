@@ -741,6 +741,7 @@ export function NotificationBell({
   onNotificationClick,
   onViewAll,
   onRefresh,
+  className = '',
 }) {
   const [open, setOpen] = useState(false)
   const [filter, setFilter] = useState('all')
@@ -794,7 +795,9 @@ export function NotificationBell({
           setOpen(o => !o)
           if (!open && onRefresh) onRefresh()
         }}
-        className="w-9 h-9 rounded-xl border border-blue-500/25 bg-blue-50/50 dark:bg-blue-950/40 hover:bg-blue-500/20 flex items-center justify-center text-blue-800 dark:text-blue-200 hover:text-blue-950 dark:hover:text-white transition-colors cursor-pointer relative shadow-2xs"
+        className={`w-9 h-9 rounded-xl border flex items-center justify-center transition-colors cursor-pointer relative shadow-2xs ${
+          className || 'border-blue-500/25 bg-blue-50/50 dark:bg-blue-950/40 hover:bg-blue-500/20 text-blue-800 dark:text-blue-200 hover:text-blue-950 dark:hover:text-white'
+        }`}
         aria-label="Notifications"
         title="Notifications"
       >
@@ -971,3 +974,6 @@ export function NotificationBell({
     </div>
   )
 }
+
+export { SyncButton, OnDemandSyncButton } from '../lib/realtimeSync'
+

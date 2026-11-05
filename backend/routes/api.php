@@ -22,6 +22,8 @@ use App\Http\Controllers\QrRequestController;
 use App\Http\Controllers\BranchController;
 use App\Http\Controllers\SyncController;
 use App\Http\Controllers\EWalletController;
+use App\Http\Controllers\PayslipController;
+use App\Http\Controllers\StatementController;
 
 // ─── Authentication (Public) ──────────────────────────────────────────────────
 Route::get('/login', function () {
@@ -244,6 +246,10 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::put('/payroll-periods/{id}/close', [PayrollController::class, 'closePeriod']);
     });
 
+    // ─── Payslips & Statements (CRUD) ───────────────────────────────────────────
+    Route::apiResource('payslips', PayslipController::class);
+    Route::apiResource('statements', StatementController::class);
+
     // ─── Reports ────────────────────────────────────────────────────────────────
     Route::get('/reports/employees', [ReportController::class, 'employees']);
     Route::get('/reports/sales', [ReportController::class, 'sales']);
@@ -294,6 +300,7 @@ Route::middleware('auth:sanctum')->group(function () {
     // 🌟 Customer App 🌟
     Route::get('/customer/dashboard', [CustomerDashboardController::class, 'getDashboard']);
     Route::get('/customer/installments', [CustomerDashboardController::class, 'getInstallments']);
+    Route::get('/customer/statements', [CustomerDashboardController::class, 'getStatements']);
     Route::post('/customer/product-requests', [CustomerDashboardController::class, 'requestProduct']);
     Route::post('/customer/request-installment', [CustomerDashboardController::class, 'requestInstallment']);
     

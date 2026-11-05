@@ -154,7 +154,7 @@ class InstallmentController extends Controller
             'sale.items:sale_item_id,sale_id,product_id',
             'sale.items.product:product_id,product_name',
             'payments:payment_id,installment_id,amount,status',
-            'paymentSchedules:schedule_id,installment_id,due_date,balance_due,amount,status'
+            'paymentSchedules:schedule_id,installment_id,due_date,balance_due,amount_due,amount_paid,status'
         ])->select([
             'installment_id',
             'account_no',

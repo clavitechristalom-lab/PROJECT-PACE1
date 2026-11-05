@@ -13,7 +13,7 @@ import {
 import { fmt, fmtDate, filterBySearch, fastDeepEqual } from '../lib/utils'
 import { useAuth } from '../context/AuthContext'
 import api, { downloadCsv } from '../lib/api'
-import { useRealtimeSync, triggerDataSync } from '../lib/realtimeSync'
+import { useRealtimeSync, triggerDataSync, SyncButton } from '../lib/realtimeSync'
 import { TbCurrencyPeso } from 'react-icons/tb'
 import MySalesChart from '../components/MySalesChart'
 
@@ -125,8 +125,12 @@ export default function SalesPage({ branchFilter, embedded }) {
     loadData()
   }, [methodFilter, statusFilter, branchFilter, search])
 
-  // Real-time synchronization across multi-user accounts (1-2s target)
-  useRealtimeSync((_, signal) => loadData(true, signal), [methodFilter, statusFilter, branchFilter, search], { periodic: true })
+  // On-demand click-driven synchronization
+  const { sync: syncSales, isSyncing: isSyncingSales } = useRealtimeSync(
+    (_, signal) => loadData(false, signal),
+    [],
+    { module: 'sales' }
+  )
 
   const openViewSale = async (s) => {
     try {
@@ -264,6 +268,7 @@ export default function SalesPage({ branchFilter, embedded }) {
           subtitle="Process new sales, cash receipts, and installment contracts"
           action={
             <div className="flex items-center gap-2">
+              <SyncButton sync={syncSales} isSyncing={isSyncingSales} label="Sync" />
               <button
                 onClick={handleExportCSV}
                 disabled={exporting}

@@ -14,7 +14,7 @@ import {
 } from '../components/ui'
 import { fmt, fmtDate, filterBySearch, fastDeepEqual } from '../lib/utils'
 import { api } from '../lib/api'
-import { useRealtimeSync, triggerDataSync } from '../lib/realtimeSync'
+import { useRealtimeSync, triggerDataSync, SyncButton } from '../lib/realtimeSync'
 import { QRCodeSVG } from 'qrcode.react'
 import EmployeeFinancialsTab from '../components/employees/EmployeeFinancialsTab'
 import { TbCurrencyPeso } from 'react-icons/tb'
@@ -158,8 +158,12 @@ export default function EmployeesPage({ branchFilter, embedded }) {
     loadEmployees('filter_change')
   }, [search, deptFilter, branchSelectFilter, statusFilter, branchFilter])
 
-  // Real-time synchronization across all tabs and multi-user activities
-  useRealtimeSync(loadEmployees, [search, deptFilter, branchSelectFilter, statusFilter, branchFilter], { periodic: true })
+  // On-demand click-driven synchronization
+  const { sync: syncEmployees, isSyncing: isSyncingEmployees } = useRealtimeSync(
+    () => loadEmployees('manual'),
+    [],
+    { module: 'employees' }
+  )
 
   useEffect(() => {
     const id = searchParams.get('id')
@@ -582,15 +586,18 @@ export default function EmployeesPage({ branchFilter, embedded }) {
           title="Employee Management"
           subtitle="Manage organizational personnel, permanent QR badges, attendance PINs, and payroll assignments"
           action={
-            (isAdmin || isStoreAdmin) && (
-              <button
-                onClick={() => { setEditItem(null); setFormTab('personal'); setForm(emptyForm); setAddModal(true) }}
-                className="flex items-center gap-2 px-4 py-2 bg-primary hover:bg-primary/90 text-primary-foreground font-semibold text-xs rounded-xl shadow-xs transition-all cursor-pointer hover:shadow-md active:scale-98"
-              >
-                <FiPlus className="w-4 h-4" />
-                <span>Add Employee</span>
-              </button>
-            )
+            <div className="flex items-center gap-2">
+              <SyncButton sync={syncEmployees} isSyncing={isSyncingEmployees} label="Sync" />
+              {(isAdmin || isStoreAdmin) && (
+                <button
+                  onClick={() => { setEditItem(null); setFormTab('personal'); setForm(emptyForm); setAddModal(true) }}
+                  className="flex items-center gap-2 px-4 py-2 bg-primary hover:bg-primary/90 text-primary-foreground font-semibold text-xs rounded-xl shadow-xs transition-all cursor-pointer hover:shadow-md active:scale-98"
+                >
+                  <FiPlus className="w-4 h-4" />
+                  <span>Add Employee</span>
+                </button>
+              )}
+            </div>
           }
         />
       )}

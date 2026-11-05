@@ -13,7 +13,7 @@ import {
 } from '../components/ui'
 import { fmtDate, filterBySearch, fastDeepEqual } from '../lib/utils'
 import { api, downloadCsv } from '../lib/api'
-import { useRealtimeSync, triggerDataSync } from '../lib/realtimeSync'
+import { useRealtimeSync, triggerDataSync, SyncButton } from '../lib/realtimeSync'
 import { Html5Qrcode } from 'html5-qrcode'
 import { QRCodeSVG } from 'qrcode.react'
 import QrMonitoringModal from '../components/attendance/QrMonitoringModal'
@@ -305,16 +305,21 @@ export default function AttendancePage({ branchFilter: propBranchFilter, embedde
     }
   }, [activeTab, selectedDate, deptFilter, statusFilter, branchFilter, scanLogsPage, scanLogsStatusFilter, scanLogsActionFilter])
 
-  useRealtimeSync(() => {
-    if (activeTab === 'log' || activeTab === 'timesheet') {
-      loadData(true)
-    } else if (activeTab === 'audit') {
-      loadScanLogs(true)
-    }
-    if (isEmployee || isStoreAdmin) {
-      loadMyProfile(true)
-    }
-  }, [activeTab, selectedDate, deptFilter, statusFilter, branchFilter, scanLogsPage, scanLogsStatusFilter, scanLogsActionFilter, isEmployee, isStoreAdmin], { periodic: true })
+  // On-demand click-driven synchronization
+  const { sync: syncAttendance, isSyncing: isSyncingAttendance } = useRealtimeSync(
+    () => {
+      if (activeTab === 'log' || activeTab === 'timesheet') {
+        loadData(false)
+      } else if (activeTab === 'audit') {
+        loadScanLogs(false)
+      }
+      if (isEmployee || isStoreAdmin) {
+        loadMyProfile(false)
+      }
+    },
+    [activeTab, isEmployee, isStoreAdmin],
+    { module: 'attendance' }
+  )
 
   useEffect(() => {
     const searchParam = searchParams.get('search')
@@ -857,6 +862,7 @@ export default function AttendancePage({ branchFilter: propBranchFilter, embedde
         }
         action={
           <div className="flex gap-2 flex-wrap">
+            <SyncButton sync={syncAttendance} isSyncing={isSyncingAttendance} label="Sync" />
             {activeTab === 'log' && (
               <button
                 onClick={handleExportCSV}

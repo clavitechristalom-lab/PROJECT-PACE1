@@ -67,10 +67,7 @@ class PaymentController extends Controller
 
         // Scoping
         if ($user && $user->role === 'Customer') {
-            $customerId = $user->customer_id ?? $user->customer?->customer_id;
-            if (!$customerId) {
-                $customerId = \App\Models\Customer::where('email', $user->username)->value('customer_id');
-            }
+            $customerId = \App\Http\Controllers\CustomerDashboardController::resolveCustomerId($user);
             $query->whereHas('installmentAccount', function ($installmentQuery) use ($customerId) {
                 $installmentQuery->where('customer_id', $customerId ?? -1);
             });

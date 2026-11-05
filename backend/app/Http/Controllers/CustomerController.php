@@ -10,6 +10,7 @@ use App\Models\Notification;
 use App\Models\User;
 use App\Models\PaymentSchedule;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Hash;
 
 class CustomerController extends Controller
 {
@@ -321,7 +322,11 @@ class CustomerController extends Controller
             'notes'         => 'nullable|string',
             'branch_id'     => 'nullable|integer|exists:branch_profiles,id',
             'branch'        => 'nullable|string|max:255',
+            'password'      => 'nullable|string|min:6',
         ]);
+
+        $password = $request->input('password');
+        unset($validated['password']);
 
         $user = auth()->user();
         if ($user && in_array($user->role, ['Store Administrator', 'Store Admin'])) {
@@ -354,6 +359,28 @@ class CustomerController extends Controller
 
         $customer = Customer::create($validated);
         $customer->load(['branch', 'branchProfile']);
+
+        if (!empty($password)) {
+            $username = !empty($validated['email']) ? $validated['email'] : (!empty($validated['phone']) ? $validated['phone'] : $customer->customer_code);
+            $origUsername = $username;
+            $counter = 1;
+            while (User::where('username', $username)->exists()) {
+                $username = $origUsername . '_' . $counter;
+                $counter++;
+            }
+
+            User::create([
+                'username'            => $username,
+                'email'               => $validated['email'] ?? null,
+                'phone_number'        => $validated['phone'] ?? null,
+                'password_hash'       => Hash::make($password),
+                'role'                => 'Customer',
+                'is_active'           => ($validated['status'] ?? 'Active') === 'Active',
+                'customer_id'         => $customer->customer_id,
+                'account_verified'    => true,
+                'account_verified_at' => now(),
+            ]);
+        }
 
         SystemLog::create([
             'user_id'     => $request->user()?->user_id ?? $request->input('user_id'),
@@ -391,7 +418,11 @@ class CustomerController extends Controller
             'notes'         => 'nullable|string',
             'branch_id'     => 'nullable|integer|exists:branch_profiles,id',
             'branch'        => 'nullable|string|max:255',
+            'password'      => 'nullable|string|min:6',
         ]);
+
+        $password = $request->input('password');
+        unset($validated['password']);
 
         $user = auth()->user();
         if ($user && in_array($user->role, ['Store Administrator', 'Store Admin'])) {
@@ -420,6 +451,36 @@ class CustomerController extends Controller
 
         $customer->update($validated);
         $customer->load(['branch', 'branchProfile']);
+
+        if (!empty($password)) {
+            $user = User::where('customer_id', $customer->customer_id)->first();
+            if ($user) {
+                $user->password_hash = Hash::make($password);
+                if (!empty($validated['email'])) $user->email = $validated['email'];
+                if (!empty($validated['phone'])) $user->phone_number = $validated['phone'];
+                $user->save();
+            } else {
+                $username = !empty($validated['email']) ? $validated['email'] : (!empty($validated['phone']) ? $validated['phone'] : $customer->customer_code);
+                $origUsername = $username;
+                $counter = 1;
+                while (User::where('username', $username)->exists()) {
+                    $username = $origUsername . '_' . $counter;
+                    $counter++;
+                }
+
+                User::create([
+                    'username'            => $username,
+                    'email'               => $validated['email'] ?? null,
+                    'phone_number'        => $validated['phone'] ?? null,
+                    'password_hash'       => Hash::make($password),
+                    'role'                => 'Customer',
+                    'is_active'           => ($validated['status'] ?? 'Active') === 'Active',
+                    'customer_id'         => $customer->customer_id,
+                    'account_verified'    => true,
+                    'account_verified_at' => now(),
+                ]);
+            }
+        }
 
         // Synchronize customer branch in sales transactions ledger
         if ($customer->branch_id) {

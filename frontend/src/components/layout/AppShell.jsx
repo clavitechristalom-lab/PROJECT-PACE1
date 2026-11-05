@@ -5,12 +5,13 @@ import {
   FiCalendar, FiUser, FiClock, FiFileText,
   FiBarChart2, FiSettings, FiShield, FiDatabase, FiActivity,
   FiSun, FiMoon, FiSearch, FiLogOut, FiMenu, FiChevronDown,
-  FiCheckCircle, FiX, FiBell, FiCamera, FiLayers, FiMessageSquare, FiHardDrive
+  FiCheckCircle, FiX, FiBell, FiCamera, FiLayers, FiMessageSquare, FiHardDrive,
+  FiShoppingBag
 } from 'react-icons/fi'
 import { useAuth } from '../../context/AuthContext'
 import { NotificationBell, showToast, Spinner } from '../ui'
 import { api } from '../../lib/api'
-import { useRealtimeSync, triggerDataSync } from '../../lib/realtimeSync'
+import { triggerDataSync } from '../../lib/realtimeSync'
 import { fastDeepEqual } from '../../lib/utils'
 import { useTheme } from '../../context/ThemeContext'
 import ProfileModal from './ProfileModal'
@@ -56,6 +57,11 @@ function navByRole(role, onOpenConfig, pendingLettersCount = 0) {
   if (role === 'Customer') {
     return [
       { label: 'My Dashboard', path: '/customer/dashboard', icon: icons.dashboard },
+      { label: 'Installments', path: '/customer/dashboard?tab=installments', icon: icons.installment },
+      { label: 'Payment Schedule', path: '/customer/dashboard?tab=schedule', icon: icons.schedule },
+      { label: 'Statements', path: '/customer/dashboard?tab=statements', icon: icons.payslip },
+      { label: 'Product List', path: '/customer/dashboard?tab=products', icon: icons.products },
+      { label: 'Customer Support', path: '/customer/dashboard?tab=support', icon: icons.support },
     ]
   }
 
@@ -212,6 +218,11 @@ function getCollapsedRailItems(role, onOpenConfig, pendingLettersCount = 0) {
   if (role === 'Customer') {
     return [
       { label: 'My Dashboard', path: '/customer/dashboard', icon: <FiHome className="w-5 h-5" /> },
+      { label: 'Installments', path: '/customer/dashboard?tab=installments', icon: <FiCreditCard className="w-5 h-5" /> },
+      { label: 'Payment Schedule', path: '/customer/dashboard?tab=schedule', icon: <FiCalendar className="w-5 h-5" /> },
+      { label: 'Statements', path: '/customer/dashboard?tab=statements', icon: <FiFileText className="w-5 h-5" /> },
+      { label: 'Product List', path: '/customer/dashboard?tab=products', icon: <FiShoppingBag className="w-5 h-5" /> },
+      { label: 'Customer Support', path: '/customer/dashboard?tab=support', icon: <FiMessageSquare className="w-5 h-5" /> },
     ]
   }
 
@@ -295,6 +306,8 @@ function getCollapsedRailItems(role, onOpenConfig, pendingLettersCount = 0) {
 
 function Sidebar({ collapsed, settings, mobileOpen, onCloseMobile, onOpenConfig }) {
   const { user } = useAuth()
+  const { isDark } = useTheme()
+  const isLogoDark = !isDark
   const location = useLocation()
   const [pendingLettersCount, setPendingLettersCount] = useState(0)
 
@@ -317,7 +330,7 @@ function Sidebar({ collapsed, settings, mobileOpen, onCloseMobile, onOpenConfig 
   const navItems = user ? navByRole(user.role, onOpenConfig, pendingLettersCount) : []
   const railItems = user ? getCollapsedRailItems(user.role, onOpenConfig, pendingLettersCount) : []
 
-  if (!user || user.role === 'Customer') return null
+  if (!user) return null
 
   const companyName = settings?.company_name || 'Z-LICZ'
   const siteName = 'Z-LICZ Appliances'
@@ -325,6 +338,18 @@ function Sidebar({ collapsed, settings, mobileOpen, onCloseMobile, onOpenConfig 
   const isItemActive = (item) => {
     if (item.action) return false
     if (!item.path) return false
+    const currentFull = location.pathname + (location.search || '')
+    
+    // If the item specifies a query param, require an exact match of path + query
+    if (item.path.includes('?')) {
+      return currentFull === item.path
+    }
+
+    // If the current route has query params, items without query params are not active
+    if (location.search && location.search.length > 0) {
+      return false
+    }
+
     if (item.path === '/dashboard') {
       return location.pathname === '/' || location.pathname === '/dashboard'
     }
@@ -347,10 +372,14 @@ function Sidebar({ collapsed, settings, mobileOpen, onCloseMobile, onOpenConfig 
             className="fixed inset-y-0 left-0 z-50 w-[260px] bg-white dark:bg-[#071328] border-r border-blue-500/20 shadow-2xl flex flex-col h-full overflow-hidden animate-[slideRight_0.2s_ease]"
           >
             {/* Drawer Logo */}
-            <div className="relative flex flex-col items-center justify-center px-3 py-4 sm:py-5 border-b border-slate-200 dark:border-slate-800 flex-shrink-0 overflow-hidden">
+            <div className="brand-logo-shell relative flex flex-col items-center justify-center px-3 py-4 sm:py-5 border-b flex-shrink-0 overflow-hidden transition-colors duration-200">
               <button
                 onClick={onCloseMobile}
-                className="absolute top-3 right-3 text-slate-500 dark:text-slate-400 hover:text-foreground p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800/60 cursor-pointer transition-colors z-10"
+                className={`absolute top-3 right-3 p-1.5 rounded-lg cursor-pointer transition-colors z-10 ${
+                  isLogoDark
+                    ? 'text-slate-400 hover:text-white hover:bg-slate-800/60'
+                    : 'text-slate-500 hover:text-slate-900 hover:bg-slate-100'
+                }`}
                 aria-label="Close menu"
               >
                 <FiX className="w-5 h-5" />
@@ -385,24 +414,28 @@ function Sidebar({ collapsed, settings, mobileOpen, onCloseMobile, onOpenConfig 
                   <NavLink
                     key={entry.path}
                     to={entry.path}
-                    className={({ isActive }) =>
-                      `flex items-center gap-2.5 px-3 py-2 text-xs rounded-xl transition-all cursor-pointer ${isActive
+                    className={() => {
+                      const active = isItemActive(entry)
+                      return `flex items-center gap-2.5 px-3 py-2 text-xs rounded-xl transition-all cursor-pointer ${active
                         ? 'bg-gradient-to-r from-blue-600 via-blue-600 to-indigo-700 text-white font-bold shadow-md shadow-blue-950/40 border border-blue-400/30'
                         : 'text-slate-700 dark:text-blue-100/70 hover:bg-blue-500/10 hover:text-blue-950 dark:hover:text-white'
                       }`
-                    }
+                    }}
                   >
-                    {({ isActive }) => (
-                      <>
-                        <span className={`flex-shrink-0 ${isActive ? 'text-white' : 'text-blue-700 dark:text-blue-400'}`}>{entry.icon}</span>
-                        <span className="truncate flex-1">{entry.label}</span>
-                        {entry.badge && (
-                          <span className="text-[10px] font-bold font-mono bg-rose-600 text-white px-1.5 py-0.2 rounded-full shrink-0">
-                            {entry.badge}
-                          </span>
-                        )}
-                      </>
-                    )}
+                    {() => {
+                      const active = isItemActive(entry)
+                      return (
+                        <>
+                          <span className={`flex-shrink-0 ${active ? 'text-white' : 'text-blue-700 dark:text-blue-400'}`}>{entry.icon}</span>
+                          <span className="truncate flex-1">{entry.label}</span>
+                          {entry.badge && (
+                            <span className="text-[10px] font-bold font-mono bg-rose-600 text-white px-1.5 py-0.2 rounded-full shrink-0">
+                              {entry.badge}
+                            </span>
+                          )}
+                        </>
+                      )
+                    }}
                   </NavLink>
                 )
               )}
@@ -415,9 +448,22 @@ function Sidebar({ collapsed, settings, mobileOpen, onCloseMobile, onOpenConfig 
       {collapsed ? (
         /* Icon-Only Mini Sidebar */
         <aside
-          className="sidebar-shell flex flex-col h-full overflow-hidden flex-shrink-0 select-none z-30 print:hidden transition-all duration-200 border-r border-blue-500/15 bg-white dark:bg-[#071328] w-[68px] min-w-[68px]"
+          className="sidebar-shell flex flex-col h-full overflow-hidden flex-shrink-0 select-none z-30 print:hidden transition-all duration-200 border-r-0 bg-white dark:bg-[#071328] w-[68px] min-w-[68px]"
         >
-          <div className="flex-1 overflow-y-auto overflow-x-hidden py-3 px-2 flex flex-col items-center gap-2.5 [scrollbar-width:thin] [scrollbar-color:rgba(59,130,246,0.25)_transparent] [&::-webkit-scrollbar]:w-1 [&::-webkit-scrollbar-thumb]:bg-blue-500/25 [&::-webkit-scrollbar-thumb]:rounded-full">
+          {/* Mini Brand Logo Header */}
+          <div className="brand-logo-shell h-14 flex items-center justify-center border-b border-r-0 flex-shrink-0 overflow-hidden transition-colors duration-200">
+            <img
+              src={resolveLogoUrl(settings?.logo_url || settings?.logo) || '/zlicz-logo.png'}
+              alt="Z-LICZ"
+              className="w-10 h-8 object-contain mx-auto drop-shadow-sm"
+              onError={(e) => {
+                if (e.currentTarget.src !== window.location.origin + '/zlicz-logo.png' && !e.currentTarget.src.endsWith('/zlicz-logo.png')) {
+                  e.currentTarget.src = '/zlicz-logo.png'
+                }
+              }}
+            />
+          </div>
+          <div className="flex-1 overflow-y-auto overflow-x-hidden py-3 px-2 flex flex-col items-center gap-2.5 border-r border-blue-500/15 dark:border-blue-500/20 [scrollbar-width:thin] [scrollbar-color:rgba(59,130,246,0.25)_transparent] [&::-webkit-scrollbar]:w-1 [&::-webkit-scrollbar-thumb]:bg-blue-500/25 [&::-webkit-scrollbar-thumb]:rounded-full">
             {railItems.map((item, idx) => {
               const active = isItemActive(item)
 
@@ -471,10 +517,10 @@ function Sidebar({ collapsed, settings, mobileOpen, onCloseMobile, onOpenConfig 
       ) : (
         /* Full Expanded Sidebar */
         <aside
-          className="sidebar-shell flex flex-col h-full overflow-hidden flex-shrink-0 transition-all duration-200 select-none z-30 print:hidden border-r border-blue-500/15 bg-white dark:bg-[#071328] w-[240px] min-w-[240px]"
+          className="sidebar-shell flex flex-col h-full overflow-hidden flex-shrink-0 transition-all duration-200 select-none z-30 print:hidden border-r-0 bg-white dark:bg-[#071328] w-[240px] min-w-[240px]"
         >
           {/* Brand Logo Header */}
-          <div className="flex flex-col items-center justify-center px-3 py-4 sm:py-5 border-b border-slate-200 dark:border-slate-800 flex-shrink-0 overflow-hidden">
+          <div className="brand-logo-shell flex flex-col items-center justify-center px-3 py-4 sm:py-5 border-b border-r-0 flex-shrink-0 overflow-hidden transition-colors duration-200">
             <img
               src={resolveLogoUrl(settings?.logo_url || settings?.logo) || '/zlicz-logo.png'}
               alt="Z-LICZ Furniture & Appliances Trading"
@@ -488,7 +534,7 @@ function Sidebar({ collapsed, settings, mobileOpen, onCloseMobile, onOpenConfig 
           </div>
 
           {/* Nav */}
-          <nav className="flex-1 overflow-y-auto py-3 space-y-0.5 px-1.5">
+          <nav className="flex-1 overflow-y-auto py-3 space-y-0.5 px-1.5 border-r border-blue-500/15 dark:border-blue-500/20">
             {navItems.map((entry, i) =>
               entry.items ? (
                 <SidebarGroup key={i} group={entry} collapsed={false} />
@@ -505,24 +551,28 @@ function Sidebar({ collapsed, settings, mobileOpen, onCloseMobile, onOpenConfig 
                 <NavLink
                   key={entry.path}
                   to={entry.path}
-                  className={({ isActive }) =>
-                    `flex items-center gap-2.5 px-3 py-2 text-xs rounded-xl transition-all cursor-pointer ${isActive
+                  className={() => {
+                    const active = isItemActive(entry)
+                    return `flex items-center gap-2.5 px-3 py-2 text-xs rounded-xl transition-all cursor-pointer ${active
                       ? 'bg-gradient-to-r from-blue-600 via-blue-600 to-indigo-700 text-white font-bold shadow-md shadow-blue-950/40 border border-blue-400/30'
                       : 'text-slate-700 dark:text-blue-100/70 hover:bg-blue-500/10 hover:text-blue-950 dark:hover:text-white'
                     }`
-                  }
+                  }}
                 >
-                  {({ isActive }) => (
-                    <>
-                      <span className={`flex-shrink-0 ${isActive ? 'text-white' : 'text-blue-700 dark:text-blue-400'}`}>{entry.icon}</span>
-                      <span className="truncate flex-1">{entry.label}</span>
-                      {entry.badge && (
-                        <span className="text-[10px] font-bold font-mono bg-rose-600 text-white px-1.5 py-0.2 rounded-full shrink-0">
-                          {entry.badge}
-                        </span>
-                      )}
-                    </>
-                  )}
+                  {() => {
+                    const active = isItemActive(entry)
+                    return (
+                      <>
+                        <span className={`flex-shrink-0 ${active ? 'text-white' : 'text-blue-700 dark:text-blue-400'}`}>{entry.icon}</span>
+                        <span className="truncate flex-1">{entry.label}</span>
+                        {entry.badge && (
+                          <span className="text-[10px] font-bold font-mono bg-rose-600 text-white px-1.5 py-0.2 rounded-full shrink-0">
+                            {entry.badge}
+                          </span>
+                        )}
+                      </>
+                    )
+                  }}
                 </NavLink>
               )
             )}
@@ -533,7 +583,7 @@ function Sidebar({ collapsed, settings, mobileOpen, onCloseMobile, onOpenConfig 
   )
 }
 
-function RealTimeClock() {
+function RealTimeClock({ isHeaderDark = false }) {
   const [time, setTime] = useState(new Date())
 
   useEffect(() => {
@@ -543,10 +593,10 @@ function RealTimeClock() {
 
   return (
     <div className="hidden lg:flex flex-col items-end mr-4 text-right">
-      <span className="text-xs font-bold font-mono text-slate-900 dark:text-white tracking-tight">
+      <span className={`text-xs font-bold font-mono tracking-tight ${isHeaderDark ? 'text-white' : 'text-slate-900'}`}>
         {time.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
       </span>
-      <span className="text-[10px] text-blue-700 dark:text-blue-400 font-semibold uppercase tracking-wider">
+      <span className={`text-[10px] font-semibold uppercase tracking-wider ${isHeaderDark ? 'text-blue-400' : 'text-blue-700'}`}>
         {time.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })}
       </span>
     </div>
@@ -566,6 +616,7 @@ function Header({
 }) {
   const { user, logout } = useAuth()
   const { isDark, toggleMode } = useTheme()
+  const isHeaderDark = !isDark
   const [userOpen, setUserOpen] = useState(false)
   const userRef = useRef(null)
   const navigate = useNavigate()
@@ -685,16 +736,20 @@ function Header({
     <header className="header-shell h-14 px-2.5 sm:px-4 flex items-center justify-between gap-2 sm:gap-4 flex-shrink-0 z-30 print:hidden min-w-0">
       {/* Left: toggle + title */}
       <div className="flex items-center gap-2 sm:gap-3 min-w-0 shrink-0">
-        {user?.role !== 'Customer' && (
-          <button
-            onClick={onToggle}
-            className="w-8 h-8 rounded-xl border border-blue-500/20 bg-blue-50 dark:bg-[#071328] hover:bg-blue-500/20 flex items-center justify-center text-blue-800 dark:text-blue-200 hover:text-blue-950 dark:hover:text-white transition-colors cursor-pointer shrink-0"
-            aria-label="Toggle sidebar"
-          >
-            <FiMenu className="w-4 h-4" />
-          </button>
-        )}
-        <h1 className="text-xs sm:text-sm font-bold text-slate-900 dark:text-white truncate tracking-wide max-w-[100px] sm:max-w-[180px] md:max-w-xs">{title}</h1>
+        <button
+          onClick={onToggle}
+          className={`w-8 h-8 rounded-xl border flex items-center justify-center transition-colors cursor-pointer shrink-0 ${
+            isHeaderDark
+              ? 'border-blue-500/20 bg-[#071328] text-blue-200 hover:bg-blue-500/20 hover:text-white'
+              : 'border-blue-500/20 bg-blue-50 text-blue-800 hover:bg-blue-500/20 hover:text-blue-950'
+          }`}
+          aria-label="Toggle sidebar"
+        >
+          <FiMenu className="w-4 h-4" />
+        </button>
+        <h1 className={`text-xs sm:text-sm font-bold truncate tracking-wide max-w-[100px] sm:max-w-[180px] md:max-w-xs ${
+          isHeaderDark ? 'text-white' : 'text-slate-900'
+        }`}>{title}</h1>
       </div>
 
       {/* Center: Live Global Search Bar */}
@@ -711,9 +766,15 @@ function Header({
             onFocus={() => setSearchOpen(true)}
             onKeyDown={handleSearchKeyDown}
             placeholder="Search records across system (Ctrl+K)..."
-            className="w-full h-9 pl-9 pr-16 text-xs rounded-xl border border-blue-500/25 dark:border-blue-500/25 bg-blue-50/80 dark:bg-[#071328] text-slate-900 dark:text-slate-50 placeholder:text-blue-700/50 dark:placeholder:text-blue-300/40 focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-500 transition-all"
+            className={`w-full h-9 pl-9 pr-16 text-xs rounded-xl border transition-all focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-500 ${
+              isHeaderDark
+                ? 'border-blue-500/25 bg-[#071328] text-slate-50 placeholder:text-blue-300/40'
+                : 'border-blue-500/25 bg-blue-50/80 text-slate-900 placeholder:text-blue-700/50'
+            }`}
           />
-          <div className="absolute left-3 top-2.5 text-blue-600 dark:text-blue-400 pointer-events-none">
+          <div className={`absolute left-3 top-2.5 pointer-events-none ${
+            isHeaderDark ? 'text-blue-400' : 'text-blue-600'
+          }`}>
             {isSearching ? (
               <svg className="animate-spin w-4 h-4 text-blue-500" fill="none" viewBox="0 0 24 24">
                 <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
@@ -728,13 +789,17 @@ function Header({
               <button
                 type="button"
                 onClick={() => { setSearchQuery(''); setSearchResults([]); setGroupedResults({}); }}
-                className="text-blue-700 dark:text-blue-300 hover:text-foreground p-0.5 rounded cursor-pointer"
+                className={`${isHeaderDark ? 'text-blue-300 hover:text-white' : 'text-blue-700 hover:text-slate-950'} p-0.5 rounded cursor-pointer`}
                 title="Clear search query"
               >
                 <FiX className="w-3.5 h-3.5" />
               </button>
             )}
-            <kbd className="hidden lg:inline-block px-1.5 py-0.5 text-[10px] font-mono text-blue-700 dark:text-blue-300 bg-blue-100/60 dark:bg-blue-900/40 border border-blue-500/25 rounded shadow-2xs">
+            <kbd className={`hidden lg:inline-block px-1.5 py-0.5 text-[10px] font-mono border rounded shadow-2xs ${
+              isHeaderDark
+                ? 'text-blue-300 bg-blue-900/40 border-blue-500/25'
+                : 'text-blue-700 bg-blue-100/60 border-blue-500/25'
+            }`}>
               Ctrl+K
             </kbd>
           </div>
@@ -823,7 +888,7 @@ function Header({
 
       {/* Right controls */}
       <div className="flex items-center gap-1 sm:gap-2 shrink-0">
-        <RealTimeClock />
+        <RealTimeClock isHeaderDark={isHeaderDark} />
 
         {/* Mobile Search Button */}
         <button
@@ -832,7 +897,11 @@ function Header({
             setTimeout(() => searchInputRef.current?.focus(), 100)
           }}
           title="Search system"
-          className="sm:hidden w-8 h-8 flex items-center justify-center rounded-xl border border-blue-500/25 bg-blue-50/50 dark:bg-blue-950/40 hover:bg-blue-500/20 text-blue-900 dark:text-blue-100 transition-colors cursor-pointer text-base shadow-2xs shrink-0"
+          className={`sm:hidden w-8 h-8 flex items-center justify-center rounded-xl border transition-colors cursor-pointer text-base shadow-2xs shrink-0 ${
+            isHeaderDark
+              ? 'border-blue-500/25 bg-[#071328] hover:bg-blue-500/20 text-blue-100'
+              : 'border-blue-500/25 bg-blue-50/50 hover:bg-blue-500/20 text-blue-900'
+          }`}
         >
           <FiSearch className="w-4 h-4" />
         </button>
@@ -841,9 +910,17 @@ function Header({
         <button
           onClick={toggleMode}
           title={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
-          className="w-8 h-8 sm:w-9 sm:h-9 flex items-center justify-center rounded-xl border border-blue-500/25 bg-blue-50/50 dark:bg-blue-950/40 hover:bg-blue-500/20 text-blue-900 dark:text-blue-100 transition-colors cursor-pointer text-base shadow-2xs shrink-0"
+          className={`w-8 h-8 sm:w-9 sm:h-9 flex items-center justify-center rounded-xl border transition-colors cursor-pointer text-base shadow-2xs shrink-0 ${
+            isHeaderDark
+              ? 'border-blue-500/25 bg-[#071328] hover:bg-blue-500/20 text-blue-100'
+              : 'border-blue-500/25 bg-blue-50/50 hover:bg-blue-500/20 text-blue-900'
+          }`}
         >
-          {isDark ? <FiSun className="w-4 h-4 text-amber-400 drop-shadow-[0_0_6px_rgba(251,191,36,0.6)]" /> : <FiMoon className="w-4 h-4 text-blue-700 dark:text-blue-300" />}
+          {isDark ? (
+            <FiSun className="w-4 h-4 text-amber-500 drop-shadow-[0_0_6px_rgba(245,158,11,0.5)]" />
+          ) : (
+            <FiMoon className="w-4 h-4 text-blue-300" />
+          )}
         </button>
 
         {/* Real Notification Bell with Live DB Count & Dropdown */}
@@ -854,13 +931,22 @@ function Header({
           onNotificationClick={onNotificationClick}
           onViewAll={() => navigate(user?.role === 'Employee' ? '/employee/notifications' : '/notifications')}
           onRefresh={onRefreshNotifs}
+          className={
+            isHeaderDark
+              ? 'border-blue-500/25 bg-[#071328] text-blue-200 hover:bg-blue-500/20 hover:text-white'
+              : 'border-blue-500/25 bg-blue-50/50 text-blue-800 hover:bg-blue-500/20 hover:text-blue-950'
+          }
         />
 
         {/* User Menu */}
         <div className="relative shrink-0" ref={userRef}>
           <button
             onClick={() => setUserOpen(o => !o)}
-            className="flex items-center gap-1.5 p-1 sm:px-2.5 sm:py-1.5 rounded-xl border border-blue-500/25 bg-blue-50/80 dark:bg-[#071328] hover:bg-blue-500/20 transition-colors cursor-pointer shadow-2xs shrink-0"
+            className={`flex items-center gap-1.5 p-1 sm:px-2.5 sm:py-1.5 rounded-xl border transition-colors cursor-pointer shadow-2xs shrink-0 ${
+              isHeaderDark
+                ? 'border-blue-500/25 bg-[#071328] hover:bg-blue-500/20'
+                : 'border-blue-500/25 bg-blue-50/80 hover:bg-blue-500/20'
+            }`}
           >
             <div className="w-7 h-7 rounded-full bg-gradient-to-br from-blue-600 to-indigo-700 border border-blue-400/30 flex items-center justify-center text-white text-xs font-bold overflow-hidden shadow-xs shrink-0">
               {user?.profile_image ? (
@@ -870,8 +956,12 @@ function Header({
               )}
             </div>
             <div className="hidden sm:block text-left">
-              <div className="text-xs font-semibold text-slate-900 dark:text-slate-100 leading-tight">{user?.name ? user.name.split(' ')[0] : 'User'}</div>
-              <div className="text-[10px] text-blue-700 dark:text-blue-300/80 font-mono leading-tight">{user?.role}</div>
+              <div className={`text-xs font-semibold leading-tight ${
+                isHeaderDark ? 'text-slate-100' : 'text-slate-900'
+              }`}>{user?.name ? user.name.split(' ')[0] : 'User'}</div>
+              <div className={`text-[10px] font-mono leading-tight ${
+                isHeaderDark ? 'text-blue-300/80' : 'text-blue-700'
+              }`}>{user?.role}</div>
             </div>
           </button>
           {userOpen && (
@@ -957,7 +1047,10 @@ const ROUTE_TITLES = {
 }
 
 export default function AppShell() {
-  const [collapsed, setCollapsed] = useState(false)
+  const { user } = useAuth()
+  const [collapsed, setCollapsed] = useState(() => {
+    return user?.role === 'Customer'
+  })
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const [profileOpen, setProfileOpen] = useState(false)
   const [notifs, setNotifs] = useState([])
@@ -972,7 +1065,6 @@ export default function AppShell() {
   const cancelledVerifIdsRef = useRef(new Set())
   const location = useLocation()
   const navigate = useNavigate()
-  const { user } = useAuth()
   const pageTitle = ROUTE_TITLES[location.pathname] || 'Z-LICZ'
 
   useEffect(() => {

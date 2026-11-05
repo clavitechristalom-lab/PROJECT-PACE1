@@ -14,7 +14,7 @@ import {
 import { fmt, fmtDate, fastDeepEqual } from '../lib/utils'
 import { useAuth } from '../context/AuthContext'
 import api, { downloadCsv } from '../lib/api'
-import { useRealtimeSync, triggerDataSync } from '../lib/realtimeSync'
+import { useRealtimeSync, triggerDataSync, SyncButton } from '../lib/realtimeSync'
 import { TbCurrencyPeso } from 'react-icons/tb'
 import { FiDownload } from 'react-icons/fi'
 
@@ -206,9 +206,12 @@ export default function PaymentsPage() {
     loadData()
   }, [methodFilter, branchFilter, search, dateFrom, dateTo])
 
-  useRealtimeSync((_, signal) => {
-    loadData(true, signal)
-  }, [methodFilter, branchFilter, search, dateFrom, dateTo], { periodic: true })
+  // On-demand click-driven synchronization
+  const { sync: syncPayments, isSyncing: isSyncingPayments } = useRealtimeSync(
+    (_, signal) => loadData(false, signal),
+    [],
+    { module: 'payments' }
+  )
 
   useEffect(() => {
     const id = searchParams.get('id')
@@ -352,7 +355,8 @@ export default function PaymentsPage() {
       cancelButtonText: 'Cancel',
       reverseButtons: true,
       icon: 'question',
-      width: '460px',
+      width: '14.23cm',
+      height: '18.47cm',
     });
 
     if (!result.isConfirmed) return;
@@ -471,6 +475,7 @@ export default function PaymentsPage() {
         }
         action={
           <div className="flex items-center gap-2 flex-wrap">
+            <SyncButton sync={syncPayments} isSyncing={isSyncingPayments} label="Sync" />
             <button
               onClick={handlePrintSummary}
               className="flex items-center gap-2 px-3.5 py-2 rounded-xl border border-border bg-card hover:bg-muted font-semibold text-xs text-foreground cursor-pointer shadow-2xs transition-colors"

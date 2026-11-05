@@ -12,7 +12,7 @@ import {
 } from '../components/ui'
 import { fmt, filterBySearch, fastDeepEqual } from '../lib/utils'
 import api, { downloadCsv } from '../lib/api'
-import { useRealtimeSync, triggerDataSync } from '../lib/realtimeSync'
+import { useRealtimeSync, triggerDataSync, SyncButton } from '../lib/realtimeSync'
 import { FiDownload } from 'react-icons/fi'
 import { TbCurrencyPeso } from 'react-icons/tb'
 import MySalesChart from '../components/MySalesChart'
@@ -184,8 +184,12 @@ export default function ProductsPage({ branchFilter, embedded }) {
     loadProducts('filter_change')
   }, [category, stockStatus, activeBranch])
 
-  // Real-time synchronization
-  useRealtimeSync(loadProducts, [category, stockStatus, search, activeBranch], { periodic: true })
+  // On-demand click-driven synchronization
+  const { sync: syncProducts, isSyncing: isSyncingProducts } = useRealtimeSync(
+    () => loadProducts('manual'),
+    [],
+    { module: 'products' }
+  )
 
   const openAdd = () => {
     if (branches.length === 0) {
@@ -440,6 +444,7 @@ export default function ProductsPage({ branchFilter, embedded }) {
           subtitle="Manage product catalog, pricing, and stock levels"
           action={
             <div className="flex gap-2">
+              <SyncButton sync={syncProducts} isSyncing={isSyncingProducts} label="Sync" />
               <button
                 onClick={handleExport}
                 disabled={exporting}

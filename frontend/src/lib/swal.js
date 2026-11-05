@@ -30,10 +30,11 @@ const getPopupConfig = (type = 'info', isDanger = false) => {
 
   return {
     customClass: {
-      popup: `${popupBg} !backdrop-blur-xl border !rounded-2xl shadow-2xl p-6 sm:p-8 max-w-2xl w-full ${textColor}`,
-      title: 'hidden',
+      popup: `${popupBg} !backdrop-blur-xl border !rounded-2xl shadow-2xl p-5 sm:p-6 max-w-2xl w-full ${textColor}`,
+      icon: '!w-12 !h-12 !my-2.5 !mx-auto !border-[2.5px]',
+      title: '!text-lg md:!text-xl !font-bold !m-0 !p-0 !pt-1 !pb-2 !text-center !leading-snug',
       htmlContainer: '!m-0 !p-0',
-      actions: 'flex items-center justify-end gap-3 mt-6 pt-4 border-t border-slate-200 dark:border-slate-800/80 w-full',
+      actions: 'flex items-center justify-end gap-3 mt-4 pt-3 border-t border-slate-200 dark:border-slate-800/80 w-full',
       confirmButton: `inline-flex items-center justify-center font-bold !rounded-xl cursor-pointer transition-all active:scale-95 px-5 py-2.5 text-sm ${confirmBtnClass}`,
       cancelButton: `inline-flex items-center justify-center font-semibold !rounded-xl cursor-pointer transition-all active:scale-95 px-4 py-2.5 text-sm ${cancelBtnClass}`,
     },
@@ -364,12 +365,55 @@ export const unifiedAlert = (options) => {
   const isDanger = options.isDanger || options.danger || options.icon === 'error' || options.confirmButtonColor === '#ef4444'
   const config = getPopupConfig(options.icon || 'info', isDanger)
 
+  const { height, ...restOptions } = options
+
   return Swal.fire({
     ...config,
-    ...options,
+    ...restOptions,
     customClass: {
       ...config.customClass,
       ...(options.customClass || {})
+    },
+    didOpen: (popup) => {
+      const icon = popup.querySelector('.swal2-icon')
+      if (icon) {
+        icon.style.width = '48px'
+        icon.style.height = '48px'
+        icon.style.margin = '12px auto 8px auto'
+        icon.style.borderWidth = '2.5px'
+        const iconContent = icon.querySelector('.swal2-icon-content')
+        if (iconContent) {
+          iconContent.style.fontSize = '26px'
+          iconContent.style.display = 'flex'
+          iconContent.style.alignItems = 'center'
+          iconContent.style.justifyContent = 'center'
+        }
+      }
+      const titleEl = popup.querySelector('.swal2-title')
+      if (titleEl) {
+        titleEl.style.fontSize = '18px'
+        titleEl.style.fontWeight = '700'
+        titleEl.style.marginTop = '4px'
+        titleEl.style.marginBottom = '8px'
+        titleEl.style.padding = '0 16px'
+        titleEl.style.lineHeight = '1.3'
+      }
+
+      if (height) {
+        popup.style.height = height
+        popup.style.maxHeight = 'calc(100vh - 2rem)'
+        popup.style.display = 'flex'
+        popup.style.flexDirection = 'column'
+        popup.style.justifyContent = 'space-between'
+        const htmlContainer = popup.querySelector('.swal2-html-container')
+        if (htmlContainer) {
+          htmlContainer.style.flex = '1'
+          htmlContainer.style.overflowY = 'auto'
+        }
+      }
+      if (typeof options.didOpen === 'function') {
+        options.didOpen(popup)
+      }
     }
   })
 }

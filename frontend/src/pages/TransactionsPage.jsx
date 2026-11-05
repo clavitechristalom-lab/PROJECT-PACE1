@@ -13,7 +13,7 @@ import {
 import { fmt, fmtDate, filterBySearch, fastDeepEqual } from '../lib/utils'
 import { useAuth } from '../context/AuthContext'
 import { api } from '../lib/api'
-import { useRealtimeSync } from '../lib/realtimeSync'
+import { useRealtimeSync, SyncButton } from '../lib/realtimeSync'
 import { TbCurrencyPeso } from 'react-icons/tb'
 import MySalesChart from '../components/MySalesChart'
 
@@ -153,9 +153,12 @@ export default function TransactionsPage() {
     loadData()
   }, [activeChannelTab, typeFilter, providerFilter, dateRange, dateFrom, dateTo])
 
-  useRealtimeSync((_, signal) => {
-    loadData(true, signal)
-  }, [activeChannelTab, typeFilter, providerFilter, dateRange, dateFrom, dateTo, search], { periodic: true })
+  // On-demand click-driven synchronization
+  const { sync: syncTransactions, isSyncing: isSyncingTransactions } = useRealtimeSync(
+    (_, signal) => loadData(false, signal),
+    [],
+    { module: 'transactions' }
+  )
 
   useEffect(() => {
     const id = searchParams.get('id')
@@ -302,6 +305,7 @@ export default function TransactionsPage() {
           subtitle="Comprehensive audit trail of E-Wallet, Online Banking, Cash, and Installment transactions"
           action={
             <div className="flex items-center gap-2">
+              <SyncButton sync={syncTransactions} isSyncing={isSyncingTransactions} label="Sync" />
               <button
                 onClick={handleExportCSV}
                 className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-border bg-card hover:bg-muted font-semibold text-xs text-foreground cursor-pointer shadow-2xs transition-colors"

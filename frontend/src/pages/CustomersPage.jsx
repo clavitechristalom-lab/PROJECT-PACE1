@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import {
-  FiUser, FiUsers, FiPlus, FiEdit, FiTrash2, FiEye,
+  FiUser, FiUsers, FiPlus, FiEdit, FiTrash2, FiEye, FiEyeOff, FiLock,
   FiPhone, FiMapPin, FiMail, FiSearch,
   FiCreditCard, FiCheckCircle, FiAlertTriangle, FiX,
   FiClock, FiFileText, FiFilter, FiGitBranch
@@ -13,7 +13,7 @@ import {
 } from '../components/ui'
 import { fmt, filterBySearch, fastDeepEqual } from '../lib/utils'
 import api, { downloadCsv } from '../lib/api'
-import { useRealtimeSync, triggerDataSync } from '../lib/realtimeSync'
+import { useRealtimeSync, triggerDataSync, SyncButton } from '../lib/realtimeSync'
 import { FiDownload } from 'react-icons/fi'
 import { TbCurrencyPeso } from 'react-icons/tb'
 import { useAuth } from '../context/AuthContext'
@@ -163,8 +163,11 @@ export default function CustomersPage({ branchFilter, embedded }) {
     customer_code: '', first_name: '', middle_name: '', last_name: '',
     phone: '', email: '', address: '', status: 'Active', notes: '',
     branch_id: '',
+    password: '',
+    confirm_password: '',
   }
   const [form, setForm] = useState(emptyForm)
+  const [showPassword, setShowPassword] = useState(false)
   const inFlightRef = useRef(false)
 
   const loadCustomers = async (source, signal) => {
@@ -217,8 +220,12 @@ export default function CustomersPage({ branchFilter, embedded }) {
     loadCustomers('filter_change')
   }, [statusFilter, selectedBranchFilter])
 
-  // Real-time synchronization
-  useRealtimeSync(loadCustomers, [statusFilter, search, branchFilter, selectedBranchFilter], { periodic: true })
+  // On-demand click-driven synchronization
+  const { sync: syncCustomers, isSyncing: isSyncingCustomers } = useRealtimeSync(
+    () => loadCustomers('manual'),
+    [],
+    { module: 'customers' }
+  )
 
   useEffect(() => {
     const id = searchParams.get('id')
@@ -239,6 +246,17 @@ export default function CustomersPage({ branchFilter, embedded }) {
       return
     }
 
+    if (form.password) {
+      if (form.password.length < 6) {
+        showToast('Password must be at least 6 characters long', 'error')
+        return
+      }
+      if (form.confirm_password && form.password !== form.confirm_password) {
+        showToast('Passwords do not match', 'error')
+        return
+      }
+    }
+
     setSaving(true)
     try {
       let branchIdVal = form.branch_id === '' || form.branch_id === null ? null : parseInt(form.branch_id)
@@ -252,6 +270,10 @@ export default function CustomersPage({ branchFilter, embedded }) {
         ...form,
         branch_id: branchIdVal
       }
+      if (!payload.password) {
+        delete payload.password
+      }
+      delete payload.confirm_password
       if (editItem) {
         const res = await api.customers.update(editItem.customer_id, payload)
         if (res.customer) {
@@ -314,7 +336,10 @@ export default function CustomersPage({ branchFilter, embedded }) {
       status: c.status || 'Active',
       notes: c.notes || '',
       branch_id: c.branch_id !== null && c.branch_id !== undefined ? String(c.branch_id) : '',
+      password: '',
+      confirm_password: '',
     })
+    setShowPassword(false)
     setAddModal(true)
   }
 
@@ -353,6 +378,7 @@ export default function CustomersPage({ branchFilter, embedded }) {
           subtitle="Manage customer records, credit histories, and installment"
           action={
             <div className="flex gap-2">
+              <SyncButton sync={syncCustomers} isSyncing={isSyncingCustomers} label="Sync" />
               <button
                 onClick={handleExport}
                 disabled={exporting}
@@ -374,6 +400,7 @@ export default function CustomersPage({ branchFilter, embedded }) {
                           : (isAdmin && branches[0]?.id ? String(branches[0].id) : '')))
                     setForm({ ...emptyForm, branch_id: defaultBranch })
                     setEditItem(null)
+                    setShowPassword(false)
                     setAddModal(true)
                   }}
                   className="flex items-center gap-2 px-4 py-2 bg-primary hover:bg-primary/90 text-primary-foreground font-semibold text-xs rounded-xl shadow-xs transition-all cursor-pointer"
@@ -709,7 +736,7 @@ export default function CustomersPage({ branchFilter, embedded }) {
         <Modal
           isOpen={true}
           title={editItem ? `Edit Customer — ${editItem?.customer_code || ''}` : 'Add New Customer'}
-          onClose={() => { setAddModal(false); setEditItem(null); setForm(emptyForm) }}
+          onClose={() => { setAddModal(false); setEditItem(null); setForm(emptyForm); setShowPassword(false) }}
           size="lg"
         >
           <form onSubmit={handleSave} className="space-y-4 text-xs">
@@ -819,6 +846,52 @@ export default function CustomersPage({ branchFilter, embedded }) {
               </div>
             </div>
 
+            {/* Customer Password & Confirm Password */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+              <div>
+                <label className="block font-bold text-muted-foreground mb-1">
+                  Password <span className="font-normal text-[10px] text-muted-foreground/70">(Min. 6 chars)</span>
+                </label>
+                <div className="relative">
+                  <FiLock className="absolute left-3 top-2.5 text-muted-foreground w-3.5 h-3.5" />
+                  <input
+                    type={showPassword ? 'text' : 'password'}
+                    value={form.password || ''}
+                    onChange={e => setForm(f => ({ ...f, password: e.target.value }))}
+                    placeholder={editItem ? 'Leave blank to keep existing' : 'Customer portal password'}
+                    minLength={6}
+                    className="w-full pl-9 pr-10 py-2 rounded-xl border border-border bg-card text-foreground"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(s => !s)}
+                    className="absolute right-3 top-2.5 text-muted-foreground hover:text-foreground cursor-pointer"
+                    tabIndex={-1}
+                    title={showPassword ? 'Hide password' : 'Show password'}
+                  >
+                    {showPassword ? <FiEyeOff className="w-4 h-4" /> : <FiEye className="w-4 h-4" />}
+                  </button>
+                </div>
+              </div>
+
+              <div>
+                <label className="block font-bold text-muted-foreground mb-1">
+                  Confirm Password
+                </label>
+                <div className="relative">
+                  <FiLock className="absolute left-3 top-2.5 text-muted-foreground w-3.5 h-3.5" />
+                  <input
+                    type={showPassword ? 'text' : 'password'}
+                    value={form.confirm_password || ''}
+                    onChange={e => setForm(f => ({ ...f, confirm_password: e.target.value }))}
+                    placeholder={editItem ? 'Leave blank to keep existing' : 'Confirm password'}
+                    minLength={6}
+                    className="w-full pl-9 pr-3 py-2 rounded-xl border border-border bg-card text-foreground"
+                  />
+                </div>
+              </div>
+            </div>
+
             {!isStoreAdmin && (
               <div className="bg-muted/20 p-3.5 rounded-xl border border-border">
                 <label className="block font-bold text-foreground mb-1.5 flex items-center justify-between">
@@ -862,7 +935,7 @@ export default function CustomersPage({ branchFilter, embedded }) {
             <div className="flex justify-end gap-3 pt-4 border-t border-border">
               <button
                 type="button"
-                onClick={() => { setAddModal(false); setEditItem(null) }}
+                onClick={() => { setAddModal(false); setEditItem(null); setShowPassword(false) }}
                 className="flex items-center gap-1 px-4 py-2 rounded-xl border border-border hover:bg-muted font-semibold cursor-pointer"
               >
                 <FiX className="w-3.5 h-3.5" />

@@ -19,7 +19,7 @@ import {
 import { fmt, fastDeepEqual } from '../lib/utils'
 import { useAuth } from '../context/AuthContext'
 import { api } from '../lib/api'
-import { useRealtimeSync, triggerDataSync } from '../lib/realtimeSync'
+import { useRealtimeSync, triggerDataSync, SyncButton } from '../lib/realtimeSync'
 import { ComposedChart, Bar, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend } from 'recharts'
 import { TbCurrencyPeso } from 'react-icons/tb'
 import EmployeePayslipModal from '../components/payslip/EmployeePayslipModal'
@@ -312,9 +312,12 @@ export default function PayrollPage() {
     }
   }, [])
 
-  useRealtimeSync((_silent, signal) => {
-    loadData(selectedPeriodId, { branch: branchFilter, fromDate, toDate, status: filterStatus }, true, signal)
-  }, [selectedPeriodId, branchFilter, fromDate, toDate, filterStatus, user?.role], { periodic: true })
+  // On-demand click-driven synchronization
+  const { sync: syncPayroll, isSyncing: isSyncingPayroll } = useRealtimeSync(
+    (_, signal) => loadData(selectedPeriodId, { branch: branchFilter, fromDate, toDate, status: filterStatus }, false, signal),
+    [],
+    { module: 'payroll' }
+  )
 
   useEffect(() => {
     const id = searchParams.get('id')
@@ -578,6 +581,7 @@ export default function PayrollPage() {
           action={
             isManager ? (
               <div className="flex flex-wrap items-center gap-2">
+                <SyncButton sync={syncPayroll} isSyncing={isSyncingPayroll} label="Sync" />
                 <button
                   type="button"
                   id="btn-gov-contributions-modal"
@@ -616,6 +620,9 @@ export default function PayrollPage() {
         <PageHeader
           title="My Payslips"
           subtitle="View and download your official company pay stubs and salary history"
+          action={
+            <SyncButton sync={syncPayroll} isSyncing={isSyncingPayroll} label="Sync" />
+          }
         />
       )}
 

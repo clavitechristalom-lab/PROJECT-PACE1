@@ -12,6 +12,42 @@ use Illuminate\Support\Facades\DB;
 class CustomerDashboardController extends Controller
 {
     /**
+     * Helper to resolve customer ID for authenticated customer user
+     */
+    public static function resolveCustomerId($user)
+    {
+        if (!$user) return null;
+        if (!empty($user->customer_id)) return $user->customer_id;
+        if ($user->customer?->customer_id) {
+            $user->customer_id = $user->customer->customer_id;
+            try { $user->saveQuietly(); } catch (\Throwable $e) {}
+            return $user->customer->customer_id;
+        }
+
+        $cust = \App\Models\Customer::where(function ($q) use ($user) {
+            if (!empty($user->email)) {
+                $q->orWhere('email', $user->email);
+            }
+            if (!empty($user->phone_number)) {
+                $q->orWhere('phone', $user->phone_number);
+            }
+            if (!empty($user->username)) {
+                $q->orWhere('email', $user->username)
+                  ->orWhere('phone', $user->username)
+                  ->orWhere('customer_code', $user->username);
+            }
+        })->first();
+
+        if ($cust) {
+            $user->customer_id = $cust->customer_id;
+            try { $user->saveQuietly(); } catch (\Throwable $e) {}
+            return $cust->customer_id;
+        }
+
+        return null;
+    }
+
+    /**
      * Get summary metrics for the customer dashboard
      */
     public function getDashboard(Request $request)
@@ -21,16 +57,7 @@ class CustomerDashboardController extends Controller
             return response()->json(['message' => 'Unauthorized or missing customer profile'], 403);
         }
 
-        $customerId = $user->customer_id;
-        if (!$customerId && $user->customer) {
-            $customerId = $user->customer->customer_id;
-        }
-        if (!$customerId) {
-            $cust = \App\Models\Customer::where('email', $user->username)->first();
-            if ($cust) {
-                $customerId = $cust->customer_id;
-            }
-        }
+        $customerId = self::resolveCustomerId($user);
 
         // Products metrics scoped by branch (with fallback to all active products)
         $branchId = null;
@@ -116,16 +143,7 @@ class CustomerDashboardController extends Controller
             return response()->json(['message' => 'Unauthorized'], 403);
         }
 
-        $customerId = $user->customer_id;
-        if (!$customerId && $user->customer) {
-            $customerId = $user->customer->customer_id;
-        }
-        if (!$customerId) {
-            $cust = \App\Models\Customer::where('email', $user->username)->first();
-            if ($cust) {
-                $customerId = $cust->customer_id;
-            }
-        }
+        $customerId = self::resolveCustomerId($user);
 
         if (!$customerId) {
             return response()->json(['installments' => []]);
@@ -170,6 +188,18 @@ class CustomerDashboardController extends Controller
                 'installment_id' => $inst->installment_id,
                 'payment_method' => $inst->sale?->payment_method ?? 'Installment',
                 'updated_at' => $inst->updated_at,
+                'payments' => $inst->payments->map(function ($p) {
+                    return [
+                        'payment_id' => $p->payment_id,
+                        'receipt_no' => $p->receipt_no,
+                        'payment_date' => $p->payment_date,
+                        'amount' => (float)$p->amount,
+                        'payment_method' => $p->payment_method,
+                        'reference_no' => $p->reference_no,
+                        'status' => $p->status,
+                        'notes' => $p->notes,
+                    ];
+                }),
                 'paymentSchedules' => $inst->paymentSchedules->map(function ($s) use ($balance) {
                     if ($balance <= 0) {
                         $s->balance_due = 0;
@@ -193,10 +223,7 @@ class CustomerDashboardController extends Controller
             return response()->json(['message' => 'Unauthorized or missing customer profile'], 403);
         }
 
-        $customerId = $user->customer_id;
-        if (!$customerId && $user->customer) {
-            $customerId = $user->customer->customer_id;
-        }
+        $customerId = self::resolveCustomerId($user);
 
         $validated = $request->validate([
             'product_id' => 'required|exists:products,product_id',
@@ -318,7 +345,7 @@ class CustomerDashboardController extends Controller
                     'payment_method' => $validated['payment_method'],
                     'reference_no'   => $validated['reference_no'] ?? null,
                     'notes'          => $isFullPayment ? "{$validated['payment_method']} payment for product" : 'Downpayment for product request',
-                    'processed_by'   => $request->user()->user_id,
+                    'received_by'    => null,
                     'status'         => $isFullPayment ? 'Completed' : 'Pending',
                 ]);
 
@@ -370,9 +397,9 @@ class CustomerDashboardController extends Controller
             return response()->json(['message' => 'Unauthorized or missing customer profile'], 403);
         }
 
-        $customerId = $user->customer_id ?? $user->customer?->customer_id;
+        $customerId = self::resolveCustomerId($user);
         if (!$customerId) {
-            $customerId = \App\Models\Customer::where('email', $user->username)->value('customer_id');
+            return response()->json(['message' => 'Customer account could not be found.'], 404);
         }
 
         $customer = \App\Models\Customer::findOrFail($customerId);
@@ -419,6 +446,235 @@ class CustomerDashboardController extends Controller
         return response()->json([
             'success' => true,
             'message' => 'Installment request submitted successfully. Your Store Administrator has been notified to review and allow your account.',
+        ]);
+    }
+
+    /**
+     * Get Statement of Account ledger, summary, and items for the authenticated customer
+     */
+    public function getStatements(Request $request)
+    {
+        $user = $request->user();
+        if (!$user || $user->role !== 'Customer') {
+            return response()->json(['message' => 'Unauthorized or missing customer profile'], 403);
+        }
+
+        $customerId = self::resolveCustomerId($user);
+        if (!$customerId) {
+            return response()->json([
+                'customer' => null,
+                'summary' => [
+                    'total_purchases' => 0,
+                    'total_paid' => 0,
+                    'total_balance' => 0,
+                    'active_accounts_count' => 0,
+                    'next_due_date' => null,
+                    'next_due_amount' => 0,
+                ],
+                'statements' => [],
+                'installments' => [],
+            ]);
+        }
+
+        $customer = \App\Models\Customer::with(['branch', 'branchProfile'])->find($customerId);
+
+        // Fetch sales transactions
+        $sales = \App\Models\SaleTransaction::with(['items.product', 'branch'])
+            ->where('customer_id', $customerId)
+            ->orderBy('sale_date', 'desc')
+            ->get();
+
+        // Fetch installment accounts with full relationships
+        $installments = InstallmentAccount::with(['sale.items.product', 'payments', 'paymentSchedules', 'customer'])
+            ->where('customer_id', $customerId)
+            ->orderBy('created_at', 'desc')
+            ->get();
+
+        // Fetch all direct payments
+        $payments = Payment::whereHas('installmentAccount', function ($q) use ($customerId) {
+            $q->where('customer_id', $customerId);
+        })->orderBy('payment_date', 'desc')
+          ->get();
+
+        // Fetch e-wallet deposits
+        $ewalletDeposits = \App\Models\EWalletDeposit::where('customer_id', $customerId)
+            ->where('status', 'Completed')
+            ->orderBy('created_at', 'desc')
+            ->get();
+
+        $statementItems = collect();
+
+        // 1. Map Sales (Invoices / Purchases)
+        foreach ($sales as $sale) {
+            $productNames = $sale->items->map(function ($it) {
+                return $it->product ? $it->product->product_name : 'Item';
+            })->filter()->implode(', ');
+
+            $desc = $productNames ?: ($sale->notes ?: 'Product Purchase');
+            $statementItems->push([
+                'id' => 'SALE-' . $sale->sale_id,
+                'date' => date('Y-m-d', strtotime($sale->sale_date)),
+                'raw_date' => strtotime($sale->sale_date),
+                'reference' => $sale->invoice_no ?: ('INV-' . $sale->sale_id),
+                'type' => 'Purchase',
+                'category' => 'Debit',
+                'description' => $desc,
+                'payment_method' => $sale->payment_method ?: 'Sale',
+                'amount' => (float)$sale->total_amount,
+                'status' => $sale->status ?: 'Completed',
+                'account_no' => $sale->invoice_no,
+            ]);
+        }
+
+        // 2. Map Installments Purchases (if not already represented in sales)
+        foreach ($installments as $inst) {
+            $alreadyAdded = $statementItems->contains(function ($item) use ($inst) {
+                return $inst->sale && $item['reference'] === $inst->sale->invoice_no;
+            });
+
+            if (!$alreadyAdded && (float)$inst->total_payable > 0) {
+                $productName = 'Installment Purchase';
+                if ($inst->sale && $inst->sale->items && $inst->sale->items->count() > 0) {
+                    $productName = $inst->sale->items->map(fn($it) => $it->product?->product_name ?? 'Item')->implode(', ');
+                }
+
+                $statementItems->push([
+                    'id' => 'INST-' . $inst->installment_id,
+                    'date' => date('Y-m-d', strtotime($inst->start_date ?: $inst->created_at)),
+                    'raw_date' => strtotime($inst->start_date ?: $inst->created_at),
+                    'reference' => $inst->account_no,
+                    'type' => 'Purchase',
+                    'category' => 'Debit',
+                    'description' => $productName,
+                    'payment_method' => 'Installment Plan',
+                    'amount' => (float)($inst->principal_amount + $inst->interest_amount),
+                    'status' => $inst->status,
+                    'account_no' => $inst->account_no,
+                ]);
+            }
+
+            // Down Payment record if non-zero and not explicitly in payments table
+            if ((float)$inst->down_payment > 0) {
+                $hasDownpaymentPayment = $inst->payments->contains(function ($p) {
+                    $notes = strtolower($p->notes ?? '');
+                    return str_contains($notes, 'downpayment') || str_contains($notes, 'down payment');
+                });
+
+                if (!$hasDownpaymentPayment) {
+                    $statementItems->push([
+                        'id' => 'DOWN-' . $inst->installment_id,
+                        'date' => date('Y-m-d', strtotime($inst->start_date ?: $inst->created_at)),
+                        'raw_date' => strtotime($inst->start_date ?: $inst->created_at),
+                        'reference' => 'DP-' . $inst->account_no,
+                        'type' => 'Down Payment',
+                        'category' => 'Credit',
+                        'description' => 'Down payment for ' . $inst->account_no,
+                        'payment_method' => 'Down Payment',
+                        'amount' => (float)$inst->down_payment,
+                        'status' => 'Completed',
+                        'account_no' => $inst->account_no,
+                    ]);
+                }
+            }
+        }
+
+        // 3. Map Payments
+        $seenReceipts = [];
+        foreach ($payments as $payment) {
+            $key = ($payment->receipt_no ?: ('PAY-' . $payment->payment_id));
+            if (isset($seenReceipts[$key])) continue;
+            $seenReceipts[$key] = true;
+
+            $instAcc = $payment->installmentAccount;
+            $desc = $payment->notes ?: ($instAcc ? "Payment for {$instAcc->account_no}" : "Payment Received");
+
+            $statementItems->push([
+                'id' => 'PAY-' . $payment->payment_id,
+                'date' => date('Y-m-d', strtotime($payment->payment_date ?: $payment->created_at)),
+                'raw_date' => strtotime($payment->payment_date ?: $payment->created_at),
+                'reference' => $payment->receipt_no ?: ('REC-' . $payment->payment_id),
+                'type' => 'Payment',
+                'category' => 'Credit',
+                'description' => $desc,
+                'payment_method' => $payment->payment_method ?: 'Payment',
+                'amount' => (float)$payment->amount,
+                'status' => $payment->status ?: 'Completed',
+                'account_no' => $instAcc ? $instAcc->account_no : '—',
+            ]);
+        }
+
+        // 4. Map E-Wallet deposits (if not already captured in payments)
+        foreach ($ewalletDeposits as $ew) {
+            if ($ew->payment_id && isset($seenReceipts['PAY-' . $ew->payment_id])) continue;
+            if ($ew->transaction_reference && isset($seenReceipts[$ew->transaction_reference])) continue;
+
+            $statementItems->push([
+                'id' => 'EWAL-' . $ew->deposit_id,
+                'date' => date('Y-m-d', strtotime($ew->paid_at ?: $ew->created_at)),
+                'raw_date' => strtotime($ew->paid_at ?: $ew->created_at),
+                'reference' => $ew->transaction_reference ?: ('EWAL-' . $ew->deposit_id),
+                'type' => 'Payment',
+                'category' => 'Credit',
+                'description' => "E-Wallet Payment ({$ew->payment_method})",
+                'payment_method' => $ew->payment_method,
+                'amount' => (float)$ew->amount,
+                'status' => 'Completed',
+                'account_no' => $ew->customer_reference ?: 'E-Wallet',
+            ]);
+        }
+
+        // Sort descending by date
+        $sortedStatements = $statementItems->sortByDesc('raw_date')->values();
+
+        // Calculate Totals & Summary
+        $totalPurchases = $statementItems->where('type', 'Purchase')->sum('amount');
+        if ($totalPurchases == 0) {
+            $totalPurchases = $installments->sum(fn($i) => (float)($i->principal_amount + $i->interest_amount));
+        }
+
+        $totalPaid = $statementItems->whereIn('type', ['Payment', 'Down Payment'])->sum('amount');
+        $totalBalance = max(0, round($totalPurchases - $totalPaid, 2));
+
+        // Find next due date from schedules
+        $allSchedules = $installments->flatMap->paymentSchedules;
+        $nextPending = $allSchedules->where('status', 'Pending')
+            ->where('due_date', '>=', now()->format('Y-m-d'))
+            ->sortBy('due_date')
+            ->first();
+
+        $branchName = $customer ? ($customer->branch_name ?? $customer->branch?->name) : null;
+
+        return response()->json([
+            'customer' => $customer ? [
+                'customer_id' => $customer->customer_id,
+                'customer_code' => $customer->customer_code,
+                'name' => trim("{$customer->first_name} " . ($customer->middle_name ? "{$customer->middle_name} " : "") . "{$customer->last_name}"),
+                'email' => $customer->email,
+                'phone' => $customer->phone,
+                'address' => $customer->address,
+                'branch_name' => $branchName,
+                'wallet_balance' => (float)($customer->wallet_balance ?? 0),
+            ] : null,
+            'summary' => [
+                'total_purchases' => (float)$totalPurchases,
+                'total_paid' => (float)$totalPaid,
+                'total_balance' => (float)$totalBalance,
+                'active_accounts_count' => $installments->whereIn('status', ['Active', 'Pending'])->count(),
+                'next_due_date' => $nextPending ? $nextPending->due_date : null,
+                'next_due_amount' => $nextPending ? (float)($nextPending->balance_due ?? $nextPending->amount_due) : 0,
+            ],
+            'statements' => $sortedStatements,
+            'accounts' => $installments->map(function ($inst) {
+                return [
+                    'account_no' => $inst->account_no,
+                    'product' => $inst->sale?->items?->first()?->product?->product_name ?? 'Product',
+                    'status' => $inst->status,
+                    'total_payable' => (float)$inst->total_payable,
+                    'total_paid' => (float)$inst->total_paid,
+                    'balance' => (float)$inst->balance,
+                    'installment_amount' => (float)$inst->installment_amount,
+                ];
+            }),
         ]);
     }
 }

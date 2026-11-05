@@ -13,7 +13,7 @@ import {
 import { fmtDate, fastDeepEqual } from '../lib/utils'
 import { api } from '../lib/api'
 import { useAuth } from '../context/AuthContext'
-import { useRealtimeSync, triggerDataSync } from '../lib/realtimeSync'
+import { useRealtimeSync, triggerDataSync, SyncButton } from '../lib/realtimeSync'
 import { TbCurrencyPeso } from 'react-icons/tb'
 
 const MODULE_CATEGORIES = [
@@ -97,9 +97,12 @@ export default function NotificationsPage() {
     return () => clearTimeout(timer)
   }, [statusFilter, moduleFilter, priorityFilter, search])
 
-  useRealtimeSync(() => {
-    loadNotifications(page, true)
-  }, [page, statusFilter, moduleFilter, priorityFilter, search], { periodic: true })
+  // On-demand click-driven synchronization
+  const { sync: syncNotifications, isSyncing: isSyncingNotifications } = useRealtimeSync(
+    () => loadNotifications(page, false),
+    [],
+    { module: 'notifications' }
+  )
 
   // Mark single read/unread
   const handleToggleRead = async (n) => {
@@ -222,6 +225,7 @@ export default function NotificationsPage() {
         subtitle="Live system activity, employee attendance, payroll releases, inventory alerts, and security logs"
         action={
           <div className="flex items-center gap-2 flex-wrap">
+            <SyncButton sync={syncNotifications} isSyncing={isSyncingNotifications} label="Sync" />
             <button
               onClick={toggleSound}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-border bg-card hover:bg-muted font-semibold text-xs text-foreground cursor-pointer shadow-2xs transition-colors"

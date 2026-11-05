@@ -75,11 +75,8 @@ class TransactionController extends Controller
 
         $user = $request->user();
         $customerId = $user && $user->role === 'Customer'
-            ? ($user->customer_id ?? $user->customer?->customer_id)
+            ? \App\Http\Controllers\CustomerDashboardController::resolveCustomerId($user)
             : null;
-        if ($user && $user->role === 'Customer' && !$customerId) {
-            $customerId = \App\Models\Customer::where('email', $user->username)->value('customer_id');
-        }
 
         $transactions = collect();
 
@@ -89,7 +86,7 @@ class TransactionController extends Controller
                 'customer:customer_id,first_name,last_name,customer_code',
                 'processedBy:user_id,username,employee_id',
                 'processedBy.employee:employee_id,first_name,last_name',
-                'items:sale_item_id,sale_id,product_id,quantity,unit_price,discount,total_price',
+                'items:sale_item_id,sale_id,product_id,quantity,unit_price,discount_amount,line_total',
                 'items.product:product_id,product_name,product_code'
             ]);
 
@@ -159,8 +156,8 @@ class TransactionController extends Controller
                             'product_code' => $item->product ? $item->product->product_code : '',
                             'quantity' => $item->quantity,
                             'unit_price' => (float)$item->unit_price,
-                            'discount' => (float)$item->discount,
-                            'total_price' => (float)$item->total_price,
+                            'discount' => (float)($item->discount_amount ?? $item->discount ?? 0),
+                            'total_price' => (float)($item->line_total ?? $item->total_price ?? 0),
                         ];
                     }),
                 ];

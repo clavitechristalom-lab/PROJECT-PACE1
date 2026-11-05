@@ -12,6 +12,13 @@ class PaymentSchedule extends Model
         'amount_paid', 'balance_due', 'status', 'paid_date', 'notes'
     ];
 
+    protected $appends = ['amount'];
+
+    public function getAmountAttribute()
+    {
+        return $this->amount_due;
+    }
+
     // Relationships
     public function installmentAccount()
     {

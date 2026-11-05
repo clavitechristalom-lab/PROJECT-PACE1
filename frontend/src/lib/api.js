@@ -43,13 +43,7 @@ export function clearApiCacheForModule(module, targetId = null) {
   }
 }
 
-if (typeof window !== 'undefined') {
-  window.addEventListener('pace:on-demand-sync', (e) => {
-    if (e.detail?.module) {
-      clearApiCacheForModule(e.detail.module, e.detail.targetId);
-    }
-  });
-}
+
 
 async function request(endpoint, options = {}) {
   const method = (options.method || 'GET').toUpperCase();
@@ -863,6 +857,7 @@ export const api = {
   customerApp: {
     getDashboard: (options = {}) => request('/customer/dashboard', options),
     getInstallments: (options = {}) => request('/customer/installments', options),
+    getStatements: (options = {}) => request('/customer/statements', options),
     requestProduct: (data) => request('/customer/product-requests', { method: 'POST', body: data }),
     requestInstallment: (data = {}) => request('/customer/request-installment', { method: 'POST', body: JSON.stringify(data) }),
   },

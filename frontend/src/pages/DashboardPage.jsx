@@ -19,7 +19,7 @@ import {
 } from '../components/ui'
 import { fmt, fmtDate, fastDeepEqual } from '../lib/utils'
 import { api } from '../lib/api'
-import { useRealtimeSync, triggerDataSync } from '../lib/realtimeSync'
+import { useRealtimeSync, triggerDataSync, SyncButton } from '../lib/realtimeSync'
 import { TbCurrencyPeso } from 'react-icons/tb'
 
 import BranchCarousel from '../components/branches/BranchCarousel'
@@ -207,11 +207,15 @@ function AdminBusinessDashboard() {
     loadPerformance()
   }, [])
 
-  // High-frequency real-time synchronization (smooth 1-2s refresh target, zero flicker)
-  useRealtimeSync(() => {
-    loadData('sync')
-    loadPerformance(timeframe, true)
-  }, [timeframe], { periodic: true })
+  // On-demand click-driven synchronization
+  const { sync: syncDashboard, isSyncing: isSyncingDashboard } = useRealtimeSync(
+    () => {
+      loadData('manual')
+      loadPerformance(timeframe, false)
+    },
+    [],
+    { module: 'dashboard' }
+  )
 
   const handleTimeframeChange = (tf) => {
     setTimeframe(tf)
@@ -259,6 +263,7 @@ function AdminBusinessDashboard() {
         subtitle={`Improve and make a simple to Learn and secured · ${fmtDate(new Date())}`}
         action={
           <div className="flex flex-wrap items-center gap-2">
+            <SyncButton sync={syncDashboard} isSyncing={isSyncingDashboard} label="Sync" />
             <button
               onClick={() => setShowCreateBranchModal(true)}
               className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-blue-600 via-blue-600 to-indigo-700 hover:from-blue-500 hover:to-indigo-600 text-white font-semibold text-xs rounded-xl shadow-sm shadow-blue-950/40 border border-blue-400/30 transition-all cursor-pointer"
@@ -818,7 +823,12 @@ function StoreAdminBusinessDashboard() {
     loadData('initial')
   }, [timeframe])
 
-  useRealtimeSync(() => loadData('sync'), [timeframe], { periodic: true })
+  // On-demand click-driven synchronization
+  const { sync: syncStoreDashboard, isSyncing: isSyncingStoreDashboard } = useRealtimeSync(
+    () => loadData('manual'),
+    [],
+    { module: 'store_dashboard' }
+  )
 
   if (loading) {
     return (
@@ -837,6 +847,7 @@ function StoreAdminBusinessDashboard() {
         subtitle={`Branch: ${branchName} · Authorized Operations`}
         action={
           <div className="flex flex-wrap items-center gap-2">
+            <SyncButton sync={syncStoreDashboard} isSyncing={isSyncingStoreDashboard} label="Sync" />
             <button
               onClick={() => navigate('/sales')}
               className="flex items-center gap-2 px-4 py-2 bg-primary hover:bg-primary/90 text-primary-foreground font-semibold text-xs rounded-xl shadow-xs transition-all cursor-pointer"
@@ -1411,7 +1422,12 @@ export function EmployeeDashboard() {
     loadData('initial')
   }, [user])
 
-  useRealtimeSync(() => loadData('sync'), [user], { periodic: true })
+  // On-demand click-driven synchronization
+  const { sync: syncEmpDashboard, isSyncing: isSyncingEmpDashboard } = useRealtimeSync(
+    () => loadData('manual'),
+    [],
+    { module: 'employee_dashboard' }
+  )
 
   const today = stats?.my_attendance_today
   const myPayroll = stats?.my_latest_payroll
@@ -1433,6 +1449,7 @@ export function EmployeeDashboard() {
         subtitle={`Welcome back, ${user?.name ? user.name.split(' ')[0] : 'Employee'}`}
         action={
           <div className="flex items-center gap-2 flex-wrap">
+            <SyncButton sync={syncEmpDashboard} isSyncing={isSyncingEmpDashboard} label="Sync" />
             <button
               onClick={() => navigate('/employee/notifications')}
               className="flex items-center gap-2 px-3.5 py-2 bg-card hover:bg-muted text-foreground border border-border font-semibold text-xs rounded-xl shadow-xs transition-all cursor-pointer"

@@ -34,6 +34,11 @@ class Customer extends Model
         return $this->hasMany(InstallmentAccount::class, 'customer_id', 'customer_id');
     }
 
+    public function statements()
+    {
+        return $this->hasMany(Statement::class, 'customer_id', 'customer_id');
+    }
+
     public function user()
     {
         return $this->hasOne(User::class, 'customer_id', 'customer_id');

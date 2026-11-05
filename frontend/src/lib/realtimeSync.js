@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { clearApiCacheForModule } from './api'
 export { fastDeepEqual, setIfChanged } from './diff'
+export { SyncButton, OnDemandSyncButton, default as DefaultSyncButton } from '../components/SyncButton'
 
 // Active sync locks registry: tracks module/targetId currently in an active sync operation
 const activeSyncLocks = new Set()
@@ -83,18 +84,6 @@ export async function executeOnDemandSync({
       clearApiCacheForModule(module, targetId)
     }
 
-    // 5. Targeted Event Dispatch: Restrict payload to ONLY specific item/ID/action, NEVER whole database state
-    const eventDetail = {
-      module,
-      targetId: targetId ?? null,
-      action: action || 'sync',
-      timestamp: Date.now()
-    }
-
-    if (typeof window !== 'undefined') {
-      window.dispatchEvent(new CustomEvent('pace:on-demand-sync', { detail: eventDetail }))
-    }
-
     if (typeof onSuccess === 'function') {
       onSuccess({ module, targetId, action, result })
     }
@@ -110,7 +99,7 @@ export async function executeOnDemandSync({
     }
     return { status: 'error', error: err }
   } finally {
-    // 6. Release Lock
+    // 5. Release Lock
     activeSyncLocks.delete(lockKey)
     syncAbortControllers.delete(lockKey)
   }
@@ -140,14 +129,14 @@ export function triggerDataSync(module = 'general', extra = {}) {
 /**
  * React hook for strictly on-demand, click-driven synchronization.
  * Completely eliminates background intervals, auto-sync useEffects, and global polling.
- * Returns { sync, isSyncing } to attach explicitly to user-clicked elements (e.g. Refresh/Sync buttons).
+ * Returns { sync, isSyncing, triggerSync } to attach explicitly to user-clicked elements (e.g. Refresh/Sync buttons).
  *
  * @param {Function} refreshFn - Sync callback to execute when user clicks (receives source, signal, extraData)
  * @param {Array} deps - Dependency array
  * @param {Object} options - { enabled?: boolean, module?: string }
  */
 export function useRealtimeSync(refreshFn, deps = [], options = {}) {
-  const { enabled = true, module = null } = typeof options === 'object' ? options : {}
+  const { enabled = true, module = 'general' } = typeof options === 'object' ? options : {}
   const [isSyncingState, setIsSyncingState] = useState(false)
   const refreshFnRef = useRef(refreshFn)
 
@@ -159,15 +148,15 @@ export function useRealtimeSync(refreshFn, deps = [], options = {}) {
   const handleManualSync = useCallback(async (targetId = null, extraData = null) => {
     if (!enabled) return
 
-    const lockKey = module ? (targetId !== null && targetId !== undefined ? `${module}:${targetId}` : module) : 'manual_sync'
-    if (activeSyncLocks.has(lockKey)) {
+    const lockKey = targetId !== null && targetId !== undefined ? `${module}:${targetId}` : module
+    if (activeSyncLocks.has(lockKey) || activeSyncLocks.has(`${module}:all`)) {
       return // Single-run locking: safely ignore duplicate concurrent clicks
     }
 
     setIsSyncingState(true)
     try {
       await executeOnDemandSync({
-        module: module || 'manual',
+        module,
         targetId,
         action: 'manual-click',
         syncFn: async ({ signal }) => {
@@ -181,25 +170,9 @@ export function useRealtimeSync(refreshFn, deps = [], options = {}) {
     }
   }, [enabled, module])
 
-  // Optional: Listen ONLY to targeted on-demand events explicitly matching this module
-  useEffect(() => {
-    if (!enabled || !module) return
-
-    const handleTargetedSync = (e) => {
-      const detail = e?.detail
-      if (detail && detail.module === module) {
-        handleManualSync(detail.targetId)
-      }
-    }
-
-    window.addEventListener('pace:on-demand-sync', handleTargetedSync)
-    return () => {
-      window.removeEventListener('pace:on-demand-sync', handleTargetedSync)
-    }
-  }, [enabled, module, handleManualSync])
-
   return {
     sync: handleManualSync,
+    triggerSync: handleManualSync,
     isSyncing: isSyncingState
   }
 }
@@ -218,4 +191,3 @@ export function useOnDemandSync(module, syncFn, options = {}) {
 export function startRealtimeEngine() {
   return () => {}
 }
-
