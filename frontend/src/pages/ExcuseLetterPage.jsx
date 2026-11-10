@@ -327,7 +327,7 @@ export default function ExcuseLetterPage() {
   // Real-time synchronization
   useRealtimeSync(() => {
     loadLetters(historyTab)
-  }, [user, historyTab])
+  }, [user, historyTab], { module: 'employees' })
 
   const handleAutoFieldChange = (field, value) => {
     setFormData(prev => {

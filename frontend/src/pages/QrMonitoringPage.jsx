@@ -54,7 +54,7 @@ export default function QrMonitoringPage() {
 
   useRealtimeSync(() => {
     loadData(true)
-  }, [])
+  }, [], { module: 'employees' })
 
   if (!isAdmin) {
     return (

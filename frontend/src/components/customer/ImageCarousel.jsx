@@ -51,7 +51,7 @@ export default function ImageCarousel() {
     fetchImages(false);
   }, [fetchImages]);
 
-  useRealtimeSync(fetchImages, [fetchImages]);
+  useRealtimeSync(fetchImages, [fetchImages], { module: 'carousels' });
 
   useEffect(() => {
     if (images.length <= 1) return;

@@ -240,33 +240,38 @@ export default function PayrollWorkflowModal({
     return branchEmployees.find(e => String(e.employee_id) === String(selectedEmployeeId)) || null
   }, [branchEmployees, selectedEmployeeId, isAllEmployees])
 
+  const resolveWorkflowEmployeeRates = (e) => {
+    const rawDr = Number(e?.daily_rate || 0)
+    const rawBasic = Number(e?.basic_salary || 0)
+    const dailyRate = (rawDr >= 100 && rawDr <= 500)
+      ? rawDr
+      : ((rawBasic >= 2600 && rawBasic <= 13000) ? round2(rawBasic / 26) : 500)
+    const monthlyBasic = round2(dailyRate * 26)
+    const hourlyRate = round2(dailyRate / 8)
+    const weeklyBase = round2(dailyRate * 6)
+    return { monthlyBasic, dailyRate, hourlyRate, weeklyBase }
+  }
+
   // Aggregate metrics for batch processing mode
   const batchMetrics = useMemo(() => {
     const emps = filteredEmployees || []
-    const totalBasic = emps.reduce((sum, e) => sum + Number(e.basic_salary || 0), 0)
-    const totalDaily = emps.reduce((sum, e) => {
-      const m = Number(e.basic_salary || 0)
-      const d = Number(e.daily_rate || (m > 0 ? m / 26 : 0))
-      return sum + d
-    }, 0)
-    const totalHourly = emps.reduce((sum, e) => {
-      const m = Number(e.basic_salary || 0)
-      const d = Number(e.daily_rate || (m > 0 ? m / 26 : 0))
-      const h = Number(e.hourly_rate || (d > 0 ? d / 8 : 0))
-      return sum + h
-    }, 0)
-    const totalBasePay = emps.reduce((sum, e) => {
-      const m = Number(e.basic_salary || 0)
-      const d = Number(e.daily_rate || (m > 0 ? m / 26 : 0))
-      const base = isWeekly ? d * 6 : m / 2
-      return sum + base
-    }, 0)
+    let totalBasic = 0
+    let totalDaily = 0
+    let totalHourly = 0
+    let totalBasePay = 0
+    emps.forEach((e) => {
+      const { monthlyBasic, dailyRate, hourlyRate, weeklyBase } = resolveWorkflowEmployeeRates(e)
+      totalBasic += monthlyBasic
+      totalDaily += dailyRate
+      totalHourly += hourlyRate
+      totalBasePay += isWeekly ? weeklyBase : monthlyBasic / 2
+    })
     return {
       totalCount: emps.length,
-      totalBasic: Math.round(totalBasic * 100) / 100,
-      totalDaily: Math.round(totalDaily * 100) / 100,
-      totalHourly: Math.round(totalHourly * 100) / 100,
-      totalBasePay: Math.round(totalBasePay * 100) / 100,
+      totalBasic: round2(totalBasic),
+      totalDaily: round2(totalDaily),
+      totalHourly: round2(totalHourly),
+      totalBasePay: round2(totalBasePay),
     }
   }, [filteredEmployees, isWeekly])
 
@@ -359,28 +364,37 @@ export default function PayrollWorkflowModal({
     autoLoadEmployeeAttendance(emp.employee_id, fromDate, toDate)
   }
 
-  // Live client-side calculation helper to provide immediate responsive feedback
+  // Live client-side calculation helper synchronized identically with backend rules
   const clientComputation = useMemo(() => {
-    const monthlyBasic = Number(selectedEmployee?.basic_salary || 0)
-    const dailyRate = Number(selectedEmployee?.daily_rate || (monthlyBasic > 0 ? monthlyBasic / 26 : 0))
-    const hourlyRate = Number(selectedEmployee?.hourly_rate || (dailyRate > 0 ? dailyRate / 8 : 0))
+    const previewCalc = (!isAllEmployees && previewData?.calculation) ? previewData.calculation : null
+    const { monthlyBasic, dailyRate, hourlyRate, weeklyBase } = previewCalc
+      ? {
+          monthlyBasic: Number(previewCalc.monthly_basic || 13000),
+          dailyRate: Number(previewCalc.daily_rate || 500),
+          hourlyRate: Number(previewCalc.hourly_rate || 62.5),
+          weeklyBase: Number(previewCalc.weekly_base || 3000),
+        }
+      : resolveWorkflowEmployeeRates(selectedEmployee)
 
     const numWorkHours = parseFloat(workHours) || 0
     const numAbsenceDays = parseFloat(absenceDays) || 0
     const numLateMinutes = parseInt(lateMinutes, 10) || 0
     const numUndertimeMinutes = parseFloat(undertimeMinutes) || 0
-    const numOvertimeHours = parseFloat(overtimeHours) || 0
+    const numOvertimeHours = 0
+    const paidLeaveDays = Number(previewCalc?.paid_leave_days || 0)
 
     // Gross Pay base: Weekly (6 days @ 8h = 48h) or Semi-Monthly (13 days @ 8h = 104h)
-    const weeklyBase = round2(dailyRate * 6)
     const semiMonthlyBase = round2(monthlyBasic / 2)
     const standardHours = isWeekly ? 48 : 104
     const standardBase = isWeekly ? weeklyBase : semiMonthlyBase
 
-    // Strict Zero Hours Rule:
-    // If an employee has no working hours recorded for the week (working_hours = 0 or total absence),
-    // computed salary must strictly be ₱0.00 (gross pay = 0, deductions = 0, net pay = 0).
-    if (numWorkHours <= 0) {
+    // Strict Zero Hours Rule (unless covered by approved Paid Leave):
+    // 0 rendered working hours -> base pay, gross pay, deductions, and net pay strictly ₱0.00
+    const isZeroHours = previewCalc?.zero_hours !== undefined && Number(previewCalc.work_hours || 0) === numWorkHours
+      ? Boolean(previewCalc.zero_hours)
+      : (numWorkHours <= 0 && paidLeaveDays <= 0)
+
+    if (isZeroHours) {
       return {
         monthlyBasic,
         dailyRate,
@@ -397,10 +411,10 @@ export default function PayrollWorkflowModal({
         grossPay: 0,
         absenceDays: numAbsenceDays,
         absenceDeduction: 0,
-        lateMinutes: numLateMinutes,
+        lateMinutes: 0,
         latePenalty: 0,
         lateRule: 'Zero Work Hours - Salary ₱0.00',
-        undertimeMinutes: numUndertimeMinutes,
+        undertimeMinutes: 0,
         undertimeHours: 0,
         undertimeDeduction: 0,
         sss: 0,
@@ -417,40 +431,39 @@ export default function PayrollWorkflowModal({
       }
     }
 
-    const periodBasePay = numWorkHours === standardHours ? standardBase : round2(numWorkHours * hourlyRate)
-    const overtimePay = round2(numOvertimeHours * hourlyRate * 1.25)
-    const allowance = Number(previewData?.calculation?.allowance || 0)
-    const grossPay = round2(periodBasePay + allowance + overtimePay)
+    const periodBasePay = standardBase
+    const overtimePay = 0
+    const allowance = Number(previewCalc?.allowance || 0)
+    const grossPay = round2(periodBasePay + allowance)
 
-    // Strict Late Penalty Logic:
-    // - 1 PHP per minute for 1–29 mins late
-    // - Automatic half-day salary deduction if late is 30 minutes or more
-    let latePenalty = 0
-    let lateRule = 'None'
-    if (numLateMinutes >= 30) {
-      latePenalty = round2(dailyRate / 2)
-      lateRule = `Half-Day Salary Deduction (≥ 30 mins late = ₱${latePenalty.toFixed(2)})`
-    } else if (numLateMinutes >= 1) {
-      latePenalty = round2(numLateMinutes * 1.0)
-      lateRule = `₱1.00 / min (${numLateMinutes} mins = ₱${latePenalty.toFixed(2)})`
-    }
+    // Late Penalty: 1–29 mins/day @ ₱1.00/min (30+ mins on a single day is converted to Half Day under Absences by backend)
+    const latePenalty = (previewCalc && previewCalc.late_penalty !== undefined && Number(previewCalc.late_minutes || 0) === numLateMinutes)
+      ? round2(previewCalc.late_penalty)
+      : round2(Math.max(0, numLateMinutes) * 1.0)
+    const lateRule = latePenalty > 0
+      ? (previewCalc?.late_rule || `₱1.00 / min (${numLateMinutes} mins = ₱${latePenalty.toFixed(2)})`)
+      : 'None'
 
-    // Absence Deduction: Multiply total absence days by daily rate
-    const absenceDeduction = round2(numAbsenceDays * dailyRate)
+    // Absence Deduction: deduct only unpaid absences + 0.5-day Half Days (never deduct Paid Leave days)
+    const unpaidAbsenceDays = Math.max(0, numAbsenceDays - paidLeaveDays)
+    const absenceDeduction = (previewCalc && previewCalc.absence_deduction !== undefined && Number(previewCalc.absence_days || 0) === numAbsenceDays)
+      ? round2(previewCalc.absence_deduction)
+      : round2(unpaidAbsenceDays * dailyRate)
 
     // Undertime Deduction: Proportionate deduction based on hourly rate
     const undertimeHours = round2(numUndertimeMinutes / 60)
-    const undertimeDeduction = round2((numUndertimeMinutes / 60) * hourlyRate)
+    const undertimeDeduction = (previewCalc && previewCalc.undertime_deduction !== undefined && Number(previewCalc.undertime_minutes || 0) === numUndertimeMinutes)
+      ? round2(previewCalc.undertime_deduction)
+      : round2((numUndertimeMinutes / 60) * hourlyRate)
 
-    // Standard Statutory Contributions (SSS, PhilHealth, Pag-IBIG):
-    const sss = includeSss ? Number(previewData?.calculation?.sss ?? round2(weeklyBase * 0.045)) : 0
-    const philhealth = includePhilhealth ? Number(previewData?.calculation?.philhealth ?? round2(weeklyBase * 0.025)) : 0
-    const pagibig = includePagibig ? Number(previewData?.calculation?.pagibig ?? Math.min(50, round2(weeklyBase * 0.02))) : 0
+    // Standard Statutory Contributions (strictly from approved employee_deductions selection):
+    const sss = includeSss ? Number(previewCalc?.sss || 0) : 0
+    const philhealth = includePhilhealth ? Number(previewCalc?.philhealth || 0) : 0
+    const pagibig = includePagibig ? Number(previewCalc?.pagibig || 0) : 0
+    const withholdingTax = includeTax ? Number(previewCalc?.withholding_tax || 0) : 0
 
-    const withholdingTax = includeTax ? Number(previewData?.calculation?.withholding_tax || 0) : 0
-
-    const customDeductionsSum = Number(previewData?.calculation?.custom_deductions_sum || 0)
-    const loanDeductionsSum = Number(previewData?.calculation?.loan_deductions_sum || 0)
+    const customDeductionsSum = includeCustomDeductions ? Number(previewCalc?.custom_deductions_sum || 0) : 0
+    const loanDeductionsSum = includeLoans ? Number(previewCalc?.loan_deductions_sum || 0) : 0
 
     const attendanceDeductions = round2(absenceDeduction + latePenalty + undertimeDeduction)
     const governmentDeductions = round2(sss + philhealth + pagibig + withholdingTax)
@@ -489,9 +502,11 @@ export default function PayrollWorkflowModal({
       loanDeductionsSum,
       totalDeductions,
       netPay,
+      isZeroHours: false,
     }
   }, [
     selectedEmployee,
+    isAllEmployees,
     workHours,
     absenceDays,
     lateMinutes,
@@ -501,6 +516,8 @@ export default function PayrollWorkflowModal({
     includePhilhealth,
     includePagibig,
     includeTax,
+    includeCustomDeductions,
+    includeLoans,
     isWeekly,
     previewData
   ])
@@ -1181,7 +1198,7 @@ export default function PayrollWorkflowModal({
                           </div>
                           <div className="text-right shrink-0">
                             <span className="text-[11px] font-mono font-bold text-emerald-600 dark:text-emerald-400 block">
-                              {fmt(emp.basic_salary || 0)}
+                              {fmt(resolveWorkflowEmployeeRates(emp).monthlyBasic)}
                             </span>
                             <span className="text-[9px] text-muted-foreground uppercase">Monthly</span>
                           </div>
@@ -1235,15 +1252,15 @@ export default function PayrollWorkflowModal({
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-1 border-t border-border/60 text-xs">
                     <div>
                       <span className="block text-[9px] uppercase tracking-wider text-muted-foreground font-semibold">Monthly Basic</span>
-                      <span className="font-mono font-bold text-foreground">{fmt(selectedEmployee.basic_salary || 0)}</span>
+                      <span className="font-mono font-bold text-foreground">{fmt(resolveWorkflowEmployeeRates(selectedEmployee).monthlyBasic)}</span>
                     </div>
                     <div>
                       <span className="block text-[9px] uppercase tracking-wider text-muted-foreground font-semibold">Daily Rate</span>
-                      <span className="font-mono font-medium text-foreground">{fmt(selectedEmployee.daily_rate || (selectedEmployee.basic_salary / 26) || 0)}</span>
+                      <span className="font-mono font-medium text-foreground">{fmt(resolveWorkflowEmployeeRates(selectedEmployee).dailyRate)}</span>
                     </div>
                     <div>
                       <span className="block text-[9px] uppercase tracking-wider text-muted-foreground font-semibold">Hourly Rate</span>
-                      <span className="font-mono font-medium text-foreground">{fmt(selectedEmployee.hourly_rate || (selectedEmployee.basic_salary / 26 / 8) || 0)}</span>
+                      <span className="font-mono font-medium text-foreground">{fmt(resolveWorkflowEmployeeRates(selectedEmployee).hourlyRate)}</span>
                     </div>
                     <div>
                       <span className="block text-[9px] uppercase tracking-wider text-muted-foreground font-semibold">Payout Preference</span>
@@ -1699,7 +1716,10 @@ export default function PayrollWorkflowModal({
                                 {c.late_minutes ?? 0}m
                               </td>
                               <td className="py-2 px-3 text-right font-mono font-bold text-emerald-600 dark:text-emerald-400">
-                                {fmt(c.gross_pay ?? (isWeekly ? (Number(emp.basic_salary || 0) / 26 * 6) : (Number(emp.basic_salary || 0) / 2)))}
+                                {(() => {
+                                  const rates = resolveWorkflowEmployeeRates(emp)
+                                  return fmt(c.gross_pay ?? (isWeekly ? rates.weeklyBase : (rates.monthlyBasic / 2)))
+                                })()}
                               </td>
                             </tr>
                           )
@@ -2239,22 +2259,22 @@ export default function PayrollWorkflowModal({
                           </>
                         ) : (
                           <>
-                            {clientComputation.absenceDeduction > 0 && (
+                            {(calc.absence_deduction ?? clientComputation.absenceDeduction) > 0 && (
                               <div className="flex justify-between text-muted-foreground">
-                                <span>Absence Deduction ({clientComputation.absenceDays}d):</span>
-                                <span className="font-mono text-rose-500 font-medium">-{fmt(clientComputation.absenceDeduction)}</span>
+                                <span>Absence Deduction ({calc.absence_days ?? clientComputation.absenceDays}d):</span>
+                                <span className="font-mono text-rose-500 font-medium">-{fmt(calc.absence_deduction ?? clientComputation.absenceDeduction)}</span>
                               </div>
                             )}
-                            {clientComputation.latePenalty > 0 && (
+                            {(calc.late_penalty ?? clientComputation.latePenalty) > 0 && (
                               <div className="flex justify-between text-muted-foreground">
-                                <span>Late Penalty ({clientComputation.lateMinutes}m):</span>
-                                <span className="font-mono text-rose-500 font-medium">-{fmt(clientComputation.latePenalty)}</span>
+                                <span>Late Penalty ({calc.late_minutes ?? clientComputation.lateMinutes}m):</span>
+                                <span className="font-mono text-rose-500 font-medium">-{fmt(calc.late_penalty ?? clientComputation.latePenalty)}</span>
                               </div>
                             )}
-                            {clientComputation.undertimeDeduction > 0 && (
+                            {(calc.undertime_deduction ?? clientComputation.undertimeDeduction) > 0 && (
                               <div className="flex justify-between text-muted-foreground">
-                                <span>Undertime ({clientComputation.undertimeMinutes}m):</span>
-                                <span className="font-mono text-rose-500 font-medium">-{fmt(clientComputation.undertimeDeduction)}</span>
+                                <span>Undertime ({calc.undertime_minutes ?? clientComputation.undertimeMinutes}m):</span>
+                                <span className="font-mono text-rose-500 font-medium">-{fmt(calc.undertime_deduction ?? clientComputation.undertimeDeduction)}</span>
                               </div>
                             )}
                             {(calc.sss ?? clientComputation.sss) > 0 && (
@@ -2281,16 +2301,16 @@ export default function PayrollWorkflowModal({
                                 <span className="font-mono text-rose-500 font-medium">-{fmt(calc.withholding_tax ?? clientComputation.withholdingTax)}</span>
                               </div>
                             )}
-                            {clientComputation.customDeductionsSum > 0 && (
+                            {(calc.custom_deductions_sum ?? clientComputation.customDeductionsSum) > 0 && (
                               <div className="flex justify-between text-muted-foreground">
                                 <span>Other Custom Deductions:</span>
-                                <span className="font-mono text-rose-500 font-medium">-{fmt(clientComputation.customDeductionsSum)}</span>
+                                <span className="font-mono text-rose-500 font-medium">-{fmt(calc.custom_deductions_sum ?? clientComputation.customDeductionsSum)}</span>
                               </div>
                             )}
-                            {clientComputation.loanDeductionsSum > 0 && (
+                            {(calc.loan_deductions_sum ?? clientComputation.loanDeductionsSum) > 0 && (
                               <div className="flex justify-between text-muted-foreground">
                                 <span>Loan Amortization:</span>
-                                <span className="font-mono text-rose-500 font-medium">-{fmt(clientComputation.loanDeductionsSum)}</span>
+                                <span className="font-mono text-rose-500 font-medium">-{fmt(calc.loan_deductions_sum ?? clientComputation.loanDeductionsSum)}</span>
                               </div>
                             )}
                           </>
@@ -2341,8 +2361,9 @@ export default function PayrollWorkflowModal({
                           <tbody className="divide-y divide-border/50">
                             {(previewData?.employees || filteredEmployees).map((emp) => {
                               const c = emp.calculation || {}
-                              const baseSalary = Number(emp.basic_salary || 0)
-                              const empGross = c.gross_pay ?? (isWeekly ? (baseSalary / 26 * 6) : (baseSalary / 2))
+                              const rates = resolveWorkflowEmployeeRates(emp)
+                              const baseSalary = rates.monthlyBasic
+                              const empGross = c.gross_pay ?? (isWeekly ? rates.weeklyBase : (baseSalary / 2))
                               const empDeds = c.total_deductions ?? 0
                               const empNet = c.net_pay ?? Math.max(0, empGross - empDeds)
                               return (

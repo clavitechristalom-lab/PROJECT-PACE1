@@ -49,7 +49,7 @@ function LedgerTable({ title, icon, items, type, onView, onDelete }) {
                 <td className="px-4 sm:px-6 py-3.5 flex items-center gap-3 min-w-[200px]">
                   {inst.image_url ? (
                     <img 
-                      src={inst.image_url.startsWith('http') ? inst.image_url : `http://127.0.0.1:8000${inst.image_url}`} 
+                      src={inst.image_url.includes('/storage/') ? inst.image_url.substring(inst.image_url.indexOf('/storage/')) : inst.image_url} 
                       alt={inst.product}
                       className="w-10 h-10 rounded object-cover border border-border bg-white"
                       onError={(e) => { e.target.style.display = 'none'; }}

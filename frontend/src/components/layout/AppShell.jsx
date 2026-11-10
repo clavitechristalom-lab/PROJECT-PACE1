@@ -103,10 +103,6 @@ function navByRole(role, onOpenConfig, pendingLettersCount = 0) {
       { label: 'Admin Interface', path: '/admin-dashboard', icon: icons.shield },
       { label: 'Branches', path: '/branches', icon: icons.products },
       { label: 'Users', path: '/users', icon: icons.users },
-      { label: 'Carousel', path: '/settings/carousel', icon: icons.products },
-      { label: 'System Logs', path: '/system-logs', icon: icons.logs },
-      { label: 'Backup & Restore', path: '/backups', icon: icons.backup },
-      { label: 'Storage Management', path: '/storage', icon: icons.storage },
     ],
   }
 
@@ -297,7 +293,7 @@ function getCollapsedRailItems(role, onOpenConfig, pendingLettersCount = 0) {
       label: 'System Management',
       path: '/admin-dashboard',
       icon: <FiSettings className="w-5 h-5" />,
-      subPaths: ['/branches', '/users', '/settings/carousel', '/system-logs', '/backups', '/storage']
+      subPaths: ['/branches', '/users']
     })
   }
 
@@ -811,7 +807,7 @@ function Header({
             <div className="p-2.5 border-b border-blue-500/20 !bg-blue-50/70 dark:!bg-blue-950/70 flex items-center justify-between text-[11px] text-blue-800 dark:text-blue-300">
               <span>
                 {searchQuery.trim().length < 2
-                  ? 'Type at least 2 characters to search MySQL database...'
+                  ? 'Type at least 2 characters to search...'
                   : `${totalMatches} matching record${totalMatches === 1 ? '' : 's'} found`}
               </span>
               {isSearching && <span className="text-blue-600 dark:text-blue-400 font-medium animate-pulse">Searching database...</span>}

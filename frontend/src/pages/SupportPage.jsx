@@ -224,7 +224,7 @@ export default function SupportPage() {
 
   useRealtimeSync(() => {
     loadMessages(true)
-  }, [])
+  }, [], { module: 'support' })
 
   const filtered = useMemo(() => {
     return messages.filter(m => {

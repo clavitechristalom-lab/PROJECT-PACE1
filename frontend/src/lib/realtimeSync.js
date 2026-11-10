@@ -107,31 +107,33 @@ export async function executeOnDemandSync({
 
 /**
  * On-demand data sync trigger for user actions (create, edit, delete, status toggle).
- * Restricts payload to ONLY the specific item/target and drops duplicate clicks.
+ * Strictly targeted to the specific module and entity, invalidating isolated cache.
  */
 export function triggerDataSync(module = 'general', extra = {}) {
   const targetId = extra?.id || extra?.targetId || null
   const action = extra?.action || 'mutation'
 
-  return executeOnDemandSync({
-    module,
-    targetId,
-    action,
-    payload: {
-      module,
-      targetId,
-      action,
-      timestamp: Date.now()
+  // 1. Immediately invalidate targeted API cache so subsequent on-demand fetches are fresh
+  if (module && module !== 'general') {
+    clearApiCacheForModule(module, targetId)
+  }
+
+  // 2. Dispatch strictly targeted events
+  if (typeof window !== 'undefined') {
+    const detail = { module, targetId, action, timestamp: Date.now() }
+    window.dispatchEvent(new CustomEvent('pace:data-sync', { detail }))
+    if (module && module !== 'general') {
+      window.dispatchEvent(new CustomEvent(`pace:sync:${module}`, { detail }))
     }
-  })
+  }
+
+  return { status: 'dispatched', module, targetId, action }
 }
 
 /**
- * React hook for strictly on-demand, click-driven synchronization.
- * Completely eliminates background intervals, auto-sync useEffects, and global polling.
- * Returns { sync, isSyncing, triggerSync } to attach explicitly to user-clicked elements (e.g. Refresh/Sync buttons).
+ * React hook for strictly isolated, event-driven, on-demand synchronization.
  *
- * @param {Function} refreshFn - Sync callback to execute when user clicks (receives source, signal, extraData)
+ * @param {Function} refreshFn - Sync callback to execute (receives source, signal, extraData)
  * @param {Array} deps - Dependency array
  * @param {Object} options - { enabled?: boolean, module?: string }
  */
@@ -139,6 +141,19 @@ export function useRealtimeSync(refreshFn, deps = [], options = {}) {
   const { enabled = true, module = 'general' } = typeof options === 'object' ? options : {}
   const [isSyncingState, setIsSyncingState] = useState(false)
   const refreshFnRef = useRef(refreshFn)
+  const isFetchingRef = useRef(false)
+  const isMountedRef = useRef(true)
+  const debounceTimerRef = useRef(null)
+
+  useEffect(() => {
+    isMountedRef.current = true
+    return () => {
+      isMountedRef.current = false
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current)
+      }
+    }
+  }, [])
 
   useEffect(() => {
     refreshFnRef.current = refreshFn
@@ -146,27 +161,70 @@ export function useRealtimeSync(refreshFn, deps = [], options = {}) {
 
   // Explicit, click-driven sync trigger with concurrency locking
   const handleManualSync = useCallback(async (targetId = null, extraData = null) => {
-    if (!enabled) return
+    if (!enabled || !isMountedRef.current) return
 
     const lockKey = targetId !== null && targetId !== undefined ? `${module}:${targetId}` : module
     if (activeSyncLocks.has(lockKey) || activeSyncLocks.has(`${module}:all`)) {
       return // Single-run locking: safely ignore duplicate concurrent clicks
     }
 
-    setIsSyncingState(true)
+    if (isMountedRef.current) setIsSyncingState(true)
     try {
       await executeOnDemandSync({
         module,
         targetId,
         action: 'manual-click',
         syncFn: async ({ signal }) => {
-          if (refreshFnRef.current) {
+          if (refreshFnRef.current && isMountedRef.current) {
             await refreshFnRef.current('manual', signal, extraData)
           }
         }
       })
     } finally {
-      setIsSyncingState(false)
+      if (isMountedRef.current) setIsSyncingState(false)
+    }
+  }, [enabled, module])
+
+  useEffect(() => {
+    // Strictly isolate: do not attach wildcard listeners if module is generic or disabled
+    if (!enabled || typeof window === 'undefined' || !module || module === 'general') {
+      return
+    }
+
+    const onDataSync = (e) => {
+      const mod = e?.detail?.module
+      // Strictly isolated: only trigger if the event matches this component's specific module
+      if (!mod || mod !== module) return
+
+      // Micro-debounce & yield to the main thread (guarantees 60fps UI responsiveness)
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current)
+      }
+
+      debounceTimerRef.current = setTimeout(async () => {
+        if (!isMountedRef.current || isFetchingRef.current) return
+        isFetchingRef.current = true
+        try {
+          if (refreshFnRef.current && isMountedRef.current) {
+            await refreshFnRef.current('event', undefined, e?.detail)
+          }
+        } catch (_) {
+        } finally {
+          isFetchingRef.current = false
+        }
+      }, 50)
+    }
+
+    window.addEventListener('pace:data-sync', onDataSync)
+    const specificEvent = `pace:sync:${module}`
+    window.addEventListener(specificEvent, onDataSync)
+
+    return () => {
+      window.removeEventListener('pace:data-sync', onDataSync)
+      window.removeEventListener(specificEvent, onDataSync)
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current)
+      }
     }
   }, [enabled, module])
 

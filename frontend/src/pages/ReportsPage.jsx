@@ -108,7 +108,7 @@ export default function ReportsPage() {
 
   useRealtimeSync(() => {
     loadReport(activeTab, true)
-  }, [activeTab, branch, department, status, startDate, endDate, periodId])
+  }, [activeTab, branch, department, status, startDate, endDate, periodId], { module: 'reports' })
 
   const handleApplyFilters = () => {
     loadReport(activeTab)

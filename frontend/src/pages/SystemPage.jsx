@@ -147,7 +147,7 @@ export default function SystemPage({ defaultTab = 'users' }) {
 
   useRealtimeSync(() => {
     loadTabData(activeTab, true)
-  }, [activeTab, logModule])
+  }, [activeTab, logModule], { module: 'system' })
 
   useEffect(() => {
     const id = searchParams.get('id')
@@ -897,7 +897,7 @@ export default function SystemPage({ defaultTab = 'users' }) {
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 rounded-full bg-primary/10 border border-primary/20 overflow-hidden flex items-center justify-center">
                   {settings.logo ? (
-                    <img src={settings.logo.startsWith('blob:') ? settings.logo : `http://localhost:8000${settings.logo}`} alt="Logo" className="w-full h-full object-cover" />
+                    <img src={settings.logo.includes('/storage/') ? settings.logo.substring(settings.logo.indexOf('/storage/')) : settings.logo} alt="Logo" className="w-full h-full object-cover" />
                   ) : (
                     <FiBriefcase className="w-4 h-4 text-primary" />
                   )}
@@ -982,7 +982,7 @@ export default function SystemPage({ defaultTab = 'users' }) {
                   <div className="w-24 h-24 rounded-2xl bg-muted border-2 border-dashed border-border overflow-hidden flex items-center justify-center">
                     {settingModalPreview ? (
                       <img
-                        src={settingModalPreview.startsWith('blob:') ? settingModalPreview : `http://localhost:8000${settingModalPreview}`}
+                        src={settingModalPreview.includes('/storage/') ? settingModalPreview.substring(settingModalPreview.indexOf('/storage/')) : settingModalPreview}
                         alt="Preview"
                         className="w-full h-full object-cover"
                       />

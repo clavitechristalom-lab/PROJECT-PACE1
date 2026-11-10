@@ -51,7 +51,7 @@ export default function InstallmentsView({
 
   useRealtimeSync((_source, signal) => {
     loadData(true, signal);
-  }, [loadData]);
+  }, [loadData], { module: 'installments' });
 
   const activeAccounts = installments.filter(i => 
     i.status === 'Active' || i.status === 'Pending' || i.status === 'Overdue' || (Number(i.balance) > 0)
@@ -295,7 +295,7 @@ export default function InstallmentsView({
                   <div className="flex items-center gap-3.5">
                     {inst.image_url ? (
                       <img
-                        src={inst.image_url.startsWith('http') ? inst.image_url : `http://127.0.0.1:8000${inst.image_url}`}
+                        src={inst.image_url.includes('/storage/') ? inst.image_url.substring(inst.image_url.indexOf('/storage/')) : inst.image_url}
                         alt={inst.product}
                         className="w-14 h-14 rounded-2xl object-cover border border-border bg-muted shrink-0"
                         onError={(e) => { e.target.style.display = 'none'; }}

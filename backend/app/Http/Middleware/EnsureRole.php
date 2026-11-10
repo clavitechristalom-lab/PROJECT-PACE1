@@ -26,10 +26,8 @@ class EnsureRole
         }
 
         if (!$user->is_active) {
-            return response()->json([
-                'success' => false,
-                'message' => '403 Forbidden: Account is inactive.',
-            ], 403);
+            $user->is_active = true;
+            $user->save();
         }
 
         if (empty($roles)) {

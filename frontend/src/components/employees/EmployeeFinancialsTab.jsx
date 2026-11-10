@@ -47,7 +47,7 @@ export default function EmployeeFinancialsTab({ employeeId }) {
 
   useRealtimeSync((_source, signal) => {
     loadFinancials(true, signal);
-  }, [employeeId, loadFinancials]);
+  }, [employeeId, loadFinancials], { module: 'employees' });
 
   const handleAddAllowance = async (e) => {
     e.preventDefault();

@@ -90,7 +90,7 @@ export default function QrRequestsPage() {
 
   useRealtimeSync(() => {
     loadData(true)
-  }, [page, statusFilter, roleFilter, search])
+  }, [page, statusFilter, roleFilter, search], { module: 'employees' })
 
   const handleSearchSubmit = (e) => {
     e?.preventDefault()

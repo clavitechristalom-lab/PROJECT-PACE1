@@ -7,9 +7,11 @@ import { useAuth } from '../context/AuthContext'
 
 export const resolveLogoUrl = (logo) => {
   if (!logo) return null
-  if (logo.startsWith('blob:') || logo.startsWith('data:') || logo.startsWith('http://') || logo.startsWith('https://')) return logo
+  if (logo.startsWith('blob:') || logo.startsWith('data:')) return logo
+  if (logo.includes('/storage/')) return `${STORAGE_BASE}${logo.substring(logo.indexOf('/storage/'))}`
+  if (logo.startsWith('http://') || logo.startsWith('https://')) return logo
   const path = logo.startsWith('/') ? logo : (logo.startsWith('storage/') ? `/${logo}` : `/storage/${logo}`)
-  return `${STORAGE_BASE || 'http://localhost:8000'}${path}`
+  return `${STORAGE_BASE}${path}`
 }
 
 const INITIAL_FORM_DATA = {

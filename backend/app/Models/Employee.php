@@ -157,16 +157,53 @@ class Employee extends Model
         return $this->hasMany(EmployeeLoan::class, 'employee_id', 'employee_id');
     }
 
+    public function letters()
+    {
+        return $this->hasMany(EmployeeLetter::class, 'employee_id', 'employee_id');
+    }
+
+    public function employeeLetters()
+    {
+        return $this->hasMany(EmployeeLetter::class, 'employee_id', 'employee_id');
+    }
+
+    public function supportMessages()
+    {
+        return $this->hasMany(SupportMessage::class, 'employee_id', 'employee_id');
+    }
+
+    public function processedSales()
+    {
+        return $this->hasManyThrough(
+            SaleTransaction::class,
+            User::class,
+            'employee_id',
+            'processed_by',
+            'employee_id',
+            'user_id'
+        );
+    }
+
+    public function receivedPayments()
+    {
+        return $this->hasManyThrough(
+            Payment::class,
+            User::class,
+            'employee_id',
+            'received_by',
+            'employee_id',
+            'user_id'
+        );
+    }
+
     /**
      * Scope query to strictly include Store Administrator and Employee staff only.
      * Excludes Administrators (System Admin, Main Admin) and Customers from payroll.
      */
     public function scopePayrollEligible($query)
     {
-        return $query->where('status', 'Active')
-            ->whereHas('user', function ($uq) {
-                $uq->whereIn('role', ['Store Administrator', 'Store Admin', 'Employee', 'Staff'])
-                   ->where('is_active', true);
+        return $query->whereHas('user', function ($uq) {
+                $uq->whereIn('role', ['Store Administrator', 'Store Admin', 'Employee', 'Staff']);
             })
             ->where(function ($ex) {
                 $ex->where('position', 'NOT LIKE', '%System Administrator%')

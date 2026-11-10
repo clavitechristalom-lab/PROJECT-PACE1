@@ -85,4 +85,20 @@ class InstallmentAccount extends Model
     {
         return $this->hasMany(Payment::class, 'installment_id', 'installment_id');
     }
+
+    public function ewalletDeposits()
+    {
+        return $this->hasMany(EWalletDeposit::class, 'installment_id', 'installment_id');
+    }
+
+    protected static function booted()
+    {
+        static::saved(function ($installment) {
+            try {
+                if ($installment->customer_id && \Illuminate\Support\Facades\Schema::hasTable('statements')) {
+                    Statement::syncCustomerStatements((int)$installment->customer_id);
+                }
+            } catch (\Throwable $e) {}
+        });
+    }
 }

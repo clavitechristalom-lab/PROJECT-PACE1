@@ -1,6 +1,24 @@
 const API_BASE = import.meta.env.VITE_API_URL || '/api';
 export const STORAGE_BASE = import.meta.env.VITE_STORAGE_URL || '';
 
+export const normalizeStorageUrls = (val) => {
+  if (typeof val === 'string') {
+    if (val.includes('/storage/') && /^https?:\/\/(127\.0\.0\.1|localhost)(:\d+)?\/storage\//i.test(val)) {
+      return `${STORAGE_BASE}${val.substring(val.indexOf('/storage/'))}`;
+    }
+    return val;
+  }
+  if (Array.isArray(val)) return val.map(normalizeStorageUrls);
+  if (val && typeof val === 'object') {
+    const out = {};
+    for (const [k, v] of Object.entries(val)) {
+      out[k] = normalizeStorageUrls(v);
+    }
+    return out;
+  }
+  return val;
+};
+
 
 const cleanParams = (params) => {
   const cleaned = {};
@@ -15,8 +33,26 @@ const cleanParams = (params) => {
 const inFlightGets = new Map();
 const inFlightControllers = new Map();
 const responseCache = new Map();
-const CACHE_TTL_MS = 800; 
-// 800ms TTL for sub-second de-duplication while ensuring fresh 1-2s auto-refresh
+const CACHE_TTL_MS = 800; // 2-minute on-demand cache: avoids repeating identical queries when switching routes
+
+export const ENDPOINT_MODULE_MAP = {
+  branches: ['/branches', '/dashboard/branch-comparison'],
+  customers: ['/customers', '/customer/wallet'],
+  employees: ['/employees', '/employee', '/attendance', '/excuse-letters', '/leave-requests', '/qr'],
+  attendance: ['/attendance', '/attendance-verifications', '/employee/me/attendance'],
+  products: ['/products', '/categories'],
+  sales: ['/sales', '/transactions', '/installments', '/payment-schedules', '/dashboard', '/reports'],
+  installments: ['/installments', '/payment-schedules', '/sales', '/transactions'],
+  payments: ['/payments', '/installments', '/sales', '/transactions', '/dashboard'],
+  payroll: ['/payroll', '/payrolls'],
+  dashboard: ['/dashboard', '/reports'],
+  carousels: ['/carousel', '/carousels'],
+  support: ['/support', '/tickets'],
+  notifications: ['/notifications'],
+  system: ['/system', '/audit-logs', '/sync/status'],
+  reports: ['/reports', '/dashboard'],
+  profile: ['/user/profile', '/employee/me']
+};
 
 export function clearApiCache(endpointPrefix = null) {
   if (!endpointPrefix) {
@@ -33,9 +69,14 @@ export function clearApiCache(endpointPrefix = null) {
 export function clearApiCacheForModule(module, targetId = null) {
   if (!module) return;
   const modLower = String(module).toLowerCase();
+  const prefixes = ENDPOINT_MODULE_MAP[modLower] || [`/${modLower}`];
+
   for (const key of responseCache.keys()) {
     const keyLower = key.toLowerCase();
-    if (keyLower.includes(`/${modLower}`) || keyLower.includes(`module=${modLower}`)) {
+    const matchesPrefix = prefixes.some(p => keyLower.includes(p.toLowerCase()));
+    const matchesParam = keyLower.includes(`module=${modLower}`);
+
+    if (matchesPrefix || matchesParam) {
       if (targetId === null || targetId === undefined || key.includes(String(targetId))) {
         responseCache.delete(key);
       }
@@ -43,16 +84,38 @@ export function clearApiCacheForModule(module, targetId = null) {
   }
 }
 
+export function clearApiCacheForEndpoint(endpoint) {
+  if (!endpoint) return;
+  const cleanEndpoint = endpoint.split('?')[0].toLowerCase();
 
+  // Find module by endpoint prefix
+  for (const [mod, prefixes] of Object.entries(ENDPOINT_MODULE_MAP)) {
+    if (prefixes.some(p => cleanEndpoint.startsWith(p.toLowerCase()))) {
+      clearApiCacheForModule(mod);
+      return;
+    }
+  }
+
+  // Fallback: clear keys matching the first URL segment
+  const segments = cleanEndpoint.split('/').filter(Boolean);
+  if (segments.length > 0) {
+    const base = `/${segments[0]}`;
+    for (const key of responseCache.keys()) {
+      if (key.toLowerCase().includes(base)) {
+        responseCache.delete(key);
+      }
+    }
+  }
+}
 
 async function request(endpoint, options = {}) {
   const method = (options.method || 'GET').toUpperCase();
   const isGet = method === 'GET';
   const bypassCache = options.fresh === true || options.cache === 'no-cache';
 
-  // Invalidate cache on all mutations
+  // Targeted cache invalidation on mutations (POST, PUT, PATCH, DELETE)
   if (!isGet) {
-    responseCache.clear();
+    clearApiCacheForEndpoint(endpoint);
   }
 
   // Return from high-speed cache if still warm
@@ -117,7 +180,8 @@ async function request(endpoint, options = {}) {
         signal: controller.signal,
       });
 
-      const data = await response.json().catch(() => null);
+      const rawData = await response.json().catch(() => null);
+      const data = normalizeStorageUrls(rawData);
 
       if (!response.ok) {
         if (response.status === 401 && !endpoint.startsWith('/login') && !endpoint.startsWith('/register')) {
@@ -708,6 +772,52 @@ export const api = {
     closePeriod: (id) =>
       request(`/payroll-periods/${id}/close`, {
         method: 'PUT',
+      }),
+  },
+
+  // ─── Payslips (Table CRUD) ───
+  payslips: {
+    getAll: (params = {}, options = {}) => {
+      const qs = new URLSearchParams(cleanParams(params)).toString();
+      return request(`/payslips${qs ? `?${qs}` : ''}`, options);
+    },
+    getById: (id, options = {}) => request(`/payslips/${id}`, options),
+    create: (data) =>
+      request('/payslips', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+    update: (id, data) =>
+      request(`/payslips/${id}`, {
+        method: 'PUT',
+        body: JSON.stringify(data),
+      }),
+    delete: (id) =>
+      request(`/payslips/${id}`, {
+        method: 'DELETE',
+      }),
+  },
+
+  // ─── Statements (Table CRUD) ───
+  statements: {
+    getAll: (params = {}, options = {}) => {
+      const qs = new URLSearchParams(cleanParams(params)).toString();
+      return request(`/statements${qs ? `?${qs}` : ''}`, options);
+    },
+    getById: (id, options = {}) => request(`/statements/${id}`, options),
+    create: (data) =>
+      request('/statements', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+    update: (id, data) =>
+      request(`/statements/${id}`, {
+        method: 'PUT',
+        body: JSON.stringify(data),
+      }),
+    delete: (id) =>
+      request(`/statements/${id}`, {
+        method: 'DELETE',
       }),
   },
 

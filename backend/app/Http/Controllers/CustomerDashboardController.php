@@ -504,6 +504,12 @@ class CustomerDashboardController extends Controller
 
         $statementItems = collect();
 
+        try {
+            if (\Illuminate\Support\Facades\Schema::hasTable('statements')) {
+                \App\Models\Statement::syncCustomerStatements((int)$customerId);
+            }
+        } catch (\Throwable $e) {}
+
         // 1. Map Sales (Invoices / Purchases)
         foreach ($sales as $sale) {
             $productNames = $sale->items->map(function ($it) {
@@ -511,15 +517,19 @@ class CustomerDashboardController extends Controller
             })->filter()->implode(', ');
 
             $desc = $productNames ?: ($sale->notes ?: 'Product Purchase');
+            $refVal = $sale->invoice_no ?: ('INV-' . $sale->sale_id);
+            $chanVal = $sale->payment_method ?: 'Sale';
             $statementItems->push([
                 'id' => 'SALE-' . $sale->sale_id,
                 'date' => date('Y-m-d', strtotime($sale->sale_date)),
                 'raw_date' => strtotime($sale->sale_date),
-                'reference' => $sale->invoice_no ?: ('INV-' . $sale->sale_id),
+                'reference_no' => $refVal,
+                'reference' => $refVal,
                 'type' => 'Purchase',
                 'category' => 'Debit',
                 'description' => $desc,
-                'payment_method' => $sale->payment_method ?: 'Sale',
+                'channel_method' => $chanVal,
+                'payment_method' => $chanVal,
                 'amount' => (float)$sale->total_amount,
                 'status' => $sale->status ?: 'Completed',
                 'account_no' => $sale->invoice_no,
@@ -542,10 +552,12 @@ class CustomerDashboardController extends Controller
                     'id' => 'INST-' . $inst->installment_id,
                     'date' => date('Y-m-d', strtotime($inst->start_date ?: $inst->created_at)),
                     'raw_date' => strtotime($inst->start_date ?: $inst->created_at),
+                    'reference_no' => $inst->account_no,
                     'reference' => $inst->account_no,
                     'type' => 'Purchase',
                     'category' => 'Debit',
                     'description' => $productName,
+                    'channel_method' => 'Installment Plan',
                     'payment_method' => 'Installment Plan',
                     'amount' => (float)($inst->principal_amount + $inst->interest_amount),
                     'status' => $inst->status,
@@ -561,14 +573,17 @@ class CustomerDashboardController extends Controller
                 });
 
                 if (!$hasDownpaymentPayment) {
+                    $dpRef = 'DP-' . $inst->account_no;
                     $statementItems->push([
                         'id' => 'DOWN-' . $inst->installment_id,
                         'date' => date('Y-m-d', strtotime($inst->start_date ?: $inst->created_at)),
                         'raw_date' => strtotime($inst->start_date ?: $inst->created_at),
-                        'reference' => 'DP-' . $inst->account_no,
+                        'reference_no' => $dpRef,
+                        'reference' => $dpRef,
                         'type' => 'Down Payment',
                         'category' => 'Credit',
                         'description' => 'Down payment for ' . $inst->account_no,
+                        'channel_method' => 'Down Payment',
                         'payment_method' => 'Down Payment',
                         'amount' => (float)$inst->down_payment,
                         'status' => 'Completed',
@@ -587,16 +602,20 @@ class CustomerDashboardController extends Controller
 
             $instAcc = $payment->installmentAccount;
             $desc = $payment->notes ?: ($instAcc ? "Payment for {$instAcc->account_no}" : "Payment Received");
+            $payRef = $payment->receipt_no ?: ('REC-' . $payment->payment_id);
+            $payChan = $payment->payment_method ?: 'Payment';
 
             $statementItems->push([
                 'id' => 'PAY-' . $payment->payment_id,
                 'date' => date('Y-m-d', strtotime($payment->payment_date ?: $payment->created_at)),
                 'raw_date' => strtotime($payment->payment_date ?: $payment->created_at),
-                'reference' => $payment->receipt_no ?: ('REC-' . $payment->payment_id),
+                'reference_no' => $payRef,
+                'reference' => $payRef,
                 'type' => 'Payment',
                 'category' => 'Credit',
                 'description' => $desc,
-                'payment_method' => $payment->payment_method ?: 'Payment',
+                'channel_method' => $payChan,
+                'payment_method' => $payChan,
                 'amount' => (float)$payment->amount,
                 'status' => $payment->status ?: 'Completed',
                 'account_no' => $instAcc ? $instAcc->account_no : '—',
@@ -608,15 +627,19 @@ class CustomerDashboardController extends Controller
             if ($ew->payment_id && isset($seenReceipts['PAY-' . $ew->payment_id])) continue;
             if ($ew->transaction_reference && isset($seenReceipts[$ew->transaction_reference])) continue;
 
+            $ewRef = $ew->transaction_reference ?: ('EWAL-' . $ew->deposit_id);
+            $ewChan = $ew->payment_method ?: 'E-Wallet';
             $statementItems->push([
                 'id' => 'EWAL-' . $ew->deposit_id,
                 'date' => date('Y-m-d', strtotime($ew->paid_at ?: $ew->created_at)),
                 'raw_date' => strtotime($ew->paid_at ?: $ew->created_at),
-                'reference' => $ew->transaction_reference ?: ('EWAL-' . $ew->deposit_id),
+                'reference_no' => $ewRef,
+                'reference' => $ewRef,
                 'type' => 'Payment',
                 'category' => 'Credit',
-                'description' => "E-Wallet Payment ({$ew->payment_method})",
-                'payment_method' => $ew->payment_method,
+                'description' => "E-Wallet Payment ({$ewChan})",
+                'channel_method' => $ewChan,
+                'payment_method' => $ewChan,
                 'amount' => (float)$ew->amount,
                 'status' => 'Completed',
                 'account_no' => $ew->customer_reference ?: 'E-Wallet',

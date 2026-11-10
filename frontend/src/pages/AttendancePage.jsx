@@ -18,6 +18,7 @@ import { Html5Qrcode } from 'html5-qrcode'
 import { QRCodeSVG } from 'qrcode.react'
 import QrMonitoringModal from '../components/attendance/QrMonitoringModal'
 import FaceRecognitionAttendanceModal from '../components/attendance/FaceRecognitionAttendanceModal'
+import FaceRecognitionEnrollment from '../components/biometrics/FaceRecognitionEnrollment'
 
 const DEPARTMENTS = ['All', 'Operations', 'Sales', 'Finance']
 const STATUSES = ['All', 'Present', 'Late', 'Absent', 'Half Day']
@@ -59,7 +60,7 @@ const playTone = (type) => {
 }
 
 export default function AttendancePage({ branchFilter: propBranchFilter, embedded }) {
-  const { user } = useAuth()
+  const { user, verifySession } = useAuth()
   const navigate = useNavigate()
   const isAdmin = user?.role === 'Administrator'
   const isEmployee = user?.role === 'Employee'
@@ -438,10 +439,16 @@ export default function AttendancePage({ branchFilter: propBranchFilter, embedde
               fps: 15,
               qrbox: { width: 240, height: 240 },
               aspectRatio: 1.0,
+              disableFlip: false,
             },
             onQrCodeScanned,
             () => { } // Ignore continuous frame errors
           )
+          const videoEl = document.querySelector('#qr-reader-container video')
+          if (videoEl) {
+            videoEl.style.transform = 'scaleX(-1)'
+            videoEl.style.objectFit = 'cover'
+          }
           isScannerRunningRef.current = true
         }
       } else {
@@ -883,15 +890,17 @@ export default function AttendancePage({ branchFilter: propBranchFilter, embedde
                 QR Monitoring
               </Btn>
             )}
-            <Btn
-              variant="outline"
-              size="sm"
-              onClick={() => setFaceAuthModalOpen(true)}
-              icon={<FiCamera className="w-4 h-4 text-emerald-400" />}
-              className="border-emerald-500/40 text-emerald-400 hover:bg-emerald-500/10"
-            >
-              Face Authorization
-            </Btn>
+            {isEmployee && (
+              <Btn
+                variant="outline"
+                size="sm"
+                onClick={() => setFaceAuthModalOpen(true)}
+                icon={<FiCamera className="w-4 h-4 text-emerald-500" />}
+                className="border-emerald-500/40 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/10"
+              >
+                Face Recognition
+              </Btn>
+            )}
             {isStoreAdmin && activeTab !== 'punch' && (
               <Btn
                 variant="primary"
@@ -974,15 +983,18 @@ export default function AttendancePage({ branchFilter: propBranchFilter, embedde
 
               {/* Viewport (Always in DOM for Html5Qrcode initialization) */}
               <div className="w-full max-w-sm mx-auto aspect-square bg-slate-950 rounded-2xl border-2 border-slate-700 overflow-hidden relative shadow-2xl flex items-center justify-center">
-                <div id="qr-reader-container" className="w-full h-full" />
+                <div
+                  id="qr-reader-container"
+                  className="w-full h-full [&_video]:-scale-x-100! [&_video]:object-cover [&_#qr-shaded-region>div]:hidden"
+                />
 
                 {/* Target Overlay */}
                 <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
                   <div className="w-60 h-60 border-2 border-primary/80 rounded-2xl relative animate-pulse shadow-lg shadow-primary/20">
-                    <div className="absolute -top-1.5 -left-1.5 w-6 h-6 border-t-4 border-l-4 border-primary rounded-tl" />
-                    <div className="absolute -top-1.5 -right-1.5 w-6 h-6 border-t-4 border-r-4 border-primary rounded-tr" />
-                    <div className="absolute -bottom-1.5 -left-1.5 w-6 h-6 border-b-4 border-l-4 border-primary rounded-bl" />
-                    <div className="absolute -bottom-1.5 -right-1.5 w-6 h-6 border-b-4 border-r-4 border-primary rounded-br" />
+                    <div className="absolute -top-0.5 -left-0.5 w-6 h-6 border-t-4 border-l-4 border-primary rounded-tl-xl" />
+                    <div className="absolute -top-0.5 -right-0.5 w-6 h-6 border-t-4 border-r-4 border-primary rounded-tr-xl" />
+                    <div className="absolute -bottom-0.5 -left-0.5 w-6 h-6 border-b-4 border-l-4 border-primary rounded-bl-xl" />
+                    <div className="absolute -bottom-0.5 -right-0.5 w-6 h-6 border-b-4 border-r-4 border-primary rounded-br-xl" />
                   </div>
                 </div>
 
@@ -1205,6 +1217,13 @@ export default function AttendancePage({ branchFilter: propBranchFilter, embedde
                     <span>Print Badge</span>
                   </button>
                 </div>
+                <button
+                  onClick={() => setFaceAuthModalOpen(true)}
+                  className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-emerald-500/40 bg-emerald-500/10 hover:bg-emerald-500/20 font-bold text-xs text-emerald-600 dark:text-emerald-400 cursor-pointer transition"
+                >
+                  <FiCamera className="w-4 h-4" />
+                  <span>Face Recognition</span>
+                </button>
               </div>
             </div>
           ) : myProfile?.qr_status === 'REQUESTED' ? (
@@ -1701,56 +1720,95 @@ export default function AttendancePage({ branchFilter: propBranchFilter, embedde
         onClose={() => setQrMonitoringOpen(false)}
       />
 
+      {/* EMPLOYEE FACE RECOGNITION ENROLLMENT MODAL ("Add a face") */}
+      {isEmployee && faceAuthModalOpen && (
+        <div
+          className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-in fade-in duration-200 overflow-y-auto"
+          onClick={() => setFaceAuthModalOpen(false)}
+        >
+          <div
+            className="relative w-full max-w-3xl my-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              type="button"
+              onClick={() => setFaceAuthModalOpen(false)}
+              className="absolute top-4 right-4 z-30 p-2 rounded-xl bg-emerald-950/60 hover:bg-emerald-900/80 text-emerald-300/70 hover:text-white border border-emerald-500/20 transition-colors cursor-pointer"
+              title="Close"
+            >
+              <FiX className="w-4 h-4" />
+            </button>
+            <FaceRecognitionEnrollment
+              existingImage={myProfile?.face_biometric_image || user?.face_biometric_image}
+              faceBiometricImage={myProfile?.face_biometric_image || user?.face_biometric_image}
+              employee={myProfile || user?.employee || user}
+              onSuccess={async (payload) => {
+                const biometricUrl = payload?.face_biometric_image || payload?.imageUrl
+                if (biometricUrl) {
+                  setMyProfile(prev => prev ? ({ ...prev, face_biometric_image: biometricUrl }) : prev)
+                }
+                if (typeof verifySession === 'function') {
+                  await verifySession()
+                }
+                loadMyProfile(true)
+              }}
+            />
+          </div>
+        </div>
+      )}
+
       {/* FACE RECOGNITION ATTENDANCE AUTHORIZATION MODAL */}
-      <FaceRecognitionAttendanceModal
-        isOpen={faceAuthModalOpen}
-        employee={user?.employee || user}
-        onClose={() => {
-          setFaceAuthModalOpen(false)
-          setStationStep('scan')
-          setActiveTab('punch')
-          setPunchResult(null)
-          setScannedQrToken('')
-          setIdentifiedEmployee(null)
-          setCameraActive(true)
-          isProcessingScan.current = false
-          setTimeout(() => startCamera(), 80)
-        }}
-        onCancel={() => {
-          setFaceAuthModalOpen(false)
-          setStationStep('scan')
-          setActiveTab('punch')
-          setPunchResult(null)
-          setScannedQrToken('')
-          setIdentifiedEmployee(null)
-          setCameraActive(true)
-          isProcessingScan.current = false
-          setTimeout(() => startCamera(), 80)
-        }}
-        onAuthorize={() => {
-          setFaceAuthModalOpen(false)
-          setStationStep('scan')
-          setActiveTab('punch')
-          setPunchResult(null)
-          setScannedQrToken('')
-          setIdentifiedEmployee(null)
-          setCameraActive(true)
-          isProcessingScan.current = false
-          setTimeout(() => startCamera(), 80)
-        }}
-        onSuccess={() => {
-          setFaceAuthModalOpen(false)
-          setStationStep('scan')
-          setActiveTab('punch')
-          setPunchResult(null)
-          setScannedQrToken('')
-          setIdentifiedEmployee(null)
-          setCameraActive(true)
-          isProcessingScan.current = false
-          setTimeout(() => startCamera(), 80)
-        }}
-        adminName={user?.name || "talom clavite"}
-      />
+      {!isEmployee && (
+        <FaceRecognitionAttendanceModal
+          isOpen={faceAuthModalOpen}
+          employee={myProfile || user?.employee || user}
+          onClose={() => {
+            setFaceAuthModalOpen(false)
+            setStationStep('scan')
+            setActiveTab('punch')
+            setPunchResult(null)
+            setScannedQrToken('')
+            setIdentifiedEmployee(null)
+            setCameraActive(true)
+            isProcessingScan.current = false
+            setTimeout(() => startCamera(), 80)
+          }}
+          onCancel={() => {
+            setFaceAuthModalOpen(false)
+            setStationStep('scan')
+            setActiveTab('punch')
+            setPunchResult(null)
+            setScannedQrToken('')
+            setIdentifiedEmployee(null)
+            setCameraActive(true)
+            isProcessingScan.current = false
+            setTimeout(() => startCamera(), 80)
+          }}
+          onAuthorize={() => {
+            setFaceAuthModalOpen(false)
+            setStationStep('scan')
+            setActiveTab('punch')
+            setPunchResult(null)
+            setScannedQrToken('')
+            setIdentifiedEmployee(null)
+            setCameraActive(true)
+            isProcessingScan.current = false
+            setTimeout(() => startCamera(), 80)
+          }}
+          onSuccess={() => {
+            setFaceAuthModalOpen(false)
+            setStationStep('scan')
+            setActiveTab('punch')
+            setPunchResult(null)
+            setScannedQrToken('')
+            setIdentifiedEmployee(null)
+            setCameraActive(true)
+            isProcessingScan.current = false
+            setTimeout(() => startCamera(), 80)
+          }}
+          adminName={user?.name || "talom clavite"}
+        />
+      )}
     </div>
   )
 }

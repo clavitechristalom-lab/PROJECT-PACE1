@@ -81,8 +81,9 @@ export default function DepositModal({
 
   const formatImgUrl = (url) => {
     if (!url) return null;
+    if (url.includes('/storage/')) return url.substring(url.indexOf('/storage/'));
     if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('data:')) return url;
-    return url.startsWith('/') ? `http://127.0.0.1:8000${url}` : `http://127.0.0.1:8000/${url}`;
+    return url.startsWith('/') ? url : `/storage/${url}`;
   };
 
   // Store Admin Installment Control & Eligibility State

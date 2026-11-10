@@ -1,41 +1,50 @@
 <?php
 
 use Illuminate\Database\Migrations\Migration;
-use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 
 return new class extends Migration
 {
     /**
-     * Run the migrations.
+     * Run the migrations: Remove legacy residents table and sync emails across Project PACE users, employees, and customers.
      */
     public function up(): void
     {
-        if (!Schema::hasTable('residents')) {
-            Schema::create('residents', function (Blueprint $table) {
-                $table->id();
-                $table->string('firstName', 100)->default('User');
-                $table->string('lastName', 100)->nullable();
-                $table->string('email', 191)->unique();
-                $table->string('mobile_password', 255)->nullable();
-                $table->string('mobile_account_status', 50)->default('active');
-                $table->boolean('has_mobile_account')->default(true);
-                $table->timestamps();
-            });
+        Schema::dropIfExists('residents');
 
-            // Populate existing users into residents
-            $users = DB::table('users')->whereNotNull('email')->get();
-            foreach ($users as $u) {
-                if (filter_var($u->email, FILTER_VALIDATE_EMAIL)) {
-                    DB::table('residents')->insertOrIgnore([
-                        'firstName'             => $u->username,
-                        'email'                 => $u->email,
-                        'mobile_password'       => $u->password_hash,
-                        'mobile_account_status' => 'active',
-                        'has_mobile_account'    => 1,
-                        'created_at'            => now(),
-                        'updated_at'            => now(),
-                    ]);
+        // Sync Customer emails into Users table for Gmail OTP delivery
+        if (Schema::hasTable('users') && Schema::hasTable('customers')) {
+            $customerUsers = DB::table('users')
+                ->join('customers', 'users.customer_id', '=', 'customers.customer_id')
+                ->whereNull('users.email')
+                ->whereNotNull('customers.email')
+                ->select('users.user_id', 'customers.email')
+                ->get();
+
+            foreach ($customerUsers as $cu) {
+                if (filter_var($cu->email, FILTER_VALIDATE_EMAIL)) {
+                    DB::table('users')
+                        ->where('user_id', $cu->user_id)
+                        ->update(['email' => strtolower(trim($cu->email))]);
+                }
+            }
+        }
+
+        // Sync Employee emails into Users table for Gmail OTP delivery
+        if (Schema::hasTable('users') && Schema::hasTable('employees')) {
+            $employeeUsers = DB::table('users')
+                ->join('employees', 'users.employee_id', '=', 'employees.employee_id')
+                ->whereNull('users.email')
+                ->whereNotNull('employees.email')
+                ->select('users.user_id', 'employees.email')
+                ->get();
+
+            foreach ($employeeUsers as $eu) {
+                if (filter_var($eu->email, FILTER_VALIDATE_EMAIL)) {
+                    DB::table('users')
+                        ->where('user_id', $eu->user_id)
+                        ->update(['email' => strtolower(trim($eu->email))]);
                 }
             }
         }

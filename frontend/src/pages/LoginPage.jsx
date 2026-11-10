@@ -156,9 +156,11 @@ export default function LoginPage() {
 
   const getLogoUrl = (logo) => {
     if (!logo) return '';
-    if (logo.startsWith('blob:') || logo.startsWith('http')) return logo;
+    if (logo.startsWith('blob:') || logo.startsWith('data:')) return logo;
+    if (logo.includes('/storage/')) return `${STORAGE_BASE}${logo.substring(logo.indexOf('/storage/'))}`;
+    if (logo.startsWith('http')) return logo;
     const path = logo.startsWith('/') ? logo : (logo.startsWith('storage/') ? `/${logo}` : `/storage/${logo}`);
-    return `${STORAGE_BASE || 'http://localhost:8000'}${path}`;
+    return `${STORAGE_BASE}${path}`;
   }
 
   const handleNavClick = (e, sectionId) => {
@@ -837,7 +839,7 @@ export default function LoginPage() {
                       <div className="h-48 bg-gray-100 dark:bg-slate-700/50 overflow-hidden relative">
                         {product.image_url ? (
                           <img
-                            src={product.image_url.startsWith('http') ? product.image_url : `${STORAGE_BASE || 'http://localhost:8000'}${product.image_url.startsWith('/') ? '' : '/storage/'}${product.image_url}`}
+                            src={product.image_url.includes('/storage/') ? `${STORAGE_BASE}${product.image_url.substring(product.image_url.indexOf('/storage/'))}` : (product.image_url.startsWith('http') ? product.image_url : `${STORAGE_BASE}${product.image_url.startsWith('/') ? '' : '/storage/'}${product.image_url}`)}
                             alt={product.product_name}
                             className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
                             onError={e => { e.target.style.display = 'none'; e.target.nextSibling.style.display = 'flex'; }}
@@ -913,7 +915,7 @@ export default function LoginPage() {
                       <div className="h-48 bg-gray-100 dark:bg-slate-700/50 overflow-hidden relative">
                         {product.image_url ? (
                           <img
-                            src={product.image_url.startsWith('http') ? product.image_url : `${STORAGE_BASE || 'http://localhost:8000'}${product.image_url.startsWith('/') ? '' : '/storage/'}${product.image_url}`}
+                            src={product.image_url.includes('/storage/') ? `${STORAGE_BASE}${product.image_url.substring(product.image_url.indexOf('/storage/'))}` : (product.image_url.startsWith('http') ? product.image_url : `${STORAGE_BASE}${product.image_url.startsWith('/') ? '' : '/storage/'}${product.image_url}`)}
                             alt={product.product_name}
                             className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
                             onError={e => { e.target.style.display = 'none'; e.target.nextSibling.style.display = 'flex'; }}
@@ -1448,7 +1450,7 @@ export default function LoginPage() {
                           className={`w-full bg-white/5 border ${isMasterAdmin
                             ? 'border-amber-500/60 focus:border-amber-400 focus:ring-amber-500/25 text-amber-300'
                             : 'border-slate-800 focus:border-blue-500 focus:ring-blue-500/25 text-blue-400'
-                            } focus:ring-2 rounded-xl px-4 py-3 text-center text-2xl font-mono tracking-[0.5em] placeholder-slate-600 focus:outline-none transition-all`}
+                            } focus:ring-2 rounded-xl px-4 py-3 text-center ${loginOtp ? 'text-2xl font-mono tracking-[0.35em] font-bold' : 'text-sm font-medium tracking-normal'} placeholder:tracking-normal placeholder:font-sans placeholder:text-sm placeholder:text-slate-500 focus:outline-none transition-all`}
                         />
                       </div>
 
@@ -2180,10 +2182,10 @@ export default function LoginPage() {
                       setForgotOtp(val);
                       if (forgotError) setForgotError('');
                     }}
-                    placeholder="000000"
+                    placeholder="Enter 6 digits"
                     autoFocus
                     required
-                    className="w-full bg-white/5 border border-slate-800 focus:border-blue-500 rounded-xl px-4 py-3 text-xl font-mono text-center tracking-widest text-white placeholder-slate-600 focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-all"
+                    className={`w-full bg-white/5 border border-slate-800 focus:border-blue-500 rounded-xl px-4 py-3 text-center ${forgotOtp ? 'text-xl font-mono tracking-[0.35em] font-bold' : 'text-sm font-medium tracking-normal'} text-white placeholder:tracking-normal placeholder:font-sans placeholder:text-sm placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-all`}
                   />
                   <div className="mt-2.5 p-2.5 bg-blue-950/40 border border-blue-800/40 rounded-xl text-[11px] text-blue-300 flex items-start gap-2">
                     <FiMail className="w-4 h-4 text-blue-400 shrink-0 mt-0.5" />

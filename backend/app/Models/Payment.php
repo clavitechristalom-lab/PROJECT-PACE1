@@ -29,4 +29,18 @@ class Payment extends Model
     {
         return $this->belongsTo(User::class, 'received_by', 'user_id');
     }
+
+    protected static function booted()
+    {
+        static::saved(function ($payment) {
+            try {
+                if ($payment->installment_id && \Illuminate\Support\Facades\Schema::hasTable('statements')) {
+                    $inst = InstallmentAccount::find($payment->installment_id);
+                    if ($inst && $inst->customer_id) {
+                        Statement::syncCustomerStatements((int)$inst->customer_id);
+                    }
+                }
+            } catch (\Throwable $e) {}
+        });
+    }
 }

@@ -29,12 +29,12 @@ if (typeof window !== 'undefined') {
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
-    <ThemeProvider>
-      <IconContext.Provider value={{ className: "theme-icon" }}>
-        <AuthProvider>
+    <AuthProvider>
+      <ThemeProvider>
+        <IconContext.Provider value={{ className: "theme-icon" }}>
           <App />
-        </AuthProvider>
-      </IconContext.Provider>
-    </ThemeProvider>
+        </IconContext.Provider>
+      </ThemeProvider>
+    </AuthProvider>
   </React.StrictMode>,
 )

@@ -46,6 +46,47 @@ class BranchProfile extends Model
         return $this->hasMany(Report::class, 'branch_id', 'id');
     }
 
+    public function supportMessages()
+    {
+        return $this->hasMany(SupportMessage::class, 'branch_id', 'id');
+    }
+
+    public function installmentAccounts()
+    {
+        return $this->hasManyThrough(
+            InstallmentAccount::class,
+            Customer::class,
+            'branch_id',
+            'customer_id',
+            'id',
+            'customer_id'
+        );
+    }
+
+    public function payslips()
+    {
+        return $this->hasManyThrough(
+            Payslip::class,
+            Employee::class,
+            'branch_id',
+            'employee_id',
+            'id',
+            'employee_id'
+        );
+    }
+
+    public function statements()
+    {
+        return $this->hasManyThrough(
+            Statement::class,
+            Customer::class,
+            'branch_id',
+            'customer_id',
+            'id',
+            'customer_id'
+        );
+    }
+
     public static function getNameById($id)
     {
         if (empty($id)) return null;

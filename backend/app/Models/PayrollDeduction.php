@@ -24,4 +24,21 @@ class PayrollDeduction extends Model
     {
         return $this->belongsTo(Payroll::class, 'payroll_id', 'payroll_id');
     }
+
+    protected static function booted()
+    {
+        $syncParent = function ($deduction) {
+            try {
+                if ($deduction->payroll_id && \Illuminate\Support\Facades\Schema::hasTable('payslips')) {
+                    $payroll = Payroll::find($deduction->payroll_id);
+                    if ($payroll) {
+                        Payslip::syncFromPayroll($payroll);
+                    }
+                }
+            } catch (\Throwable $e) {}
+        };
+
+        static::saved($syncParent);
+        static::deleted($syncParent);
+    }
 }

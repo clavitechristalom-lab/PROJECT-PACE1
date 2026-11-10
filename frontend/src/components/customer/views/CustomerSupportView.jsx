@@ -40,7 +40,7 @@ export default function CustomerSupportView({ user = null }) {
 
   useRealtimeSync((_source, signal) => {
     loadMessages(true, signal);
-  }, [loadMessages]);
+  }, [loadMessages], { module: 'support' });
 
   const handleSubmit = async (e) => {
     e.preventDefault();

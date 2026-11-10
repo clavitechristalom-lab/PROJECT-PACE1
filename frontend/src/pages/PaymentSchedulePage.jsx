@@ -90,7 +90,7 @@ export default function PaymentSchedulePage({ branchFilter: propBranchFilter, em
 
   useRealtimeSync(() => {
     loadSchedules(true)
-  }, [statusFilter, branchFilter, search])
+  }, [statusFilter, branchFilter, search], { module: 'installments' })
 
   const filtered = useMemo(() => {
     return filterBySearch(schedules, search, ['account_no', 'customer_name', 'due_date', 'branch'])

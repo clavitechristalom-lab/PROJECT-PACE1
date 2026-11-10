@@ -64,4 +64,15 @@ class EWalletDeposit extends Model
     {
         return $this->belongsTo(Payment::class, 'payment_id', 'payment_id');
     }
+
+    protected static function booted()
+    {
+        static::saved(function ($deposit) {
+            try {
+                if ($deposit->customer_id && \Illuminate\Support\Facades\Schema::hasTable('statements')) {
+                    Statement::syncCustomerStatements((int)$deposit->customer_id);
+                }
+            } catch (\Throwable $e) {}
+        });
+    }
 }

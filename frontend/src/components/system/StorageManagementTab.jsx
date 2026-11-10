@@ -40,7 +40,7 @@ export default function StorageManagementTab({ onNavigateToBackups }) {
 
   useRealtimeSync((_source, signal) => {
     loadStorage(true, signal);
-  }, [loadStorage]);
+  }, [loadStorage], { module: 'system' });
 
   const handleCleanAction = async (action, actionLabel) => {
     const confirmed = await confirmAction({

@@ -73,7 +73,7 @@ export default function PaymentScheduleView({
 
   useRealtimeSync((_source, signal) => {
     loadData(true, signal);
-  }, [loadData]);
+  }, [loadData], { module: 'installments' });
 
   // Flatten all schedules across all customer accounts
   const allSchedules = useMemo(() => {

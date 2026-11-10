@@ -17,6 +17,7 @@ class CustomerController extends Controller
     public function index(Request $request)
     {
         $user = auth()->user();
+        User::syncSessionStatuses($user);
 
         // 1-2s Performance Cache: bypass if exporting CSV
         if (!$request->boolean('export_csv')) {
@@ -175,6 +176,7 @@ class CustomerController extends Controller
     public function show($id)
     {
         $user = auth()->user();
+        User::syncSessionStatuses($user);
 
         // Customer can only see their own data
         if ($user && $user->role === 'Customer' && $user->customer_id != $id) {

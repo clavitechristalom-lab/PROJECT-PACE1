@@ -665,7 +665,7 @@ export default function FaceRecognitionAttendanceModal({
             setBooleanEvaluation('true')
             setMismatchError(null)
 
-            const nextProgress = Math.min(100, progressRef.current + 1.25)
+            const nextProgress = Math.min(100, progressRef.current + 25)
             progressRef.current = nextProgress
             setScanProgress(nextProgress)
 
@@ -738,9 +738,8 @@ export default function FaceRecognitionAttendanceModal({
                 playSound('scan')
               }
 
-              // Advance progress frame-by-frame based strictly on verified matching frames:
-              // ~1.0% per verified frame => ~100 strictly verified frames = ~8-10 seconds of verified matching
-              const increment = 0.95 + Math.random() * 0.15
+              // Advance progress rapidly on verified matching frames (no 10s wait)
+              const increment = 25
               const nextProgress = Math.min(100, progressRef.current + increment)
               progressRef.current = nextProgress
               setScanProgress(nextProgress)
@@ -1100,7 +1099,7 @@ export default function FaceRecognitionAttendanceModal({
                   ) : isMatchEvaluatedTrue ? (
                     <div className="flex items-center gap-1.5 px-3.5 py-1 rounded-full bg-emerald-950/90 border border-emerald-400 text-emerald-300 text-[11px] font-bold shadow-[0_0_15px_rgba(16,185,129,0.5)]">
                       <FiShield className="w-3.5 h-3.5 text-emerald-400" />
-                      <span>Face ID Match: TRUE · Validating ({remainingSeconds}s)</span>
+                      <span>Face ID Match: TRUE · Validating</span>
                     </div>
                   ) : !isScanningValid ? (
                     <div className="flex items-center gap-1.5 px-3.5 py-1 rounded-full bg-amber-950/90 border border-amber-500/70 text-amber-300 text-[11px] font-semibold backdrop-blur-md shadow-[0_0_15px_rgba(245,158,11,0.4)]">
@@ -1317,7 +1316,7 @@ export default function FaceRecognitionAttendanceModal({
                   <>
                     <FiShield className="w-4 h-4 text-emerald-400 shrink-0" />
                     <span className="text-emerald-300">
-                      Validating 3D Biometric Liveness... ({remainingSeconds}s remaining)
+                      Validating 3D Biometric Liveness...
                     </span>
                   </>
                 ) : (
@@ -1404,7 +1403,7 @@ export default function FaceRecognitionAttendanceModal({
                 <>
                   <FiShield className="w-4 h-4 text-emerald-400" />
                   <span className="tracking-wide text-xs">
-                    Auto-Authorizing on 100% Match ({remainingSeconds}s)...
+                    Auto-Authorizing on 100% Match...
                   </span>
                 </>
               ) : (

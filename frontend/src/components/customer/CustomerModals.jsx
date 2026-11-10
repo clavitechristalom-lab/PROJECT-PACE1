@@ -74,7 +74,7 @@ export function ProductListModal({ isOpen, onClose, category, availableCategorie
 
   useRealtimeSync((_source, signal) => {
     if (isOpen) loadProducts(true, signal);
-  }, [isOpen, loadProducts]);
+  }, [isOpen, loadProducts], { module: 'products', enabled: isOpen });
 
   if (!isOpen) return null;
 
@@ -753,7 +753,7 @@ export function FullyPaidProductDetailsModal({ isOpen, onClose, accountData }) {
         <div className="flex flex-col sm:flex-row gap-6 p-5 bg-emerald-50/50 dark:bg-emerald-900/10 rounded-xl border border-emerald-100 dark:border-emerald-800/50">
           {item && (item.image_url || item.image) ? (
             <img
-              src={(item.image_url || item.image)?.startsWith('http') ? (item.image_url || item.image) : `http://127.0.0.1:8000${item.image_url || item.image}`}
+              src={(item.image_url || item.image)?.includes('/storage/') ? (item.image_url || item.image).substring((item.image_url || item.image).indexOf('/storage/')) : (item.image_url || item.image)}
               alt={item.product_name}
               className="w-32 h-32 object-cover rounded-xl border border-emerald-200 dark:border-emerald-700/50 bg-white shrink-0 shadow-sm"
               onError={(e) => { e.target.style.display = 'none'; }}
@@ -915,7 +915,7 @@ export function InstallmentAccountDetailsModal({ isOpen, onClose, installmentId 
 
   useRealtimeSync((_source, signal) => {
     if (isOpen && installmentId) loadAccountDetails(true, signal);
-  }, [isOpen, installmentId, loadAccountDetails]);
+  }, [isOpen, installmentId, loadAccountDetails], { module: 'installments', enabled: isOpen });
 
   if (!isOpen) return null;
 
@@ -945,7 +945,7 @@ export function InstallmentAccountDetailsModal({ isOpen, onClose, installmentId 
         <div className="flex flex-col sm:flex-row gap-6 p-5 bg-slate-50 dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800">
           {item && (item.image_url || item.image) ? (
             <img
-              src={(item.image_url || item.image)?.startsWith('http') ? (item.image_url || item.image) : `http://127.0.0.1:8000${item.image_url || item.image}`}
+              src={(item.image_url || item.image)?.includes('/storage/') ? (item.image_url || item.image).substring((item.image_url || item.image).indexOf('/storage/')) : (item.image_url || item.image)}
               alt={item.product_name}
               className="w-32 h-32 object-cover rounded-xl border border-border bg-white shrink-0 shadow-sm"
               onError={(e) => { e.target.style.display = 'none'; }}
@@ -1295,7 +1295,7 @@ export function StatementModal({ isOpen, onClose, installments = [], user = null
 
   useRealtimeSync((_source, signal) => {
     if (isOpen) loadStatements(true, signal);
-  }, [isOpen, loadStatements]);
+  }, [isOpen, loadStatements], { module: 'installments', enabled: isOpen });
 
   if (!isOpen) return null;
 
@@ -1817,7 +1817,7 @@ export function MakePaymentModal({ isOpen, onClose, installments, onPaymentSucce
                 <div className="flex items-center gap-3 border-b border-border/50 pb-3">
                   {selectedScheduleDetails.image_url ? (
                     <img
-                      src={selectedScheduleDetails.image_url.startsWith('http') ? selectedScheduleDetails.image_url : `http://127.0.0.1:8000${selectedScheduleDetails.image_url}`}
+                      src={selectedScheduleDetails.image_url.includes('/storage/') ? selectedScheduleDetails.image_url.substring(selectedScheduleDetails.image_url.indexOf('/storage/')) : selectedScheduleDetails.image_url}
                       alt={selectedScheduleDetails.product}
                       className="w-12 h-12 rounded-xl object-cover border border-border bg-card shrink-0"
                       onError={(e) => { e.currentTarget.style.display = 'none'; }}
@@ -2107,7 +2107,7 @@ export function SupportModal({ isOpen, onClose }) {
     if (isOpen) {
       loadMyMessages(true, signal);
     }
-  }, [isOpen, loadMyMessages]);
+  }, [isOpen, loadMyMessages], { module: 'support', enabled: isOpen });
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -2437,7 +2437,7 @@ export function InstallmentsModal({ isOpen, onClose, onMakePayment, onViewLedger
 
   useRealtimeSync((_source, signal) => {
     if (isOpen) loadData(true, signal);
-  }, [isOpen, loadData]);
+  }, [isOpen, loadData], { module: 'installments', enabled: isOpen });
 
   if (!isOpen) return null;
 
@@ -2542,7 +2542,7 @@ export function InstallmentsModal({ isOpen, onClose, onMakePayment, onViewLedger
                     <div className="flex items-center gap-3">
                       {inst.image_url ? (
                         <img
-                          src={inst.image_url.startsWith('http') ? inst.image_url : `http://127.0.0.1:8000${inst.image_url}`}
+                          src={inst.image_url.includes('/storage/') ? inst.image_url.substring(inst.image_url.indexOf('/storage/')) : inst.image_url}
                           alt={inst.product}
                           className="w-12 h-12 rounded-xl object-cover border border-border bg-muted shrink-0"
                           onError={(e) => { e.target.style.display = 'none'; }}

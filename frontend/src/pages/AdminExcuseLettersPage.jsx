@@ -218,7 +218,7 @@ export default function AdminExcuseLettersPage() {
   // Real-time synchronization
   useRealtimeSync(() => {
     loadData()
-  }, [selectedCategory, statusFilter, searchTerm, dateFrom, dateTo])
+  }, [selectedCategory, statusFilter, searchTerm, dateFrom, dateTo], { module: 'employees' })
 
   // Handle Review submission
   const handleReviewSubmit = async (e, decisionOverride = null) => {

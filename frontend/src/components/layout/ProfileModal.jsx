@@ -214,7 +214,7 @@ export default function ProfileModal({ open, isOpen, onClose }) {
         })
         .catch(() => { })
     }
-  }, [isVisible, isEditing, activeTab, isCustomer, loadProfile])
+  }, [isVisible, isEditing, activeTab, isCustomer, loadProfile], { module: 'profile', enabled: isVisible })
 
   const handleConfirmVerify = async () => {
     setVerificationLoading(true)

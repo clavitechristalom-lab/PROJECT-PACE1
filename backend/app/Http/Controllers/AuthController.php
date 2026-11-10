@@ -182,7 +182,7 @@ class AuthController extends Controller
                 'gender' => $gender,
                 'date_of_birth' => $dateOfBirth,
                 'marital_status' => $maritalStatus,
-                'status' => 'Active',
+                'status' => 'Inactive',
                 'branch_id' => $branchId,
                 'branch' => $branchName,
             ]);
@@ -193,7 +193,7 @@ class AuthController extends Controller
                 'phone_number' => $normalizedPhone,
                 'password_hash' => Hash::make($validated['password']),
                 'role' => $role,
-                'is_active' => true,
+                'is_active' => false,
                 'customer_id' => $customer->customer_id,
                 'account_verified' => $isAdmin ? true : false,
                 'account_verified_at' => $isAdmin ? now() : null,
@@ -229,7 +229,7 @@ class AuthController extends Controller
                     'date_of_birth' => $dateOfBirth,
                     'marital_status' => $maritalStatus,
                     'position' => $request->input('position') ?: $defaultPosition,
-                    'status' => 'Active',
+                    'status' => 'Inactive',
                     'pay_type' => $request->input('pay_type') ?: 'Cash',
                     'basic_salary' => $inputSalary,
                     'daily_rate' => $dailyRate,
@@ -273,7 +273,7 @@ class AuthController extends Controller
                 'phone_number' => $normalizedPhone,
                 'password_hash' => Hash::make($validated['password']),
                 'role' => $role,
-                'is_active' => true,
+                'is_active' => false,
                 'employee_id' => $employee->employee_id,
                 'account_verified' => $isAdminRole ? true : false,
                 'account_verified_at' => $isAdminRole ? now() : null,
@@ -367,17 +367,11 @@ class AuthController extends Controller
             ], 201);
         }
 
-        // If created by Admin: return user object and success
-        $sessionToken = $user->createToken('auth_token')->plainTextToken;
-
+        // If created by Admin: return user object and success (do not issue active session token until user logs in)
         return response()->json([
-            'success'       => true,
-            'message'       => "Account for {$displayName} ({$role}) created successfully! Welcome email sent to {$normalizedEmail}.",
-            'session_token' => $sessionToken,
-            'token'         => $sessionToken,
-            'access_token'  => $sessionToken,
-            'token_type'    => 'Bearer',
-            'user'          => $this->buildUserData($user),
+            'success' => true,
+            'message' => "Account for {$displayName} ({$role}) created successfully! Welcome email sent to {$normalizedEmail}.",
+            'user'    => $this->buildUserData($user),
         ], 201);
     }
 
@@ -752,7 +746,7 @@ class AuthController extends Controller
                 ->update(['used' => 1, 'updated_at' => now()]);
         } catch (\Throwable $e) {}
 
-        // Clear OTP fields immediately to prevent reuse
+        // Clear OTP fields immediately to prevent reuse and mark account Active on login
         $user->otp_code = null;
         $user->otp_expires_at = null;
         $user->otp_created_at = null;
@@ -760,6 +754,13 @@ class AuthController extends Controller
         $user->last_login = now();
         $user->is_active = true;
         $user->save();
+
+        if ($user->employee) {
+            $user->employee->update(['status' => 'Active']);
+        }
+        if ($user->customer) {
+            $user->customer->update(['status' => 'Active']);
+        }
 
         // Log login event in SystemLog
         SystemLog::create([
@@ -771,8 +772,18 @@ class AuthController extends Controller
             'user_agent'  => $request->userAgent(),
         ]);
 
-        // STRICT SECURITY: Sanctum bearer token is issued ONLY now upon verified 2FA OTP
-        $sessionToken = $user->createToken('auth_token')->plainTextToken;
+        // Clear any stale tokens and issue fresh Sanctum bearer token upon verified 2FA OTP
+        try {
+            $user->tokens()->delete();
+        } catch (\Throwable $e) {}
+
+        $newToken = $user->createToken('auth_token');
+        try {
+            $newToken->accessToken->forceFill(['last_used_at' => now()])->save();
+        } catch (\Throwable $e) {}
+        $sessionToken = $newToken->plainTextToken;
+
+        SyncController::invalidateFingerprint();
 
         return response()->json([
             'success'       => true,
@@ -907,7 +918,16 @@ class AuthController extends Controller
             return response()->json(['message' => 'User account not found'], 404);
         }
 
-
+        if (!$user->is_active) {
+            $user->is_active = true;
+            $user->save();
+        }
+        if ($user->employee && $user->employee->status !== 'Active') {
+            $user->employee->update(['status' => 'Active']);
+        }
+        if ($user->customer && $user->customer->status !== 'Active') {
+            $user->customer->update(['status' => 'Active']);
+        }
 
         return response()->json([
             'user' => $this->buildUserData($user)
@@ -917,27 +937,50 @@ class AuthController extends Controller
     public function logout(Request $request)
     {
         $user = $request->user('sanctum') ?? $request->user();
+        if (!$user && $request->bearerToken()) {
+            try {
+                $pat = \Laravel\Sanctum\PersonalAccessToken::findToken($request->bearerToken());
+                if ($pat && $pat->tokenable instanceof User) {
+                    $user = $pat->tokenable;
+                }
+            } catch (\Throwable $e) {}
+        }
         if (!$user && $request->filled('user_id')) {
-            $user = User::find($request->input('user_id'));
+            $user = User::with(['employee', 'customer'])->find($request->input('user_id'));
         }
 
         if ($user) {
+            $user->loadMissing(['employee', 'customer']);
+            $user->is_active = false;
+            $user->save();
+
+            if ($user->employee) {
+                $user->employee->update(['status' => 'Inactive']);
+            }
+            if ($user->customer) {
+                $user->customer->update(['status' => 'Inactive']);
+            }
+
             SystemLog::create([
-                'user_id'    => $user->user_id,
-                'action'     => 'LOGOUT',
-                'module'     => 'Auth',
+                'user_id'     => $user->user_id,
+                'action'      => 'LOGOUT',
+                'module'      => 'Auth',
                 'description' => "User {$user->username} ({$user->role}) logged out",
-                'ip_address' => $request->ip(),
-                'user_agent' => $request->userAgent(),
+                'ip_address'  => $request->ip(),
+                'user_agent'  => $request->userAgent(),
             ]);
 
             try {
-                if ($user->currentAccessToken()) {
-                    $user->currentAccessToken()->delete();
-                }
+                $user->tokens()->delete();
             } catch (\Throwable $e) {
-                // Token already deleted or stateless
+                try {
+                    if ($user->currentAccessToken()) {
+                        $user->currentAccessToken()->delete();
+                    }
+                } catch (\Throwable $ex) {}
             }
+
+            SyncController::invalidateFingerprint();
         }
 
         return response()->json([
@@ -1421,14 +1464,26 @@ class AuthController extends Controller
         $user->otp_created_at = null;
         $user->save();
 
-        // Sync with residents, password_reset_otp, and otps tables
+        // Sync with Project PACE OTP tables and SystemLog
         try {
-            DB::table('residents')->where('email', $user->email)->update([
-                'mobile_password' => $user->password_hash,
-                'updated_at' => now(),
-            ]);
             DB::table('password_reset_otp')->where('email', $user->email)->delete();
-            DB::table('otps')->where('email', $user->email)->update(['used' => 1]);
+            DB::table('otps')
+                ->where(function ($q) use ($user) {
+                    $q->where('user_id', $user->user_id);
+                    if ($user->email) {
+                        $q->orWhere('email', $user->email);
+                    }
+                })
+                ->update(['used' => 1, 'updated_at' => now()]);
+
+            SystemLog::create([
+                'user_id'     => $user->user_id,
+                'action'      => 'PASSWORD_RESET',
+                'module'      => 'Auth',
+                'description' => "User {$user->username} ({$user->role}) reset password via Email OTP",
+                'ip_address'  => $request->ip(),
+                'user_agent'  => $request->userAgent(),
+            ]);
         } catch (\Throwable $e) {}
 
         Log::info("[PASSWORD RESET SUCCESS] User ID: {$user->user_id} ({$user->username}) reset password successfully.");

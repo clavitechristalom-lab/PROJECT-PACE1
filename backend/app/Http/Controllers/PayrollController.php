@@ -28,8 +28,10 @@ class PayrollController extends Controller
     {
         $user = $request->user();
 
-        // Automatically finalize and generate weekly payday totals if cutoff reached
-        self::autoFinalizeWeeklyPaydayCutoff();
+        // Automatically finalize and generate weekly payday totals if cutoff reached (throttled to once per 30 mins)
+        if (Cache::add('pace_auto_finalize_weekly_cutoff_lock', true, 1800)) {
+            self::autoFinalizeWeeklyPaydayCutoff();
+        }
 
         // 1-2s Performance Cache: bypass if exporting CSV
         if (!$request->boolean('export_csv')) {
@@ -41,6 +43,7 @@ class PayrollController extends Controller
                 'bid' => $request->query('branch_id', ''),
                 'p' => $request->query('period_id', ''),
                 's' => $request->query('status', ''),
+                'q' => $request->query('search', ''),
                 'df' => $request->query('from_date', ''),
                 'dt' => $request->query('to_date', ''),
             ])) . '_' . $fp;
@@ -105,7 +108,30 @@ class PayrollController extends Controller
         }
 
         if ($request->filled('status') && $request->query('status') !== 'All') {
-            $query->where('status', $request->query('status'));
+            $st = $request->query('status');
+            if (strcasecmp($st, 'Pending') === 0) {
+                $query->whereIn('status', ['Pending', 'Draft']);
+            } else {
+                $query->where('status', $st);
+            }
+        }
+
+        if ($request->filled('search')) {
+            $search = trim($request->query('search'));
+            if ($search !== '') {
+                $query->whereHas('employee', function ($eq) use ($search) {
+                    $eq->where(function ($sub) use ($search) {
+                        $sub->where('first_name', 'like', "%{$search}%")
+                            ->orWhere('last_name', 'like', "%{$search}%")
+                            ->orWhereRaw("CONCAT(first_name, ' ', last_name) LIKE ?", ["%{$search}%"])
+                            ->orWhere('employee_code', 'like', "%{$search}%")
+                            ->orWhere('department', 'like', "%{$search}%")
+                            ->orWhere('position', 'like', "%{$search}%")
+                            ->orWhere('branch', 'like', "%{$search}%")
+                            ->orWhereHas('branchProfile', fn($bq) => $bq->where('name', 'like', "%{$search}%"));
+                    });
+                });
+            }
         }
 
         if ($request->filled('from_date')) {
@@ -143,7 +169,8 @@ class PayrollController extends Controller
             }
 
             $absenceDed = (float) $p->deductions->whereIn('deduction_type', [
-                'Absence', 'Absences', 'Excuse Letter', 'Sick Leave', 'Important Matter', 'Maternity Leave', 'Vacation Leave'
+                'Absence', 'Absences', 'Unexcused Absence', 'Half Day', 'Half-Day Deduction',
+                'Excuse Letter', 'Sick Leave', 'Important Matter', 'Maternity Leave', 'Vacation Leave'
             ])->sum('amount');
             if ($absenceDed <= 0 && isset($meta['absence_deduction'])) {
                 $absenceDed = (float)$meta['absence_deduction'];
@@ -165,39 +192,74 @@ class PayrollController extends Controller
             $pagibigDed = (float) $p->deductions->where('deduction_type', 'Pag-IBIG')->sum('amount');
             $taxDed = (float) $p->deductions->where('deduction_type', 'Withholding Tax')->sum('amount');
 
+            $syncedPayslip = null;
+            try {
+                if (\Illuminate\Support\Facades\Schema::hasTable('payslips')) {
+                    $syncedPayslip = \App\Models\Payslip::syncFromPayroll($p);
+                }
+            } catch (\Throwable $e) {}
+
+            $workHoursVal = (float)($meta['work_hours'] ?? $p->regular_hours);
+            $lateMinsVal = (int)($meta['late_minutes'] ?? 0);
+            $undertimeMinsVal = (float)($meta['undertime_minutes'] ?? 0);
+            $paidLeaveDaysVal = (float)($meta['paid_leave_days'] ?? 0);
+            $isZeroHours = !empty($meta['zero_hours']) || ((float)$p->basic_salary === 0.0 && $workHoursVal <= 0 && $paidLeaveDaysVal <= 0);
+            $empCodeVal = $emp ? $emp->employee_code : '';
+
+            $empRawDaily = ($emp && (float)$emp->daily_rate >= 100 && (float)$emp->daily_rate <= 500) ? (float)$emp->daily_rate : 500.00;
+            $resolvedDailyRate = (float)($meta['daily_rate'] ?? $empRawDaily);
+            $resolvedWeeklyBase = $isZeroHours
+                ? 0.00
+                : (isset($meta['weekly_base_pay'])
+                    ? (float)$meta['weekly_base_pay']
+                    : ((float)$p->basic_salary > 0 ? (float)$p->basic_salary : round($resolvedDailyRate * 6, 2)));
+            $resolvedHourlyRate = (float)($meta['hourly_rate'] ?? ($emp && (float)$emp->hourly_rate >= 10 && (float)$emp->hourly_rate <= 62.50 ? (float)$emp->hourly_rate : round($resolvedDailyRate / 8, 2)));
+
             return [
+                'id' => $syncedPayslip ? $syncedPayslip->id : $p->payroll_id,
+                'payslip_id' => $syncedPayslip ? $syncedPayslip->id : $p->payroll_id,
                 'payroll_id' => $p->payroll_id,
                 'period_id' => $p->period_id,
                 'period_name' => $p->period ? $p->period->period_name : "Period #{$p->period_id}",
                 'period_dates' => $p->period ? "{$p->period->start_date} to {$p->period->end_date}" : '',
+                'start_date' => $p->period ? $p->period->start_date : null,
+                'end_date' => $p->period ? $p->period->end_date : null,
                 'pay_date' => $p->period ? $p->period->pay_date : null,
                 'employee_id' => $p->employee_id,
+                'code' => $empCodeVal,
+                'employee_code' => $empCodeVal,
                 'employee_name' => $emp ? "{$emp->first_name} {$emp->last_name}" : 'Employee',
-                'employee_code' => $emp ? $emp->employee_code : '',
                 'position' => $emp ? $emp->position : '',
                 'department' => $emp ? $emp->department : '',
                 'branch' => $emp ? ($emp->branch_name ?? (is_object($emp->branch) ? $emp->branch->name : ((string)$emp->branch ?: ''))) : '',
                 'branch_id' => $emp ? $emp->branch_id : null,
                 'basic_salary' => (float)$p->basic_salary,
-                'weekly_base_pay' => (float)($meta['weekly_base_pay'] ?? ($p->basic_salary ?: 3000.00)),
-                'daily_rate' => (float)($meta['daily_rate'] ?? ($emp && (float)$emp->daily_rate > 0 ? (float)$emp->daily_rate : 500.00)),
-                'hourly_rate' => (float)($meta['hourly_rate'] ?? ($emp && (float)$emp->hourly_rate > 0 ? (float)$emp->hourly_rate : 62.50)),
-                'minute_rate' => (float)($meta['minute_rate'] ?? 1.0417),
+                'weekly_base_pay' => $resolvedWeeklyBase,
+                'daily_rate' => $resolvedDailyRate,
+                'hourly_rate' => $resolvedHourlyRate,
+                'minute_rate' => (float)($meta['minute_rate'] ?? 1.00),
+                'zero_hours' => $isZeroHours,
+                'paid_leave_days' => $paidLeaveDaysVal,
+                'days_worked' => (float)($meta['days_worked'] ?? 0),
                 'regular_hours' => (float)$p->regular_hours,
-                'work_hours' => (float)($meta['work_hours'] ?? $p->regular_hours),
+                'work_hours' => $workHoursVal,
+                'total_work_hours' => $workHoursVal,
                 'is_weekly' => true,
                 'pay_frequency' => 'Weekly',
-                'overtime_hours' => (float)$p->overtime_hours,
-                'overtime_pay' => (float)$p->overtime_pay,
+                'overtime_hours' => 0.0,
+                'overtime_pay' => 0.0,
                 'allowance' => (float)$p->allowance,
                 'gross_pay' => (float)$p->gross_pay,
                 'absence_days' => $absenceDays,
+                'total_absences' => $absenceDays,
                 'absence_deduction' => $absenceDed,
                 'absence_breakdown' => $absenceBreakdown,
                 'late_penalty' => $latePenalty,
                 'late_deduction' => $latePenalty,
-                'late_minutes' => (int)($meta['late_minutes'] ?? 0),
-                'undertime_minutes' => (float)($meta['undertime_minutes'] ?? 0),
+                'late_minutes' => $lateMinsVal,
+                'total_late' => $lateMinsVal,
+                'undertime_minutes' => $undertimeMinsVal,
+                'total_undertime' => $undertimeMinsVal,
                 'undertime_hours' => (float)($meta['undertime_hours'] ?? 0),
                 'undertime_deduction' => $undertimeDed,
                 'attendance_deductions_total' => (float)($meta['attendance_deductions_total'] ?? round($absenceDed + $latePenalty + $undertimeDed, 2)),
@@ -207,7 +269,9 @@ class PayrollController extends Controller
                 'withholding_tax_deduction' => $taxDed,
                 'total_deductions' => (float)$p->total_deductions,
                 'net_pay' => (float)$p->net_pay,
+                'final_take_home_pay' => (float)$p->net_pay,
                 'status' => $p->status,
+                'actions' => $syncedPayslip ? $syncedPayslip->actions : 'View | Slip',
                 'payout_method' => $p->payout_method ?: ($emp ? ($emp->pay_type ?: 'Cash') : 'Cash'),
                 'pay_type' => $emp ? ($emp->pay_type ?: 'Cash') : 'Cash',
                 'ewallet_provider' => $emp ? $emp->ewallet_provider : null,
@@ -349,6 +413,7 @@ class PayrollController extends Controller
 
         $employees = $query->orderBy('first_name')->get()->map(function ($emp) {
             $u = $emp->user;
+            [$eWeekly, $eDaily, $eHourly, , $eMonthly] = $this->resolveEmployeeRates($emp);
             return [
                 'employee_id'   => $emp->employee_id,
                 'employee_code' => $emp->employee_code ?: ('EMP-' . str_pad($emp->employee_id, 3, '0', STR_PAD_LEFT)),
@@ -362,9 +427,10 @@ class PayrollController extends Controller
                 'department'    => $emp->department ?: 'Sales & Operations',
                 'branch_id'     => $emp->branch_id,
                 'branch_name'   => $emp->branchProfile ? $emp->branchProfile->name : ($emp->branch_name ?: ($emp->branch ? (is_object($emp->branch) ? $emp->branch->name : (string)$emp->branch) : 'C-LICZ Furniture Tradings C.D.O')),
-                'basic_salary'  => (float)$emp->basic_salary,
-                'daily_rate'    => (float)$emp->daily_rate,
-                'hourly_rate'   => (float)$emp->hourly_rate,
+                'basic_salary'  => $eMonthly,
+                'daily_rate'    => $eDaily,
+                'hourly_rate'   => $eHourly,
+                'weekly_base_pay' => $eWeekly,
                 'pay_type'      => $emp->pay_type ?: 'Cash',
                 'ewallet_provider' => $emp->ewallet_provider,
                 'ewallet_account_name' => $emp->ewallet_account_name,
@@ -431,8 +497,12 @@ class PayrollController extends Controller
             $query->where('period_id', $request->period_id);
         }
 
-        if ($request->filled('status')) {
-            $query->where('status', $request->status);
+        if ($request->filled('status') && $request->status !== 'All') {
+            if (strcasecmp($request->status, 'Pending') === 0) {
+                $query->whereIn('status', ['Pending', 'Draft']);
+            } else {
+                $query->where('status', $request->status);
+            }
         }
 
         if ($request->filled('from_date')) {
@@ -452,33 +522,106 @@ class PayrollController extends Controller
         $records = $query->orderByDesc('payroll_id')
             ->get()
             ->map(function ($p) {
+                $emp = $p->employee;
+                $meta = [];
+                if (!empty($p->notes)) {
+                    $decoded = json_decode($p->notes, true);
+                    if (is_array($decoded)) {
+                        $meta = $decoded;
+                    }
+                }
+
+                $syncedPayslip = null;
+                try {
+                    if (\Illuminate\Support\Facades\Schema::hasTable('payslips')) {
+                        $syncedPayslip = \App\Models\Payslip::syncFromPayroll($p);
+                    }
+                } catch (\Throwable $e) {}
+
+                $absenceDed = (float) $p->deductions->whereIn('deduction_type', [
+                    'Absence', 'Absences', 'Excuse Letter', 'Sick Leave', 'Important Matter', 'Maternity Leave', 'Vacation Leave'
+                ])->sum('amount');
+                if ($absenceDed <= 0 && isset($meta['absence_deduction'])) {
+                    $absenceDed = (float)$meta['absence_deduction'];
+                }
+                $absenceDays = (float)($meta['absence_days'] ?? 0);
+
+                $latePenalty = (float) $p->deductions->whereIn('deduction_type', ['Late Penalty', 'Late / Undertime', 'Tardiness', 'Late'])->sum('amount');
+                if ($latePenalty <= 0 && isset($meta['late_penalty'])) {
+                    $latePenalty = (float)$meta['late_penalty'];
+                }
+                $lateMinsVal = (int)($meta['late_minutes'] ?? 0);
+
+                $undertimeDed = (float) $p->deductions->where('deduction_type', 'Undertime')->sum('amount');
+                if ($undertimeDed <= 0 && isset($meta['undertime_deduction'])) {
+                    $undertimeDed = (float)$meta['undertime_deduction'];
+                }
+                $undertimeMinsVal = (float)($meta['undertime_minutes'] ?? 0);
+
+                $workHoursVal = (float)($meta['work_hours'] ?? $p->regular_hours);
+                $paidLeaveDaysVal = (float)($meta['paid_leave_days'] ?? 0);
+                $isZeroHours = !empty($meta['zero_hours']) || ((float)$p->basic_salary === 0.0 && $workHoursVal <= 0 && $paidLeaveDaysVal <= 0);
+                $empRawDaily = ($emp && (float)$emp->daily_rate >= 100 && (float)$emp->daily_rate <= 500) ? (float)$emp->daily_rate : 500.00;
+                $resolvedDailyRate = (float)($meta['daily_rate'] ?? $empRawDaily);
+                $weeklyBasePay = $isZeroHours
+                    ? 0.00
+                    : (isset($meta['weekly_base_pay'])
+                        ? (float)$meta['weekly_base_pay']
+                        : ((float)$p->basic_salary > 0 ? (float)$p->basic_salary : round($resolvedDailyRate * 6, 2)));
+                $empCodeVal = $emp ? $emp->employee_code : 'EMP-000';
+                $branchName = $emp ? ($emp->branch_name ?? (is_object($emp->branch) ? $emp->branch->name : ((string)$emp->branch ?: 'Unassigned'))) : 'Unassigned';
+
                 return [
+                    'id' => $syncedPayslip ? $syncedPayslip->id : $p->payroll_id,
+                    'payslip_id' => $syncedPayslip ? $syncedPayslip->id : $p->payroll_id,
                     'payroll_id' => $p->payroll_id,
                     'period_id' => $p->period_id,
-                    'employee_name' => $p->employee ? $p->employee->first_name . ' ' . $p->employee->last_name : 'Employee',
-                    'employee_code' => $p->employee ? $p->employee->employee_code : 'EMP-000',
-                    'department' => $p->employee ? $p->employee->department : '',
-                    'position' => $p->employee ? $p->employee->position : '',
+                    'employee_id' => $p->employee_id,
+                    'code' => $empCodeVal,
+                    'employee_code' => $empCodeVal,
+                    'employee_name' => $emp ? "{$emp->first_name} {$emp->last_name}" : 'Employee',
+                    'department' => $emp ? $emp->department : '',
+                    'position' => $emp ? $emp->position : '',
+                    'branch' => $branchName,
                     'period_name' => $p->period ? $p->period->period_name : "Period #{$p->period_id}",
                     'period_dates' => $p->period ? "{$p->period->start_date} to {$p->period->end_date}" : '',
                     'pay_date' => $p->period ? $p->period->pay_date : null,
                     'basic_salary' => (float)$p->basic_salary,
+                    'weekly_base_pay' => $weeklyBasePay,
+                    'daily_rate' => $resolvedDailyRate,
+                    'hourly_rate' => (float)($meta['hourly_rate'] ?? round($resolvedDailyRate / 8, 2)),
+                    'zero_hours' => $isZeroHours,
+                    'paid_leave_days' => $paidLeaveDaysVal,
                     'regular_hours' => (float)$p->regular_hours,
-                    'overtime_hours' => (float)$p->overtime_hours,
-                    'overtime_pay' => (float)$p->overtime_pay,
+                    'work_hours' => $workHoursVal,
+                    'total_work_hours' => $workHoursVal,
+                    'overtime_hours' => 0.0,
+                    'overtime_pay' => 0.0,
                     'allowance' => (float)$p->allowance,
                     'gross_pay' => (float)$p->gross_pay,
+                    'absence_days' => $absenceDays,
+                    'total_absences' => $absenceDays,
+                    'absence_deduction' => $absenceDed,
+                    'late_minutes' => $lateMinsVal,
+                    'total_late' => $lateMinsVal,
+                    'late_penalty' => $latePenalty,
+                    'late_deduction' => $latePenalty,
+                    'undertime_minutes' => $undertimeMinsVal,
+                    'total_undertime' => $undertimeMinsVal,
+                    'undertime_deduction' => $undertimeDed,
                     'total_deductions' => (float)$p->total_deductions,
                     'net_pay' => (float)$p->net_pay,
+                    'final_take_home_pay' => (float)$p->net_pay,
                     'status' => $p->status,
-                    'payout_method' => $p->payout_method ?: ($p->employee ? ($p->employee->pay_type ?: 'Cash') : 'Cash'),
-                    'pay_type' => $p->employee ? ($p->employee->pay_type ?: 'Cash') : 'Cash',
-                    'ewallet_provider' => $p->employee ? $p->employee->ewallet_provider : null,
-                    'ewallet_account_name' => $p->employee ? $p->employee->ewallet_account_name : null,
-                    'ewallet_account_no' => $p->employee ? $p->employee->ewallet_account_no : null,
-                    'bank_name' => $p->employee ? $p->employee->bank_name : null,
-                    'bank_account_name' => $p->employee ? $p->employee->bank_account_name : null,
-                    'bank_account_no' => $p->employee ? $p->employee->bank_account_no : null,
+                    'actions' => $syncedPayslip ? $syncedPayslip->actions : 'View | Slip',
+                    'payout_method' => $p->payout_method ?: ($emp ? ($emp->pay_type ?: 'Cash') : 'Cash'),
+                    'pay_type' => $emp ? ($emp->pay_type ?: 'Cash') : 'Cash',
+                    'ewallet_provider' => $emp ? $emp->ewallet_provider : null,
+                    'ewallet_account_name' => $emp ? $emp->ewallet_account_name : null,
+                    'ewallet_account_no' => $emp ? $emp->ewallet_account_no : null,
+                    'bank_name' => $emp ? $emp->bank_name : null,
+                    'bank_account_name' => $emp ? $emp->bank_account_name : null,
+                    'bank_account_no' => $emp ? $emp->bank_account_no : null,
                     'proof_of_payment' => $p->proof_of_payment
                         ? (str_starts_with($p->proof_of_payment, 'http') ? $p->proof_of_payment : url('storage/' . $p->proof_of_payment))
                         : null,
@@ -545,10 +688,6 @@ class PayrollController extends Controller
             ];
         });
 
-        $monthlyRate = $emp && (float)$emp->basic_salary > 0 ? (float)$emp->basic_salary : 0;
-        $dailyRate = $emp && (float)$emp->daily_rate > 0 ? (float)$emp->daily_rate : ($monthlyRate > 0 ? round($monthlyRate / 26, 2) : 0);
-        $hourlyRate = $emp && (float)$emp->hourly_rate > 0 ? (float)$emp->hourly_rate : ($dailyRate > 0 ? round($dailyRate / 8, 2) : 0);
-
         // Parse structured metadata if saved in notes
         $meta = [];
         if (!empty($payroll->notes)) {
@@ -558,8 +697,20 @@ class PayrollController extends Controller
             }
         }
 
+        $empRawDaily = ($emp && (float)$emp->daily_rate >= 100 && (float)$emp->daily_rate <= 500) ? (float)$emp->daily_rate : 500.00;
+        $dailyRate = (float)($meta['daily_rate'] ?? $empRawDaily);
+        $monthlyRate = round($dailyRate * 26, 2);
+        $hourlyRate = (float)($meta['hourly_rate'] ?? ($emp && (float)$emp->hourly_rate >= 10 && (float)$emp->hourly_rate <= 62.50 ? (float)$emp->hourly_rate : round($dailyRate / 8, 2)));
+        $workHoursMeta = (float)($meta['work_hours'] ?? $payroll->regular_hours);
+        $paidLeaveMeta = (float)($meta['paid_leave_days'] ?? 0);
+        $isZeroHoursMeta = !empty($meta['zero_hours']) || ((float)$payroll->basic_salary === 0.0 && $workHoursMeta <= 0 && $paidLeaveMeta <= 0);
+        $resolvedWeeklyBase = $isZeroHoursMeta
+            ? 0.00
+            : (isset($meta['weekly_base_pay']) ? (float)$meta['weekly_base_pay'] : round($dailyRate * 6, 2));
+
         $absenceDed = (float) $payroll->deductions->whereIn('deduction_type', [
-            'Absence', 'Absences', 'Excuse Letter', 'Sick Leave', 'Important Matter', 'Maternity Leave', 'Vacation Leave'
+            'Absence', 'Absences', 'Unexcused Absence', 'Half Day', 'Half-Day Deduction',
+            'Excuse Letter', 'Sick Leave', 'Important Matter', 'Maternity Leave', 'Vacation Leave'
         ])->sum('amount');
         if ($absenceDed <= 0 && isset($meta['absence_deduction'])) {
             $absenceDed = (float)$meta['absence_deduction'];
@@ -572,20 +723,21 @@ class PayrollController extends Controller
         if ($undertimeDed <= 0 && isset($meta['undertime_deduction'])) {
             $undertimeDed = (float)$meta['undertime_deduction'];
         }
+        $hasDeductionRows = $payroll->deductions->isNotEmpty();
         $sssDed = (float) $payroll->deductions->where('deduction_type', 'SSS')->sum('amount');
-        if ($sssDed <= 0 && isset($meta['sss'])) {
+        if (!$hasDeductionRows && $sssDed <= 0 && isset($meta['sss'])) {
             $sssDed = (float)$meta['sss'];
         }
         $philhealthDed = (float) $payroll->deductions->where('deduction_type', 'PhilHealth')->sum('amount');
-        if ($philhealthDed <= 0 && isset($meta['philhealth'])) {
+        if (!$hasDeductionRows && $philhealthDed <= 0 && isset($meta['philhealth'])) {
             $philhealthDed = (float)$meta['philhealth'];
         }
         $pagibigDed = (float) $payroll->deductions->where('deduction_type', 'Pag-IBIG')->sum('amount');
-        if ($pagibigDed <= 0 && isset($meta['pagibig'])) {
+        if (!$hasDeductionRows && $pagibigDed <= 0 && isset($meta['pagibig'])) {
             $pagibigDed = (float)$meta['pagibig'];
         }
         $taxDed = (float) $payroll->deductions->where('deduction_type', 'Withholding Tax')->sum('amount');
-        if ($taxDed <= 0 && isset($meta['withholding_tax'])) {
+        if (!$hasDeductionRows && $taxDed <= 0 && isset($meta['withholding_tax'])) {
             $taxDed = (float)$meta['withholding_tax'];
         }
 
@@ -641,13 +793,15 @@ class PayrollController extends Controller
                 ? (str_starts_with($payroll->proof_of_payment, 'http') ? $payroll->proof_of_payment : url('storage/' . $payroll->proof_of_payment))
                 : null,
             'monthly_rate' => $monthlyRate,
-            'weekly_base_pay' => (float)($meta['weekly_base_pay'] ?? ($payroll->basic_salary ?: round($dailyRate * 6, 2))),
+            'weekly_base_pay' => $resolvedWeeklyBase,
             'daily_rate' => $dailyRate,
             'hourly_rate' => $hourlyRate,
-            'minute_rate' => (float)($meta['minute_rate'] ?? ($hourlyRate > 0 ? round($hourlyRate / 60, 4) : 1.0417)),
+            'minute_rate' => (float)($meta['minute_rate'] ?? 1.00),
+            'zero_hours' => $isZeroHoursMeta,
+            'paid_leave_days' => $paidLeaveMeta,
             'basic_salary' => (float)$payroll->basic_salary,
             'regular_hours' => (float)$payroll->regular_hours,
-            'work_hours' => (float)($meta['work_hours'] ?? $payroll->regular_hours),
+            'work_hours' => $workHoursMeta,
             'is_weekly' => true,
             'pay_frequency' => 'Weekly',
             'absence_days' => (float)($meta['absence_days'] ?? 0),
@@ -661,8 +815,8 @@ class PayrollController extends Controller
             'undertime_hours' => (float)($meta['undertime_hours'] ?? 0),
             'undertime_deduction' => $undertimeDed,
             'attendance_deductions_total' => (float)($meta['attendance_deductions_total'] ?? round($absenceDed + $lateDed + $undertimeDed, 2)),
-            'overtime_hours' => (float)$payroll->overtime_hours,
-            'overtime_pay' => (float)$payroll->overtime_pay,
+            'overtime_hours' => 0.0,
+            'overtime_pay' => 0.0,
             'allowance' => (float)$payroll->allowance,
             'gross_pay' => (float)$payroll->gross_pay,
             'sss_deduction' => $sssDed,
@@ -683,52 +837,36 @@ class PayrollController extends Controller
     /**
      * Resolve or initialize Weekly Base Pay, Daily Rate, Hourly Rate, and Minute Rate.
      * Standard Philippine store workweek = 6 days (Monday to Saturday, 8 hours/day = 48h standard).
-     * e.g., Weekly Base Pay = ₱3,000.00 / 6 days = ₱500.00/day.
+     * Weekly Base Pay = ₱3,000.00 / 6 days = ₱500.00/day.
      * Hourly Rate = Daily Rate / 8 hours = ₱62.50/hour.
-     * Minute Rate = Hourly Rate / 60 minutes = ₱1.0417/minute.
+     * Late Minute Rate (8:01–8:29 AM) = ₱1.00/minute.
+     * 8:30 AM onwards (>= 30 mins late) = Automatic Half Day (0.5 day / ₱250.00 deduction).
      */
     private function resolveEmployeeRates(Employee $emp): array
     {
-        $basicSalary = (float)$emp->basic_salary;
         $dailyRate = (float)$emp->daily_rate;
-        $hourlyRate = (float)$emp->hourly_rate;
 
-        if ($dailyRate >= 100) {
-            // Keep existing valid daily rate
-        } elseif ($basicSalary > 5000) {
-            // Monthly basic salary (e.g. 13,000 or 15,600 / 26 days = ₱500.00/day)
-            $dailyRate = round($basicSalary / 26, 2);
-        } elseif ($basicSalary >= 1000) {
-            // Weekly base salary (e.g. ₱3,000.00 / 6 days = ₱500.00/day)
-            $dailyRate = round($basicSalary / 6, 2);
-        } elseif ($basicSalary >= 100) {
-            // Daily rate directly entered (e.g. ₱500.00/day)
-            $dailyRate = $basicSalary;
-        } elseif ($hourlyRate > 0) {
-            $dailyRate = round($hourlyRate * 8, 2);
-        } else {
-            // Standard Z-LICZ base daily rate = ₱500.00/day
-            $dailyRate = 500.00;
+        if ($dailyRate < 100 || $dailyRate > 500) {
+            $rawBasic = (float)$emp->basic_salary;
+            $derivedDaily = ($rawBasic >= 2600 && $rawBasic <= 13000) ? round($rawBasic / 26, 2) : 500.00;
+            // Standard Z-LICS base daily rate = ₱500.00/day (₱3,000.00 for 6 days)
+            $dailyRate = ($derivedDaily >= 100 && $derivedDaily <= 500) ? $derivedDaily : 500.00;
         }
 
-        if ($dailyRate <= 0) {
-            $dailyRate = 500.00;
-        }
-
-        // Weekly Base Pay: Daily Rate * 6 standard working days (e.g. ₱3,000.00)
+        // Weekly Base Pay: Daily Rate * 6 standard working days (₱3,000.00)
         $weeklyBase = round($dailyRate * 6, 2);
 
-        // Hourly Rate: Daily Rate / 8 hours (e.g. ₱62.50)
+        // Hourly Rate: Daily Rate / 8 hours (₱62.50)
         $hourlyRate = round($dailyRate / 8, 2);
 
-        // Minute Rate: Hourly Rate / 60 minutes (e.g. ₱1.0417)
-        $minuteRate = round($hourlyRate / 60, 4);
+        // Late Minute Rate: ₱1.00 per minute (for 8:01 AM - 8:29 AM)
+        $minuteRate = 1.00;
 
-        // Monthly Basic equivalent (26 days standard)
+        // Monthly Basic equivalent (26 days standard = ₱13,000.00)
         $monthlyBasic = round($dailyRate * 26, 2);
 
-        // Persist standard rates if missing or invalid on employee record
-        if ((float)$emp->daily_rate <= 0 || (float)$emp->hourly_rate <= 0 || (float)$emp->basic_salary <= 0) {
+        // Persist normalized rates (basic_salary = Monthly Basic, daily_rate = Daily, hourly_rate = Hourly)
+        if ((float)$emp->daily_rate != $dailyRate || (float)$emp->hourly_rate != $hourlyRate || (float)$emp->basic_salary != $monthlyBasic) {
             $emp->update([
                 'basic_salary' => $monthlyBasic,
                 'daily_rate' => $dailyRate,
@@ -737,6 +875,171 @@ class PayrollController extends Controller
         }
 
         return [$weeklyBase, $dailyRate, $hourlyRate, $minuteRate, $monthlyBasic];
+    }
+
+    /**
+     * Build consistent JSON metadata persisted inside payroll.notes across all calculation paths.
+     */
+    private function buildPayrollMeta(array $details, string $startDate, string $endDate, string $remarks): array
+    {
+        $hasZeroHours = !empty($details['zero_hours']);
+        return [
+            'from_date' => $startDate,
+            'to_date' => $endDate,
+            'period_dates' => "From {$startDate} to {$endDate}",
+            'cutoff_type' => $details['cutoff_type'] ?? 'weekly',
+            'is_weekly' => $details['is_weekly'] ?? true,
+            'monthly_basic' => (float)($details['monthly_basic'] ?? round(($details['daily_rate'] ?? 500.00) * 26, 2)),
+            'standard_weekly_base' => (float)($details['weekly_base'] ?? round(($details['daily_rate'] ?? 500.00) * 6, 2)),
+            'weekly_base_pay' => $hasZeroHours ? 0.0 : (float)($details['weekly_base_pay'] ?? $details['weekly_base'] ?? 0),
+            'daily_rate' => (float)($details['daily_rate'] ?? 500.00),
+            'hourly_rate' => (float)($details['hourly_rate'] ?? 62.50),
+            'minute_rate' => (float)($details['minute_rate'] ?? 1.00),
+            'standard_hours' => (float)($details['standard_hours'] ?? 48.0),
+            'standard_days' => (float)($details['standard_days'] ?? 6.0),
+            'days_worked' => (float)($details['days_worked'] ?? 0),
+            'work_hours' => (float)($details['work_hours'] ?? 0),
+            'regular_hours' => (float)($details['regular_hours'] ?? $details['work_hours'] ?? 0),
+            'overtime_hours' => 0.0,
+            'overtime_pay' => 0.0,
+            'paid_leave_days' => (float)($details['paid_leave_days'] ?? 0),
+            'zero_hours' => $hasZeroHours,
+            'absence_days' => (float)($details['absence_days'] ?? 0),
+            'absence_deduction' => $hasZeroHours ? 0.0 : (float)($details['absence_deduction'] ?? 0),
+            'absence_breakdown' => $hasZeroHours ? [] : ($details['absence_breakdown'] ?? []),
+            'late_minutes' => (int)($details['late_minutes'] ?? 0),
+            'late_penalty' => $hasZeroHours ? 0.0 : (float)($details['late_deduction'] ?? $details['late_penalty'] ?? 0),
+            'late_deduction' => $hasZeroHours ? 0.0 : (float)($details['late_deduction'] ?? $details['late_penalty'] ?? 0),
+            'late_rule' => $details['late_rule'] ?? 'None',
+            'undertime_minutes' => (float)($details['undertime_minutes'] ?? 0),
+            'undertime_hours' => (float)($details['undertime_hours'] ?? 0),
+            'undertime_deduction' => $hasZeroHours ? 0.0 : (float)($details['undertime_deduction'] ?? 0),
+            'attendance_deductions_total' => $hasZeroHours ? 0.0 : (float)($details['attendance_deductions_total'] ?? 0),
+            'sss' => $hasZeroHours ? 0.0 : (float)($details['sss'] ?? 0),
+            'philhealth' => $hasZeroHours ? 0.0 : (float)($details['philhealth'] ?? 0),
+            'pagibig' => $hasZeroHours ? 0.0 : (float)($details['pagibig'] ?? 0),
+            'withholding_tax' => $hasZeroHours ? 0.0 : (float)($details['withholding_tax'] ?? 0),
+            'remarks' => $remarks,
+        ];
+    }
+
+    /**
+     * Persist itemized PayrollDeduction rows uniformly (no rows when Zero Hours Rule applies).
+     */
+    private function persistItemizedDeductions(Payroll $payroll, array $details, bool $applyLoanPayments = false): void
+    {
+        PayrollDeduction::where('payroll_id', $payroll->payroll_id)->delete();
+
+        if (!empty($details['zero_hours'])) {
+            return;
+        }
+
+        if (!empty($details['absence_breakdown'])) {
+            foreach ($details['absence_breakdown'] as $ab) {
+                if ((float)($ab['amount'] ?? 0) > 0) {
+                    PayrollDeduction::create([
+                        'payroll_id' => $payroll->payroll_id,
+                        'deduction_type' => $ab['category'],
+                        'amount' => $ab['amount'],
+                        'notes' => "Absence Deduction: {$ab['category']} ({$ab['days']} day(s) @ ₱" . number_format((float)$details['daily_rate'], 2) . "/day)",
+                    ]);
+                }
+            }
+        } elseif ((float)($details['absence_deduction'] ?? 0) > 0) {
+            PayrollDeduction::create([
+                'payroll_id' => $payroll->payroll_id,
+                'deduction_type' => 'Absences',
+                'amount' => $details['absence_deduction'],
+                'notes' => "Absence Deduction ({$details['absence_days']} day(s) @ ₱" . number_format((float)$details['daily_rate'], 2) . "/day)",
+            ]);
+        }
+
+        $lateAmt = (float)($details['late_deduction'] ?? $details['late_penalty'] ?? 0);
+        if ($lateAmt > 0) {
+            PayrollDeduction::create([
+                'payroll_id' => $payroll->payroll_id,
+                'deduction_type' => 'Late Penalty',
+                'amount' => $lateAmt,
+                'notes' => $details['late_rule'] ?? "Late Penalty ({$details['late_minutes']} mins)",
+            ]);
+        }
+
+        if ((float)($details['undertime_deduction'] ?? 0) > 0) {
+            PayrollDeduction::create([
+                'payroll_id' => $payroll->payroll_id,
+                'deduction_type' => 'Undertime',
+                'amount' => $details['undertime_deduction'],
+                'notes' => "Undertime Deduction ({$details['undertime_minutes']} mins / {$details['undertime_hours']}h @ ₱" . number_format((float)$details['hourly_rate'], 2) . "/hr)",
+            ]);
+        }
+
+        if ((float)($details['sss'] ?? 0) > 0) {
+            PayrollDeduction::create([
+                'payroll_id' => $payroll->payroll_id,
+                'deduction_type' => 'SSS',
+                'amount' => $details['sss'],
+                'notes' => 'SSS Statutory Contribution',
+            ]);
+        }
+
+        if ((float)($details['philhealth'] ?? 0) > 0) {
+            PayrollDeduction::create([
+                'payroll_id' => $payroll->payroll_id,
+                'deduction_type' => 'PhilHealth',
+                'amount' => $details['philhealth'],
+                'notes' => 'PhilHealth Statutory Contribution',
+            ]);
+        }
+
+        if ((float)($details['pagibig'] ?? 0) > 0) {
+            PayrollDeduction::create([
+                'payroll_id' => $payroll->payroll_id,
+                'deduction_type' => 'Pag-IBIG',
+                'amount' => $details['pagibig'],
+                'notes' => 'Pag-IBIG (HDMF) Statutory Contribution',
+            ]);
+        }
+
+        if ((float)($details['withholding_tax'] ?? 0) > 0) {
+            PayrollDeduction::create([
+                'payroll_id' => $payroll->payroll_id,
+                'deduction_type' => 'Withholding Tax',
+                'amount' => $details['withholding_tax'],
+                'notes' => 'Withholding Tax Deduction',
+            ]);
+        }
+
+        foreach ($details['custom_deductions'] ?? [] as $cd) {
+            if ((float)($cd['amount'] ?? 0) > 0) {
+                PayrollDeduction::create([
+                    'payroll_id' => $payroll->payroll_id,
+                    'deduction_type' => 'Other',
+                    'amount' => $cd['amount'],
+                    'notes' => $cd['name'],
+                ]);
+            }
+        }
+
+        foreach ($details['loan_deductions'] ?? [] as $ld) {
+            if ((float)($ld['amount'] ?? 0) > 0) {
+                PayrollDeduction::create([
+                    'payroll_id' => $payroll->payroll_id,
+                    'deduction_type' => 'Loan',
+                    'amount' => $ld['amount'],
+                    'notes' => $applyLoanPayments ? "Loan #{$ld['id']} - {$ld['name']}" : "Loan Repayment: {$ld['name']}",
+                ]);
+                if ($applyLoanPayments && !empty($ld['id'])) {
+                    $loan = EmployeeLoan::find($ld['id']);
+                    if ($loan && $loan->status === 'Active') {
+                        $loan->amount_paid = min((float)$loan->total_amount, round((float)$loan->amount_paid + (float)$ld['amount'], 2));
+                        if ($loan->amount_paid >= (float)$loan->total_amount) {
+                            $loan->status = 'Paid';
+                        }
+                        $loan->save();
+                    }
+                }
+            }
+        }
     }
 
     /**
@@ -901,9 +1204,9 @@ class PayrollController extends Controller
 
                 // ─── ZERO HOURS RULE ─────────────────────────────────────────
                 // If an employee has no working hours recorded for the week
-                // (working_hours = 0 or total absence with zero rendered time),
+                // (working_hours = 0 or total absence with zero rendered time, and no approved Paid Leave),
                 // their computed salary must strictly be ₱0.00.
-                $hasZeroHours = ($details['work_hours'] <= 0);
+                $hasZeroHours = !empty($details['zero_hours']);
 
                 if ($existingPayroll) {
                     if ($recalculate) {
@@ -919,40 +1222,10 @@ class PayrollController extends Controller
                 }
 
                 // Construct comprehensive metadata for 1-second instant retrieval
-                $meta = [
-                    'from_date' => $period->start_date,
-                    'to_date' => $period->end_date,
-                    'period_dates' => "From {$period->start_date} to {$period->end_date}",
-                    'cutoff_type' => 'weekly',
-                    'is_weekly' => true,
-                    'weekly_base_pay' => $hasZeroHours ? 0.0 : $details['weekly_base'],
-                    'daily_rate' => $details['daily_rate'],
-                    'hourly_rate' => $details['hourly_rate'],
-                    'minute_rate' => $details['minute_rate'],
-                    'standard_hours' => $details['standard_hours'],
-                    'standard_days' => $details['standard_days'],
-                    'days_worked' => $details['days_worked'],
-                    'work_hours' => $details['work_hours'],
-                    'regular_hours' => $details['regular_hours'],
-                    'absence_days' => $details['absence_days'],
-                    'absence_deduction' => $details['absence_deduction'],
-                    'absence_breakdown' => $details['absence_breakdown'] ?? [],
-                    'late_minutes' => $details['late_minutes'],
-                    'late_penalty' => $details['late_deduction'],
-                    'late_deduction' => $details['late_deduction'],
-                    'late_rule' => $details['late_rule'],
-                    'undertime_minutes' => $details['undertime_minutes'],
-                    'undertime_hours' => $details['undertime_hours'],
-                    'undertime_deduction' => $details['undertime_deduction'],
-                    'sss' => $details['sss'],
-                    'philhealth' => $details['philhealth'],
-                    'pagibig' => $details['pagibig'],
-                    'withholding_tax' => $details['withholding_tax'],
-                    'zero_hours' => $hasZeroHours,
-                    'remarks' => $hasZeroHours
-                        ? "Zero Hours Rule Applied: 0 rendered working hours = ₱0.00 Salary"
-                        : "Weekly Payday Base: ₱" . number_format($details['weekly_base'], 2) . " | Work: {$details['work_hours']}h | Net: ₱" . number_format($details['net_pay'], 2),
-                ];
+                $genRemarks = $hasZeroHours
+                    ? "Zero Hours Rule Applied: 0 rendered working hours = ₱0.00 Salary"
+                    : "Weekly Payday Base: ₱" . number_format($details['weekly_base'], 2) . " | Work: {$details['work_hours']}h | Net: ₱" . number_format($details['net_pay'], 2);
+                $meta = $this->buildPayrollMeta($details, $period->start_date, $period->end_date, $genRemarks);
 
                 $payroll = Payroll::create([
                     'period_id' => $period->period_id,
@@ -973,106 +1246,8 @@ class PayrollController extends Controller
                     'notes' => json_encode($meta),
                 ]);
 
-                // Record itemized deductions only if employee rendered working hours (Zero Hours Rule)
-                if (!$hasZeroHours) {
-                    // 1. Absences Deduction (Itemized with breakdown)
-                    if (!empty($details['absence_breakdown'])) {
-                        foreach ($details['absence_breakdown'] as $ab) {
-                            PayrollDeduction::create([
-                                'payroll_id' => $payroll->payroll_id,
-                                'deduction_type' => $ab['category'],
-                                'amount' => $ab['amount'],
-                                'notes' => "Absence Deduction: {$ab['category']} ({$ab['days']} day(s) @ -₱" . number_format($details['daily_rate'], 2) . "/day)",
-                            ]);
-                        }
-                    } elseif ($details['absence_deduction'] > 0) {
-                        PayrollDeduction::create([
-                            'payroll_id' => $payroll->payroll_id,
-                            'deduction_type' => 'Absences',
-                            'amount' => $details['absence_deduction'],
-                            'notes' => "Absence Deduction ({$details['absence_days']} day(s) @ -₱" . number_format($details['daily_rate'], 2) . "/day)",
-                        ]);
-                    }
-
-                    // 2. Late Penalty Deduction
-                    if ($details['late_deduction'] > 0) {
-                        PayrollDeduction::create([
-                            'payroll_id' => $payroll->payroll_id,
-                            'deduction_type' => 'Late Penalty',
-                            'amount' => $details['late_deduction'],
-                            'notes' => "Late Penalty: {$details['late_minutes']} mins tardiness @ ₱" . number_format($details['minute_rate'], 2) . "/min",
-                        ]);
-                    }
-
-                    // 3. Undertime Deduction
-                    if ($details['undertime_deduction'] > 0) {
-                        PayrollDeduction::create([
-                            'payroll_id' => $payroll->payroll_id,
-                            'deduction_type' => 'Undertime',
-                            'amount' => $details['undertime_deduction'],
-                            'notes' => "Undertime Deduction: {$details['undertime_minutes']} mins @ ₱" . number_format($details['minute_rate'], 2) . "/min",
-                        ]);
-                    }
-
-                    // 4. Statutory Deductions
-                    if ($details['sss'] > 0) {
-                        PayrollDeduction::create([
-                            'payroll_id' => $payroll->payroll_id,
-                            'deduction_type' => 'SSS',
-                            'amount' => $details['sss'],
-                            'notes' => 'SSS Contribution',
-                        ]);
-                    }
-                    if ($details['philhealth'] > 0) {
-                        PayrollDeduction::create([
-                            'payroll_id' => $payroll->payroll_id,
-                            'deduction_type' => 'PhilHealth',
-                            'amount' => $details['philhealth'],
-                            'notes' => 'PhilHealth Contribution',
-                        ]);
-                    }
-                    if ($details['pagibig'] > 0) {
-                        PayrollDeduction::create([
-                            'payroll_id' => $payroll->payroll_id,
-                            'deduction_type' => 'Pag-IBIG',
-                            'amount' => $details['pagibig'],
-                            'notes' => 'Pag-IBIG (HDMF) Contribution',
-                        ]);
-                    }
-
-                    if ($details['withholding_tax'] > 0) {
-                        PayrollDeduction::create([
-                            'payroll_id' => $payroll->payroll_id,
-                            'deduction_type' => 'Withholding Tax',
-                            'amount' => $details['withholding_tax'],
-                            'notes' => 'Withholding Tax (Approved)',
-                        ]);
-                    }
-
-                    // 5. Custom Deductions
-                    foreach ($details['custom_deductions'] as $cd) {
-                        if ((float)$cd['amount'] > 0) {
-                            PayrollDeduction::create([
-                                'payroll_id' => $payroll->payroll_id,
-                                'deduction_type' => 'Other',
-                                'amount' => $cd['amount'],
-                                'notes' => $cd['name'],
-                            ]);
-                        }
-                    }
-
-                    // 6. Active Loan Repayments
-                    foreach ($details['loan_deductions'] as $ld) {
-                        if ((float)$ld['amount'] > 0) {
-                            PayrollDeduction::create([
-                                'payroll_id' => $payroll->payroll_id,
-                                'deduction_type' => 'Loan',
-                                'amount' => $ld['amount'],
-                                'notes' => "Loan Repayment: {$ld['name']}",
-                            ]);
-                        }
-                    }
-                }
+                // Record itemized deductions uniformly (Zero Hours Rule skips all deductions)
+                $this->persistItemizedDeductions($payroll, $details);
             }
 
             $totalProcessed = $generatedCount + $updatedCount;
@@ -1194,7 +1369,7 @@ class PayrollController extends Controller
 
         DB::transaction(function () use ($activeEmployees, $period, $year, $user, $request, &$generatedCount) {
             foreach ($activeEmployees as $emp) {
-                [$monthlyBasic] = $this->resolveEmployeeRates($emp);
+                [$weeklyBase, $dailyRate, $hourlyRate, $minuteRate, $monthlyBasic] = $this->resolveEmployeeRates($emp);
 
                 $existing = Payroll::where('period_id', $period->period_id)
                     ->where('employee_id', $emp->employee_id)
@@ -1671,78 +1846,69 @@ class PayrollController extends Controller
         $loggedUndertimeMinutes = 0;
 
         // Strictly evaluate daily attendance logs (NO DUMMY / MOCK VALUES)
+        // Rules:
+        // - 8:00 AM Time In
+        // - 8:01 AM to 8:29 AM (1–29 mins late) = ₱1.00 per minute deduction
+        // - 8:30 AM onwards (>= 30 mins late) = Automatic Half Day (4h work hours, 0.5 day deducted from basic pay)
+        // - Strictly NO Overtime (overtime = 0, max 8h work hours per full day, 4h per half day)
         foreach ($validAttendances as $att) {
             $dateStr = $att->attendance_date instanceof \DateTimeInterface
                 ? $att->attendance_date->format('Y-m-d')
                 : substr((string)$att->attendance_date, 0, 10);
 
-            $isHalfDay = ($att->status === 'Half Day');
+            $recLate = AttendanceSchedule::lateMinutes($dateStr, $att->time_in);
+            $computed = (!empty($att->time_in) && !empty($att->time_out))
+                ? AttendanceSchedule::computeHours($att)
+                : null;
+
+            if ($recLate >= 30) {
+                $isHalfDay = true;
+            } elseif ($computed !== null && (float)$computed['regular'] > 0) {
+                $isHalfDay = ((float)$computed['regular'] <= 4.0);
+            } else {
+                $isHalfDay = ($att->status === 'Half Day');
+            }
+
             $daysWorked += $isHalfDay ? 0.5 : 1.0;
             $scheduledDayHours = $isHalfDay ? 4.0 : 8.0;
 
-            $dayReg = 0.0;
+            if ($isHalfDay) {
+                $dayReg = ($computed !== null && (float)$computed['regular'] > 0)
+                    ? min(4.0, (float)$computed['regular'])
+                    : 4.0;
+            } else {
+                $dayReg = ($computed !== null && (float)$computed['regular'] > 0)
+                    ? min(8.0, (float)$computed['regular'])
+                    : 8.0;
+            }
             $dayOt = 0.0;
 
-            if (!empty($att->time_in) && !empty($att->time_out)) {
-                $computed = AttendanceSchedule::computeHours($att);
-                $dayReg = (float)$computed['regular'];
-                $dayOt = (float)$computed['overtime'];
-
-                if ($dayReg <= 0 && $att->status !== 'Absent') {
-                    if ((float)$att->total_hours > 0) {
-                        $dayOt = (float)$att->overtime_hours;
-                        $dayReg = max(0, round((float)$att->total_hours - $dayOt, 2));
-                    } else {
-                        $dayReg = ($att->status === 'Late') ? 7.0 : $scheduledDayHours;
-                    }
-                }
-            } elseif ((float)$att->total_hours > 0) {
-                $dayOt = (float)$att->overtime_hours;
-                $dayReg = max(0, round((float)$att->total_hours - $dayOt, 2));
-            } else {
-                if ($isHalfDay) {
-                    $dayReg = 4.0;
-                } elseif ($att->status === 'Present') {
-                    $dayReg = 8.0;
-                } else {
-                    $lateMins = AttendanceSchedule::lateMinutes($dateStr, $att->time_in);
-                    if ($lateMins > 0 && $lateMins <= 240) {
-                        $dayReg = max(4.0, round(8.0 - ($lateMins / 60), 2));
-                    } else {
-                        $dayReg = 7.0;
-                    }
-                }
-            }
-
             $regularHours += $dayReg;
-            $overtimeHours += $dayOt;
+            $overtimeHours = 0.0;
 
-            // Track accumulated late and undertime from logs
-            $recLate = AttendanceSchedule::lateMinutes($dateStr, $att->time_in);
-            if ($recLate > 0) {
+            // Track accumulated late (only for 1–29 mins; >= 30 mins is already converted to Half Day)
+            if (!$isHalfDay && $recLate >= 1 && $recLate < 30) {
                 $loggedLateMinutes += $recLate;
             }
-            if (!empty($att->time_out)) {
+            if (!$isHalfDay && !empty($att->time_out)) {
                 $recUt = AttendanceSchedule::undertimeMinutes($dateStr, $att->time_out);
                 if ($recUt > 0) {
                     $loggedUndertimeMinutes += $recUt;
                 }
-            } elseif ($dayReg < $scheduledDayHours && $att->status !== 'Absent') {
-                $loggedUndertimeMinutes += round(($scheduledDayHours - $dayReg) * 60);
             }
         }
 
         $regularHours = round($regularHours, 2);
-        $overtimeHours = round($overtimeHours, 2);
+        $overtimeHours = 0.0;
         $workHours = $regularHours;
 
         $semiMonthlyBase = round($monthlyBasic / 2, 2);
 
-        // 1. Total Absences (Days) and Breakdown from live attendance & Message Reports
+        // 1. Total Absences (Days) and Breakdown from live attendance & Message Reports (includes 0.5d Half Days)
         $absenceInfo = $this->computeAbsenceDetails($emp, $startDate, $endDate, $dailyRate, $attendances);
         $paidLeaveDays = (float)($absenceInfo['paid_leave_days'] ?? 0.0);
-        $absenceDays = max(0.0, round($standardDays - $daysWorked, 1));
-        $unpaidAbsenceDays = (float)($absenceInfo['unpaid_absence_days'] ?? max(0.0, round($absenceDays - $paidLeaveDays, 1)));
+        $absenceDays = (float)($absenceInfo['absence_days'] ?? 0.0);
+        $unpaidAbsenceDays = (float)($absenceInfo['unpaid_absence_days'] ?? 0.0);
         $absenceBreakdown = $absenceInfo['absence_breakdown'] ?? [];
         $absenceDeduction = round($unpaidAbsenceDays * $dailyRate, 2);
 
@@ -1805,29 +1971,24 @@ class PayrollController extends Controller
             ];
         }
 
-        // 2. Total Late (Minutes) and Deduction: Late Deduction = Total Late Minutes * Minute Rate
+        // 2. Total Late (Minutes) and Deduction: 8:01–8:29 AM = ₱1.00 per minute
         $lateMinutes = $loggedLateMinutes;
-        $lateDeduction = round($lateMinutes * $minuteRate, 2);
+        $lateDeduction = round($lateMinutes * 1.00, 2);
         $latePenalty = $lateDeduction;
-        $lateRule = $lateMinutes > 0 ? "{$lateMinutes} mins @ ₱" . number_format($minuteRate, 2) . "/min" : 'None';
+        $lateRule = $lateMinutes > 0 ? "₱1.00 / min ({$lateMinutes} mins = ₱" . number_format($lateDeduction, 2) . ")" : 'None';
 
-        // 3. Total Undertime (Minutes) and Deduction: Undertime Deduction = Total Undertime Minutes * Minute Rate
+        // 3. Total Undertime (Minutes) and Deduction
         $undertimeMinutes = (float)$loggedUndertimeMinutes;
         $undertimeHours = round($undertimeMinutes / 60, 2);
-        $undertimeDeduction = round($undertimeMinutes * $minuteRate, 2);
+        $undertimeDeduction = round(($undertimeMinutes / 60) * $hourlyRate, 2);
 
-        // Base Pay dynamically computed from weekly base
-        // If employee has Leave with Pay, their base pay remains intact ($absenceDeduction = ₱0.00).
-        // If employee has Leave without Pay, the absence deduction ($unpaidAbsenceDays * $dailyRate)
-        // is subtracted in Total Deductions, leaving Net Pay = Gross Pay - Total Deductions.
+        // Base Pay dynamically computed from weekly base (₱3,000.00 for 6 days)
         $creditedHours = $workHours + ($paidLeaveDays * 8.0);
         $periodBasePay = ($isWeekly ? $weeklyBase : $semiMonthlyBase);
 
-        // Overtime Pay (125% of hourly rate per Philippine Labor Code)
-        $overtimeHours = isset($options['overtime_hours']) && is_numeric($options['overtime_hours'])
-            ? (float)$options['overtime_hours']
-            : $overtimeHours;
-        $overtimePay = round($overtimeHours * $hourlyRate * 1.25, 2);
+        // Strictly NO Overtime count or Overtime pay
+        $overtimeHours = 0.0;
+        $overtimePay = 0.0;
 
         // Active Allowances + Pending Bonuses
         $empAllowances = $emp->relationLoaded('allowances')
@@ -1841,60 +2002,42 @@ class PayrollController extends Controller
         $grossPay = round($periodBasePay + $allowance + $overtimePay, 2);
 
         // ─── STATUTORY CONTRIBUTION TAX COMPUTATION ─────────────────────
-        $includeSss = !empty($options['include_sss']);
-        $includePhilhealth = !empty($options['include_philhealth']);
-        $includePagibig = !empty($options['include_pagibig']);
-        $includeTax = !empty($options['include_tax']);
-
         $allActiveDeds = $emp->relationLoaded('deductions')
             ? $emp->deductions->where('is_active', true)
             : EmployeeDeduction::where('employee_id', $emp->employee_id)->where('is_active', true)->get();
 
         $dedsByName = $allActiveDeds->keyBy('name');
         $approvedSss = $dedsByName->get('SSS Contribution')?->amount ?? $dedsByName->get('SSS')?->amount;
-        $approvedPhic = $dedsByName->get('PhilHealth Contribution')?->amount ?? $dedsByName->get('PhilHealth')?->amount;
+        $approvedPhic = $dedsByName->get('PhilHealth Contribution')?->amount ?? $dedsByName->get('PhilHealth')?->amount ?? $dedsByName->get('PhilHealth Premium')?->amount;
         $approvedPagibig = $dedsByName->get('Pag-IBIG (HDMF)')?->amount ?? $dedsByName->get('Pag-IBIG')?->amount;
         $approvedTax = $dedsByName->get('Withholding Tax')?->amount ?? $dedsByName->get('Tax')?->amount;
 
-        // If no explicit toggle options passed, check which contributions are active in database
-        if (!isset($options['include_sss']) && !isset($options['include_philhealth']) && !isset($options['include_pagibig'])) {
-            $includeSss = ($approvedSss !== null && (float)$approvedSss > 0);
-            $includePhilhealth = ($approvedPhic !== null && (float)$approvedPhic > 0);
-            $includePagibig = ($approvedPagibig !== null && (float)$approvedPagibig > 0);
-        }
+        // Strictly follow only the statutory contributions selected & active in employee_deductions
+        $hasApprovedSss = ($approvedSss !== null && (float)$approvedSss > 0);
+        $hasApprovedPhic = ($approvedPhic !== null && (float)$approvedPhic > 0);
+        $hasApprovedPagibig = ($approvedPagibig !== null && (float)$approvedPagibig > 0);
+        $hasApprovedTax = ($approvedTax !== null && (float)$approvedTax > 0);
 
-        $autoStatutory = $this->computeStatutoryDeductions($periodBasePay, $grossPay, [
-            'cutoff_type' => $isWeekly ? 'weekly' : 'semi-monthly',
-            'is_weekly' => $isWeekly,
-            'include_sss' => $includeSss,
-            'include_philhealth' => $includePhilhealth,
-            'include_pagibig' => $includePagibig,
-            'include_tax' => $includeTax,
-        ]);
+        $includeSss = array_key_exists('include_sss', $options) ? ((bool)$options['include_sss'] && $hasApprovedSss) : $hasApprovedSss;
+        $includePhilhealth = array_key_exists('include_philhealth', $options) ? ((bool)$options['include_philhealth'] && $hasApprovedPhic) : $hasApprovedPhic;
+        $includePagibig = array_key_exists('include_pagibig', $options) ? ((bool)$options['include_pagibig'] && $hasApprovedPagibig) : $hasApprovedPagibig;
+        $includeTax = array_key_exists('include_tax', $options) ? ((bool)$options['include_tax'] && $hasApprovedTax) : $hasApprovedTax;
 
-        $sss = ($includeSss)
-            ? (isset($options['custom_sss']) && is_numeric($options['custom_sss'])
-                ? (float)$options['custom_sss']
-                : ($approvedSss !== null ? (float)$approvedSss : (float)$autoStatutory['sss']))
-            : 0.0;
+        $sss = isset($options['custom_sss']) && is_numeric($options['custom_sss'])
+            ? (float)$options['custom_sss']
+            : ($includeSss ? (float)$approvedSss : 0.0);
 
-        $philhealth = ($includePhilhealth)
-            ? (isset($options['custom_philhealth']) && is_numeric($options['custom_philhealth'])
-                ? (float)$options['custom_philhealth']
-                : ($approvedPhic !== null ? (float)$approvedPhic : (float)$autoStatutory['philhealth']))
-            : 0.0;
+        $philhealth = isset($options['custom_philhealth']) && is_numeric($options['custom_philhealth'])
+            ? (float)$options['custom_philhealth']
+            : ($includePhilhealth ? (float)$approvedPhic : 0.0);
 
-        $pagibig = ($includePagibig)
-            ? (isset($options['custom_pagibig']) && is_numeric($options['custom_pagibig'])
-                ? (float)$options['custom_pagibig']
-                : ($approvedPagibig !== null ? (float)$approvedPagibig : (float)$autoStatutory['pagibig']))
-            : 0.0;
+        $pagibig = isset($options['custom_pagibig']) && is_numeric($options['custom_pagibig'])
+            ? (float)$options['custom_pagibig']
+            : ($includePagibig ? (float)$approvedPagibig : 0.0);
 
-        $withholdingTax = ($includeTax)
-            ? (isset($options['custom_tax']) && is_numeric($options['custom_tax'])
-                ? (float)$options['custom_tax']
-                : ($approvedTax !== null ? (float)$approvedTax : (float)$autoStatutory['withholding_tax']))
-            : 0.0;
+        $withholdingTax = isset($options['custom_tax']) && is_numeric($options['custom_tax'])
+            ? (float)$options['custom_tax']
+            : ($includeTax ? (float)$approvedTax : 0.0);
 
         // Custom Deductions (filtered in-memory)
         $customDeductions = [];
@@ -2116,18 +2259,29 @@ class PayrollController extends Controller
             $totalGross = 0;
             $totalDeductions = 0;
             $totalNet = 0;
+            $sumWorkHours = 0;
+            $sumAbsenceDays = 0;
+            $sumLateMinutes = 0;
+            $sumUndertimeMinutes = 0;
 
             foreach ($activeEmployees as $e) {
                 $d = $this->calculateEmployeePayrollDetails($e, $period, $options);
                 $totalGross += (float)$d['gross_pay'];
                 $totalDeductions += (float)$d['total_deductions'];
                 $totalNet += (float)$d['net_pay'];
+                $sumWorkHours += (float)$d['work_hours'];
+                $sumAbsenceDays += (float)$d['absence_days'];
+                $sumLateMinutes += (int)$d['late_minutes'];
+                $sumUndertimeMinutes += (float)$d['undertime_minutes'];
                 $empList[] = [
                     'employee_id' => $e->employee_id,
                     'employee_code' => $e->employee_code,
                     'full_name' => "{$e->first_name} {$e->last_name}",
                     'position' => $e->position,
-                    'basic_salary' => (float)($e->basic_salary ?? 0),
+                    'basic_salary' => (float)($d['monthly_basic'] ?? $e->basic_salary ?? 13000),
+                    'daily_rate' => (float)($d['daily_rate'] ?? $e->daily_rate ?? 500),
+                    'hourly_rate' => (float)($d['hourly_rate'] ?? $e->hourly_rate ?? 62.5),
+                    'weekly_base_pay' => (float)($d['weekly_base_pay'] ?? 0),
                     'branch' => $e->branchProfile ? $e->branchProfile->name : ($e->branch_name ?: (is_object($e->branch) ? $e->branch->name : ((string)$e->branch ?: 'Unassigned'))),
                     'branch_name' => $e->branchProfile ? $e->branchProfile->name : ($e->branch_name ?: (is_object($e->branch) ? $e->branch->name : ((string)$e->branch ?: 'Unassigned'))),
                     'calculation' => $d,
@@ -2159,10 +2313,10 @@ class PayrollController extends Controller
                 ],
                 'employees' => $empList,
                 'calculation' => [
-                    'work_hours' => $isWeekly ? 48 : 104,
-                    'absence_days' => 0,
-                    'late_minutes' => 0,
-                    'undertime_minutes' => 0,
+                    'work_hours' => round($sumWorkHours, 2),
+                    'absence_days' => round($sumAbsenceDays, 2),
+                    'late_minutes' => $sumLateMinutes,
+                    'undertime_minutes' => round($sumUndertimeMinutes, 2),
                     'overtime_hours' => 0,
                     'gross_pay' => round($totalGross, 2),
                     'total_deductions' => round($totalDeductions, 2),
@@ -2337,8 +2491,14 @@ class PayrollController extends Controller
             &$appliedDeductions,
             &$totalStatutoryDeductions
         ) {
-            // Helper to update or create an entry in employee_deductions
-            $syncDeduction = function ($name, $amount, $active) use ($employee, &$appliedDeductions) {
+            // Helper to update or create an entry in employee_deductions (and deactivate aliases when unchecked)
+            $syncDeduction = function ($name, $amount, $active, array $aliases = []) use ($employee, &$appliedDeductions) {
+                if (!empty($aliases)) {
+                    EmployeeDeduction::where('employee_id', $employee->employee_id)
+                        ->whereIn('name', $aliases)
+                        ->update(['amount' => 0.00, 'is_active' => false]);
+                }
+
                 $record = EmployeeDeduction::where('employee_id', $employee->employee_id)
                     ->where('name', $name)
                     ->first();
@@ -2376,36 +2536,64 @@ class PayrollController extends Controller
             };
 
             // SSS Contribution
-            $syncDeduction('SSS Contribution', $sssAmount, $includeSss);
+            $syncDeduction('SSS Contribution', $sssAmount, $includeSss, ['SSS']);
 
             // PhilHealth Contribution
-            $syncDeduction('PhilHealth Contribution', $philhealthAmount, $includePhilhealth);
+            $syncDeduction('PhilHealth Contribution', $philhealthAmount, $includePhilhealth, ['PhilHealth', 'PhilHealth Premium']);
 
             // Pag-IBIG (HDMF)
-            $syncDeduction('Pag-IBIG (HDMF)', $pagibigAmount, $includePagibig);
+            $syncDeduction('Pag-IBIG (HDMF)', $pagibigAmount, $includePagibig, ['Pag-IBIG']);
 
             // Withholding Tax (if applicable)
             if ($includeTax && $taxAmount > 0) {
-                $syncDeduction('Withholding Tax', $taxAmount, true);
+                $syncDeduction('Withholding Tax', $taxAmount, true, ['Tax']);
             } else {
-                $syncDeduction('Withholding Tax', 0, false);
+                $syncDeduction('Withholding Tax', 0, false, ['Tax']);
             }
 
             // Sync with current/open payroll records in database ledger
             $targetPeriodId = $request->input('period_id');
-            $payrollQuery = Payroll::where('employee_id', $employee->employee_id);
-            if ($targetPeriodId && $targetPeriodId !== 'all' && $targetPeriodId !== 'auto') {
-                $payrollQuery->where('period_id', $targetPeriodId);
-            } else {
-                $payrollQuery->whereIn('status', ['Draft', 'Pending', 'Approved']);
-            }
-            $openPayrolls = $payrollQuery->get();
+            $openPayrolls = Payroll::where('employee_id', $employee->employee_id)
+                ->where(function ($q) use ($targetPeriodId) {
+                    $q->whereIn('status', ['Draft', 'Pending', 'Approved']);
+                    if ($targetPeriodId && $targetPeriodId !== 'all' && $targetPeriodId !== 'auto') {
+                        $q->orWhere('period_id', $targetPeriodId);
+                    }
+                })
+                ->get();
 
             foreach ($openPayrolls as $p) {
+                $meta = [];
+                if (!empty($p->notes)) {
+                    $decoded = json_decode($p->notes, true);
+                    if (is_array($decoded)) {
+                        $meta = $decoded;
+                    }
+                }
+
+                $workHoursMeta = (float)($meta['work_hours'] ?? $p->regular_hours ?? 0);
+                $paidLeaveMeta = (float)($meta['paid_leave_days'] ?? 0);
+                $isZeroHoursPayroll = !empty($meta['zero_hours'])
+                    || ((float)$p->basic_salary === 0.0 && $workHoursMeta <= 0 && $paidLeaveMeta <= 0);
+
                 // Delete previous statutory deduction line items in payroll_deductions
                 PayrollDeduction::where('payroll_id', $p->payroll_id)
                     ->whereIn('deduction_type', ['SSS', 'PhilHealth', 'Pag-IBIG', 'Withholding Tax'])
                     ->delete();
+
+                if ($isZeroHoursPayroll) {
+                    $meta['sss'] = 0.0;
+                    $meta['philhealth'] = 0.0;
+                    $meta['pagibig'] = 0.0;
+                    $meta['withholding_tax'] = 0.0;
+                    $meta['zero_hours'] = true;
+                    $meta['weekly_base_pay'] = 0.0;
+                    $p->notes = json_encode($meta);
+                    $p->total_deductions = 0.0;
+                    $p->net_pay = 0.0;
+                    $p->save();
+                    continue;
+                }
 
                 if ($includeSss && $sssAmount > 0) {
                     PayrollDeduction::create([
@@ -2439,6 +2627,13 @@ class PayrollController extends Controller
                         'notes' => "Withholding Tax (TRAIN Law)",
                     ]);
                 }
+
+                // Sync JSON metadata notes on the payroll record so unselected contributions are cleared
+                $meta['sss'] = ($includeSss && $sssAmount > 0) ? (float)$sssAmount : 0.0;
+                $meta['philhealth'] = ($includePhilhealth && $philhealthAmount > 0) ? (float)$philhealthAmount : 0.0;
+                $meta['pagibig'] = ($includePagibig && $pagibigAmount > 0) ? (float)$pagibigAmount : 0.0;
+                $meta['withholding_tax'] = ($includeTax && $taxAmount > 0) ? (float)$taxAmount : 0.0;
+                $p->notes = json_encode($meta);
 
                 // Recalculate total deductions & net pay on the payroll entry
                 $newDeductionsTotal = (float) PayrollDeduction::where('payroll_id', $p->payroll_id)->sum('amount');
@@ -2639,119 +2834,17 @@ class PayrollController extends Controller
                     $startDate = $details['from_date'] ?? $period->start_date;
                     $endDate = $details['to_date'] ?? $period->end_date;
 
-                    $meta = [
-                        'from_date' => $startDate,
-                        'to_date' => $endDate,
-                        'period_dates' => "From {$startDate} to {$endDate}",
-                        'work_hours' => $details['work_hours'],
-                        'absence_days' => $details['absence_days'],
-                        'absence_deduction' => $details['absence_deduction'],
-                        'absence_breakdown' => $details['absence_breakdown'] ?? [],
-                        'late_minutes' => $details['late_minutes'],
-                        'late_penalty' => $details['late_penalty'],
-                        'late_rule' => $details['late_rule'],
-                        'undertime_minutes' => $details['undertime_minutes'],
-                        'undertime_hours' => $details['undertime_hours'],
-                        'undertime_deduction' => $details['undertime_deduction'],
-                        'sss' => $details['sss'],
-                        'philhealth' => $details['philhealth'],
-                        'pagibig' => $details['pagibig'],
-                        'withholding_tax' => $details['withholding_tax'],
-                        'remarks' => $request->input('notes') ?: "Batch Approved | Hrs: {$details['work_hours']}h | Abs: {$details['absence_days']}d | Late: {$details['late_minutes']}m",
-                    ];
+                    $batchRemarks = $request->input('notes') ?: (
+                        !empty($details['zero_hours'])
+                            ? "Zero Hours Rule Applied: 0 rendered working hours = ₱0.00 Salary"
+                            : "Batch Approved | Hrs: {$details['work_hours']}h | Abs: {$details['absence_days']}d | Late: {$details['late_minutes']}m"
+                    );
+                    $meta = $this->buildPayrollMeta($details, $startDate, $endDate, $batchRemarks);
                     $payroll->notes = json_encode($meta);
                     $payroll->save();
 
-                    // Itemized deductions
-                    if (!empty($details['absence_breakdown'])) {
-                        foreach ($details['absence_breakdown'] as $ab) {
-                            PayrollDeduction::create([
-                                'payroll_id' => $payroll->payroll_id,
-                                'deduction_type' => $ab['category'],
-                                'amount' => $ab['amount'],
-                                'notes' => "Absence Deduction: {$ab['category']} ({$ab['days']} day(s) @ ₱" . number_format($details['daily_rate'], 2) . "/day)",
-                            ]);
-                        }
-                    } elseif ($details['absence_deduction'] > 0) {
-                        PayrollDeduction::create([
-                            'payroll_id' => $payroll->payroll_id,
-                            'deduction_type' => 'Absences',
-                            'amount' => $details['absence_deduction'],
-                            'notes' => "Absence Deduction ({$details['absence_days']} days @ ₱" . number_format($details['daily_rate'], 2) . "/day)",
-                        ]);
-                    }
-                    if ($details['late_penalty'] > 0) {
-                        PayrollDeduction::create([
-                            'payroll_id' => $payroll->payroll_id,
-                            'deduction_type' => 'Late Penalty',
-                            'amount' => $details['late_penalty'],
-                            'notes' => $details['late_rule'],
-                        ]);
-                    }
-                    if ($details['undertime_deduction'] > 0) {
-                        PayrollDeduction::create([
-                            'payroll_id' => $payroll->payroll_id,
-                            'deduction_type' => 'Undertime',
-                            'amount' => $details['undertime_deduction'],
-                            'notes' => "Undertime Deduction ({$details['undertime_minutes']} mins)",
-                        ]);
-                    }
-                    if ($details['sss'] > 0) {
-                        PayrollDeduction::create([
-                            'payroll_id' => $payroll->payroll_id,
-                            'deduction_type' => 'SSS',
-                            'amount' => $details['sss'],
-                            'notes' => 'SSS Statutory Contribution (4.5%)',
-                        ]);
-                    }
-                    if ($details['philhealth'] > 0) {
-                        PayrollDeduction::create([
-                            'payroll_id' => $payroll->payroll_id,
-                            'deduction_type' => 'PhilHealth',
-                            'amount' => $details['philhealth'],
-                            'notes' => 'PhilHealth Statutory Contribution (2.5%)',
-                        ]);
-                    }
-                    if ($details['pagibig'] > 0) {
-                        PayrollDeduction::create([
-                            'payroll_id' => $payroll->payroll_id,
-                            'deduction_type' => 'Pag-IBIG',
-                            'amount' => $details['pagibig'],
-                            'notes' => 'Pag-IBIG (HDMF) Statutory Contribution',
-                        ]);
-                    }
-                    if ($details['withholding_tax'] > 0) {
-                        PayrollDeduction::create([
-                            'payroll_id' => $payroll->payroll_id,
-                            'deduction_type' => 'Withholding Tax',
-                            'amount' => $details['withholding_tax'],
-                            'notes' => 'Withholding Tax (TRAIN Law)',
-                        ]);
-                    }
-                    foreach ($details['custom_deductions'] as $cd) {
-                        PayrollDeduction::create([
-                            'payroll_id' => $payroll->payroll_id,
-                            'deduction_type' => 'Other',
-                            'amount' => $cd['amount'],
-                            'notes' => $cd['name'],
-                        ]);
-                    }
-                    foreach ($details['loan_deductions'] as $ld) {
-                        PayrollDeduction::create([
-                            'payroll_id' => $payroll->payroll_id,
-                            'deduction_type' => 'Loan',
-                            'amount' => $ld['amount'],
-                            'notes' => "Loan #{$ld['id']} - {$ld['name']}",
-                        ]);
-                        $loan = EmployeeLoan::find($ld['id']);
-                        if ($loan && $loan->status === 'Active') {
-                            $loan->amount_paid = min((float)$loan->total_amount, round((float)$loan->amount_paid + (float)$ld['amount'], 2));
-                            if ($loan->amount_paid >= (float)$loan->total_amount) {
-                                $loan->status = 'Paid';
-                            }
-                            $loan->save();
-                        }
-                    }
+                    // Itemized deductions & loan amortization (Zero Hours Rule skips all deductions)
+                    $this->persistItemizedDeductions($payroll, $details, true);
 
                     $totalGross += (float)$details['gross_pay'];
                     $totalDeductions += (float)$details['total_deductions'];
@@ -2865,163 +2958,17 @@ class PayrollController extends Controller
             $endDate = $details['to_date'] ?? $period->end_date;
 
             // Store structured metadata in notes as JSON for payslip and audit
-            $meta = [
-                'from_date' => $startDate,
-                'to_date' => $endDate,
-                'period_dates' => "From {$startDate} to {$endDate}",
-                'work_hours' => $details['work_hours'],
-                'absence_days' => $details['absence_days'],
-                'absence_deduction' => $details['absence_deduction'],
-                'absence_breakdown' => $details['absence_breakdown'] ?? [],
-                'late_minutes' => $details['late_minutes'],
-                'late_penalty' => $details['late_penalty'],
-                'late_rule' => $details['late_rule'],
-                'undertime_minutes' => $details['undertime_minutes'],
-                'undertime_hours' => $details['undertime_hours'],
-                'undertime_deduction' => $details['undertime_deduction'],
-                'sss' => $details['sss'],
-                'philhealth' => $details['philhealth'],
-                'pagibig' => $details['pagibig'],
-                'withholding_tax' => $details['withholding_tax'],
-                'remarks' => $request->input('notes') ?: "Approved via 5-Step Workflow | Hrs: {$details['work_hours']}h | Abs: {$details['absence_days']}d | Late: {$details['late_minutes']}m | UT: {$details['undertime_minutes']}m",
-            ];
+            $singleRemarks = $request->input('notes') ?: (
+                !empty($details['zero_hours'])
+                    ? "Zero Hours Rule Applied: 0 rendered working hours = ₱0.00 Salary"
+                    : "Approved via 4-Step Workflow | Hrs: {$details['work_hours']}h | Abs: {$details['absence_days']}d | Late: {$details['late_minutes']}m | UT: {$details['undertime_minutes']}m"
+            );
+            $meta = $this->buildPayrollMeta($details, $startDate, $endDate, $singleRemarks);
             $payroll->notes = json_encode($meta);
             $payroll->save();
 
-            // Record itemized payroll deductions:
-            // 1. Absences
-            if (!empty($details['absence_breakdown'])) {
-                foreach ($details['absence_breakdown'] as $ab) {
-                    PayrollDeduction::create([
-                        'payroll_id' => $payroll->payroll_id,
-                        'deduction_type' => $ab['category'],
-                        'amount' => $ab['amount'],
-                        'notes' => "Absence Deduction: {$ab['category']} ({$ab['days']} day(s) @ ₱" . number_format($details['daily_rate'], 2) . "/day)",
-                    ]);
-                }
-            } elseif ($details['absence_deduction'] > 0) {
-                PayrollDeduction::create([
-                    'payroll_id' => $payroll->payroll_id,
-                    'deduction_type' => 'Absences',
-                    'amount' => $details['absence_deduction'],
-                    'notes' => "Absence Deduction ({$details['absence_days']} days @ ₱" . number_format($details['daily_rate'], 2) . "/day)",
-                ]);
-            }
-
-            // 2. Late Penalty
-            if ($details['late_penalty'] > 0) {
-                PayrollDeduction::create([
-                    'payroll_id' => $payroll->payroll_id,
-                    'deduction_type' => 'Late Penalty',
-                    'amount' => $details['late_penalty'],
-                    'notes' => $details['late_rule'],
-                ]);
-            }
-
-            // 3. Undertime
-            if ($details['undertime_deduction'] > 0) {
-                PayrollDeduction::create([
-                    'payroll_id' => $payroll->payroll_id,
-                    'deduction_type' => 'Undertime',
-                    'amount' => $details['undertime_deduction'],
-                    'notes' => "Undertime Deduction ({$details['undertime_minutes']} mins / {$details['undertime_hours']}h @ ₱" . number_format($details['hourly_rate'], 2) . "/hr)",
-                ]);
-            }
-
-            // 4. SSS
-            if ($details['sss'] > 0) {
-                PayrollDeduction::create([
-                    'payroll_id' => $payroll->payroll_id,
-                    'deduction_type' => 'SSS',
-                    'amount' => $details['sss'],
-                    'notes' => 'SSS Statutory Contribution (4.5%)',
-                ]);
-            }
-
-            // 5. PhilHealth
-            if ($details['philhealth'] > 0) {
-                PayrollDeduction::create([
-                    'payroll_id' => $payroll->payroll_id,
-                    'deduction_type' => 'PhilHealth',
-                    'amount' => $details['philhealth'],
-                    'notes' => 'PhilHealth Statutory Contribution (2.5%)',
-                ]);
-            }
-
-            // 6. Pag-IBIG
-            if ($details['pagibig'] > 0) {
-                PayrollDeduction::create([
-                    'payroll_id' => $payroll->payroll_id,
-                    'deduction_type' => 'Pag-IBIG',
-                    'amount' => $details['pagibig'],
-                    'notes' => 'Pag-IBIG (HDMF) Statutory Contribution',
-                ]);
-            }
-
-            // 7. Withholding Tax
-            if ($details['withholding_tax'] > 0) {
-                PayrollDeduction::create([
-                    'payroll_id' => $payroll->payroll_id,
-                    'deduction_type' => 'Withholding Tax',
-                    'amount' => $details['withholding_tax'],
-                    'notes' => 'Withholding Tax (TRAIN Law)',
-                ]);
-            }
-
-            // 8. Custom Deductions
-            foreach ($details['custom_deductions'] as $cd) {
-                PayrollDeduction::create([
-                    'payroll_id' => $payroll->payroll_id,
-                    'deduction_type' => 'Other',
-                    'amount' => $cd['amount'],
-                    'notes' => $cd['name'],
-                ]);
-            }
-
-            // 9. Loans
-            foreach ($details['loan_deductions'] as $ld) {
-                PayrollDeduction::create([
-                    'payroll_id' => $payroll->payroll_id,
-                    'deduction_type' => 'Loan',
-                    'amount' => $ld['amount'],
-                    'notes' => "Loan #{$ld['id']} - {$ld['name']}",
-                ]);
-
-                // Update employee loan amortization balance
-                $loan = EmployeeLoan::find($ld['id']);
-                if ($loan && $loan->status === 'Active') {
-                    $loan->amount_paid = min((float)$loan->total_amount, round((float)$loan->amount_paid + (float)$ld['amount'], 2));
-                    if ($loan->amount_paid >= (float)$loan->total_amount) {
-                        $loan->status = 'Paid';
-                    }
-                    $loan->save();
-                }
-            }
-
-            // Automatically deduct the computed totals and update the employee's payroll ledger
-            $statutoryMappings = [
-                'SSS Contribution' => $details['sss'],
-                'PhilHealth Contribution' => $details['philhealth'],
-                'Pag-IBIG (HDMF)' => $details['pagibig'],
-            ];
-            if ($details['withholding_tax'] > 0) {
-                $statutoryMappings['Withholding Tax'] = $details['withholding_tax'];
-            }
-
-            foreach ($statutoryMappings as $dedName => $dedAmt) {
-                if ($dedAmt > 0) {
-                    EmployeeDeduction::updateOrCreate(
-                        [
-                            'employee_id' => $emp->employee_id,
-                            'name' => $dedName,
-                        ],
-                        [
-                            'amount' => $dedAmt,
-                            'is_active' => true,
-                        ]
-                    );
-                }
-            }
+            // Record itemized payroll deductions & update active loan balances
+            $this->persistItemizedDeductions($payroll, $details, true);
 
             // Record system audit log
             SystemLog::create([
@@ -3162,20 +3109,46 @@ class PayrollController extends Controller
             }
         }
 
-        // Also check attendance records with status = 'Absent' or unworked schedule days up to today
+        // Also check attendance records with status = 'Absent', Half Day (8:30 AM+ / >= 30 mins late), or unworked schedule days up to today
         $unexcusedDays = 0;
+        $halfDayMissedDays = 0.0;
+        $halfDayDates = [];
         $todayStr = \Carbon\Carbon::today()->format('Y-m-d');
 
         foreach ($attendances as $att) {
+            $dateStr = $att->attendance_date instanceof \DateTimeInterface
+                ? $att->attendance_date->format('Y-m-d')
+                : substr((string)$att->attendance_date, 0, 10);
+            $isSunday = \Carbon\Carbon::parse($dateStr)->isSunday();
+            if ($isSunday) {
+                continue;
+            }
+
             if ($att->status === 'Absent') {
-                $dateStr = $att->attendance_date instanceof \DateTimeInterface
-                    ? $att->attendance_date->format('Y-m-d')
-                    : substr((string)$att->attendance_date, 0, 10);
-                $isSunday = \Carbon\Carbon::parse($dateStr)->isSunday();
-                if (!$isSunday && !in_array($dateStr, $coveredDates, true)) {
+                if (!in_array($dateStr, $coveredDates, true)) {
                     $unexcusedDays++;
                     $coveredDates[] = $dateStr;
                 }
+                continue;
+            }
+
+            $recLate = AttendanceSchedule::lateMinutes($dateStr, $att->time_in);
+            $computed = (!empty($att->time_in) && !empty($att->time_out))
+                ? AttendanceSchedule::computeHours($att)
+                : null;
+
+            if ($recLate >= 30) {
+                $isHalfDay = true;
+            } elseif ($computed !== null && (float)$computed['regular'] > 0) {
+                $isHalfDay = ((float)$computed['regular'] <= 4.0);
+            } else {
+                $isHalfDay = ($att->status === 'Half Day');
+            }
+
+            if ($isHalfDay && !in_array($dateStr, $coveredDates, true)) {
+                $halfDayMissedDays += 0.5;
+                $halfDayDates[] = $dateStr;
+                $coveredDates[] = $dateStr;
             }
         }
 
@@ -3199,6 +3172,27 @@ class PayrollController extends Controller
                 }
             }
             $scanDay->addDay();
+        }
+
+        if ($halfDayMissedDays > 0) {
+            $halfDayAmount = round($halfDayMissedDays * $dailyRate, 2);
+            $totalAbsenceDays += $halfDayMissedDays;
+            $unpaidAbsenceDays += $halfDayMissedDays;
+            $absenceBreakdown[] = [
+                'report_id' => null,
+                'category' => 'Half Day',
+                'leave_type' => 'Half-Day Deduction',
+                'is_paid' => false,
+                'reason' => 'Automatic Half-Day Basic Pay Deduction (8:30 AM+ Cutoff / Half Shift)',
+                'from_date' => $startDate,
+                'to_date' => $endDate,
+                'days' => $halfDayMissedDays,
+                'daily_rate' => $dailyRate,
+                'amount' => $halfDayAmount,
+                'amount_formatted' => '-₱' . number_format($halfDayAmount, 2),
+                'status' => 'Half Day',
+                'dates' => $halfDayDates,
+            ];
         }
 
         if ($unexcusedDays > 0) {
@@ -3284,6 +3278,7 @@ class PayrollController extends Controller
         $totalOvertimeHours = 0.0;
         $totalAbsentDays = 0.0;
         $daysPresent = 0.0;
+        $todayStr = date('Y-m-d');
 
         for ($i = 1; $i <= 6; $i++) {
             $curDate = date('Y-m-d', strtotime("$startDate +" . ($i - 1) . " days"));
@@ -3312,38 +3307,62 @@ class PayrollController extends Controller
             $overtimeHours = 0.0;
 
             if ($hasRecord) {
-                $status = $att->status ?: 'Absent';
                 $timeIn = $att->time_in ? date('h:i A', strtotime($att->time_in)) : null;
                 $timeOut = $att->time_out ? date('h:i A', strtotime($att->time_out)) : null;
                 $timeInRaw = $att->time_in;
                 $timeOutRaw = $att->time_out;
                 $remarks = $att->remarks ?: '';
 
-                // Calculate daily work hours from punches
-                if (!empty($att->time_in) && !empty($att->time_out)) {
-                    $computed = AttendanceSchedule::computeHours($att);
-                    $workHours = (float)$computed['regular'];
-                    $overtimeHours = (float)$computed['overtime'];
-                    if ($workHours <= 0 && $status !== 'Absent') {
-                        $workHours = (float)$att->total_hours;
-                    }
-                } elseif ((float)$att->total_hours > 0) {
-                    $workHours = (float)$att->total_hours;
-                    $overtimeHours = (float)$att->overtime_hours;
-                } elseif ($status === 'Present') {
-                    $workHours = 8.0;
-                } elseif ($status === 'Half Day') {
-                    $workHours = 4.0;
-                }
+                $rawLate = AttendanceSchedule::lateMinutes($curDate, $att->time_in);
+                $computed = (!empty($att->time_in) && !empty($att->time_out))
+                    ? AttendanceSchedule::computeHours($att)
+                    : null;
 
-                $lateMins = (int)$att->late_minutes ?: AttendanceSchedule::lateMinutes($curDate, $att->time_in);
-                $undertimeMins = (int)$att->undertime_minutes ?: AttendanceSchedule::undertimeMinutes($curDate, $att->time_out);
+                if ($rawLate >= 30) {
+                    $status = 'Half Day';
+                    $workHours = ($computed && (float)$computed['regular'] > 0) ? min(4.0, (float)$computed['regular']) : 4.0;
+                    $lateMins = 0;
+                    $undertimeMins = 0;
+                } elseif ($computed !== null && (float)$computed['regular'] > 0) {
+                    if ((float)$computed['regular'] <= 4.0) {
+                        $status = 'Half Day';
+                        $workHours = (float)$computed['regular'];
+                        $lateMins = 0;
+                        $undertimeMins = 0;
+                    } else {
+                        $status = $rawLate >= 1 ? 'Late' : 'Present';
+                        $workHours = min(8.0, (float)$computed['regular']);
+                        $lateMins = $rawLate;
+                        $undertimeMins = AttendanceSchedule::undertimeMinutes($curDate, $att->time_out);
+                    }
+                } else {
+                    if ($att->status === 'Half Day') {
+                        $status = 'Half Day';
+                        $workHours = 4.0;
+                        $lateMins = 0;
+                        $undertimeMins = 0;
+                    } elseif ($att->status === 'Absent') {
+                        $status = 'Absent';
+                        $workHours = 0.0;
+                    } else {
+                        $status = $rawLate >= 1 ? 'Late' : 'Present';
+                        $workHours = 8.0;
+                        $lateMins = $rawLate;
+                    }
+                }
+                $overtimeHours = 0.0;
             }
 
+            $isLetterPaid = $matchedLetter && in_array(
+                strtolower(trim((string)($matchedLetter->leave_type ?? ''))),
+                ['with_pay', 'leave with pay', 'paid'],
+                true
+            );
             if ($matchedLetter) {
                 if (!$hasRecord || $status === 'Absent') {
-                    $status = $matchedLetter->type ?: 'Excuse Letter';
-                    $remarks = $matchedLetter->reason ?: 'Approved Leave';
+                    $status = $matchedLetter->category ?: 'Excuse Letter';
+                    $leaveTag = $isLetterPaid ? 'Leave with Pay' : 'Leave without Pay';
+                    $remarks = "{$leaveTag}: " . ($matchedLetter->reason ?: 'Approved Leave');
                 }
             }
 
@@ -3353,8 +3372,8 @@ class PayrollController extends Controller
                 $dayAbsentScore = 0.5;
                 $daysPresent += 0.5;
             } elseif (in_array(strtolower($status), ['absent', 'unexcused', 'unexcused absence'], true)) {
-                $dayAbsentScore = 1.0;
-            } elseif ($matchedLetter && ($matchedLetter->is_paid ?? false)) {
+                $dayAbsentScore = ($curDate < $todayStr || $hasRecord) ? 1.0 : 0.0;
+            } elseif ($matchedLetter && $isLetterPaid) {
                 $dayAbsentScore = 0.0;
                 $daysPresent += 1.0;
             } elseif ($matchedLetter) {
@@ -3363,7 +3382,7 @@ class PayrollController extends Controller
                 $dayAbsentScore = 0.0;
                 $daysPresent += 1.0;
             } else {
-                $dayAbsentScore = 1.0;
+                $dayAbsentScore = ($curDate < $todayStr) ? 1.0 : 0.0;
             }
 
             $totalWorkHours += $workHours;
@@ -3487,7 +3506,7 @@ class PayrollController extends Controller
                         $payroll->generated_at = now();
                     }
 
-                    $hasZeroHours = ($details['work_hours'] <= 0);
+                    $hasZeroHours = !empty($details['zero_hours']);
 
                     $payroll->basic_salary = $details['period_base_pay'];
                     $payroll->regular_hours = $details['work_hours'];
@@ -3500,104 +3519,15 @@ class PayrollController extends Controller
                     $payroll->status = 'Approved';
                     $payroll->approved_at = now();
 
-                    $meta = [
-                        'from_date' => $period->start_date,
-                        'to_date' => $period->end_date,
-                        'period_dates' => "From {$period->start_date} to {$period->end_date}",
-                        'cutoff_type' => 'weekly',
-                        'is_weekly' => true,
-                        'weekly_base_pay' => $hasZeroHours ? 0.0 : $details['weekly_base'],
-                        'daily_rate' => $details['daily_rate'],
-                        'hourly_rate' => $details['hourly_rate'],
-                        'minute_rate' => $details['minute_rate'],
-                        'work_hours' => $details['work_hours'],
-                        'days_worked' => $details['days_worked'],
-                        'zero_hours' => $hasZeroHours,
-                        'absence_days' => $details['absence_days'],
-                        'absence_deduction' => $details['absence_deduction'],
-                        'absence_breakdown' => $details['absence_breakdown'] ?? [],
-                        'late_minutes' => $details['late_minutes'],
-                        'late_penalty' => $details['late_deduction'],
-                        'late_deduction' => $details['late_deduction'],
-                        'undertime_minutes' => $details['undertime_minutes'],
-                        'undertime_deduction' => $details['undertime_deduction'],
-                        'sss' => $details['sss'],
-                        'philhealth' => $details['philhealth'],
-                        'pagibig' => $details['pagibig'],
-                        'withholding_tax' => $details['withholding_tax'],
-                        'remarks' => $hasZeroHours
-                            ? "Zero Hours Rule Applied: 0 rendered working hours = ₱0.00 Salary (Auto-Finalized at Payday Cutoff)"
-                            : "Weekly Payday Cutoff Auto-Finalized: {$details['work_hours']}h rendered | Net Pay: ₱" . number_format($details['net_pay'], 2),
-                    ];
+                    $autoRemarks = $hasZeroHours
+                        ? "Zero Hours Rule Applied: 0 rendered working hours = ₱0.00 Salary (Auto-Finalized at Payday Cutoff)"
+                        : "Weekly Payday Cutoff Auto-Finalized: {$details['work_hours']}h rendered | Net Pay: ₱" . number_format($details['net_pay'], 2);
+                    $meta = $controller->buildPayrollMeta($details, $period->start_date, $period->end_date, $autoRemarks);
                     $payroll->notes = json_encode($meta);
                     $payroll->save();
 
-                    // Refresh itemized deductions
-                    PayrollDeduction::where('payroll_id', $payroll->payroll_id)->delete();
-
-                    if (!$hasZeroHours) {
-                        if ($details['late_deduction'] > 0) {
-                            PayrollDeduction::create([
-                                'payroll_id' => $payroll->payroll_id,
-                                'deduction_type' => 'Late Penalty',
-                                'amount' => $details['late_deduction'],
-                                'notes' => "Late Penalty ({$details['late_minutes']} mins)",
-                            ]);
-                        }
-                        if ($details['undertime_deduction'] > 0) {
-                            PayrollDeduction::create([
-                                'payroll_id' => $payroll->payroll_id,
-                                'deduction_type' => 'Undertime',
-                                'amount' => $details['undertime_deduction'],
-                                'notes' => "Undertime Deduction ({$details['undertime_minutes']} mins)",
-                            ]);
-                        }
-                        if ($details['sss'] > 0) {
-                            PayrollDeduction::create([
-                                'payroll_id' => $payroll->payroll_id,
-                                'deduction_type' => 'SSS',
-                                'amount' => $details['sss'],
-                                'notes' => 'SSS Statutory Contribution',
-                            ]);
-                        }
-                        if ($details['philhealth'] > 0) {
-                            PayrollDeduction::create([
-                                'payroll_id' => $payroll->payroll_id,
-                                'deduction_type' => 'PhilHealth',
-                                'amount' => $details['philhealth'],
-                                'notes' => 'PhilHealth Statutory Contribution',
-                            ]);
-                        }
-                        if ($details['pagibig'] > 0) {
-                            PayrollDeduction::create([
-                                'payroll_id' => $payroll->payroll_id,
-                                'deduction_type' => 'Pag-IBIG',
-                                'amount' => $details['pagibig'],
-                                'notes' => 'Pag-IBIG Statutory Contribution',
-                            ]);
-                        }
-
-                        foreach ($details['custom_deductions'] as $cd) {
-                            if ((float)$cd['amount'] > 0) {
-                                PayrollDeduction::create([
-                                    'payroll_id' => $payroll->payroll_id,
-                                    'deduction_type' => 'Other',
-                                    'amount' => $cd['amount'],
-                                    'notes' => $cd['name'],
-                                ]);
-                            }
-                        }
-                        foreach ($details['loan_deductions'] as $ld) {
-                            if ((float)$ld['amount'] > 0) {
-                                PayrollDeduction::create([
-                                    'payroll_id' => $payroll->payroll_id,
-                                    'deduction_type' => 'Loan',
-                                    'amount' => $ld['amount'],
-                                    'notes' => "Loan Repayment: {$ld['name']}",
-                                ]);
-                            }
-                        }
-                    }
+                    // Refresh itemized deductions uniformly (includes Absences, Half Day, Late, UT, Statutory, Tax, Custom, Loans)
+                    $controller->persistItemizedDeductions($payroll, $details);
 
                     $totalFinalized++;
                 }
@@ -3640,13 +3570,13 @@ class PayrollController extends Controller
 
         $controller = new self();
         $details = $controller->calculateEmployeePayrollDetails($emp, $period);
-        $hasZeroHours = ($details['work_hours'] <= 0);
+        $hasZeroHours = !empty($details['zero_hours']);
 
         $todayStr = date('Y-m-d');
         $isPaydayCutoffReached = ($todayStr >= $period->pay_date || $todayStr >= $period->end_date);
         $targetStatus = $isPaydayCutoffReached ? 'Approved' : 'Draft';
 
-        DB::transaction(function () use ($existing, $details, $period, $hasZeroHours, $targetStatus, $isPaydayCutoffReached) {
+        DB::transaction(function () use ($controller, $existing, $details, $period, $hasZeroHours, $targetStatus, $isPaydayCutoffReached) {
             $existing->basic_salary = $details['period_base_pay'];
             $existing->regular_hours = $details['work_hours'];
             $existing->overtime_hours = $details['overtime_hours'];
@@ -3660,133 +3590,15 @@ class PayrollController extends Controller
                 $existing->approved_at = now();
             }
 
-            $meta = [
-                'from_date' => $period->start_date,
-                'to_date' => $period->end_date,
-                'period_dates' => "From {$period->start_date} to {$period->end_date}",
-                'cutoff_type' => 'weekly',
-                'is_weekly' => true,
-                'weekly_base_pay' => $hasZeroHours ? 0.0 : $details['weekly_base'],
-                'daily_rate' => $details['daily_rate'],
-                'hourly_rate' => $details['hourly_rate'],
-                'minute_rate' => $details['minute_rate'],
-                'work_hours' => $details['work_hours'],
-                'zero_hours' => $hasZeroHours,
-                'absence_days' => $details['absence_days'],
-                'absence_deduction' => $details['absence_deduction'],
-                'absence_breakdown' => $details['absence_breakdown'] ?? [],
-                'late_minutes' => $details['late_minutes'],
-                'late_penalty' => $details['late_deduction'],
-                'late_deduction' => $details['late_deduction'],
-                'late_rule' => $details['late_rule'],
-                'undertime_minutes' => $details['undertime_minutes'],
-                'undertime_hours' => $details['undertime_hours'],
-                'undertime_deduction' => $details['undertime_deduction'],
-                'sss' => $details['sss'],
-                'philhealth' => $details['philhealth'],
-                'pagibig' => $details['pagibig'],
-                'withholding_tax' => $details['withholding_tax'],
-                'remarks' => $hasZeroHours
-                    ? "Zero Hours Rule Applied: 0 rendered hours = ₱0.00 Salary"
-                    : "Weekly Auto-synchronized | Hrs: {$details['work_hours']}h | Net: ₱" . number_format($details['net_pay'], 2),
-            ];
+            $syncRemarks = $hasZeroHours
+                ? "Zero Hours Rule Applied: 0 rendered hours = ₱0.00 Salary"
+                : "Weekly Auto-synchronized | Hrs: {$details['work_hours']}h | Net: ₱" . number_format($details['net_pay'], 2);
+            $meta = $controller->buildPayrollMeta($details, $period->start_date, $period->end_date, $syncRemarks);
             $existing->notes = json_encode($meta);
             $existing->save();
 
-            // Refresh itemized deductions
-            PayrollDeduction::where('payroll_id', $existing->payroll_id)->delete();
-
-            if (!$hasZeroHours) {
-                if (!empty($details['absence_breakdown'])) {
-                    foreach ($details['absence_breakdown'] as $ab) {
-                        if (($ab['amount'] ?? 0) > 0) {
-                            PayrollDeduction::create([
-                                'payroll_id' => $existing->payroll_id,
-                                'deduction_type' => $ab['category'],
-                                'amount' => $ab['amount'],
-                                'notes' => "Absence Deduction: {$ab['category']} ({$ab['days']} day(s) @ ₱" . number_format($details['daily_rate'], 2) . "/day)",
-                            ]);
-                        }
-                    }
-                } elseif ($details['absence_deduction'] > 0) {
-                    PayrollDeduction::create([
-                        'payroll_id' => $existing->payroll_id,
-                        'deduction_type' => 'Absences',
-                        'amount' => $details['absence_deduction'],
-                        'notes' => "Absence Deduction ({$details['absence_days']} days @ ₱" . number_format($details['daily_rate'], 2) . "/day)",
-                    ]);
-                }
-
-                if ($details['late_penalty'] > 0) {
-                    PayrollDeduction::create([
-                        'payroll_id' => $existing->payroll_id,
-                        'deduction_type' => 'Late Penalty',
-                        'amount' => $details['late_penalty'],
-                        'notes' => $details['late_rule'],
-                    ]);
-                }
-
-                if ($details['undertime_deduction'] > 0) {
-                    PayrollDeduction::create([
-                        'payroll_id' => $existing->payroll_id,
-                        'deduction_type' => 'Undertime',
-                        'amount' => $details['undertime_deduction'],
-                        'notes' => "Undertime Deduction ({$details['undertime_minutes']} mins)",
-                    ]);
-                }
-
-                if ($details['sss'] > 0) {
-                    PayrollDeduction::create([
-                        'payroll_id' => $existing->payroll_id,
-                        'deduction_type' => 'SSS',
-                        'amount' => $details['sss'],
-                        'notes' => 'SSS Contribution',
-                    ]);
-                }
-                if ($details['philhealth'] > 0) {
-                    PayrollDeduction::create([
-                        'payroll_id' => $existing->payroll_id,
-                        'deduction_type' => 'PhilHealth',
-                        'amount' => $details['philhealth'],
-                        'notes' => 'PhilHealth Contribution',
-                    ]);
-                }
-                if ($details['pagibig'] > 0) {
-                    PayrollDeduction::create([
-                        'payroll_id' => $existing->payroll_id,
-                        'deduction_type' => 'Pag-IBIG',
-                        'amount' => $details['pagibig'],
-                        'notes' => 'Pag-IBIG (HDMF) Contribution',
-                    ]);
-                }
-
-                if ($details['withholding_tax'] > 0) {
-                    PayrollDeduction::create([
-                        'payroll_id' => $existing->payroll_id,
-                        'deduction_type' => 'Withholding Tax',
-                        'amount' => $details['withholding_tax'],
-                        'notes' => 'Withholding Tax Deduction',
-                    ]);
-                }
-
-                foreach ($details['custom_deductions'] as $cd) {
-                    PayrollDeduction::create([
-                        'payroll_id' => $existing->payroll_id,
-                        'deduction_type' => 'Other',
-                        'amount' => $cd['amount'],
-                        'notes' => $cd['name'],
-                    ]);
-                }
-
-                foreach ($details['loan_deductions'] as $ld) {
-                    PayrollDeduction::create([
-                        'payroll_id' => $existing->payroll_id,
-                        'deduction_type' => 'Loan',
-                        'amount' => $ld['amount'],
-                        'notes' => "Loan Repayment: {$ld['name']}",
-                    ]);
-                }
-            }
+            // Refresh itemized deductions uniformly
+            $controller->persistItemizedDeductions($existing, $details);
         });
     }
 }

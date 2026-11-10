@@ -158,6 +158,7 @@ export default function QrScannerPage() {
         fps: 15,
         qrbox: { width: 250, height: 250 },
         aspectRatio: 1.0,
+        disableFlip: false,
       }
 
       await qrScanner.start(
@@ -168,6 +169,12 @@ export default function QrScannerPage() {
         },
         () => {}
       )
+
+      const videoEl = document.querySelector(`#${scannerContainerId} video`)
+      if (videoEl) {
+        videoEl.style.transform = 'scaleX(-1)'
+        videoEl.style.objectFit = 'cover'
+      }
 
       setCameraActive(true)
     } catch (err) {
@@ -380,15 +387,18 @@ export default function QrScannerPage() {
 
               {/* Camera Video Viewport */}
               <div className="w-full max-w-sm aspect-square bg-slate-950 rounded-2xl border-2 border-slate-700 overflow-hidden relative shadow-2xl flex items-center justify-center">
-                <div id={scannerContainerId} className="w-full h-full" />
+                <div
+                  id={scannerContainerId}
+                  className="w-full h-full [&_video]:-scale-x-100! [&_video]:object-cover [&_#qr-shaded-region>div]:hidden"
+                />
                 
                 {/* Target Overlay */}
                 <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
-                  <div className="w-64 h-64 border-2 border-primary-500/80 rounded-2xl relative animate-pulse shadow-lg shadow-primary-500/10">
-                    <div className="absolute -top-1.5 -left-1.5 w-6 h-6 border-t-4 border-l-4 border-primary-400 rounded-tl" />
-                    <div className="absolute -top-1.5 -right-1.5 w-6 h-6 border-t-4 border-r-4 border-primary-400 rounded-tr" />
-                    <div className="absolute -bottom-1.5 -left-1.5 w-6 h-6 border-b-4 border-l-4 border-primary-400 rounded-bl" />
-                    <div className="absolute -bottom-1.5 -right-1.5 w-6 h-6 border-b-4 border-r-4 border-primary-400 rounded-br" />
+                  <div className="w-[250px] h-[250px] border-2 border-primary-500/80 rounded-2xl relative animate-pulse shadow-lg shadow-primary-500/10">
+                    <div className="absolute -top-0.5 -left-0.5 w-6 h-6 border-t-4 border-l-4 border-primary-400 rounded-tl-xl" />
+                    <div className="absolute -top-0.5 -right-0.5 w-6 h-6 border-t-4 border-r-4 border-primary-400 rounded-tr-xl" />
+                    <div className="absolute -bottom-0.5 -left-0.5 w-6 h-6 border-b-4 border-l-4 border-primary-400 rounded-bl-xl" />
+                    <div className="absolute -bottom-0.5 -right-0.5 w-6 h-6 border-b-4 border-r-4 border-primary-400 rounded-br-xl" />
                   </div>
                 </div>
 

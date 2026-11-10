@@ -27,7 +27,7 @@ export default function CarouselPage() {
     loadImages();
   }, []);
 
-  useRealtimeSync(loadImages, []);
+  useRealtimeSync(loadImages, [], { module: 'carousels' });
 
   const handleFileChange = async (e) => {
     if (images.length >= 10) {

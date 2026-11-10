@@ -27,6 +27,16 @@ export function fastDeepEqual(a, b) {
     return a.getTime() === b.getTime();
   }
 
+  // Fast primary key identity check for entity models
+  const aId = a.id ?? a.user_id ?? a.employee_id ?? a.customer_id ?? a.sale_id ?? a.payment_id ?? a.payroll_id ?? a.installment_id;
+  const bId = b.id ?? b.user_id ?? b.employee_id ?? b.customer_id ?? b.sale_id ?? b.payment_id ?? b.payroll_id ?? b.installment_id;
+  if (aId !== undefined && bId !== undefined && aId !== bId) {
+    return false;
+  }
+  if (a.updated_at !== undefined && b.updated_at !== undefined && a.updated_at !== b.updated_at) {
+    return false;
+  }
+
   const keysA = Object.keys(a);
   const keysB = Object.keys(b);
   const len = keysA.length;

@@ -50,15 +50,19 @@ class SyncController extends Controller
 
     /**
      * Compute a unified version hash across all core database tables.
-     * Sub-1ms index-only primary key checks combined with write-invalidation delta tracking.
+     * Ultra-fast O(1) in-memory mutation counter check with cached write-invalidation fallback.
      */
     public static function computeFingerprint(): int
     {
-        return Cache::remember('pace_unified_fingerprint', 1, function () {
-            try {
-                $mutationCounter = Cache::get('pace_mutation_counter', 0);
-                $mutationVersion = Cache::get('pace_db_mutation_version', 0);
+        $mutationCounter = (int) Cache::get('pace_mutation_counter', 0);
+        $mutationVersion = (int) Cache::get('pace_db_mutation_version', 0);
 
+        if ($mutationCounter > 0 && $mutationVersion > 0) {
+            return (int) crc32("{$mutationCounter}_{$mutationVersion}");
+        }
+
+        return Cache::remember('pace_unified_fingerprint', 300, function () use ($mutationCounter, $mutationVersion) {
+            try {
                 // Sub-1ms O(1) B-tree index queries on primary keys (no slow COUNT(*) or table scans)
                 $res = DB::selectOne("
                     SELECT 

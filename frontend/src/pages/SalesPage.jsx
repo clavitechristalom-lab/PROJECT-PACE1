@@ -88,7 +88,7 @@ export default function SalesPage({ branchFilter, embedded }) {
       if (needCatalog) {
         promises.push(
           api.products.getAll({ branch: branchFilter || undefined }, reqOpts).catch(() => ({ products: [] })),
-          api.customers.getAll({ status: 'Active', branch: branchFilter || undefined }, reqOpts).catch(() => ({ customers: [] }))
+          api.customers.getAll({ branch: branchFilter || undefined }, reqOpts).catch(() => ({ customers: [] }))
         )
       }
 

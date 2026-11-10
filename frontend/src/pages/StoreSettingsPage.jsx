@@ -63,9 +63,9 @@ export default function StoreSettingsPage() {
         })
         if (data.branch.image_url) {
           setPreviewUrl(
-            data.branch.image_url.startsWith('http') 
-              ? data.branch.image_url 
-              : `http://localhost:8000${data.branch.image_url}`
+            data.branch.image_url.includes('/storage/')
+              ? data.branch.image_url.substring(data.branch.image_url.indexOf('/storage/'))
+              : data.branch.image_url
           )
         }
       }
@@ -77,7 +77,7 @@ export default function StoreSettingsPage() {
     }
   }
 
-  useRealtimeSync(fetchBranchDetails, [branchId])
+  useRealtimeSync(fetchBranchDetails, [branchId], { module: 'branches' })
 
   const handleFileChange = (e) => {
     const file = e.target.files[0]

@@ -45,7 +45,7 @@ export default function StoreCatalogView({ onBuyProduct, availableCategories = [
 
   useRealtimeSync((_source, signal) => {
     loadProducts(true, signal);
-  }, [loadProducts]);
+  }, [loadProducts], { module: 'products' });
 
   // Extract all categories dynamically if not provided
   const categories = ['All', ...new Set([
@@ -72,26 +72,6 @@ export default function StoreCatalogView({ onBuyProduct, availableCategories = [
           <p className="text-xs sm:text-sm text-muted-foreground">
             Explore premium furniture, home appliances, and installment-ready pieces available at Z-Lics Iligan.
           </p>
-        </div>
-
-        {/* Search Bar */}
-        <div className="relative w-full md:w-80">
-          <FiSearch className="absolute left-3.5 top-1/2 -translate-y-1/2 text-muted-foreground w-4 h-4" />
-          <input
-            type="text"
-            placeholder="Search appliance, sofa, brand..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full h-11 pl-10 pr-4 text-xs rounded-2xl border border-border bg-card text-foreground placeholder:text-muted-foreground/70 focus:outline-none focus:ring-2 focus:ring-blue-500/30 transition-all shadow-xs"
-          />
-          {searchQuery && (
-            <button
-              onClick={() => setSearchQuery('')}
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-            >
-              <FiX className="w-3.5 h-3.5" />
-            </button>
-          )}
         </div>
       </div>
 
@@ -156,7 +136,7 @@ export default function StoreCatalogView({ onBuyProduct, availableCategories = [
                 <div className="relative aspect-4/3 w-full bg-slate-100 dark:bg-slate-900 overflow-hidden flex items-center justify-center p-3">
                   {p.image_url ? (
                     <img
-                      src={p.image_url.startsWith('http') ? p.image_url : `http://127.0.0.1:8000${p.image_url}`}
+                      src={p.image_url.includes('/storage/') ? p.image_url.substring(p.image_url.indexOf('/storage/')) : p.image_url}
                       alt={p.product_name}
                       className="w-full h-full object-contain transition-transform duration-500 group-hover:scale-105"
                       onError={(e) => { e.currentTarget.style.display = 'none'; }}
@@ -230,7 +210,7 @@ export default function StoreCatalogView({ onBuyProduct, availableCategories = [
                       className="px-3 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 active:scale-95 text-white font-bold text-xs flex items-center gap-1.5 shadow-md shadow-blue-600/25 transition-all cursor-pointer shrink-0"
                     >
                       <FiShoppingBag className="w-3.5 h-3.5" />
-                      <span>Inquire / Pay</span>
+                      <span>Pay</span>
                     </button>
                   </div>
                 </div>
@@ -258,7 +238,7 @@ export default function StoreCatalogView({ onBuyProduct, availableCategories = [
 function ProductDetailViewer({ product, onClose, onBuyProduct }) {
   const images = [product.image_url, product.image_url_2, product.image_url_3, product.image_url_4]
     .filter(Boolean)
-    .map(url => (url.startsWith('http') ? url : `http://127.0.0.1:8000${url}`));
+    .map(url => (url.includes('/storage/') ? url.substring(url.indexOf('/storage/')) : url));
 
   const [activeImgIdx, setActiveImgIdx] = useState(0);
   const [isFullScreen, setIsFullScreen] = useState(false);
@@ -391,7 +371,7 @@ function ProductDetailViewer({ product, onClose, onBuyProduct }) {
             className="px-6 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 active:scale-95 text-white font-bold text-xs shadow-md shadow-blue-600/30 flex items-center gap-2 transition-all cursor-pointer"
           >
             <FiShoppingBag size={15} />
-            <span>Inquire / Pay ({fmt(price)})</span>
+            <span>Pay ({fmt(price)})</span>
           </button>
         </div>
 

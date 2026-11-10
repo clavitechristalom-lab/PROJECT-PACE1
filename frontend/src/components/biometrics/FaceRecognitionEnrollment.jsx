@@ -378,8 +378,8 @@ export default function FaceRecognitionEnrollment({
           return
         }
 
-        // 10-Second Progress Pacing: 80ms * 125 ticks = 10,000ms = 10.0s
-        const increment = 0.76 + Math.random() * 0.08
+        // Fast Progress Pacing (no 10-second countdown wait)
+        const increment = 25
         const nextProgress = Math.min(100, progressRef.current + increment)
         progressRef.current = nextProgress
         setScanProgress(nextProgress)
@@ -765,7 +765,7 @@ export default function FaceRecognitionEnrollment({
                   <>
                     <FiShield className="w-4 h-4 text-emerald-400 shrink-0" />
                     <span className="text-emerald-300">
-                      Validating 3D Biometric Liveness... ({remainingSeconds}s remaining)
+                      Validating 3D Biometric Liveness...
                     </span>
                   </>
                 ) : (

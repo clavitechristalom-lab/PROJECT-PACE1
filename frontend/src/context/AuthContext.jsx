@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react'
-import { api } from '../lib/api'
+import { api, normalizeStorageUrls } from '../lib/api'
 
 const defaultAuthContext = {
   user: null,
@@ -20,7 +20,7 @@ export function AuthProvider({ children }) {
       const raw = sessionStorage.getItem('pace_session')
       if (!raw) return null
       const parsed = JSON.parse(raw)
-      return parsed?.cached_user || null
+      return normalizeStorageUrls(parsed?.cached_user) || null
     } catch {
       return null
     }

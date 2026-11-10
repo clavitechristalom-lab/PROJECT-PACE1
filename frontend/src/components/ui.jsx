@@ -185,7 +185,7 @@ export function Badge({ label, text, children, color = 'gray', variant, icon }) 
 
 const STATUS_COLORS = {
   Active: 'green', Completed: 'green', 'Complete Payment': 'green', Paid: 'green', 'Paid in Full': 'green', 'Fully Paid': 'green', Present: 'green', Approved: 'blue', Responded: 'green',
-  Overdue: 'red', Inactive: 'red', Absent: 'red', Cancelled: 'red', Rejected: 'red',
+  Overdue: 'red', Inactive: 'red', Unactive: 'red', Absent: 'red', Cancelled: 'red', Rejected: 'red',
   Pending: 'yellow', Draft: 'yellow', Late: 'yellow', Open: 'yellow', 'Half Day': 'yellow',
   'Partially Paid': 'purple', Processing: 'blue', 'On Leave': 'indigo', 'Rest Day': 'gray',
   'In Stock': 'green', 'High Stock': 'blue', 'Medium Stock': 'orange', 'Low Stock': 'yellow', 'Out of Stock': 'red',
@@ -198,7 +198,7 @@ export function StatusBadge({ status }) {
 
   let icon = null
   const s = String(status).toLowerCase().trim()
-  if (s === 'inactive' || s.includes('inactive')) {
+  if (s === 'inactive' || s === 'unactive' || s.includes('inactive') || s.includes('unactive')) {
     icon = <FiAlertCircle className="w-3 h-3" />
   } else if (s.includes('active') || s.includes('complete') || s.includes('paid') || s.includes('present') || s.includes('approved')) {
     icon = <FiCheckCircle className="w-3 h-3" />

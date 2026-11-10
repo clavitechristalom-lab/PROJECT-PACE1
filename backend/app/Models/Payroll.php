@@ -42,4 +42,30 @@ class Payroll extends Model
     {
         return $this->hasMany(PayrollDeduction::class, 'payroll_id', 'payroll_id');
     }
+
+    public function payslip()
+    {
+        return $this->hasOne(Payslip::class, 'payroll_id', 'payroll_id');
+    }
+
+    protected static function booted()
+    {
+        static::saved(function ($payroll) {
+            try {
+                if (\Illuminate\Support\Facades\Schema::hasTable('payslips')) {
+                    Payslip::syncFromPayroll($payroll);
+                }
+            } catch (\Throwable $e) {
+                // Silent guard if table is migrating
+            }
+        });
+
+        static::deleted(function ($payroll) {
+            try {
+                if (\Illuminate\Support\Facades\Schema::hasTable('payslips')) {
+                    Payslip::where('payroll_id', $payroll->payroll_id)->delete();
+                }
+            } catch (\Throwable $e) {}
+        });
+    }
 }

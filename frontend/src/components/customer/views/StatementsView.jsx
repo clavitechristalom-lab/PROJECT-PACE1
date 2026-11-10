@@ -101,7 +101,7 @@ export default function StatementsView({
 
   useRealtimeSync((_source, signal) => {
     loadStatements(true, signal);
-  }, [loadStatements]);
+  }, [loadStatements], { module: 'installments' });
 
   // Derived financials
   const totalDebits = statements
@@ -121,11 +121,12 @@ export default function StatementsView({
 
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
-      const matchRef = (item.reference || '').toLowerCase().includes(q);
+      const matchRef = (item.reference_no || item.reference || '').toLowerCase().includes(q);
       const matchDesc = (item.description || '').toLowerCase().includes(q);
+      const matchChan = (item.channel_method || item.payment_method || '').toLowerCase().includes(q);
       const matchAcct = (item.account_no || '').toLowerCase().includes(q);
       const matchDate = (item.date || '').toLowerCase().includes(q);
-      if (!matchRef && !matchDesc && !matchAcct && !matchDate) return false;
+      if (!matchRef && !matchDesc && !matchChan && !matchAcct && !matchDate) return false;
     }
 
     return true;
@@ -340,13 +341,15 @@ export default function StatementsView({
               <tbody className="divide-y divide-border/60">
                 {filtered.map((item, idx) => {
                   const isDebit = item.category === 'Debit' || item.type === 'Purchase';
+                  const refDisplay = item.reference_no || item.reference || item.id;
+                  const channelDisplay = item.channel_method || item.payment_method || 'Standard';
                   return (
-                    <tr key={item.id || idx} className="hover:bg-muted/30 transition-colors">
+                    <tr key={item.id || refDisplay || idx} className="hover:bg-muted/30 transition-colors">
                       <td className="px-5 py-3.5 font-semibold text-foreground whitespace-nowrap">
                         {item.date || '—'}
                       </td>
                       <td className="px-5 py-3.5 font-mono font-bold text-foreground whitespace-nowrap">
-                        {item.reference || item.id}
+                        {refDisplay}
                       </td>
                       <td className="px-5 py-3.5">
                         <span className="font-semibold text-foreground block">{item.description}</span>
@@ -367,7 +370,7 @@ export default function StatementsView({
                         </span>
                       </td>
                       <td className="px-5 py-3.5 text-muted-foreground whitespace-nowrap">
-                        {item.payment_method || 'Standard'}
+                        {channelDisplay}
                       </td>
                       <td className={`px-5 py-3.5 font-mono font-extrabold text-sm text-right whitespace-nowrap ${
                         isDebit ? 'text-amber-900 dark:text-amber-200' : 'text-emerald-600 dark:text-emerald-400'

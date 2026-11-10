@@ -38,7 +38,6 @@ class NotificationService
 
         $user = User::select(['user_id', 'is_active'])->find($userId);
         if (!$user) return null;
-        if (isset($user->is_active) && $user->is_active === false) return null;
 
         $notif = self::createForUserId($userId, $data);
         SyncController::invalidateFingerprint();
@@ -52,9 +51,6 @@ class NotificationService
     public static function sendToAdmins(array $data): array
     {
         $adminIds = User::where('role', 'Administrator')
-            ->where(function ($q) {
-                $q->whereNull('is_active')->orWhere('is_active', true)->orWhere('is_active', 1);
-            })
             ->pluck('user_id');
 
         $created = [];
@@ -74,8 +70,7 @@ class NotificationService
      */
     public static function sendToStoreAdmins(array $data, ?string $branch = null): array
     {
-        $query = User::whereIn('role', ['Store Administrator', 'Store Admin'])
-            ->where('is_active', true);
+        $query = User::whereIn('role', ['Store Administrator', 'Store Admin']);
 
         if ($branch && $branch !== 'All') {
             $query->whereHas('employee', function ($q) use ($branch) {
@@ -103,7 +98,6 @@ class NotificationService
     public static function sendToRole(string $role, array $data): array
     {
         $userIds = User::where('role', $role)
-            ->where('is_active', true)
             ->pluck('user_id');
 
         $created = [];
@@ -126,7 +120,6 @@ class NotificationService
         if (!$employeeId) return null;
 
         $userId = User::where('employee_id', $employeeId)
-            ->where('is_active', true)
             ->value('user_id');
 
         if (!$userId) return null;
@@ -142,8 +135,7 @@ class NotificationService
      */
     public static function sendToCustomers(array $data, ?string $branchId = null): array
     {
-        $query = User::where('role', 'Customer')
-            ->where('is_active', true);
+        $query = User::where('role', 'Customer');
 
         if ($branchId && $branchId !== 'All') {
             $query->whereHas('customer', function ($q) use ($branchId) {
@@ -173,7 +165,6 @@ class NotificationService
         if (!$customerId) return null;
 
         $userId = User::where('customer_id', $customerId)
-            ->where('is_active', true)
             ->value('user_id');
 
         if (!$userId) return null;

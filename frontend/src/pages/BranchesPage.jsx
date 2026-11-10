@@ -54,7 +54,7 @@ export default function BranchesPage() {
 
   useRealtimeSync(() => {
     loadData(true)
-  }, [])
+  }, [], { module: 'branches' })
 
   // Form
   const emptyForm = { name: '', location: '', contact_number: '', status: 'open', color: '#2b5ce6' }

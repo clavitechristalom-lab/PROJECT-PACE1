@@ -103,25 +103,31 @@ export default function EmployeePayslipModal({ payslip, onClose }) {
   }, [payslip])
 
   // Strict Zero Hours Rule & Live MySQL Attendance Detection:
-  // If work_hours == 0 or regular_hours == 0, base pay, gross pay, deductions, and net pay evaluate strictly to 0.00
-  const isZeroHours = (payslip.work_hours !== undefined && payslip.work_hours !== null && Number(payslip.work_hours) === 0) ||
-    (payslip.regular_hours !== undefined && payslip.regular_hours !== null && Number(payslip.regular_hours) === 0 && Number(payslip.work_hours || 0) === 0)
+  // If work_hours == 0 and no approved Paid Leave covers the week, base pay, gross pay, deductions, and net pay evaluate strictly to 0.00
+  const paidLeaveDays = Number(payslip.paid_leave_days || 0)
+  const rawHours = (payslip.work_hours !== undefined && payslip.work_hours !== null)
+    ? Number(payslip.work_hours)
+    : Number(payslip.regular_hours || 0)
+  const isZeroHours = Boolean(payslip.zero_hours) || (rawHours <= 0 && paidLeaveDays <= 0 && Number(payslip.gross_pay || 0) <= 0)
 
-  const regularHours = isZeroHours ? 0 : Number(payslip.work_hours ?? payslip.regular_hours ?? 0)
+  const regularHours = isZeroHours ? 0 : rawHours
+  const rawDaily = Number(payslip.daily_rate || 0)
+  const dailyRateVal = (rawDaily >= 100 && rawDaily <= 500) ? rawDaily : 500
   const regularRate = Number(
     payslip.hourly_rate > 0
       ? payslip.hourly_rate
-      : (payslip.daily_rate > 0 ? (payslip.daily_rate / 8) : 0)
+      : (dailyRateVal / 8)
   )
   const regularAmount = isZeroHours
     ? 0
-    : Number(payslip.weekly_base_pay ?? (payslip.basic_pay ?? (regularHours > 0 ? (regularRate * regularHours) : 0)))
+    : (payslip.weekly_base_pay !== undefined && payslip.weekly_base_pay !== null
+        ? Number(payslip.weekly_base_pay)
+        : Number(payslip.basic_pay ?? (dailyRateVal * 6)))
 
-  const otHours = isZeroHours ? 0 : Number(payslip.overtime_hours || 0)
-  const otRate = otHours > 0
-    ? (payslip.overtime_pay > 0 ? (Number(payslip.overtime_pay) / otHours) : (regularRate > 0 ? regularRate * 1.25 : 0))
-    : (regularRate > 0 ? regularRate * 1.25 : 0)
-  const otAmount = isZeroHours ? 0 : Number(payslip.overtime_pay || 0)
+  // Strictly NO Overtime Company-Wide
+  const otHours = 0
+  const otRate = 0
+  const otAmount = 0
 
   const holidayHours = isZeroHours ? 0 : Number(payslip.holiday_hours || 0)
   const holidayRate = holidayHours > 0
@@ -170,8 +176,7 @@ export default function EmployeePayslipModal({ payslip, onClose }) {
 
   // Build Synchronized Side-by-Side Table Rows
   const isWeeklyPay = payFrequency === 'Weekly' || payslip.is_weekly !== false
-  const minuteRateVal = Number(payslip.minute_rate || (regularRate > 0 ? (regularRate / 60) : 1.0417))
-  const dailyRateVal = Number(payslip.daily_rate || (regularRate > 0 ? regularRate * 8 : 500))
+  const minuteRateVal = Number(payslip.minute_rate || 1.00)
 
   const earningsList = [
     {
@@ -591,8 +596,10 @@ export default function EmployeePayslipModal({ payslip, onClose }) {
                         {ab.reason} ({ab.days} day(s): {ab.from_date} &rarr; {ab.to_date})
                       </span>
                     </div>
-                    <span className="font-mono font-bold text-rose-600">
-                      -₱{formatMoney(Number(ab.amount), false)}
+                    <span className={`font-mono font-bold ${ab.is_paid || Number(ab.amount || 0) === 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
+                      {ab.is_paid || Number(ab.amount || 0) === 0
+                        ? (ab.amount_formatted || '₱0.00 (Paid Leave)')
+                        : `-₱${formatMoney(Number(ab.amount), false)}`}
                     </span>
                   </div>
                 ))}

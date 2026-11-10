@@ -232,7 +232,6 @@ export default function PayrollPage() {
           period_id: targetPeriodId !== undefined ? (targetPeriodId || undefined) : (selectedPeriodId || undefined),
           from_date: customParams.fromDate !== undefined ? (customParams.fromDate || undefined) : (fromDate || undefined),
           to_date: customParams.toDate !== undefined ? (customParams.toDate || undefined) : (toDate || undefined),
-          status: customParams.status !== undefined ? (customParams.status || undefined) : (filterStatus || undefined),
         }, { signal })
         if (signal?.aborted) return
         const newPay = data?.payroll || []
@@ -255,7 +254,6 @@ export default function PayrollPage() {
           period_id: targetPeriodId !== undefined ? (targetPeriodId || undefined) : (selectedPeriodId || undefined),
           from_date: customParams.fromDate !== undefined ? (customParams.fromDate || undefined) : (fromDate || undefined),
           to_date: customParams.toDate !== undefined ? (customParams.toDate || undefined) : (toDate || undefined),
-          status: customParams.status !== undefined ? (customParams.status || undefined) : (filterStatus || undefined),
           branch: branchParam,
         }, { signal })
         if (signal?.aborted) return
@@ -275,9 +273,6 @@ export default function PayrollPage() {
           sessionStorage.setItem('pace_cached_payroll', JSON.stringify(newPay))
           sessionStorage.setItem('pace_cached_periods', JSON.stringify(newPer))
         } catch (e) { }
-        if (!selectedPeriodId && data?.periods?.length > 0 && targetPeriodId === undefined) {
-          setSelectedPeriodId(data.periods[0].period_id.toString())
-        }
       }
     } catch (err) {
       if (err?.name === 'AbortError') return
@@ -527,27 +522,68 @@ export default function PayrollPage() {
     if (branchFilter && branchFilter !== 'All') {
       list = list.filter(p => (p.branch || '').toLowerCase() === branchFilter.toLowerCase())
     }
-    if (search.trim()) {
-      const q = search.toLowerCase().trim()
+    if (filterStatus && filterStatus !== 'All') {
+      const st = filterStatus.toLowerCase().trim()
       list = list.filter(p => {
-        const name = (p.employee_name || '').toLowerCase()
-        const code = (p.employee_code || '').toLowerCase()
-        const dept = (p.department || '').toLowerCase()
-        const pos = (p.position || '').toLowerCase()
-        const br = (p.branch || '').toLowerCase()
-        return name.includes(q) || code.includes(q) || dept.includes(q) || pos.includes(q) || br.includes(q)
+        const rowStatus = (p.status || '').toLowerCase().trim()
+        if (st === 'pending') return rowStatus === 'pending' || rowStatus === 'draft'
+        return rowStatus === st
+      })
+    }
+    if (fromDate) {
+      list = list.filter(p => {
+        const end = p.end_date || (p.period_dates ? p.period_dates.split(' to ')[1] : '') || p.pay_date || ''
+        const start = p.start_date || (p.period_dates ? p.period_dates.split(' to ')[0] : '') || ''
+        return (!end && !start) || (start >= fromDate || end >= fromDate)
+      })
+    }
+    if (toDate) {
+      list = list.filter(p => {
+        const start = p.start_date || (p.period_dates ? p.period_dates.split(' to ')[0] : '') || ''
+        const end = p.end_date || (p.period_dates ? p.period_dates.split(' to ')[1] : '') || p.pay_date || ''
+        return (!start && !end) || (start <= toDate || end <= toDate)
+      })
+    }
+    if (search.trim()) {
+      const tokens = search.toLowerCase().trim().split(/\s+/).filter(Boolean)
+      list = list.filter(p => {
+        const haystack = [
+          p.employee_name,
+          p.code,
+          p.employee_code,
+          p.department,
+          p.position,
+          p.branch,
+          p.status,
+          p.payout_method,
+          p.pay_type,
+          p.period_name,
+        ].filter(Boolean).join(' ').toLowerCase()
+        return tokens.every(t => haystack.includes(t))
       })
     }
     return list
-  }, [payroll, selectedPeriodId, branchFilter, search])
+  }, [payroll, selectedPeriodId, branchFilter, filterStatus, fromDate, toDate, search])
 
   const isManager = ['Administrator', 'Admin', 'Store Administrator', 'Store Admin'].includes(user?.role)
 
   const total = displayed.length
   const paginated = displayed.slice((page - 1) * pageSize, page * pageSize)
 
+  const resolveRowWeeklyBase = (p) => {
+    const hours = Number(p.work_hours ?? p.regular_hours ?? 0)
+    const paidLeave = Number(p.paid_leave_days || 0)
+    const isZero = Boolean(p.zero_hours) || (Number(p.basic_salary || 0) === 0 && hours <= 0 && paidLeave <= 0)
+    if (isZero) return 0
+    const dr = Number(p.daily_rate >= 100 && p.daily_rate <= 500 ? p.daily_rate : 500)
+    const wb = p.weekly_base_pay !== undefined && p.weekly_base_pay !== null ? Number(p.weekly_base_pay) : -1
+    if (wb > 0 && wb <= 3000) return wb
+    if (wb === 0) return 0
+    return dr * 6
+  }
+
   // Live aggregates for weekly payroll
-  const totalWeeklyBase = displayed.reduce((acc, p) => acc + (p.weekly_base_pay || p.basic_salary || 0), 0)
+  const totalWeeklyBase = displayed.reduce((acc, p) => acc + resolveRowWeeklyBase(p), 0)
   const totalWorkHours = displayed.reduce((acc, p) => acc + (p.work_hours ?? p.regular_hours ?? 0), 0)
   const totalAbsenceDays = displayed.reduce((acc, p) => acc + (p.absence_days || 0), 0)
   const totalAbsenceDeductions = displayed.reduce((acc, p) => acc + (p.absence_deduction || 0), 0)
@@ -562,14 +598,18 @@ export default function PayrollPage() {
 
   // Group by department for chart
   const deptSummary = useMemo(() => {
-    return Object.values(displayed.reduce((acc, p) => {
-      const dept = p.department || 'General'
-      if (!acc[dept]) acc[dept] = { department: dept, Net: 0, Deductions: 0, Gross: 0 }
-      acc[dept].Net += (p.net_pay || 0)
-      acc[dept].Deductions += (p.total_deductions || 0)
-      acc[dept].Gross += (p.gross_pay || 0)
-      return acc
-    }, {}))
+    const map = {}
+    displayed.forEach(p => {
+      const dept = p.department || (p.position?.includes('Store Admin') ? 'Store Admin' : 'Employee')
+      if (!map[dept]) map[dept] = { department: dept, Gross: 0, Net: 0, Deductions: 0 }
+      const baseVal = resolveRowWeeklyBase(p)
+      const grossVal = (p.gross_pay !== undefined && p.gross_pay !== null) ? Number(p.gross_pay) : baseVal
+      const netVal = (p.net_pay !== undefined && p.net_pay !== null) ? Number(p.net_pay) : Math.max(0, grossVal - Number(p.total_deductions || 0))
+      map[dept].Gross += grossVal
+      map[dept].Deductions += Number(p.total_deductions || 0)
+      map[dept].Net += netVal
+    })
+    return Object.values(map)
   }, [displayed])
 
   return (
@@ -737,18 +777,32 @@ export default function PayrollPage() {
           <h3 className="text-xs font-bold text-foreground mb-4 uppercase tracking-wide">Payroll Distribution by Department</h3>
           <div className="h-[220px] w-full">
             <ResponsiveContainer width="100%" height="100%">
-              <ComposedChart data={deptSummary} margin={{ top: 5, right: 0, left: -20, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" />
-                <XAxis dataKey="department" axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: 'hsl(var(--muted-foreground))' }} dy={10} />
-                <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: 'hsl(var(--muted-foreground))' }} tickFormatter={v => `₱${v >= 1000 ? (v / 1000) + 'k' : v}`} />
+              <ComposedChart data={deptSummary} margin={{ top: 10, right: 20, left: 0, bottom: 0 }} barGap={8}>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--border)" />
+                <XAxis
+                  dataKey="department"
+                  axisLine={false}
+                  tickLine={false}
+                  tick={{ fontSize: 11, fill: 'var(--muted-foreground)' }}
+                  dy={10}
+                />
+                <YAxis
+                  allowDecimals={false}
+                  domain={[0, dataMax => Math.max(Number(dataMax) || 0, 5000)]}
+                  axisLine={false}
+                  tickLine={false}
+                  tick={{ fontSize: 11, fill: 'var(--muted-foreground)' }}
+                  tickFormatter={v => `₱${v >= 1000 ? (v / 1000).toFixed(v % 1000 === 0 ? 0 : 1) + 'k' : v}`}
+                />
                 <Tooltip
                   formatter={(value) => fmt(value)}
-                  contentStyle={{ borderRadius: '12px', border: '1px solid hsl(var(--border))', background: 'hsl(var(--card))', color: 'hsl(var(--foreground))', fontSize: '12px' }}
-                  cursor={{ fill: 'hsl(var(--muted) / 0.4)' }}
+                  contentStyle={{ borderRadius: '12px', border: '1px solid var(--border)', backgroundColor: 'var(--card)', color: 'var(--foreground)', fontSize: '12px' }}
+                  labelStyle={{ color: 'var(--foreground)', fontWeight: 700, marginBottom: '4px' }}
+                  cursor={{ fill: 'rgba(148, 163, 184, 0.12)' }}
                 />
-                <Legend iconType="circle" wrapperStyle={{ fontSize: '11px' }} />
-                <Bar dataKey="Net" name="Net Pay" fill="#10b981" barSize={32} />
-                <Line dataKey="Gross" name="Gross Pay" type="monotone" stroke="#8b5cf6" strokeWidth={3} dot={false} activeDot={{ r: 6 }} />
+                <Legend iconType="circle" wrapperStyle={{ fontSize: '11px', paddingTop: '8px' }} />
+                <Bar dataKey="Gross" name="Gross Pay" fill="#8b5cf6" barSize={36} radius={[6, 6, 0, 0]} />
+                <Bar dataKey="Net" name="Net Pay" fill="#10b981" barSize={36} radius={[6, 6, 0, 0]} minPointSize={4} />
               </ComposedChart>
             </ResponsiveContainer>
           </div>
@@ -759,10 +813,10 @@ export default function PayrollPage() {
 
       {/* Filters */}
       <Card noPad className="p-3.5 border border-border">
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-7 gap-3 items-end">
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-7 gap-3 items-start">
           {user?.role !== 'Employee' && (
-            <div className="sm:col-span-2 lg:col-span-2">
-              <label className="text-[11px] font-bold text-muted-foreground uppercase mb-1 block">Employee Search</label>
+            <div className="sm:col-span-2 lg:col-span-2 flex flex-col">
+              <label className="text-[11px] font-bold text-muted-foreground uppercase leading-none mb-1.5 block">Employee Search</label>
               <div className="relative">
                 <FiSearch className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
                 <input
@@ -770,10 +824,11 @@ export default function PayrollPage() {
                   placeholder="Search name, code, branch, dept..."
                   value={search}
                   onChange={e => { setSearch(e.target.value); setPage(1); }}
-                  className="w-full pl-9 pr-8 py-1.5 text-xs border border-border rounded-lg bg-card text-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all placeholder:text-muted-foreground/70"
+                  onKeyDown={e => { if (e.key === 'Enter') handleSearchFilters(); }}
+                  className="w-full h-9 pl-9 pr-8 text-xs border border-border rounded-lg bg-card text-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all placeholder:text-muted-foreground/70"
                 />
                 {search && (
-                  <button type="button" onClick={() => setSearch('')} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground cursor-pointer">
+                  <button type="button" onClick={() => { setSearch(''); setPage(1); }} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground cursor-pointer">
                     <FiX className="w-3.5 h-3.5" />
                   </button>
                 )}
@@ -781,8 +836,8 @@ export default function PayrollPage() {
             </div>
           )}
           {user?.role !== 'Employee' && (
-            <div>
-              <label className="text-[11px] font-bold text-muted-foreground uppercase mb-1 block">
+            <div className="flex flex-col">
+              <label className="text-[11px] font-bold text-muted-foreground uppercase leading-none mb-1.5 block">
                 Branch {isStoreAdmin ? '(Assigned)' : ''}
               </label>
               <select
@@ -795,7 +850,7 @@ export default function PayrollPage() {
                   loadData(selectedPeriodId, { fromDate, toDate, status: filterStatus, branch: val })
                   loadEmployees(val)
                 }}
-                className="w-full px-3 py-1.5 text-xs border border-border rounded-lg bg-card text-foreground cursor-pointer disabled:opacity-75 focus:outline-none focus:ring-2 focus:ring-primary/20"
+                className="w-full h-9 px-3 text-xs border border-border rounded-lg bg-card text-foreground cursor-pointer disabled:opacity-75 focus:outline-none focus:ring-2 focus:ring-primary/20"
                 title={isStoreAdmin ? `Locked to ${userBranchName || 'assigned branch'}` : 'Filter by branch'}
               >
                 <option value="All">All Branches</option>
@@ -805,36 +860,39 @@ export default function PayrollPage() {
               </select>
             </div>
           )}
-          <div>
-            <label className="text-[11px] font-bold text-muted-foreground uppercase mb-1 block">From Date</label>
-            <input type="date" value={fromDate} onChange={e => setFromDate(e.target.value)} className="w-full px-3 py-1.5 text-xs border border-border rounded-lg bg-card text-foreground" />
+          <div className="flex flex-col">
+            <label className="text-[11px] font-bold text-muted-foreground uppercase leading-none mb-1.5 block">From Date</label>
+            <input type="date" value={fromDate} onChange={e => { setFromDate(e.target.value); setPage(1); }} className="w-full h-9 px-3 text-xs border border-border rounded-lg bg-card text-foreground focus:outline-none focus:ring-2 focus:ring-primary/20" />
           </div>
-          <div>
-            <label className="text-[11px] font-bold text-muted-foreground uppercase mb-1 block">To Date</label>
-            <input type="date" value={toDate} onChange={e => setToDate(e.target.value)} className="w-full px-3 py-1.5 text-xs border border-border rounded-lg bg-card text-foreground" />
+          <div className="flex flex-col">
+            <label className="text-[11px] font-bold text-muted-foreground uppercase leading-none mb-1.5 block">To Date</label>
+            <input type="date" value={toDate} onChange={e => { setToDate(e.target.value); setPage(1); }} className="w-full h-9 px-3 text-xs border border-border rounded-lg bg-card text-foreground focus:outline-none focus:ring-2 focus:ring-primary/20" />
           </div>
-          <div>
-            <label className="text-[11px] font-bold text-muted-foreground uppercase mb-1 block">Payroll Period</label>
-            <select value={selectedPeriodId} onChange={e => handlePeriodChange(e.target.value)} className="w-full px-3 py-1.5 text-xs border border-border rounded-lg bg-card text-foreground">
+          <div className="flex flex-col">
+            <label className="text-[11px] font-bold text-muted-foreground uppercase leading-none mb-1.5 block">Payroll Period</label>
+            <select value={selectedPeriodId} onChange={e => handlePeriodChange(e.target.value)} className="w-full h-9 px-3 text-xs border border-border rounded-lg bg-card text-foreground cursor-pointer focus:outline-none focus:ring-2 focus:ring-primary/20">
               <option value="">All Periods</option>
               {periods.map(prd => <option key={prd.period_id} value={prd.period_id}>{prd.period_name}</option>)}
             </select>
           </div>
-          <div>
-            <label className="text-[11px] font-bold text-muted-foreground uppercase mb-1 block">Status</label>
-            <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)} className="w-full px-3 py-1.5 text-xs border border-border rounded-lg bg-card text-foreground">
+          <div className="flex flex-col">
+            <label className="text-[11px] font-bold text-muted-foreground uppercase leading-none mb-1.5 block">Status</label>
+            <select
+              value={filterStatus}
+              onChange={e => {
+                const val = e.target.value
+                setFilterStatus(val)
+                setPage(1)
+                loadData(selectedPeriodId, { fromDate, toDate, status: val, branch: branchFilter })
+              }}
+              className="w-full h-9 px-3 text-xs border border-border rounded-lg bg-card text-foreground cursor-pointer focus:outline-none focus:ring-2 focus:ring-primary/20"
+            >
               <option value="">All</option>
               <option value="Paid">Paid</option>
               <option value="Approved">Approved</option>
               <option value="Processing">Processing</option>
               <option value="Pending">Pending</option>
             </select>
-          </div>
-          <div className={user?.role === 'Employee' ? '' : 'sm:col-span-1'}>
-            <button onClick={handleSearchFilters} className="w-full flex items-center justify-center gap-1.5 px-3 py-1.5 bg-primary text-primary-foreground font-semibold text-xs rounded-lg hover:bg-primary/90 transition-all cursor-pointer shadow-sm">
-              <FiSearch className="w-3.5 h-3.5" />
-              <span>Search</span>
-            </button>
           </div>
         </div>
       </Card>
@@ -911,10 +969,17 @@ export default function PayrollPage() {
                 <tbody className="divide-y divide-border">
                   {paginated.map((p, i) => {
                     const payoutMethod = p.payout_method || p.pay_type || 'Cash'
-                    const isDigitalPayout = payoutMethod === 'E-Wallet' || payoutMethod === 'Online Bank'
+                    const isDigitalPayout = payoutMethod === 'E-Wallet' || payoutMethod === 'Online Bank' || payoutMethod.startsWith('E-Wallet') || payoutMethod.startsWith('Bank')
+                    const empCode = p.code || p.employee_code
+                    const totalWorkHours = Number(p.total_work_hours ?? p.work_hours ?? p.regular_hours ?? 0)
+                    const totalAbsences = Number(p.total_absences ?? p.absence_days ?? 0)
+                    const totalLate = Number(p.total_late ?? p.late_minutes ?? 0)
+                    const totalUndertime = Number(p.total_undertime ?? p.undertime_minutes ?? 0)
+                    const totalDeductions = Number(p.total_deductions ?? p.deductions ?? 0)
+                    const finalTakeHomePay = Number(p.final_take_home_pay ?? p.net_pay ?? 0)
                     return (
-                    <tr key={p.payroll_id || i} className={`hover:bg-muted/40 transition-colors ${i % 2 === 1 ? 'bg-muted/10' : ''}`}>
-                      <td className="py-3 px-3 font-mono font-bold text-foreground">{p.employee_code}</td>
+                    <tr key={p.payroll_id || p.id || i} className={`hover:bg-muted/40 transition-colors ${i % 2 === 1 ? 'bg-muted/10' : ''}`}>
+                      <td className="py-3 px-3 font-mono font-bold text-foreground">{empCode}</td>
                       <td className="py-3 px-4 font-semibold text-foreground">
                         <div>{p.employee_name}</div>
                         <div className="text-[10px] text-muted-foreground font-normal">
@@ -969,18 +1034,18 @@ export default function PayrollPage() {
                       </td>
                       {/* Weekly Base Pay */}
                       <td className="py-3 px-3 text-right font-mono">
-                        <div className="font-bold text-foreground">{fmt(p.weekly_base_pay || p.basic_salary)}</div>
+                        <div className="font-bold text-foreground">{fmt(resolveRowWeeklyBase(p))}</div>
                         <div className="text-[10px] text-muted-foreground">{fmt(p.daily_rate || 500)}/d</div>
                       </td>
                       {/* Total Work Hours */}
                       <td className="py-3 px-3 text-right font-mono">
-                        <div className="font-semibold text-foreground">{Number(p.work_hours ?? p.regular_hours ?? 0)}h</div>
+                        <div className="font-semibold text-foreground">{totalWorkHours}h</div>
                         <div className="text-[10px] text-muted-foreground">of 48h std</div>
                       </td>
                       {/* Total Absences */}
                       <td className="py-3 px-3 text-right font-mono">
-                        <div className={`font-semibold ${p.absence_days > 0 ? 'text-rose-600 dark:text-rose-400 font-bold' : 'text-muted-foreground'}`}>
-                          {p.absence_days > 0 ? `${p.absence_days}d` : '0d'}
+                        <div className={`font-semibold ${totalAbsences > 0 ? 'text-rose-600 dark:text-rose-400 font-bold' : 'text-muted-foreground'}`}>
+                          {totalAbsences > 0 ? `${totalAbsences}d` : '0d'}
                         </div>
                         <div className="text-[10px] text-muted-foreground">
                           {p.absence_deduction > 0 ? `-${fmt(p.absence_deduction)}` : 'No absence'}
@@ -988,8 +1053,8 @@ export default function PayrollPage() {
                       </td>
                       {/* Total Late */}
                       <td className="py-3 px-3 text-right font-mono">
-                        <div className={`font-semibold ${p.late_minutes > 0 ? 'text-amber-600 dark:text-amber-400 font-bold' : 'text-muted-foreground'}`}>
-                          {p.late_minutes > 0 ? `${p.late_minutes}m` : '0m'}
+                        <div className={`font-semibold ${totalLate > 0 ? 'text-amber-600 dark:text-amber-400 font-bold' : 'text-muted-foreground'}`}>
+                          {totalLate > 0 ? `${totalLate}m` : '0m'}
                         </div>
                         <div className="text-[10px] text-rose-500">
                           {p.late_deduction > 0 || p.late_penalty > 0 ? `-${fmt(p.late_deduction || p.late_penalty)}` : 'On time'}
@@ -997,8 +1062,8 @@ export default function PayrollPage() {
                       </td>
                       {/* Total Undertime */}
                       <td className="py-3 px-3 text-right font-mono">
-                        <div className={`font-semibold ${p.undertime_minutes > 0 ? 'text-amber-600 dark:text-amber-400 font-bold' : 'text-muted-foreground'}`}>
-                          {p.undertime_minutes > 0 ? `${p.undertime_minutes}m` : '0m'}
+                        <div className={`font-semibold ${totalUndertime > 0 ? 'text-amber-600 dark:text-amber-400 font-bold' : 'text-muted-foreground'}`}>
+                          {totalUndertime > 0 ? `${totalUndertime}m` : '0m'}
                         </div>
                         <div className="text-[10px] text-rose-500">
                           {p.undertime_deduction > 0 ? `-${fmt(p.undertime_deduction)}` : 'Full shift'}
@@ -1006,11 +1071,11 @@ export default function PayrollPage() {
                       </td>
                       {/* Total Deductions */}
                       <td className="py-3 px-3 text-right font-mono font-bold text-rose-600 dark:text-rose-400">
-                        -{fmt(p.total_deductions)}
+                        -{fmt(totalDeductions)}
                       </td>
                       {/* Final Take-Home Pay (Net Pay) */}
                       <td className="py-3 px-3 text-right font-mono font-bold text-emerald-600 dark:text-emerald-400 text-sm">
-                        {fmt(p.net_pay)}
+                        {fmt(finalTakeHomePay)}
                       </td>
                       <td className="py-3 px-3 text-center whitespace-nowrap align-middle"><StatusBadge status={p.status} /></td>
                       <td className="py-2.5 px-3 text-center align-middle whitespace-nowrap">
@@ -1620,6 +1685,14 @@ export function GovernmentContributionsModal({
         .then((data) => {
           const deductions = data?.deductions || []
           setActiveLedgerDeductions(deductions)
+          const statutoryDeds = deductions.filter((d) =>
+            ['SSS Contribution', 'SSS', 'PhilHealth Contribution', 'PhilHealth', 'PhilHealth Premium', 'Pag-IBIG (HDMF)', 'Pag-IBIG'].includes(d.name)
+          )
+          if (statutoryDeds.length > 0) {
+            setIncludeSss(statutoryDeds.some((d) => ['SSS Contribution', 'SSS'].includes(d.name) && d.is_active && Number(d.amount) > 0))
+            setIncludePhilhealth(statutoryDeds.some((d) => ['PhilHealth Contribution', 'PhilHealth', 'PhilHealth Premium'].includes(d.name) && d.is_active && Number(d.amount) > 0))
+            setIncludePagibig(statutoryDeds.some((d) => ['Pag-IBIG (HDMF)', 'Pag-IBIG'].includes(d.name) && d.is_active && Number(d.amount) > 0))
+          }
         })
         .catch((err) => {
           console.warn('Could not fetch existing ledger deductions:', err)
@@ -1651,7 +1724,12 @@ export function GovernmentContributionsModal({
       }
     }
 
-    const monthlySalary = Number(selectedEmployee.basic_salary) || (Number(selectedEmployee.daily_rate) ? Number(selectedEmployee.daily_rate) * 26 : 0)
+    const rawDr = Number(selectedEmployee.daily_rate || 0)
+    const rawBasic = Number(selectedEmployee.basic_salary || 0)
+    const dailyRate = (rawDr >= 100 && rawDr <= 500)
+      ? rawDr
+      : ((rawBasic >= 2600 && rawBasic <= 13000) ? Math.round((rawBasic / 26) * 100) / 100 : 500)
+    const monthlySalary = Math.round(dailyRate * 26 * 100) / 100
 
     // Schedule Apportioning Multipliers:
     // weekly: 25% (0.25)
@@ -2005,7 +2083,7 @@ export function GovernmentContributionsModal({
                     <div className="text-right">
                       <span className="text-[10px] text-slate-400 block uppercase font-bold tracking-wider">Basic Salary</span>
                       <span className="text-sm font-mono font-bold text-emerald-400">
-                        {fmt(selectedEmployee.basic_salary || (selectedEmployee.daily_rate * 26))}
+                        {fmt(computation.monthlyBase)}
                       </span>
                       <span className="text-[10px] text-slate-500 block">
                         Cutoff Base ({cutoffType}): <strong className="text-slate-300 font-mono">{fmt(computation.cutoffBase)}</strong>
@@ -2553,26 +2631,28 @@ export function DetailedPayrollViewModal({
   // Multiplier / Scale calculation across the selected timeframe
   const metrics = useMemo(() => {
     const p = activeRecord
-    const dailyRate = Number(p.daily_rate || (p.weekly_base_pay ? p.weekly_base_pay / 6 : (p.basic_salary && p.basic_salary <= 1000 ? p.basic_salary : 500.00)))
-    const weeklyBasePay = Number(p.weekly_base_pay || dailyRate * 6)
-    const hourlyRate = Number(p.hourly_rate || (dailyRate > 0 ? dailyRate / 8 : 62.50))
-    const minuteRate = Number(p.minute_rate || (hourlyRate > 0 ? hourlyRate / 60 : 1.0417))
-    const basicMonthly = Number(p.monthly_rate || dailyRate * 26)
-
-    // Strict Zero Hours Rule Detection:
-    // If work_hours == 0 or regular_hours == 0, base pay, gross pay, deductions, and net pay evaluate strictly to 0.00
-    const isZeroHours = (p.work_hours !== undefined && p.work_hours !== null)
-      ? Number(p.work_hours) === 0
-      : (p.regular_hours !== undefined && p.regular_hours !== null ? Number(p.regular_hours) === 0 : false)
+    const rawDr = Number(p.daily_rate || 0)
+    const dailyRate = (rawDr >= 100 && rawDr <= 500) ? rawDr : 500.00
+    const paidLeaveDays = Number(p.paid_leave_days || 0)
+    const rawHours = (p.work_hours !== undefined && p.work_hours !== null)
+      ? Number(p.work_hours)
+      : Number(p.regular_hours || 0)
+    const isZeroHours = Boolean(p.zero_hours) || (rawHours <= 0 && paidLeaveDays <= 0 && Number(p.gross_pay || 0) <= 0)
+    const weeklyBasePay = isZeroHours
+      ? 0
+      : Number((p.weekly_base_pay > 0 && p.weekly_base_pay <= 3000) ? p.weekly_base_pay : dailyRate * 6)
+    const hourlyRate = Number(dailyRate / 8)
+    const minuteRate = 1.00
+    const basicMonthly = Number(dailyRate * 26)
 
     // Base period values (single weekly period cutoff)
-    const baseRegHours = Number(p.work_hours ?? p.regular_hours ?? 0)
-    const baseOtHours = isZeroHours ? 0 : Number(p.overtime_hours || 0)
-    const baseOtPay = isZeroHours ? 0 : Number(p.overtime_pay || 0)
+    const baseRegHours = isZeroHours ? 0 : rawHours
+    const baseOtHours = 0
+    const baseOtPay = 0
     const baseAllowance = isZeroHours ? 0 : Number(p.allowance || 0)
-    const baseGross = isZeroHours ? 0 : Number(p.gross_pay ?? (p.basic_pay ?? (baseRegHours > 0 ? (baseRegHours * hourlyRate) : 0)))
+    const baseGross = isZeroHours ? 0 : Number(p.gross_pay ?? (p.basic_pay ?? weeklyBasePay))
     const baseDeductions = isZeroHours ? 0 : Number(p.total_deductions ?? 0)
-    const baseNet = isZeroHours ? 0 : Number(p.net_pay ?? (baseGross - baseDeductions))
+    const baseNet = isZeroHours ? 0 : Number(p.net_pay ?? Math.max(0, baseGross - baseDeductions))
 
     const baseLateMins = isZeroHours ? 0 : Number(p.late_minutes || 0)
     const baseLatePen = isZeroHours ? 0 : Number(p.late_penalty || p.late_deduction || 0)
@@ -3035,7 +3115,7 @@ export function DetailedPayrollViewModal({
                       </td>
                       {resolvedMatrix.days.map((day) => {
                         const isLate = day.late_minutes > 0
-                        const dayLateDed = isLate ? Math.round(day.late_minutes * (metrics.minuteRate || 1.0417) * 100) / 100 : 0
+                        const dayLateDed = isLate ? Math.round(day.late_minutes * 1.00 * 100) / 100 : 0
                         return (
                           <td key={day.day_label} className="py-2.5 px-3 text-center border-r border-border/60 align-top">
                             <div className={`font-mono text-sm font-bold ${isLate ? 'text-rose-600 dark:text-rose-400' : 'text-muted-foreground/60'}`}>

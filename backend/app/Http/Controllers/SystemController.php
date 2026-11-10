@@ -74,6 +74,8 @@ class SystemController extends Controller
     // ─── Users ──────────────────────────────────────────────────────────────────
     public function users(Request $request)
     {
+        User::syncSessionStatuses($request->user());
+
         $users = User::with(['employee.branch', 'customer.branch', 'verifiedBy'])->orderBy('user_id')->get()->map(function ($u) {
             $emp = $u->employee;
             $cust = $u->customer;
@@ -81,6 +83,7 @@ class SystemController extends Controller
             $verifiedByName = $verifiedBy ? ($verifiedBy->employee ? trim("{$verifiedBy->employee->first_name} {$verifiedBy->employee->last_name}") : $verifiedBy->username) : ($u->account_verified ? 'Administrator' : null);
 
             list($branchId, $branchName, $branchObj) = $this->resolveBranch($emp ?: $cust);
+            $liveStatus = $u->is_active ? 'Active' : 'Inactive';
 
             return [
                 'user_id' => $u->user_id,
@@ -89,6 +92,7 @@ class SystemController extends Controller
                 'username' => $u->username,
                 'role' => $u->role,
                 'is_active' => (bool)$u->is_active,
+                'status' => $liveStatus,
                 'account_verified' => (bool)$u->account_verified,
                 'account_verified_at' => $u->account_verified_at ? date('Y-m-d H:i:s', strtotime($u->account_verified_at)) : null,
                 'account_verified_by' => $u->account_verified_by,
@@ -118,7 +122,7 @@ class SystemController extends Controller
                     'phone' => $emp->phone,
                     'email' => $emp->email,
                     'address' => $emp->address,
-                    'status' => $emp->status,
+                    'status' => $liveStatus,
                 ] : null,
                 'customer' => $cust ? [
                     'customer_id' => $cust->customer_id,
@@ -128,7 +132,7 @@ class SystemController extends Controller
                     'phone' => $cust->phone,
                     'email' => $cust->email,
                     'address' => $cust->address,
-                    'status' => $cust->status,
+                    'status' => $liveStatus,
                     'branch_id' => $cust->branch_id,
                     'branch' => $branchObj,
                     'branch_name' => $branchName,
@@ -144,6 +148,8 @@ class SystemController extends Controller
 
     public function showUser(Request $request, $id)
     {
+        User::syncSessionStatuses($request->user());
+
         $u = User::with(['employee.branch', 'customer.branch', 'verifiedBy'])->findOrFail($id);
         $emp = $u->employee;
         $cust = $u->customer;

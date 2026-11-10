@@ -18,6 +18,7 @@ class EmployeeController extends Controller
     public function index(Request $request)
     {
         $user = $request->user();
+        User::syncSessionStatuses($user);
 
         // 1-2s Performance Cache
         $fp = SyncController::computeFingerprint();
@@ -36,7 +37,7 @@ class EmployeeController extends Controller
             return response()->json($cached);
         }
 
-        $query = Employee::with('branch:id,name');
+        $query = Employee::with(['branch:id,name', 'user:user_id,employee_id,is_active,role']);
 
         // Role-based Access Control
         if ($user && $user->role === 'Employee') {
@@ -121,6 +122,7 @@ class EmployeeController extends Controller
                 $emp->is_admin_account = false;
             }
 
+            $emp->status = $emp->user ? ($emp->user->is_active ? 'Active' : 'Inactive') : ($emp->status ?: 'Inactive');
             $emp->last_scan = ($latestScan && $latestScan->scan_time) ? $latestScan->scan_time->format('M d, Y h:i A') : 'Never';
             $emp->issued_date = $emp->qr_generated_at ? $emp->qr_generated_at->format('M d, Y h:i A') : '—';
             $emp->issued_by = $emp->has_qr ? 'Administrator' : '—';
@@ -144,7 +146,9 @@ class EmployeeController extends Controller
     public function show(Request $request, $id)
     {
         $user = $request->user();
+        User::syncSessionStatuses($user);
         $employee = Employee::with([
+            'user:user_id,employee_id,is_active,role',
             'attendances' => function ($q) {
                 $q->orderByDesc('attendance_date');
             },
@@ -152,6 +156,7 @@ class EmployeeController extends Controller
                 $q->with('period')->orderByDesc('payroll_id');
             }
         ])->findOrFail($id);
+        $employee->status = $employee->user ? ($employee->user->is_active ? 'Active' : 'Inactive') : ($employee->status ?: 'Inactive');
 
         if ($user && $user->role === 'Employee' && $employee->employee_id != $user->employee_id) {
             return response()->json(['message' => 'Unauthorized access.'], 403);

@@ -65,7 +65,7 @@ export default function QrMonitoringModal({ open, isOpen, onClose }) {
     if (isVisible) {
       loadData(true, signal)
     }
-  }, [isVisible, loadData])
+  }, [isVisible, loadData], { module: 'employees', enabled: isVisible })
 
   if (!isVisible) return null
 

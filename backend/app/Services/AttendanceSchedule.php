@@ -85,11 +85,19 @@ class AttendanceSchedule
         return Carbon::parse("$date $time");
     }
 
-    /** Present or Late based on cut-off. */
+    /**
+     * Present, Late (8:01–8:29 AM / 1–29 mins late), or Half Day (8:30 AM+ / >= 30 mins late).
+     */
     public static function statusForTimeIn(Carbon $scan): string
     {
-        $cutoff = self::at($scan->format('Y-m-d'), self::get()['schedule_cutoff']);
-        return $scan->gt($cutoff->copy()->addSeconds(59)) ? 'Late' : 'Present';
+        $lateMins = self::lateMinutes($scan->format('Y-m-d'), $scan->format('H:i:s'));
+        if ($lateMins >= 30) {
+            return 'Half Day';
+        }
+        if ($lateMins >= 1) {
+            return 'Late';
+        }
+        return 'Present';
     }
 
     /** Minutes late measured from scheduled TIME IN (only when past cut-off). */
@@ -132,9 +140,11 @@ class AttendanceSchedule
 
     /**
      * Compute regular / overtime / total hours.
-     * - Regular hours: time worked inside the TIME IN → TIME OUT window, minus lunch (max 8h).
-     * - Lunch: actual lunch scans if both present, otherwise the scheduled lunch hour overlap.
-     * - Overtime: time worked after scheduled TIME OUT.
+     * - Strictly NO overtime count (overtime = 0); max 8 hours per full day (4 hours for Half Day),
+     *   regardless of how late past 5:00 PM the employee clocks out.
+     * - If late >= 30 mins (8:30 AM onwards), automatic Half Day (max 4.0 hours).
+     * - If on time (<= 8:00 AM) or 1–29 mins late (8:01–8:29 AM) and clocks out at/after 5:00 PM,
+     *   full 8.0 hours are credited (late penalty of ₱1/min is deducted separately).
      */
     public static function computeHours(Attendance $record): array
     {
@@ -153,6 +163,30 @@ class AttendanceSchedule
 
         $schedIn  = self::at($date, $s['schedule_time_in']);
         $schedOut = self::at($date, $s['schedule_time_out']);
+
+        $lateMins = self::lateMinutes($date, $record->time_in);
+        $isHalfDayByLate = ($lateMins >= 30);
+        $maxDayHours = $isHalfDayByLate ? 4.0 : 8.0;
+
+        // If employee completed the shift (clocked out at or after 5:00 PM) and started before 1:00 PM:
+        // Credit 8.0 hours for full day (or 4.0 hours if Half Day >= 8:30 AM)
+        if ($out->gte($schedOut)) {
+            $schedLunchIn = self::at($date, $s['schedule_lunch_in']);
+            if (!$isHalfDayByLate && $in->lt($schedIn->copy()->addMinutes(30))) {
+                return [
+                    'regular' => 8.0,
+                    'overtime' => 0.0,
+                    'total' => 8.0,
+                ];
+            }
+            if ($isHalfDayByLate && $in->lte($schedLunchIn)) {
+                return [
+                    'regular' => 4.0,
+                    'overtime' => 0.0,
+                    'total' => 4.0,
+                ];
+            }
+        }
 
         $overlap = function (Carbon $a1, Carbon $a2, Carbon $b1, Carbon $b2) {
             $start = $a1->gt($b1) ? $a1 : $b1;
@@ -179,15 +213,12 @@ class AttendanceSchedule
             );
         }
         $regularSeconds = max(0, $regularSeconds - $lunchSeconds);
-        $regular = min(8, round($regularSeconds / 3600, 2));
-
-        $overtimeSeconds = $out->gt($schedOut) ? $out->getTimestamp() - max($schedOut->getTimestamp(), $in->getTimestamp()) : 0;
-        $overtime = round(max(0, $overtimeSeconds) / 3600, 2);
+        $regular = min($maxDayHours, round($regularSeconds / 3600, 2));
 
         return [
             'regular' => $regular,
-            'overtime' => $overtime,
-            'total' => round($regular + $overtime, 2),
+            'overtime' => 0.0,
+            'total' => $regular,
         ];
     }
 
@@ -214,12 +245,15 @@ class AttendanceSchedule
                 $record->time_out = $now;
                 $hours = self::computeHours($record);
                 $record->total_hours = $hours['total'];
-                $record->overtime_hours = $hours['overtime'];
-                // Keep Late status; mark Half Day if fewer than 4 regular hours rendered
-                if ($hours['regular'] < 4) {
+                $record->overtime_hours = 0;
+                $dateStr = $record->attendance_date instanceof \DateTimeInterface
+                    ? $record->attendance_date->format('Y-m-d')
+                    : substr((string) $record->attendance_date, 0, 10);
+                $timeInStatus = self::statusForTimeIn(self::at($dateStr, $record->time_in));
+                if ($timeInStatus === 'Half Day' || $hours['regular'] <= 4) {
                     $record->status = 'Half Day';
-                } elseif (!in_array($record->status, ['Late', 'Present'])) {
-                    $record->status = self::statusForTimeIn(self::at($record->attendance_date, $record->time_in));
+                } else {
+                    $record->status = $timeInStatus;
                 }
                 break;
         }
@@ -248,8 +282,8 @@ class AttendanceSchedule
             'late_minutes' => self::lateMinutes($date, $a->time_in),
             'undertime_minutes' => self::undertimeMinutes($date, $a->time_out),
             'regular_hours' => $hours['regular'],
-            'overtime_hours' => $a->time_out ? $hours['overtime'] : (float) $a->overtime_hours,
-            'total_hours' => $a->time_out ? $hours['total'] : (float) $a->total_hours,
+            'overtime_hours' => 0.0,
+            'total_hours' => $a->time_out ? $hours['total'] : min(8.0, (float) $a->total_hours),
         ];
     }
 }

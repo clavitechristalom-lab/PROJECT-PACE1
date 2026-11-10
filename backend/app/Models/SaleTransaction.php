@@ -42,4 +42,15 @@ class SaleTransaction extends Model
     {
         return $this->belongsTo(BranchProfile::class, 'branch_id', 'id');
     }
+
+    protected static function booted()
+    {
+        static::saved(function ($sale) {
+            try {
+                if ($sale->customer_id && \Illuminate\Support\Facades\Schema::hasTable('statements')) {
+                    Statement::syncCustomerStatements((int)$sale->customer_id);
+                }
+            } catch (\Throwable $e) {}
+        });
+    }
 }

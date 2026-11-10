@@ -365,12 +365,10 @@ function AppRoutes() {
 export default function App() {
   return (
     <ErrorBoundary>
-      <AuthProvider>
-        <HashRouter>
-          <AppRoutes />
-          <ToastContainer />
-        </HashRouter>
-      </AuthProvider>
+      <HashRouter>
+        <AppRoutes />
+        <ToastContainer />
+      </HashRouter>
     </ErrorBoundary>
   )
 }

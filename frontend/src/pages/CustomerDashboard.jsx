@@ -113,7 +113,7 @@ export default function CustomerDashboard() {
     }
   }, [searchParams]);
 
-  useRealtimeSync(fetchDashboardData, []);
+  useRealtimeSync(fetchDashboardData, [], { module: 'customers' });
 
   const handleViewLedger = (installment) => {
     openModal('installmentAccount', installment.installment_id);
@@ -306,19 +306,11 @@ export default function CustomerDashboard() {
           </p>
         </div>
 
-        {/* Customer Rounded Pill Avatar & Branch Tag */}
-        <div className="inline-flex items-center gap-3 p-1.5 pr-4 rounded-full bg-slate-100 dark:bg-slate-800/80 border border-slate-200/80 dark:border-slate-700/80 shadow-xs self-start sm:self-auto">
-          <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-600 to-indigo-700 flex items-center justify-center text-white font-extrabold text-sm shadow-xs shrink-0">
-            {user?.name ? user.name.charAt(0).toUpperCase() : 'C'}
-          </div>
-          <div className="text-left min-w-0">
-            <div className="text-xs sm:text-sm font-bold text-foreground leading-tight truncate">
-              {user?.name || 'Customer Account'}
-            </div>
-            <div className="flex items-center gap-1 text-[11px] text-blue-600 dark:text-blue-400 font-medium">
-              <FiGitBranch size={11} />
-              <span>{user?.branch_name || 'Z-Lics Iligan Branch'}</span>
-            </div>
+        {/* Customer Rounded Pill Branch Tag */}
+        <div className="inline-flex items-center px-3.5 py-2 rounded-full bg-slate-100 dark:bg-slate-800/80 border border-slate-200/80 dark:border-slate-700/80 shadow-xs self-start sm:self-auto">
+          <div className="flex items-center gap-1.5 text-xs text-blue-600 dark:text-blue-400 font-medium">
+            <FiGitBranch size={12} />
+            <span>{user?.branch_name || 'Z-Lics Iligan Branch'}</span>
           </div>
         </div>
       </div>

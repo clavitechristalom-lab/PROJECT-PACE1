@@ -21,14 +21,17 @@ import { FiDownload } from 'react-icons/fi'
 export const formatProofUrl = (url) => {
   if (!url) return null;
   if (typeof url !== 'string') return null;
-  if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('data:') || url.startsWith('blob:')) {
+  if (url.startsWith('data:') || url.startsWith('blob:')) {
+    return url;
+  }
+  if (url.includes('/storage/')) {
+    return url.substring(url.indexOf('/storage/'));
+  }
+  if (url.startsWith('http://') || url.startsWith('https://')) {
     return url;
   }
   const clean = url.startsWith('/') ? url : `/${url}`;
-  const base = (typeof window !== 'undefined' && window.location.hostname && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1')
-    ? `http://${window.location.hostname}:8000`
-    : 'http://127.0.0.1:8000';
-  return `${base}${clean.startsWith('/storage') ? clean : `/storage${clean}`}`;
+  return clean.startsWith('/storage') ? clean : `/storage${clean}`;
 };
 
 function PaymentMethodBadge({ method, provider }) {

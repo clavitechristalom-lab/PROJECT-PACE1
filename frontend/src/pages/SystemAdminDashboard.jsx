@@ -87,7 +87,7 @@ export default function SystemAdminDashboard() {
 
   useRealtimeSync((source) => {
     loadData(activeTab, source)
-  }, [activeTab])
+  }, [activeTab], { module: 'system' })
 
   // --- Handlers ---
   const handleCarouselFileChange = (e) => {
