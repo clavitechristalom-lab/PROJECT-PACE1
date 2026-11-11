@@ -26,34 +26,156 @@ class SyncController extends Controller
 {
     /**
      * Bump database mutation counter and invalidate sync caches.
-     * Invoked immediately whenever any database model is created, updated, or deleted.
+     * Supports strictly individual module invalidation so unrelated modules keep their caches warm.
      */
-    public static function bumpMutation(?string $module = null): void
+    public static function bumpMutation(string|array|null $module = null): void
     {
-        Cache::increment('pace_mutation_counter');
-        Cache::put('pace_db_mutation_version', microtime(true), 86400);
-        Cache::forget('pace_unified_fingerprint');
-        Cache::forget('pace_dash_charts');
-        Cache::forget('pace_dash_branch_comparison');
-        Cache::forget('pace_dash_recent');
-        Cache::forget('pace_storage_overview');
+        if ($module === null) {
+            Cache::increment('pace_mutation_counter');
+            Cache::put('pace_db_mutation_version', microtime(true), 86400);
+            Cache::forget('pace_unified_fingerprint');
+            Cache::forget('pace_dash_charts');
+            Cache::forget('pace_dash_branch_comparison');
+            Cache::forget('pace_dash_recent');
+            Cache::forget('pace_storage_overview');
+            return;
+        }
+
+        $modules = is_array($module) ? $module : [$module];
+        $normalized = [];
+        foreach ($modules as $mod) {
+            $m = strtolower(trim((string) $mod));
+            if ($m !== '') {
+                $normalized[$m] = true;
+            }
+        }
+
+        if (empty($normalized) || isset($normalized['all']) || isset($normalized['global'])) {
+            self::bumpMutation(null);
+            return;
+        }
+
+        $ver = microtime(true);
+        foreach (array_keys($normalized) as $mod) {
+            Cache::increment("pace_mod_counter_{$mod}");
+            Cache::put("pace_mod_ver_{$mod}", $ver, 86400);
+            Cache::forget("pace_fp_{$mod}");
+
+            if ($mod === 'dashboard') {
+                Cache::forget('pace_dash_charts');
+                Cache::forget('pace_dash_branch_comparison');
+                Cache::forget('pace_dash_recent');
+            }
+            if ($mod === 'storage' || $mod === 'system') {
+                Cache::forget('pace_storage_overview');
+            }
+        }
     }
 
     /**
-     * Invalidate unified fingerprint and clear sync caches.
+     * Invalidate fingerprint and clear targeted module sync caches.
      * Backward-compatible alias for bumpMutation() invoked by controllers and services.
      */
-    public static function invalidateFingerprint(?string $module = null): void
+    public static function invalidateFingerprint(string|array|null $module = null): void
     {
         self::bumpMutation($module);
     }
 
     /**
-     * Compute a unified version hash across all core database tables.
-     * Ultra-fast O(1) in-memory mutation counter check with cached write-invalidation fallback.
+     * Compute a version hash either for an individual module or across all core tables.
+     * Ultra-fast O(1) mutation counter check with per-module fallback so modules never collide.
      */
-    public static function computeFingerprint(): int
+    public static function computeFingerprint(?string $module = null): int
     {
+        if ($module !== null) {
+            $mod = strtolower(trim($module));
+            if ($mod !== '' && $mod !== 'all' && $mod !== 'global') {
+                $modCounter = (int) Cache::get("pace_mod_counter_{$mod}", 0);
+                $modVersion = (int) Cache::get("pace_mod_ver_{$mod}", 0);
+
+                if ($modCounter > 0 && $modVersion > 0) {
+                    return (int) crc32("{$mod}_{$modCounter}_{$modVersion}");
+                }
+
+                return Cache::remember("pace_fp_{$mod}", 300, function () use ($mod, $modCounter, $modVersion) {
+                    try {
+                        $res = match ($mod) {
+                            'attendance' => DB::selectOne("
+                                SELECT
+                                    (SELECT COALESCE(MAX(attendance_id), 0) FROM attendance) as att_max,
+                                    (SELECT COALESCE(MAX(id), 0) FROM attendance_scan_logs) as sc_max
+                            "),
+                            'employees' => DB::selectOne("
+                                SELECT
+                                    (SELECT COALESCE(MAX(employee_id), 0) FROM employees) as emp_max,
+                                    (SELECT COALESCE(MAX(user_id), 0) FROM users) as u_max,
+                                    (SELECT COALESCE(MAX(request_id), 0) FROM qr_requests) as qr_max,
+                                    (SELECT COALESCE(MAX(letter_id), 0) FROM employee_letters) as lt_max
+                            "),
+                            'customers' => DB::selectOne("
+                                SELECT
+                                    (SELECT COALESCE(MAX(customer_id), 0) FROM customers) as c_max,
+                                    (SELECT COALESCE(MAX(user_id), 0) FROM users) as u_max
+                            "),
+                            'products' => DB::selectOne("
+                                SELECT (SELECT COALESCE(MAX(product_id), 0) FROM products) as pr_max
+                            "),
+                            'sales' => DB::selectOne("
+                                SELECT
+                                    (SELECT COALESCE(MAX(sale_id), 0) FROM sale_transactions) as s_max,
+                                    (SELECT COALESCE(MAX(product_id), 0) FROM products) as pr_max
+                            "),
+                            'installments' => DB::selectOne("
+                                SELECT
+                                    (SELECT COALESCE(MAX(installment_id), 0) FROM installment_accounts) as i_max,
+                                    (SELECT COALESCE(MAX(schedule_id), 0) FROM payment_schedule) as ps_max,
+                                    (SELECT COALESCE(MAX(payment_id), 0) FROM payments) as p_max
+                            "),
+                            'payments' => DB::selectOne("
+                                SELECT
+                                    (SELECT COALESCE(MAX(payment_id), 0) FROM payments) as p_max,
+                                    (SELECT COALESCE(MAX(installment_id), 0) FROM installment_accounts) as i_max,
+                                    (SELECT COALESCE(MAX(deposit_id), 0) FROM e_wallet_deposits) as d_max
+                            "),
+                            'payroll' => DB::selectOne("
+                                SELECT
+                                    (SELECT COALESCE(MAX(payroll_id), 0) FROM payroll) as py_max,
+                                    (SELECT COALESCE(MAX(period_id), 0) FROM payroll_periods) as pp_max,
+                                    (SELECT COALESCE(MAX(deduction_id), 0) FROM payroll_deductions) as pd_max
+                            "),
+                            'notifications' => DB::selectOne("
+                                SELECT (SELECT COALESCE(MAX(notification_id), 0) FROM notifications) as n_max
+                            "),
+                            'branches' => BranchProfile::max('id') ?? 0,
+                            'system' => DB::selectOne("
+                                SELECT
+                                    (SELECT COALESCE(MAX(user_id), 0) FROM users) as u_max,
+                                    (SELECT COALESCE(MAX(id), 0) FROM system_logs) as l_max
+                            "),
+                            default => DB::selectOne("
+                                SELECT 
+                                    (SELECT COALESCE(MAX(payment_id), 0) FROM payments) as p_max,
+                                    (SELECT COALESCE(MAX(sale_id), 0) FROM sale_transactions) as s_max,
+                                    (SELECT COALESCE(MAX(product_id), 0) FROM products) as pr_max,
+                                    (SELECT COALESCE(MAX(customer_id), 0) FROM customers) as c_max,
+                                    (SELECT COALESCE(MAX(id), 0) FROM attendance_scan_logs) as sc_max,
+                                    (SELECT COALESCE(MAX(attendance_id), 0) FROM attendance) as att_max,
+                                    (SELECT COALESCE(MAX(employee_id), 0) FROM employees) as emp_max,
+                                    (SELECT COALESCE(MAX(user_id), 0) FROM users) as u_max,
+                                    (SELECT COALESCE(MAX(request_id), 0) FROM qr_requests) as qr_max,
+                                    (SELECT COALESCE(MAX(id), 0) FROM support_messages) as sp_max,
+                                    (SELECT COALESCE(MAX(payroll_id), 0) FROM payroll) as py_max,
+                                    (SELECT COALESCE(MAX(id), 0) FROM carousel_images) as cr_max
+                            "),
+                        };
+                        return (int) crc32(json_encode([$mod, $res, $modCounter, $modVersion]));
+                    } catch (\Throwable $e) {
+                        return (int) time();
+                    }
+                });
+            }
+        }
+
         $mutationCounter = (int) Cache::get('pace_mutation_counter', 0);
         $mutationVersion = (int) Cache::get('pace_db_mutation_version', 0);
 
@@ -87,17 +209,19 @@ class SyncController extends Controller
     }
 
     /**
-     * Return ultra-lightweight real-time synchronization indicators and run automations.
+     * Return ultra-lightweight real-time synchronization indicators and optionally scope automations by active module.
      */
     public function status(Request $request)
     {
         $user = $this->resolveUser($request);
+        $module = $request->query('module');
+        $normalizedMod = $module ? strtolower(trim((string) $module)) : null;
 
-        // Run automated tasks (strictly throttled to at most once per 600s)
-        $autoResults = AutomationService::runAllAutomations();
+        // Run only the targeted module's automation when module is specified (or all if omitted)
+        $autoResults = AutomationService::runAllAutomations(false, $normalizedMod);
 
-        // 1. Unified mutation fingerprint (ultra-fast sub-1ms check)
-        $latestLogId = self::computeFingerprint();
+        // 1. Targeted or unified mutation fingerprint (ultra-fast sub-1ms check)
+        $latestLogId = self::computeFingerprint($normalizedMod);
 
         $userId = $user ? $user->user_id : 0;
         $role = $user ? $user->role : '';
@@ -263,14 +387,14 @@ class SyncController extends Controller
             ]);
         }
 
-        Cache::forget('pace_unified_fingerprint');
-        Cache::forget('pace_dash_charts');
-        Cache::forget('pace_dash_branch_comparison');
+        $normalizedMod = strtolower(trim((string) $module)) ?: 'system';
+        self::bumpMutation($normalizedMod);
 
         return response()->json([
             'success' => true,
             'message' => 'Real-time synchronization triggered',
-            'fingerprint' => self::computeFingerprint(),
+            'module' => $normalizedMod,
+            'fingerprint' => self::computeFingerprint($normalizedMod),
             'timestamp' => now()->toIso8601String(),
         ]);
     }

@@ -40,7 +40,7 @@ class NotificationService
         if (!$user) return null;
 
         $notif = self::createForUserId($userId, $data);
-        SyncController::invalidateFingerprint();
+        SyncController::invalidateFingerprint('notifications');
 
         return $notif;
     }
@@ -59,7 +59,7 @@ class NotificationService
         }
 
         if (!empty($created)) {
-            SyncController::invalidateFingerprint();
+            SyncController::invalidateFingerprint('notifications');
         }
 
         return $created;
@@ -86,7 +86,7 @@ class NotificationService
         }
 
         if (!empty($created)) {
-            SyncController::invalidateFingerprint();
+            SyncController::invalidateFingerprint('notifications');
         }
 
         return $created;
@@ -106,7 +106,7 @@ class NotificationService
         }
 
         if (!empty($created)) {
-            SyncController::invalidateFingerprint();
+            SyncController::invalidateFingerprint('notifications');
         }
 
         return $created;
@@ -125,7 +125,7 @@ class NotificationService
         if (!$userId) return null;
 
         $notif = self::createForUserId($userId, $data);
-        SyncController::invalidateFingerprint();
+        SyncController::invalidateFingerprint('notifications');
 
         return $notif;
     }
@@ -151,7 +151,7 @@ class NotificationService
         }
 
         if (!empty($created)) {
-            SyncController::invalidateFingerprint();
+            SyncController::invalidateFingerprint('notifications');
         }
 
         return $created;
@@ -170,7 +170,7 @@ class NotificationService
         if (!$userId) return null;
 
         $notif = self::createForUserId($userId, $data);
-        SyncController::invalidateFingerprint();
+        SyncController::invalidateFingerprint('notifications');
 
         return $notif;
     }

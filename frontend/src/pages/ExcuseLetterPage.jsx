@@ -232,7 +232,7 @@ export function printFormalLetter(letter, user) {
   printWindow.document.close()
 }
 
-export default function ExcuseLetterPage() {
+export default function ExcuseLetterPage({ embedded = false }) {
   const { user } = useAuth()
   const navigate = useNavigate()
 
@@ -310,6 +310,7 @@ export default function ExcuseLetterPage() {
     setLoadingLetters(true)
     try {
       const params = tab === 'archived' ? { status: 'Archived' } : {}
+      if (embedded) params.my_only = 1
       const res = await api.employeeLetters.getAll(params)
       const nextLetters = res?.letters || []
       setMyLetters(prev => (fastDeepEqual(prev, nextLetters) ? prev : nextLetters))
@@ -327,7 +328,7 @@ export default function ExcuseLetterPage() {
   // Real-time synchronization
   useRealtimeSync(() => {
     loadLetters(historyTab)
-  }, [user, historyTab], { module: 'employees' })
+  }, [user, historyTab], { module: 'employee_letters' })
 
   const handleAutoFieldChange = (field, value) => {
     setFormData(prev => {
@@ -416,10 +417,8 @@ export default function ExcuseLetterPage() {
 
       await api.employeeLetters.create(payload)
       showToast(`${formData.category} submitted to Management!`, 'success')
-      triggerDataSync('employee_letters')
-      triggerDataSync('notifications')
       handleReset()
-      loadLetters()
+      triggerDataSync('employee_letters')
     } catch (err) {
       showToast(err.message || 'Failed to submit letter', 'error')
     } finally {
@@ -429,22 +428,24 @@ export default function ExcuseLetterPage() {
 
   return (
     <div className="space-y-6">
-      <PageHeader
-        title="Create Excuse / Leave Letter"
-        subtitle="Draft, auto-generate, and submit formal business letters to Z-LICZ Management & HR"
-        action={
-          <div className="flex items-center gap-2">
-            <Btn
-              variant="outline"
-              size="sm"
-              onClick={() => navigate('/employee/dashboard')}
-              icon={<FiArrowLeft className="w-4 h-4" />}
-            >
-              Back to Dashboard
-            </Btn>
-          </div>
-        }
-      />
+      {!embedded && (
+        <PageHeader
+          title="Create Excuse / Leave Letter"
+          subtitle="Draft, auto-generate, and submit formal business letters to Z-LICZ Management & HR"
+          action={
+            <div className="flex items-center gap-2">
+              <Btn
+                variant="outline"
+                size="sm"
+                onClick={() => navigate('/employee/dashboard')}
+                icon={<FiArrowLeft className="w-4 h-4" />}
+              >
+                Back to Dashboard
+              </Btn>
+            </div>
+          }
+        />
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
         {/* Left Column: Letter Form Card */}
@@ -542,6 +543,7 @@ export default function ExcuseLetterPage() {
                   <input
                     type="date"
                     value={formData.from_date || ''}
+                    max={formData.to_date || undefined}
                     onChange={e => handleAutoFieldChange('from_date', e.target.value)}
                     className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground font-mono text-xs focus:outline-none focus:ring-2 focus:ring-primary/30"
                     required

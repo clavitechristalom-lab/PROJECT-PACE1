@@ -35,7 +35,7 @@ class PayrollController extends Controller
 
         // 1-2s Performance Cache: bypass if exporting CSV
         if (!$request->boolean('export_csv')) {
-            $fp = SyncController::computeFingerprint();
+            $fp = SyncController::computeFingerprint('payroll');
             $cacheKey = 'pace_payr_idx_' . md5(json_encode([
                 'u' => $user ? $user->user_id : 0,
                 'r' => $user ? $user->role : '',
@@ -54,7 +54,7 @@ class PayrollController extends Controller
             }
         }
 
-        $query = Payroll::with(['employee.branch', 'period', 'deductions', 'approvedBy.employee'])
+        $query = Payroll::with(['employee.branch', 'period', 'deductions', 'approvedBy.employee', 'payslip'])
             ->whereHas('employee', function ($eq) {
                 $eq->payrollEligible();
             });
@@ -192,12 +192,14 @@ class PayrollController extends Controller
             $pagibigDed = (float) $p->deductions->where('deduction_type', 'Pag-IBIG')->sum('amount');
             $taxDed = (float) $p->deductions->where('deduction_type', 'Withholding Tax')->sum('amount');
 
-            $syncedPayslip = null;
-            try {
-                if (\Illuminate\Support\Facades\Schema::hasTable('payslips')) {
-                    $syncedPayslip = \App\Models\Payslip::syncFromPayroll($p);
-                }
-            } catch (\Throwable $e) {}
+            $syncedPayslip = $p->relationLoaded('payslip') ? $p->payslip : null;
+            if (!$syncedPayslip) {
+                try {
+                    if (\Illuminate\Support\Facades\Schema::hasTable('payslips')) {
+                        $syncedPayslip = \App\Models\Payslip::syncFromPayroll($p);
+                    }
+                } catch (\Throwable $e) {}
+            }
 
             $workHoursVal = (float)($meta['work_hours'] ?? $p->regular_hours);
             $lateMinsVal = (int)($meta['late_minutes'] ?? 0);
@@ -490,7 +492,7 @@ class PayrollController extends Controller
             return response()->json(['payroll' => [], 'total' => 0, 'summary' => null]);
         }
 
-        $query = Payroll::with(['employee.branch', 'period', 'deductions', 'approvedBy.employee'])
+        $query = Payroll::with(['employee.branch', 'period', 'deductions', 'approvedBy.employee', 'payslip'])
             ->where('employee_id', $user->employee_id);
 
         if ($request->filled('period_id')) {
@@ -531,12 +533,14 @@ class PayrollController extends Controller
                     }
                 }
 
-                $syncedPayslip = null;
-                try {
-                    if (\Illuminate\Support\Facades\Schema::hasTable('payslips')) {
-                        $syncedPayslip = \App\Models\Payslip::syncFromPayroll($p);
-                    }
-                } catch (\Throwable $e) {}
+                $syncedPayslip = $p->relationLoaded('payslip') ? $p->payslip : null;
+                if (!$syncedPayslip) {
+                    try {
+                        if (\Illuminate\Support\Facades\Schema::hasTable('payslips')) {
+                            $syncedPayslip = \App\Models\Payslip::syncFromPayroll($p);
+                        }
+                    } catch (\Throwable $e) {}
+                }
 
                 $absenceDed = (float) $p->deductions->whereIn('deduction_type', [
                     'Absence', 'Absences', 'Excuse Letter', 'Sick Leave', 'Important Matter', 'Maternity Leave', 'Vacation Leave'
@@ -1294,7 +1298,7 @@ class PayrollController extends Controller
             ? " ({$noAttendanceCount} employee(s) with no attendance skipped under No Work, No Pay)"
             : "";
 
-        SyncController::invalidateFingerprint();
+        SyncController::invalidateFingerprint(['payroll', 'dashboard']);
 
         return response()->json([
             'success' => true,
@@ -1456,7 +1460,7 @@ class PayrollController extends Controller
             'priority' => 'normal',
         ]);
 
-        SyncController::invalidateFingerprint();
+        SyncController::invalidateFingerprint(['payroll', 'dashboard']);
 
         return response()->json([
             'message' => "13th Month Pay generated successfully for {$period->period_name} ({$generatedCount} employees)",
@@ -1501,7 +1505,7 @@ class PayrollController extends Controller
             'priority' => 'normal',
         ]);
 
-        SyncController::invalidateFingerprint();
+        SyncController::invalidateFingerprint(['payroll', 'dashboard']);
 
         return response()->json(['message' => 'Payroll approved successfully', 'payroll' => $payroll]);
     }
@@ -1593,7 +1597,7 @@ class PayrollController extends Controller
             'priority' => 'normal',
         ]);
 
-        SyncController::invalidateFingerprint();
+        SyncController::invalidateFingerprint(['payroll', 'dashboard']);
 
         return response()->json([
             'message' => 'Payroll marked as Paid',
@@ -1655,7 +1659,7 @@ class PayrollController extends Controller
             'user_agent' => $request->userAgent(),
         ]);
 
-        SyncController::invalidateFingerprint();
+        SyncController::invalidateFingerprint(['payroll', 'dashboard']);
 
         return response()->json([
             'message' => 'Payroll period created successfully',
@@ -2658,7 +2662,7 @@ class PayrollController extends Controller
             ->where('is_active', true)
             ->get();
 
-        SyncController::invalidateFingerprint();
+        SyncController::invalidateFingerprint(['payroll', 'dashboard']);
 
         return response()->json([
             'success' => true,
@@ -2871,7 +2875,7 @@ class PayrollController extends Controller
                 ]);
             });
 
-            SyncController::invalidateFingerprint();
+            SyncController::invalidateFingerprint(['payroll', 'dashboard']);
 
             return response()->json([
                 'success' => true,
@@ -2993,7 +2997,7 @@ class PayrollController extends Controller
             'priority' => 'high',
         ]);
 
-        SyncController::invalidateFingerprint();
+        SyncController::invalidateFingerprint(['payroll', 'dashboard']);
 
         $payroll->load(['employee.branch', 'period', 'deductions', 'approvedBy.employee']);
 
@@ -3535,7 +3539,7 @@ class PayrollController extends Controller
         }
 
         if ($totalFinalized > 0) {
-            SyncController::invalidateFingerprint();
+            SyncController::invalidateFingerprint(['payroll', 'dashboard']);
         }
 
         return [

@@ -218,7 +218,7 @@ export default function AdminExcuseLettersPage() {
   // Real-time synchronization
   useRealtimeSync(() => {
     loadData()
-  }, [selectedCategory, statusFilter, searchTerm, dateFrom, dateTo], { module: 'employees' })
+  }, [selectedCategory, statusFilter, searchTerm, dateFrom, dateTo], { module: 'employee_letters' })
 
   // Handle Review submission
   const handleReviewSubmit = async (e, decisionOverride = null) => {
@@ -246,11 +246,6 @@ export default function AdminExcuseLettersPage() {
       setAdminRemarks('')
 
       triggerDataSync('employee_letters')
-      triggerDataSync('attendance')
-      triggerDataSync('payroll')
-      triggerDataSync('notifications')
-
-      loadData()
     } catch (err) {
       showToast(err.message || 'Failed to update letter status', 'error')
     } finally {
@@ -272,7 +267,6 @@ export default function AdminExcuseLettersPage() {
       await api.employeeLetters.archive(letter.letter_id || letter.id)
       showToast(`Letter #${letter.letter_id || letter.id} moved to archive.`, 'success')
       triggerDataSync('employee_letters')
-      loadData()
       if (activeLetter && (activeLetter.letter_id === letter.letter_id || activeLetter.id === letter.id)) {
         setActiveLetter(prev => ({ ...prev, is_archived: true, archived_at: new Date().toISOString() }))
       }
@@ -287,7 +281,6 @@ export default function AdminExcuseLettersPage() {
       await api.employeeLetters.unarchive(letter.letter_id || letter.id)
       showToast(`Letter #${letter.letter_id || letter.id} restored from archive.`, 'success')
       triggerDataSync('employee_letters')
-      loadData()
       if (activeLetter && (activeLetter.letter_id === letter.letter_id || activeLetter.id === letter.id)) {
         setActiveLetter(prev => ({ ...prev, is_archived: false, archived_at: null }))
       }
@@ -442,6 +435,7 @@ export default function AdminExcuseLettersPage() {
             <input
               type="date"
               value={dateFrom}
+              max={dateTo || undefined}
               onChange={(e) => setDateFrom(e.target.value)}
               className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground text-xs focus:outline-none focus:ring-2 focus:ring-primary/30"
               title="Filter by Start Date"
@@ -453,6 +447,7 @@ export default function AdminExcuseLettersPage() {
             <input
               type="date"
               value={dateTo}
+              min={dateFrom || undefined}
               onChange={(e) => setDateTo(e.target.value)}
               className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground text-xs focus:outline-none focus:ring-2 focus:ring-primary/30"
               title="Filter by End Date"

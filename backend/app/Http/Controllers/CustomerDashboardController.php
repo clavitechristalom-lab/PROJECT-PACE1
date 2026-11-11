@@ -118,6 +118,54 @@ class CustomerDashboardController extends Controller
             $walletBalance = 0;
         }
 
+        // Resolve Store Admin contact number for the customer's branch
+        $storeAdminPhone = null;
+        $storeAdminName = null;
+        $branchProfile = $branchId ? \App\Models\BranchProfile::with('manager.employee')->find($branchId) : null;
+
+        $storeAdminQuery = \App\Models\User::with('employee')
+            ->whereIn('role', [\App\Models\User::ROLE_STORE_ADMIN, 'Store Admin'])
+            ->where('is_active', true);
+
+        $storeAdminUser = null;
+        if ($branchId) {
+            $storeAdminUser = (clone $storeAdminQuery)
+                ->whereHas('employee', function ($q) use ($branchId) {
+                    $q->where('branch_id', $branchId);
+                })
+                ->first();
+        }
+        if (!$storeAdminUser && $branchProfile?->manager) {
+            $storeAdminUser = $branchProfile->manager;
+        }
+        if (!$storeAdminUser) {
+            $storeAdminUser = $storeAdminQuery->first();
+        }
+
+        if ($storeAdminUser) {
+            $storeAdminPhone = $storeAdminUser->employee?->phone ?: $storeAdminUser->phone_number;
+            $empName = $storeAdminUser->employee
+                ? trim("{$storeAdminUser->employee->first_name} {$storeAdminUser->employee->last_name}")
+                : '';
+            $storeAdminName = $empName ?: ($storeAdminUser->username ?: null);
+        }
+
+        if (!$storeAdminPhone && $branchId) {
+            $managerEmp = \App\Models\Employee::where('branch_id', $branchId)
+                ->where('position', \App\Models\Employee::POSITION_MANAGER)
+                ->whereNotNull('phone')
+                ->where('phone', '!=', '')
+                ->first();
+            if ($managerEmp) {
+                $storeAdminPhone = $managerEmp->phone;
+                $storeAdminName = trim("{$managerEmp->first_name} {$managerEmp->last_name}") ?: $storeAdminName;
+            }
+        }
+
+        if (!$storeAdminPhone && !empty($branchProfile?->contact_number)) {
+            $storeAdminPhone = $branchProfile->contact_number;
+        }
+
         return response()->json([
             'metrics' => [
                 'total_products' => $totalProducts,
@@ -129,6 +177,8 @@ class CustomerDashboardController extends Controller
                 'overdue_count' => $overdueCount,
                 'wallet_balance' => $walletBalance,
                 'allow_installment' => (bool)(\App\Models\Customer::where('customer_id', $customerId)->value('allow_installment') ?? false),
+                'store_admin_phone' => $storeAdminPhone,
+                'store_admin_name' => $storeAdminName,
             ]
         ]);
     }

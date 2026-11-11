@@ -139,7 +139,7 @@ export default function SystemAdminDashboard() {
       }
       
       closeCarouselModal();
-      triggerDataSync('carousel');
+      loadData('carousel');
     } catch (err) {
       console.error(err);
       showError('Upload Failed', err.message || 'Failed to upload image(s)');
@@ -388,12 +388,14 @@ export default function SystemAdminDashboard() {
           <input 
             type="date" 
             value={logDateRange.start} 
+            max={logDateRange.end || undefined}
             onChange={(e) => setLogDateRange({ ...logDateRange, start: e.target.value })} 
             className="bg-card border border-border rounded-xl px-4 py-2 text-sm"
           />
           <input 
             type="date" 
             value={logDateRange.end} 
+            min={logDateRange.start || undefined}
             onChange={(e) => setLogDateRange({ ...logDateRange, end: e.target.value })} 
             className="bg-card border border-border rounded-xl px-4 py-2 text-sm"
           />
@@ -495,7 +497,6 @@ export default function SystemAdminDashboard() {
                           setLoading(true);
                           await api.carouselImages.update(img.id, formData);
                           showToast('Image replaced successfully', 'success');
-                          triggerDataSync('carousel');
                           loadData('carousel');
                         } catch (err) {
                           showError('Replace Failed', err.message || 'Failed to replace image');
@@ -517,7 +518,6 @@ export default function SystemAdminDashboard() {
                           setLoading(true);
                           await api.carouselImages.delete(img.id);
                           showToast('Image deleted successfully', 'success');
-                          triggerDataSync('carousel');
                           loadData('carousel');
                         } catch (err) {
                           showError('Deletion Failed', err.message || 'Failed to delete image');

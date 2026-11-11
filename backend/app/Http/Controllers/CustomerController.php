@@ -17,11 +17,10 @@ class CustomerController extends Controller
     public function index(Request $request)
     {
         $user = auth()->user();
-        User::syncSessionStatuses($user);
 
         // 1-2s Performance Cache: bypass if exporting CSV
         if (!$request->boolean('export_csv')) {
-            $fp = SyncController::computeFingerprint();
+            $fp = SyncController::computeFingerprint('customers');
             $cacheKey = 'pace_cust_idx_' . md5(json_encode([
                 'u' => $user ? $user->user_id : 0,
                 'r' => $user ? $user->role : '',
@@ -35,6 +34,8 @@ class CustomerController extends Controller
                 return response()->json($cached);
             }
         }
+
+        User::syncSessionStatuses($user, 'customers');
 
         $query = Customer::with([
             'installmentAccounts' => function ($q) {
@@ -176,7 +177,7 @@ class CustomerController extends Controller
     public function show($id)
     {
         $user = auth()->user();
-        User::syncSessionStatuses($user);
+        User::syncSessionStatuses($user, 'customers');
 
         // Customer can only see their own data
         if ($user && $user->role === 'Customer' && $user->customer_id != $id) {
@@ -393,7 +394,7 @@ class CustomerController extends Controller
             'user_agent'  => $request->userAgent(),
         ]);
 
-        SyncController::invalidateFingerprint();
+        SyncController::invalidateFingerprint(['customers', 'installments', 'sales', 'payments', 'dashboard']);
 
         return response()->json([
             'message'  => 'Customer created successfully',
@@ -500,7 +501,7 @@ class CustomerController extends Controller
             'user_agent'  => $request->userAgent(),
         ]);
 
-        SyncController::invalidateFingerprint();
+        SyncController::invalidateFingerprint(['customers', 'installments', 'sales', 'payments', 'dashboard']);
 
         return response()->json([
             'message'  => 'Customer updated successfully',
@@ -525,7 +526,7 @@ class CustomerController extends Controller
             'user_agent'  => $request->userAgent(),
         ]);
 
-        SyncController::invalidateFingerprint();
+        SyncController::invalidateFingerprint(['customers', 'installments', 'sales', 'payments', 'dashboard']);
 
         return response()->json(['message' => 'Customer deleted successfully']);
     }
@@ -587,7 +588,7 @@ class CustomerController extends Controller
             }
         }
 
-        SyncController::invalidateFingerprint();
+        SyncController::invalidateFingerprint(['customers', 'installments', 'sales', 'payments', 'dashboard']);
 
         return response()->json([
             'message'     => 'Customer branch updated successfully',
@@ -663,7 +664,7 @@ class CustomerController extends Controller
             \App\Services\NotificationService::sendToUser($customer->user->user_id, $notifData);
         }
 
-        SyncController::invalidateFingerprint();
+        SyncController::invalidateFingerprint(['customers', 'installments', 'sales', 'payments', 'dashboard']);
 
         return response()->json([
             'success' => true,

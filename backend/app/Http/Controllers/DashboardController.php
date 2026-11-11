@@ -36,7 +36,7 @@ class DashboardController extends Controller
         $currentMonth = date('m');
         $currentYear = date('Y');
 
-        $fingerprint = SyncController::computeFingerprint();
+        $fingerprint = SyncController::computeFingerprint('dashboard');
         $cacheKey = "dash_stats_{$role}_{$branch}_{$employeeId}_{$fingerprint}";
 
         $result = Cache::remember($cacheKey, 2, function () use ($user, $role, $employeeId, $isStoreAdmin, $branch, $today, $currentMonth, $currentYear) {
@@ -328,7 +328,7 @@ class DashboardController extends Controller
             $endDate = $now->endOfMonth()->toDateString();
         }
 
-        $fingerprint = SyncController::computeFingerprint();
+        $fingerprint = SyncController::computeFingerprint('dashboard');
         $cacheKey = "dash_perf_{$timeframe}_{$startDate}_{$endDate}_{$branch}_{$fingerprint}";
 
         $result = Cache::remember($cacheKey, 2, function () use ($user, $isStoreAdmin, $branch, $startDate, $endDate, $timeframe) {
@@ -456,7 +456,7 @@ class DashboardController extends Controller
      */
     public function branchComparison(Request $request)
     {
-        $fingerprint = SyncController::computeFingerprint();
+        $fingerprint = SyncController::computeFingerprint('dashboard');
         return \Illuminate\Support\Facades\Cache::remember("pace_dash_branch_comp_{$fingerprint}", 2, function () {
             $branchProfiles = \App\Models\BranchProfile::all();
 
@@ -540,7 +540,7 @@ class DashboardController extends Controller
         $user = $request->user();
         $isStoreAdmin = $user && in_array($user->role, ['Store Administrator', 'Store Admin']);
         $branch = $isStoreAdmin ? ($user->employee ? $user->employee->branch_id : null) : 'All';
-        $fingerprint = SyncController::computeFingerprint();
+        $fingerprint = SyncController::computeFingerprint('dashboard');
         $cacheKey = "pace_dash_alerts_" . ($isStoreAdmin ? "store_{$branch}" : "admin") . "_{$fingerprint}";
 
         $data = \Illuminate\Support\Facades\Cache::remember($cacheKey, 2, function () use ($isStoreAdmin, $branch, $user) {
@@ -625,7 +625,7 @@ class DashboardController extends Controller
      */
     public function charts()
     {
-        $fingerprint = SyncController::computeFingerprint();
+        $fingerprint = SyncController::computeFingerprint('dashboard');
         return \Illuminate\Support\Facades\Cache::remember("pace_dash_charts_{$fingerprint}", 2, function () {
             // Monthly Sales & Collections Trend
             $salesTrend = DB::table('sale_transactions')
@@ -693,7 +693,7 @@ class DashboardController extends Controller
      */
     public function recent()
     {
-        $fingerprint = SyncController::computeFingerprint();
+        $fingerprint = SyncController::computeFingerprint('dashboard');
         $cacheKey = "dash_recent_{$fingerprint}";
 
         $result = Cache::remember($cacheKey, 2, function () {

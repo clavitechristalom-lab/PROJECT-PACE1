@@ -26,10 +26,24 @@ export default function QrMonitoringModal({ open, isOpen, onClose }) {
     failed_scans: 0,
   })
   const [logs, setLogs] = useState([])
+  const [branches, setBranches] = useState([])
   const [search, setSearch] = useState('')
+  const [branchFilter, setBranchFilter] = useState('All')
   const [statusFilter, setStatusFilter] = useState('All')
   const [actionFilter, setActionFilter] = useState('All')
   const inFlightRef = useRef(false)
+
+  const resolveBranchName = useCallback((item, branchList = branches) => {
+    const raw = item?.branch
+    if (raw && typeof raw === 'object' && raw.name) return raw.name
+    if (raw && !/^\d+$/.test(String(raw).trim())) return String(raw)
+    const idLookup = item?.branch_id ?? (raw && /^\d+$/.test(String(raw).trim()) ? Number(raw) : null)
+    if (idLookup !== null && idLookup !== undefined) {
+      const matched = branchList.find(b => String(b.id) === String(idLookup))
+      if (matched?.name) return matched.name
+    }
+    return raw ? String(raw) : 'Unassigned'
+  }, [branches])
 
   const loadData = useCallback(async (silent = false, signal) => {
     const isSilent = silent === true
@@ -37,13 +51,22 @@ export default function QrMonitoringModal({ open, isOpen, onClose }) {
     inFlightRef.current = true
     if (!isSilent) setLoading(true)
     try {
-      const res = await api.system.getQrMonitoring({ signal })
+      const [res, branchRes] = await Promise.all([
+        api.system.getQrMonitoring({ signal }),
+        branches.length === 0 ? api.branches.getAll({ signal }).catch(() => null) : Promise.resolve(null),
+      ])
       if (signal?.aborted) return
       if (res.success) {
         const nextStats = res.stats || {}
         const nextLogs = res.recent_logs || []
+        const nextBranches = Array.isArray(res.branches) && res.branches.length > 0
+          ? res.branches
+          : (Array.isArray(branchRes?.branches) ? branchRes.branches : [])
         setStats(prev => (fastDeepEqual(prev, nextStats) ? prev : nextStats))
         setLogs(prev => (fastDeepEqual(prev, nextLogs) ? prev : nextLogs))
+        if (nextBranches.length > 0) {
+          setBranches(prev => (fastDeepEqual(prev, nextBranches) ? prev : nextBranches))
+        }
       }
     } catch (err) {
       if (err?.name === 'AbortError') return
@@ -53,7 +76,7 @@ export default function QrMonitoringModal({ open, isOpen, onClose }) {
       inFlightRef.current = false
       if (!isSilent) setLoading(false)
     }
-  }, [])
+  }, [branches.length])
 
   useEffect(() => {
     if (isVisible) {
@@ -69,18 +92,42 @@ export default function QrMonitoringModal({ open, isOpen, onClose }) {
 
   if (!isVisible) return null
 
+  const branchOptions = Array.from(new Set([
+    ...branches.map(b => b.name).filter(Boolean),
+    ...logs.map(l => resolveBranchName(l)).filter(b => b && b !== 'Unassigned' && !/^\d+$/.test(b)),
+  ])).sort()
+
   const filteredLogs = logs.filter(item => {
+    const branchLabel = resolveBranchName(item)
     const s = search.toLowerCase()
     const matchesSearch = !search ||
       item.employee_name?.toLowerCase().includes(s) ||
       item.employee_code?.toLowerCase().includes(s) ||
-      item.branch?.toLowerCase().includes(s) ||
-      item.action_type?.toLowerCase().includes(s)
+      branchLabel.toLowerCase().includes(s) ||
+      item.action_type?.toLowerCase().includes(s) ||
+      item.verification_method?.toLowerCase().includes(s)
 
-    const matchesStatus = statusFilter === 'All' || item.status === statusFilter
-    const matchesAction = actionFilter === 'All' || item.action_type === actionFilter
+    const matchesBranch = branchFilter === 'All' || branchLabel === branchFilter
+    const matchesStatus =
+      statusFilter === 'All' ||
+      item.status === statusFilter ||
+      (statusFilter === 'PENDING' && item.status === 'PENDING_PIN')
+    const matchesAction =
+      actionFilter === 'All' ||
+      item.action_type === actionFilter ||
+      (actionFilter === 'PIN_VERIFICATION_FAILED' &&
+        (item.action_type === 'PIN_VERIFICATION' || item.action_type === 'PENDING_VERIFICATION') &&
+        item.status === 'FAILED' &&
+        String(item.failure_reason || '').toLowerCase().includes('pin')) ||
+      (actionFilter === 'FACE_RECOGNITION' &&
+        (item.face_verified === true ||
+          String(item.verification_method || '').toLowerCase().includes('face recognized') ||
+          String(item.verification_method || '').toLowerCase().includes('face recognition'))) ||
+      (actionFilter === 'FACE_VERIFICATION_FAILED' &&
+        item.status === 'FAILED' &&
+        String(item.failure_reason || '').toLowerCase().includes('face'))
 
-    return matchesSearch && matchesStatus && matchesAction
+    return matchesSearch && matchesBranch && matchesStatus && matchesAction
   })
 
   return (
@@ -175,42 +222,58 @@ export default function QrMonitoringModal({ open, isOpen, onClose }) {
         {/* Filter Bar & Activity Table */}
         <Card noPad className="border border-border overflow-hidden">
           <div className="p-4 border-b border-border space-y-3">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-              <h3 className="text-xs font-bold uppercase tracking-wider text-foreground flex items-center gap-1.5">
-                <FiClock className="text-primary" /> Real-time QR Activity Log
+            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+              <h3 className="text-xs font-bold uppercase tracking-wider text-foreground flex items-center gap-1.5 whitespace-nowrap shrink-0">
+                <FiClock className="text-primary shrink-0" />
+                <span>Real-time QR Activity Log</span>
               </h3>
 
-              <div className="flex flex-wrap items-center gap-2">
+              <div className="flex flex-wrap lg:flex-nowrap items-center gap-2 min-w-0">
                 <input
                   type="text"
                   value={search}
                   onChange={e => setSearch(e.target.value)}
                   placeholder="Search name, code, branch..."
-                  className="px-3 py-1.5 rounded-xl border border-border bg-card text-foreground text-xs w-48 focus:outline-none focus:ring-1 focus:ring-primary"
+                  className="px-2.5 py-1.5 rounded-xl border border-border bg-card text-foreground text-xs w-full sm:w-40 focus:outline-none focus:ring-1 focus:ring-primary"
                 />
+
+                <select
+                  value={branchFilter}
+                  onChange={(e) => setBranchFilter(e.target.value)}
+                  className="bg-card border border-border text-foreground rounded-xl px-2.5 py-1.5 text-xs font-semibold outline-none cursor-pointer max-w-[140px] shrink-0"
+                >
+                  <option value="All">All Branches</option>
+                  {branchOptions.map(b => (
+                    <option key={b} value={b}>{b}</option>
+                  ))}
+                </select>
 
                 <select
                   value={statusFilter}
                   onChange={(e) => setStatusFilter(e.target.value)}
-                  className="bg-card border border-border text-foreground rounded-xl px-2.5 py-1.5 text-xs font-semibold outline-none"
+                  className="bg-card border border-border text-foreground rounded-xl px-2.5 py-1.5 text-xs font-semibold outline-none cursor-pointer shrink-0"
                 >
                   <option value="All">All Statuses</option>
                   <option value="SUCCESS">SUCCESS</option>
                   <option value="FAILED">FAILED</option>
-                  <option value="PENDING_PIN">PENDING PIN</option>
                 </select>
 
                 <select
                   value={actionFilter}
                   onChange={(e) => setActionFilter(e.target.value)}
-                  className="bg-card border border-border text-foreground rounded-xl px-2.5 py-1.5 text-xs font-semibold outline-none"
+                  className="bg-card border border-border text-foreground rounded-xl px-2.5 py-1.5 text-xs font-semibold outline-none cursor-pointer max-w-[165px] shrink-0"
                 >
                   <option value="All">All Event Types</option>
-                  <option value="ATTENDANCE_CREATED">ATTENDANCE CREATED</option>
-                  <option value="QR_SCAN_SUCCESS">QR SCAN SUCCESS</option>
+                  <option value="ATTENDANCE_TIME_IN">ATTENDANCE TIME IN</option>
+                  <option value="ATTENDANCE_TIME_OUT">ATTENDANCE TIME OUT</option>
+                  <option value="FACE_RECOGNITION">FACE RECOGNITION</option>
+                  <option value="FACE_VERIFICATION_FAILED">FACE FAILED</option>
+                  <option value="PENDING_VERIFICATION">PENDING VERIFICATION</option>
                   <option value="PIN_VERIFICATION_FAILED">PIN FAILED</option>
                   <option value="UNAUTHORIZED_BRANCH_SCAN">CROSS BRANCH</option>
                   <option value="REVOKED_QR_SCAN">REVOKED QR</option>
+                  <option value="INVALID_QR">INVALID QR</option>
+                  <option value="REJECTED">REJECTED ACCOUNT</option>
                 </select>
               </div>
             </div>
@@ -247,7 +310,7 @@ export default function QrMonitoringModal({ open, isOpen, onClose }) {
                         <div className="text-[11px] font-mono text-muted-foreground">{log.employee_code}</div>
                       </td>
                       <td className="py-2.5 px-3.5">
-                        <span className="text-foreground font-medium">{log.branch}</span>
+                        <span className="text-foreground font-medium">{resolveBranchName(log)}</span>
                         <span className="text-[10px] text-muted-foreground block">{log.department}</span>
                       </td>
                       <td className="py-2.5 px-3.5">
@@ -257,7 +320,11 @@ export default function QrMonitoringModal({ open, isOpen, onClose }) {
                       </td>
                       <td className="py-2.5 px-3.5">
                         <span className="inline-flex items-center gap-1 text-[11px] font-medium">
-                          {log.verification_method === 'QR + PIN' ? (
+                          {log.face_verified || String(log.verification_method || '').includes('Face Recognition') ? (
+                            <span className="text-emerald-600 dark:text-emerald-400 font-bold">✓ QR + Face Recognition</span>
+                          ) : log.verification_method === 'Face Failed' ? (
+                            <span className="text-rose-500 font-bold">✗ Face Failed</span>
+                          ) : log.verification_method === 'QR + PIN' ? (
                             <span className="text-emerald-600 dark:text-emerald-400 font-bold">✓ QR + PIN</span>
                           ) : log.verification_method === 'QR Only' ? (
                             <span className="text-amber-500">QR Step</span>

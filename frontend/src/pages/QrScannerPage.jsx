@@ -97,12 +97,12 @@ export default function QrScannerPage() {
         <div className="w-20 h-20 rounded-2xl bg-rose-500/10 border border-rose-500/30 flex items-center justify-center text-rose-500 text-4xl mb-4 shadow-lg shadow-rose-500/10">
           <FiShield />
         </div>
-        <h1 className="text-2xl font-bold text-slate-100 mb-2">403 FORBIDDEN</h1>
-        <p className="text-slate-400 max-w-md mb-6 text-sm">
+        <h1 className="text-2xl font-bold text-foreground mb-2">403 FORBIDDEN</h1>
+        <p className="text-muted-foreground max-w-md mb-6 text-sm">
           Unauthorized access. The Attendance QR Scanner is strictly reserved for authorized Store Administrators.
         </p>
-        <div className="px-4 py-2 rounded-xl bg-slate-900/60 border border-slate-800 text-xs text-slate-400">
-          Current Role: <span className="font-semibold text-amber-400">{user?.role || 'Guest'}</span>
+        <div className="px-4 py-2 rounded-xl bg-card border border-border text-xs text-muted-foreground">
+          Current Role: <span className="font-semibold text-amber-600 dark:text-amber-400">{user?.role || 'Guest'}</span>
         </div>
       </div>
     )
@@ -268,7 +268,6 @@ export default function QrScannerPage() {
         showToast(res.message || 'Attendance recorded successfully!', 'success')
         startAutoResetTimer()
         triggerDataSync('attendance')
-        triggerDataSync('dashboard')
       } else {
         playSound('error')
         setPinError(res.message || 'EMPLOYEE VERIFICATION FAILED. Attendance was not recorded.')
@@ -330,14 +329,14 @@ export default function QrScannerPage() {
   return (
     <div className="max-w-4xl mx-auto space-y-6 pb-12">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b border-slate-800 pb-4">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b border-border pb-4">
         <div>
-          <div className="flex items-center gap-2 text-primary-400 text-xs font-semibold uppercase tracking-wider mb-1">
+          <div className="flex items-center gap-2 text-primary text-xs font-semibold uppercase tracking-wider mb-1">
             <FiShield className="text-sm" /> STORE ADMINISTRATOR TERMINAL
           </div>
-          <h1 className="text-2xl font-bold text-slate-100">QR ATTENDANCE TERMINAL</h1>
-          <p className="text-xs text-slate-400">
-            Scan Employee QR Code • Authorized Branch: <span className="text-emerald-400 font-semibold">{userBranch}</span>
+          <h1 className="text-2xl font-bold text-foreground">QR Attendance Terminal</h1>
+          <p className="text-xs text-muted-foreground">
+            Scan Employee QR Code • Authorized Branch: <span className="text-emerald-600 dark:text-emerald-400 font-semibold">{userBranch}</span>
           </p>
         </div>
 
@@ -347,13 +346,13 @@ export default function QrScannerPage() {
           </Btn>
         ) : (
           <div className="flex flex-col items-end">
-            <div className="flex items-center gap-1.5 text-slate-400 text-[10px] font-bold uppercase tracking-widest mb-1">
+            <div className="flex items-center gap-1.5 text-muted-foreground text-[10px] font-bold uppercase tracking-widest mb-1">
               <FiClock className="text-emerald-500" /> REAL-TIME CLOCK
             </div>
-            <div className="text-3xl font-mono font-bold text-emerald-400 bg-slate-900/80 px-4 py-1.5 rounded-xl border border-slate-800 shadow-inner">
+            <div className="text-3xl font-mono font-bold text-emerald-600 dark:text-emerald-400 bg-card px-4 py-1.5 rounded-xl border border-border shadow-inner">
               {currentTime.toLocaleTimeString('en-US', { hour12: true, hour: '2-digit', minute: '2-digit', second: '2-digit' })}
             </div>
-            <div className="text-xs text-slate-500 font-semibold mt-1">
+            <div className="text-xs text-muted-foreground font-semibold mt-1">
               {currentTime.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
             </div>
           </div>
@@ -361,10 +360,10 @@ export default function QrScannerPage() {
       </div>
 
       {error && (
-        <div className="p-4 rounded-xl bg-rose-500/10 border border-rose-500/30 flex items-start gap-3 text-rose-400 text-sm animate-shake">
+        <div className="p-4 rounded-xl bg-rose-500/10 border border-rose-500/30 flex items-start gap-3 text-rose-600 dark:text-rose-400 text-sm animate-shake">
           <FiAlertCircle className="text-lg shrink-0 mt-0.5" />
           <div className="flex-1 font-medium">{error}</div>
-          <button onClick={() => setError('')} className="text-rose-400 hover:text-rose-300">
+          <button onClick={() => setError('')} className="text-rose-600 dark:text-rose-400 hover:text-rose-500 dark:hover:text-rose-300">
             <FiXCircle />
           </button>
         </div>
@@ -373,20 +372,20 @@ export default function QrScannerPage() {
       {/* STEP 1: CAMERA SCANNER (SCAN EMPLOYEE QR CODE) */}
       {step === 'scan' && (
         <div className="space-y-6">
-          <Card className="p-6 border-slate-800 bg-slate-900/60 shadow-xl">
+          <Card className="p-6">
             <div className="flex flex-col items-center justify-center space-y-4">
               <div className="text-center space-y-1">
-                <span className="text-xs uppercase font-bold tracking-wider text-primary-400">
+                <span className="text-xs uppercase font-bold tracking-wider text-primary">
                   Step 1 of 2
                 </span>
-                <h2 className="text-lg font-bold text-slate-100">Scan Employee QR Code</h2>
-                <p className="text-xs text-slate-400 max-w-sm">
+                <h2 className="text-lg font-bold text-foreground">Scan Employee QR Code</h2>
+                <p className="text-xs text-muted-foreground max-w-sm">
                   Point the camera at the employee's permanent attendance QR badge displayed on their phone.
                 </p>
               </div>
 
               {/* Camera Video Viewport */}
-              <div className="w-full max-w-sm aspect-square bg-slate-950 rounded-2xl border-2 border-slate-700 overflow-hidden relative shadow-2xl flex items-center justify-center">
+              <div className="w-full max-w-sm aspect-square bg-slate-950 rounded-2xl border-2 border-border dark:border-slate-700 overflow-hidden relative shadow-2xl flex items-center justify-center">
                 <div
                   id={scannerContainerId}
                   className="w-full h-full [&_video]:-scale-x-100! [&_video]:object-cover [&_#qr-shaded-region>div]:hidden"
@@ -394,16 +393,16 @@ export default function QrScannerPage() {
                 
                 {/* Target Overlay */}
                 <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
-                  <div className="w-[250px] h-[250px] border-2 border-primary-500/80 rounded-2xl relative animate-pulse shadow-lg shadow-primary-500/10">
-                    <div className="absolute -top-0.5 -left-0.5 w-6 h-6 border-t-4 border-l-4 border-primary-400 rounded-tl-xl" />
-                    <div className="absolute -top-0.5 -right-0.5 w-6 h-6 border-t-4 border-r-4 border-primary-400 rounded-tr-xl" />
-                    <div className="absolute -bottom-0.5 -left-0.5 w-6 h-6 border-b-4 border-l-4 border-primary-400 rounded-bl-xl" />
-                    <div className="absolute -bottom-0.5 -right-0.5 w-6 h-6 border-b-4 border-r-4 border-primary-400 rounded-br-xl" />
+                  <div className="w-[250px] h-[250px] border-2 border-primary/80 rounded-2xl relative animate-pulse shadow-lg shadow-primary/10">
+                    <div className="absolute -top-0.5 -left-0.5 w-6 h-6 border-t-4 border-l-4 border-primary rounded-tl-xl" />
+                    <div className="absolute -top-0.5 -right-0.5 w-6 h-6 border-t-4 border-r-4 border-primary rounded-tr-xl" />
+                    <div className="absolute -bottom-0.5 -left-0.5 w-6 h-6 border-b-4 border-l-4 border-primary rounded-bl-xl" />
+                    <div className="absolute -bottom-0.5 -right-0.5 w-6 h-6 border-b-4 border-r-4 border-primary rounded-br-xl" />
                   </div>
                 </div>
 
                 {loading && (
-                  <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-xs flex flex-col items-center justify-center text-primary-400 gap-2 z-20">
+                  <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-xs flex flex-col items-center justify-center text-primary gap-2 z-20">
                     <FiRefreshCw className="animate-spin text-3xl" />
                     <span className="text-xs font-semibold">Identifying employee...</span>
                   </div>
@@ -413,13 +412,13 @@ export default function QrScannerPage() {
               {/* Camera Selector */}
               {cameras.length > 1 && (
                 <div className="flex items-center gap-2 text-xs">
-                  <span className="text-slate-400 flex items-center gap-1">
+                  <span className="text-muted-foreground flex items-center gap-1">
                     <FiCamera /> Camera:
                   </span>
                   <select
                     value={selectedCamera}
                     onChange={(e) => setSelectedCamera(e.target.value)}
-                    className="bg-slate-950 border border-slate-800 text-slate-200 rounded-lg px-2.5 py-1 text-xs outline-none"
+                    className="bg-card border border-border text-foreground rounded-lg px-2.5 py-1 text-xs outline-none cursor-pointer"
                   >
                     {cameras.map(c => (
                       <option key={c.id} value={c.id}>{c.label || `Camera ${c.id.slice(0, 5)}`}</option>
@@ -431,8 +430,8 @@ export default function QrScannerPage() {
           </Card>
 
           {/* Backup Manual Scanner Input */}
-          <div className="p-4 rounded-xl bg-slate-900/40 border border-slate-800 max-w-sm mx-auto text-xs space-y-2">
-            <div className="text-slate-400 font-semibold flex items-center gap-1">
+          <Card className="p-4 max-w-sm mx-auto text-xs space-y-2">
+            <div className="text-muted-foreground font-semibold flex items-center gap-1">
               <FiKey /> Barcode / Token Scanner Input:
             </div>
             <form onSubmit={handleManualScan} className="flex gap-2">
@@ -441,13 +440,13 @@ export default function QrScannerPage() {
                 value={manualToken}
                 onChange={e => setManualToken(e.target.value)}
                 placeholder="Paste or scan token..."
-                className="flex-1 px-3 py-1.5 rounded-lg border border-slate-800 bg-slate-950 text-slate-200 font-mono text-xs focus:ring-1 focus:ring-primary-500 outline-none"
+                className="flex-1 px-3 py-1.5 rounded-lg border border-border bg-muted/40 text-foreground font-mono text-xs focus:ring-1 focus:ring-primary outline-none"
               />
               <Btn type="submit" size="sm" variant="primary" disabled={loading || !manualToken.trim()}>
                 Verify
               </Btn>
             </form>
-          </div>
+          </Card>
         </div>
       )}
 
@@ -455,62 +454,62 @@ export default function QrScannerPage() {
       {step === 'pin' && identifiedEmp && (
         <div className="space-y-6 max-w-xl mx-auto">
           {/* Employee Identified Card */}
-          <Card className="p-6 border-slate-800 bg-slate-900/60 shadow-xl space-y-4">
-            <div className="border-b border-slate-800 pb-3 flex items-center justify-between">
+          <Card className="p-6 space-y-4">
+            <div className="border-b border-border pb-3 flex items-center justify-between">
               <div>
-                <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-400">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400">
                   Step 1 Complete ✓
                 </span>
-                <h2 className="text-base font-bold text-slate-100">EMPLOYEE IDENTIFIED</h2>
+                <h2 className="text-base font-bold text-foreground">EMPLOYEE IDENTIFIED</h2>
               </div>
-              <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+              <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border border-emerald-500/30">
                 <FiCheckCircle /> QR Status: ACTIVE
               </span>
             </div>
 
             <div className="grid grid-cols-2 gap-3 text-xs">
-              <div className="p-3 rounded-xl bg-slate-950/60 border border-slate-800">
-                <span className="text-slate-400 block text-[10px] uppercase font-bold">Employee Name</span>
-                <span className="font-bold text-slate-100 text-sm">{identifiedEmp.name}</span>
+              <div className="p-3 rounded-xl bg-muted/40 border border-border">
+                <span className="text-muted-foreground block text-[10px] uppercase font-bold">Employee Name</span>
+                <span className="font-bold text-foreground text-sm">{identifiedEmp.name}</span>
               </div>
-              <div className="p-3 rounded-xl bg-slate-950/60 border border-slate-800">
-                <span className="text-slate-400 block text-[10px] uppercase font-bold">Employee ID</span>
-                <span className="font-mono font-bold text-primary-400 text-sm">{identifiedEmp.employee_code}</span>
+              <div className="p-3 rounded-xl bg-muted/40 border border-border">
+                <span className="text-muted-foreground block text-[10px] uppercase font-bold">Employee ID</span>
+                <span className="font-mono font-bold text-primary text-sm">{identifiedEmp.employee_code}</span>
               </div>
-              <div className="p-3 rounded-xl bg-slate-950/60 border border-slate-800">
-                <span className="text-slate-400 block text-[10px] uppercase font-bold">Position</span>
-                <span className="font-semibold text-slate-200">{identifiedEmp.position}</span>
+              <div className="p-3 rounded-xl bg-muted/40 border border-border">
+                <span className="text-muted-foreground block text-[10px] uppercase font-bold">Position</span>
+                <span className="font-semibold text-foreground">{identifiedEmp.position}</span>
               </div>
-              <div className="p-3 rounded-xl bg-slate-950/60 border border-slate-800">
-                <span className="text-slate-400 block text-[10px] uppercase font-bold">Authorized Branch</span>
-                <span className="font-semibold text-emerald-400">{identifiedEmp.branch || userBranch}</span>
+              <div className="p-3 rounded-xl bg-muted/40 border border-border">
+                <span className="text-muted-foreground block text-[10px] uppercase font-bold">Authorized Branch</span>
+                <span className="font-semibold text-emerald-600 dark:text-emerald-400">{identifiedEmp.branch || userBranch}</span>
               </div>
             </div>
           </Card>
 
           {/* Personal PIN Verification Card */}
-          <Card className="p-6 border-slate-800 bg-slate-900/60 shadow-xl space-y-4">
+          <Card className="p-6 space-y-4">
             <div className="text-center space-y-1">
-              <span className="text-xs uppercase font-bold tracking-wider text-amber-400">
+              <span className="text-xs uppercase font-bold tracking-wider text-amber-600 dark:text-amber-400">
                 Step 2 of 2
               </span>
-              <h3 className="text-base font-bold text-slate-100 flex items-center justify-center gap-1.5">
-                <FiLock className="text-primary-400" /> PERSONAL PIN REQUIRED
+              <h3 className="text-base font-bold text-foreground flex items-center justify-center gap-1.5">
+                <FiLock className="text-primary" /> PERSONAL PIN REQUIRED
               </h3>
-              <p className="text-xs text-slate-400">
+              <p className="text-xs text-muted-foreground">
                 The employee must enter their own secure PIN to confirm attendance.
               </p>
             </div>
 
             {pinError && (
-              <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-400 text-xs font-semibold text-center animate-shake">
+              <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-600 dark:text-rose-400 text-xs font-semibold text-center animate-shake">
                 {pinError}
               </div>
             )}
 
             {availableActions.length > 0 && (
               <div className="flex justify-center my-2">
-                <span className="px-5 py-2 bg-primary-500/90 text-white text-sm font-black rounded-xl uppercase tracking-wider shadow-md">
+                <span className="px-5 py-2 bg-primary text-primary-foreground text-sm font-black rounded-xl uppercase tracking-wider shadow-md">
                   {availableActions[0].replace('_', ' ')}
                 </span>
               </div>
@@ -525,14 +524,14 @@ export default function QrScannerPage() {
                   value={pin}
                   onChange={(e) => setPin(e.target.value.replace(/\D/g, ''))}
                   placeholder="••••"
-                  className="w-full text-center text-2xl font-mono tracking-widest py-2.5 px-4 bg-slate-950 border-2 border-slate-700 rounded-xl text-slate-100 focus:border-primary-500 outline-none"
+                  className="w-full text-center text-2xl font-mono tracking-widest py-2.5 px-4 bg-muted/40 border-2 border-border rounded-xl text-foreground focus:border-primary outline-none"
                   autoFocus
                 />
               </div>
               <button
                 type="button"
                 onClick={() => setShowPin(!showPin)}
-                className="p-2.5 text-slate-400 hover:text-slate-200 border border-slate-800 rounded-xl bg-slate-950"
+                className="p-2.5 text-muted-foreground hover:text-foreground border border-border rounded-xl bg-muted/40 cursor-pointer"
                 title={showPin ? "Hide PIN" : "Show PIN"}
               >
                 {showPin ? <FiEyeOff /> : <FiEye />}
@@ -546,7 +545,7 @@ export default function QrScannerPage() {
                   key={num}
                   type="button"
                   onClick={() => handleKeypadPress(num.toString())}
-                  className="py-3 bg-slate-950 hover:bg-slate-800 active:scale-95 text-slate-100 font-bold text-base rounded-xl border border-slate-800 transition cursor-pointer"
+                  className="py-3 bg-muted/50 hover:bg-muted active:scale-95 text-foreground font-bold text-base rounded-xl border border-border transition cursor-pointer"
                 >
                   {num}
                 </button>
@@ -554,21 +553,21 @@ export default function QrScannerPage() {
               <button
                 type="button"
                 onClick={() => handleKeypadPress('clear')}
-                className="py-3 bg-slate-950 hover:bg-rose-950/40 text-rose-400 font-semibold text-xs rounded-xl border border-slate-800 transition cursor-pointer"
+                className="py-3 bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 font-semibold text-xs rounded-xl border border-rose-500/25 transition cursor-pointer"
               >
                 CLEAR
               </button>
               <button
                 type="button"
                 onClick={() => handleKeypadPress('0')}
-                className="py-3 bg-slate-950 hover:bg-slate-800 active:scale-95 text-slate-100 font-bold text-base rounded-xl border border-slate-800 transition cursor-pointer"
+                className="py-3 bg-muted/50 hover:bg-muted active:scale-95 text-foreground font-bold text-base rounded-xl border border-border transition cursor-pointer"
               >
                 0
               </button>
               <button
                 type="button"
                 onClick={() => handleKeypadPress('backspace')}
-                className="py-3 bg-slate-950 hover:bg-slate-800 text-slate-300 font-semibold text-xs rounded-xl border border-slate-800 transition cursor-pointer flex items-center justify-center"
+                className="py-3 bg-muted/50 hover:bg-muted text-muted-foreground hover:text-foreground font-semibold text-xs rounded-xl border border-border transition cursor-pointer flex items-center justify-center"
               >
                 ⌫
               </button>
@@ -595,62 +594,62 @@ export default function QrScannerPage() {
 
       {/* STEP 3: ATTENDANCE VERIFIED RESULT (TIME IN / TIME OUT) */}
       {step === 'result' && resultData && (
-        <Card className="p-8 border-slate-800 bg-slate-900/60 shadow-2xl max-w-xl mx-auto text-center space-y-6 animate-fadeIn">
+        <Card className="p-8 max-w-xl mx-auto text-center space-y-6 animate-fadeIn">
           {/* Success Banner */}
-          <div className="w-16 h-16 rounded-full bg-emerald-500/20 text-emerald-400 border-2 border-emerald-500/40 flex items-center justify-center mx-auto text-3xl shadow-lg shadow-emerald-500/10">
+          <div className="w-16 h-16 rounded-full bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-2 border-emerald-500/40 flex items-center justify-center mx-auto text-3xl shadow-lg shadow-emerald-500/10">
             <FiCheckCircle />
           </div>
 
           <div className="space-y-1">
-            <h2 className="text-xl font-black text-emerald-400 uppercase tracking-wide">
+            <h2 className="text-xl font-black text-emerald-600 dark:text-emerald-400 uppercase tracking-wide">
               {resultData.action === 'TIME_IN'
                 ? '✓ TIME IN SUCCESSFUL'
                 : resultData.action === 'TIME_OUT'
                 ? '✓ TIME OUT SUCCESSFUL'
                 : '✓ ATTENDANCE VERIFIED'}
             </h2>
-            <p className="text-xs text-slate-300">
+            <p className="text-xs text-muted-foreground">
               {resultData.message}
             </p>
           </div>
 
           {/* Detailed Verification Summary */}
-          <div className="p-4 rounded-2xl bg-slate-950/80 border border-slate-800 text-xs space-y-2 text-left">
-            <div className="flex justify-between py-1 border-b border-slate-800/60">
-              <span className="text-slate-400">Employee:</span>
-              <span className="font-bold text-slate-100">{resultData.employee?.name}</span>
+          <div className="p-4 rounded-2xl bg-muted/40 border border-border text-xs space-y-2 text-left">
+            <div className="flex justify-between py-1 border-b border-border">
+              <span className="text-muted-foreground">Employee:</span>
+              <span className="font-bold text-foreground">{resultData.employee?.name}</span>
             </div>
-            <div className="flex justify-between py-1 border-b border-slate-800/60">
-              <span className="text-slate-400">Employee ID:</span>
-              <span className="font-mono font-bold text-primary-400">{resultData.employee?.employee_code}</span>
+            <div className="flex justify-between py-1 border-b border-border">
+              <span className="text-muted-foreground">Employee ID:</span>
+              <span className="font-mono font-bold text-primary">{resultData.employee?.employee_code}</span>
             </div>
-            <div className="flex justify-between py-1 border-b border-slate-800/60">
-              <span className="text-slate-400">Timestamp:</span>
-              <span className="font-mono font-bold text-slate-200">{resultData.time}</span>
+            <div className="flex justify-between py-1 border-b border-border">
+              <span className="text-muted-foreground">Timestamp:</span>
+              <span className="font-mono font-bold text-foreground">{resultData.time}</span>
             </div>
             {resultData.action === 'TIME_OUT' && (
               <>
-                <div className="flex justify-between py-1 border-b border-slate-800/60">
-                  <span className="text-slate-400">Total Hours:</span>
-                  <span className="font-mono font-bold text-emerald-400">{resultData.total_hours} hrs</span>
+                <div className="flex justify-between py-1 border-b border-border">
+                  <span className="text-muted-foreground">Total Hours:</span>
+                  <span className="font-mono font-bold text-emerald-600 dark:text-emerald-400">{resultData.total_hours} hrs</span>
                 </div>
-                <div className="flex justify-between py-1 border-b border-slate-800/60">
-                  <span className="text-slate-400">Overtime:</span>
-                  <span className="font-mono font-bold text-amber-400">{resultData.overtime_hours} hrs</span>
+                <div className="flex justify-between py-1 border-b border-border">
+                  <span className="text-muted-foreground">Overtime:</span>
+                  <span className="font-mono font-bold text-amber-600 dark:text-amber-400">{resultData.overtime_hours} hrs</span>
                 </div>
               </>
             )}
-            <div className="flex justify-between py-1 border-b border-slate-800/60">
-              <span className="text-slate-400">Branch:</span>
-              <span className="font-semibold text-emerald-400">{resultData.branch || userBranch}</span>
+            <div className="flex justify-between py-1 border-b border-border">
+              <span className="text-muted-foreground">Branch:</span>
+              <span className="font-semibold text-emerald-600 dark:text-emerald-400">{resultData.branch || userBranch}</span>
             </div>
-            <div className="flex justify-between py-1 border-b border-slate-800/60">
-              <span className="text-slate-400">Verification:</span>
-              <span className="font-bold text-slate-100">QR + PIN</span>
+            <div className="flex justify-between py-1 border-b border-border">
+              <span className="text-muted-foreground">Verification:</span>
+              <span className="font-bold text-foreground">QR + PIN</span>
             </div>
             <div className="flex justify-between py-1">
-              <span className="text-slate-400">Verified By:</span>
-              <span className="font-semibold text-slate-200">{resultData.verified_by || `Store Administrator (${user?.username})`}</span>
+              <span className="text-muted-foreground">Verified By:</span>
+              <span className="font-semibold text-foreground">{resultData.verified_by || `Store Administrator (${user?.username})`}</span>
             </div>
           </div>
 

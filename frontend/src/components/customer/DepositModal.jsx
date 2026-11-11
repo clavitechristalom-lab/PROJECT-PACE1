@@ -7,6 +7,7 @@ import {
   FiImage, FiHash, FiFileText
 } from 'react-icons/fi';
 import { QRCodeSVG } from 'qrcode.react';
+import { TbCurrencyPeso } from 'react-icons/tb';
 import { api } from '../../lib/api';
 import { triggerDataSync } from '../../lib/realtimeSync';
 import { fmt } from '../../lib/utils';
@@ -28,8 +29,8 @@ export default function DepositModal({
 }) {
   // Step state: 1 = Order Summary & Payment Method; 2 = Gateway & QR; 3 = Payment Success Receipt
   const [step, setStep] = useState(1);
-  const [activeTab, setActiveTab] = useState('ewallet'); // 'ewallet' | 'bank'
-  const [selectedMethod, setSelectedMethod] = useState('GCash'); // 'GCash' | 'Maya' | 'BDO'
+  const [activeTab, setActiveTab] = useState('ewallet'); // 'ewallet' | 'bank' | 'cash'
+  const [selectedMethod, setSelectedMethod] = useState('GCash'); // 'GCash' | 'Maya' | 'BDO' | 'Cash'
   const [orderItems, setOrderItems] = useState([]);
   const [amount, setAmount] = useState('');
   const [selectedInstallmentId, setSelectedInstallmentId] = useState(defaultInstallmentId || '');
@@ -252,10 +253,11 @@ export default function DepositModal({
               }));
             }
             setStep(3); // Transition to success receipt automatically
-            triggerDataSync('payments');
-            triggerDataSync('sales');
-            triggerDataSync('installments');
-            if (onSuccess) onSuccess(res);
+            if (onSuccess) {
+              onSuccess(res);
+            } else {
+              triggerDataSync('customers');
+            }
           }
         } catch (err) {
           console.debug('Polling checkStatus:', err);
@@ -399,13 +401,14 @@ export default function DepositModal({
   const handleManualVerify = async () => {
     if (!checkoutData?.transaction_reference) return;
 
+    const isCashPayment = selectedMethod === 'Cash';
     const trimmedRef = (customerRef || '').trim();
-    if (!trimmedRef) {
+    if (!isCashPayment && !trimmedRef) {
       showWarning('Transaction Reference Required', `Please enter the Transaction Reference number from your ${selectedMethod} payment receipt.`);
       return;
     }
 
-    if (!proofFile && !checkoutData?.proof_of_payment) {
+    if (!isCashPayment && !proofFile && !checkoutData?.proof_of_payment) {
       showWarning('Proof of Payment Required', 'Please insert or upload a screenshot of your payment receipt before submitting.');
       return;
     }
@@ -414,7 +417,9 @@ export default function DepositModal({
     try {
       const formData = new FormData();
       formData.append('reference', checkoutData.transaction_reference);
-      formData.append('customer_reference', trimmedRef);
+      if (trimmedRef) {
+        formData.append('customer_reference', trimmedRef);
+      }
       if (proofFile) {
         formData.append('proof_of_payment', proofFile);
       }
@@ -437,10 +442,11 @@ export default function DepositModal({
           }));
         }
         setStep(3);
-        triggerDataSync('payments');
-        triggerDataSync('sales');
-        triggerDataSync('installments');
-        if (onSuccess) onSuccess(res);
+        if (onSuccess) {
+          onSuccess(res);
+        } else {
+          triggerDataSync('customers');
+        }
       }
     } catch (err) {
       console.error(err);
@@ -462,10 +468,11 @@ export default function DepositModal({
           }));
         }
         setStep(3);
-        triggerDataSync('payments');
-        triggerDataSync('sales');
-        triggerDataSync('installments');
-        if (onSuccess) onSuccess(checkRes);
+        if (onSuccess) {
+          onSuccess(checkRes);
+        } else {
+          triggerDataSync('customers');
+        }
       } catch (e) {
         console.error(e);
       }
@@ -492,6 +499,15 @@ export default function DepositModal({
         btnText: 'Open BDO Online Banking',
         logoText: 'BDO',
         title: 'BDO Online Banking Gateway',
+      };
+    }
+    if (selectedMethod === 'Cash') {
+      return {
+        bg: 'bg-gradient-to-r from-emerald-600 to-teal-600',
+        btnBg: 'bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800',
+        btnText: 'Pay at Store Cashier',
+        logoText: '₱',
+        title: 'Cash Over-the-Counter',
       };
     }
     // Default GCash
@@ -545,7 +561,9 @@ export default function DepositModal({
                     ? 'Review your order and select your payment method'
                     : 'Choose where you want to make payment from')
                   : step === 2
-                    ? `Complete your transfer using ${selectedMethod} deep link or InstaPay QR`
+                    ? (selectedMethod === 'Cash'
+                      ? 'Present your reference number at the store cashier and confirm your cash payment'
+                      : `Complete your transfer using ${selectedMethod} deep link or InstaPay QR`)
                     : 'Your payment has been verified and your order is confirmed!'}
               </p>
             </div>
@@ -881,7 +899,7 @@ export default function DepositModal({
                   </div>
                 )}
 
-                {/* ─── 2. Payment Method Tabs (E-wallets / Bank accounts) ─── */}
+                {/* ─── 2. Payment Method Tabs (E-wallets / Bank accounts / Cash) ─── */}
                 <div className="flex p-1 rounded-2xl bg-muted border border-border">
                   <button
                     type="button"
@@ -905,11 +923,22 @@ export default function DepositModal({
                     <FiCreditCard className="w-4 h-4 text-emerald-500" />
                     Bank accounts
                   </button>
+                  <button
+                    type="button"
+                    onClick={() => { setActiveTab('cash'); setSelectedMethod('Cash'); }}
+                    className={`flex-1 py-2.5 text-xs font-bold rounded-xl flex items-center justify-center gap-2 transition-all cursor-pointer ${activeTab === 'cash'
+                        ? 'bg-card text-foreground shadow-sm'
+                        : 'text-muted-foreground hover:text-foreground'
+                      }`}
+                  >
+                    <TbCurrencyPeso className="w-4 h-4 text-emerald-600" />
+                    Cash
+                  </button>
                 </div>
 
                 {/* ─── 3. Payment Method Cards ─── */}
                 <div className="space-y-3">
-                  {activeTab === 'ewallet' ? (
+                  {activeTab === 'ewallet' && (
                     <>
                       {/* GCash Card */}
                       <div
@@ -969,7 +998,8 @@ export default function DepositModal({
                         </div>
                       </div>
                     </>
-                  ) : (
+                  )}
+                  {activeTab === 'bank' && (
                     <>
                       {/* Bank accounts strictly restricted to BDO online banking */}
                       <div
@@ -1000,6 +1030,35 @@ export default function DepositModal({
                         </div>
                       </div>
                     </>
+                  )}
+                  {activeTab === 'cash' && (
+                    <div
+                      onClick={() => setSelectedMethod('Cash')}
+                      className={`p-3.5 rounded-2xl border-2 transition-all cursor-pointer flex items-center justify-between group ${selectedMethod === 'Cash'
+                          ? 'border-emerald-600 bg-emerald-50/50 dark:bg-emerald-950/20 shadow-md ring-2 ring-emerald-500/20'
+                          : 'border-border hover:border-border/80 bg-background hover:bg-muted/30'
+                        }`}
+                    >
+                      <div className="flex items-center gap-3.5">
+                        <div className="w-11 h-11 rounded-2xl bg-gradient-to-tr from-emerald-600 to-teal-500 text-white flex items-center justify-center font-black text-xl shrink-0 shadow-md">
+                          <TbCurrencyPeso className="w-6 h-6" />
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <span className="font-bold text-sm text-foreground">Cash</span>
+                            <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-700 dark:bg-emerald-900/60 dark:text-emerald-300">
+                              Pay at Store
+                            </span>
+                          </div>
+                          <p className="text-xs text-muted-foreground mt-0.5">Pay over-the-counter at any branch • Fee: Free</p>
+                        </div>
+                      </div>
+
+                      <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center transition-colors ${selectedMethod === 'Cash' ? 'border-emerald-600 bg-emerald-600' : 'border-muted-foreground/40'
+                        }`}>
+                        {selectedMethod === 'Cash' && <div className="w-2 h-2 rounded-full bg-white"></div>}
+                      </div>
+                    </div>
                   )}
                 </div>
 
@@ -1048,7 +1107,7 @@ export default function DepositModal({
                     {loading ? (
                       <>
                         <FiRefreshCw className="w-4 h-4 animate-spin" />
-                        Connecting to {selectedMethod} Gateway...
+                        {selectedMethod === 'Cash' ? 'Preparing Cash Reference...' : `Connecting to ${selectedMethod} Gateway...`}
                       </>
                     ) : (
                       <>
@@ -1086,7 +1145,9 @@ export default function DepositModal({
                       {gatewayTheme.logoText}
                     </div>
                     <div>
-                      <h3 className="font-extrabold text-base tracking-tight leading-none">{selectedMethod} Gateway</h3>
+                      <h3 className="font-extrabold text-base tracking-tight leading-none">
+                        {selectedMethod === 'Cash' ? 'Cash Over-the-Counter' : `${selectedMethod} Gateway`}
+                      </h3>
                       <p className="text-[11px] text-white/80 mt-1">Merchant: PROJECT: PACE Store</p>
                     </div>
                   </div>
@@ -1094,7 +1155,7 @@ export default function DepositModal({
                   {/* Pulsing Status Pill */}
                   <div className="relative z-10 flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-white/20 backdrop-blur-md text-[11px] font-bold">
                     <span className="w-2 h-2 rounded-full bg-amber-300 animate-ping"></span>
-                    <span>Awaiting Payment</span>
+                    <span>{selectedMethod === 'Cash' ? 'Pay at Store' : 'Awaiting Payment'}</span>
                   </div>
                 </div>
 
@@ -1179,6 +1240,80 @@ export default function DepositModal({
                   </div>
                 </div>
 
+                {selectedMethod === 'Cash' ? (
+                  <div className="space-y-4">
+                    <div className="rounded-2xl border border-emerald-200 dark:border-emerald-900/60 p-5 bg-emerald-50/40 dark:bg-emerald-950/20 space-y-4">
+                      <div className="flex items-center justify-between gap-2 flex-wrap">
+                        <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-emerald-700 dark:text-emerald-300">
+                          <TbCurrencyPeso className="w-4 h-4" />
+                          <span>Over-the-Counter Cash Payment</span>
+                        </div>
+                        <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-600 text-white">
+                          Pay at Cashier
+                        </span>
+                      </div>
+
+                      <div className="p-3.5 rounded-xl bg-background border border-border flex items-center justify-between gap-3">
+                        <div className="min-w-0">
+                          <span className="text-[10px] uppercase font-bold text-muted-foreground block">
+                            Cash Payment Reference
+                          </span>
+                          <span className="font-mono font-black text-sm text-foreground break-all">
+                            {checkoutData.transaction_reference}
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={handleCopyReference}
+                          className="px-3 py-1.5 rounded-xl border border-border bg-muted/60 hover:bg-muted text-xs font-semibold text-foreground flex items-center gap-1.5 cursor-pointer shrink-0 transition-colors"
+                        >
+                          {copied ? <FiCheck className="w-3.5 h-3.5 text-emerald-600" /> : <FiCopy className="w-3.5 h-3.5" />}
+                          <span>{copied ? 'Copied' : 'Copy'}</span>
+                        </button>
+                      </div>
+
+                      <ol className="text-xs text-muted-foreground space-y-1.5 list-decimal list-inside">
+                        <li>Click <strong className="text-foreground">Confirm Cash Payment</strong> below to submit your order.</li>
+                        <li>Present your reference code at any Z-LICZ branch store cashier.</li>
+                        <li>Pay <strong className="text-foreground font-mono">{fmt(checkoutData.amount)}</strong> in cash and wait for Store Admin confirmation.</li>
+                      </ol>
+
+                      <div className="space-y-1.5 pt-1">
+                        <label className="text-[11px] font-bold text-foreground flex items-center gap-1.5 uppercase tracking-wide">
+                          <FiFileText className="w-3.5 h-3.5 text-emerald-600" />
+                          <span>Note / Receipt Reference (Optional)</span>
+                        </label>
+                        <input
+                          type="text"
+                          value={customerRef}
+                          onChange={(e) => setCustomerRef(e.target.value)}
+                          placeholder="Optional note or cashier name"
+                          className="w-full px-3.5 py-2 text-xs bg-background text-foreground border border-border focus:border-emerald-600 rounded-xl outline-none transition-all"
+                        />
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      disabled={verifyingManually}
+                      onClick={handleManualVerify}
+                      className="w-full py-4 px-6 rounded-2xl font-extrabold text-sm sm:text-base tracking-wide flex items-center justify-center gap-2.5 transition-all bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white shadow-lg shadow-emerald-600/30 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
+                    >
+                      {verifyingManually ? (
+                        <>
+                          <FiRefreshCw className="w-4 h-4 animate-spin" />
+                          <span>Submitting Cash Payment...</span>
+                        </>
+                      ) : (
+                        <>
+                          <FiCheckCircle className="w-5 h-5" />
+                          <span>CONFIRM CASH PAYMENT</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                ) : (
+                  <>
                 {/* Official InstaPay / QR Ph Scanner */}
                 <div className="rounded-2xl border border-border p-5 bg-card text-center space-y-3.5">
                   <div className="flex items-center justify-center gap-2 text-xs font-bold uppercase tracking-wider text-muted-foreground">
@@ -1383,6 +1518,8 @@ export default function DepositModal({
                     Our secure payment listener will automatically update this screen as soon as your transaction is confirmed by {selectedMethod}.
                   </p>
                 </div>
+                  </>
+                )}
 
               </div>
             )}
@@ -1411,7 +1548,9 @@ export default function DepositModal({
                   <p className="text-xs text-muted-foreground mt-1 font-medium max-w-md mx-auto">
                     {isPaid
                       ? 'Your payment has been officially received and applied to your account by the store administrator.'
-                      : 'Your payment proof and transaction reference have been submitted. It is now pending verification and official receipt by your Store Administrator.'}
+                      : checkoutData?.payment_method === 'Cash'
+                        ? 'Your cash payment order has been submitted. Please pay at the store cashier using your reference number for official receipt and confirmation.'
+                        : 'Your payment proof and transaction reference have been submitted. It is now pending verification and official receipt by your Store Administrator.'}
                   </p>
                 </div>
 
@@ -1422,7 +1561,9 @@ export default function DepositModal({
                       <span>Pending Store Admin Receipt</span>
                     </div>
                     <p className="text-[11px] text-muted-foreground leading-relaxed pl-6">
-                      Your store administrator will inspect the receipt screenshot and transaction reference. Once received, your installment balance will be credited.
+                      {checkoutData?.payment_method === 'Cash'
+                        ? 'Present your reference number and pay in cash at the store cashier. Once confirmed by your Store Administrator, your order or installment balance will be credited.'
+                        : 'Your store administrator will inspect the receipt screenshot and transaction reference. Once received, your installment balance will be credited.'}
                     </p>
                   </div>
                 )}

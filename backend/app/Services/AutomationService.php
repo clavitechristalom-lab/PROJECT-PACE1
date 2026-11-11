@@ -73,22 +73,47 @@ class AutomationService
     }
 
     /**
-     * Run all scheduled system automations with throttling (max once per minute).
+     * Run scheduled system automations individually per module (or all when module is null/all),
+     * each independently throttled so unrelated features don't run together.
      */
-    public static function runAllAutomations(bool $force = false): array
+    public static function runAllAutomations(bool $force = false, ?string $module = null): array
     {
-        $lastRun = Cache::get('automation_last_run', 0);
         $now = time();
+        $mod = $module ? strtolower(trim($module)) : 'all';
 
-        if (!$force && ($now - $lastRun) < 600) {
-            return [
-                'skipped' => true,
-                'message' => 'Automations executed recently (throttled to 600s).',
-                'last_run' => date('Y-m-d H:i:s', $lastRun),
-            ];
+        // Map aliases cleanly to specific feature automations
+        $target = match ($mod) {
+            'installments', 'payment_schedules', 'payments', 'overdue' => 'installments',
+            'products', 'inventory' => 'products',
+            'attendance', 'employees' => 'attendance',
+            'payroll' => 'payroll',
+            default => 'all',
+        };
+
+        // Backwards-compatible fast skip if full sweep was explicitly throttled
+        if ($target === 'all') {
+            $lastRun = Cache::get('automation_last_run', 0);
+            if (!$force && ($now - $lastRun) < 600) {
+                return [
+                    'skipped' => true,
+                    'message' => 'Automations executed recently (throttled to 600s).',
+                    'last_run' => date('Y-m-d H:i:s', $lastRun),
+                ];
+            }
+            Cache::put('automation_last_run', $now, 3600);
+        } else {
+            $lockKey = "automation_last_run_{$target}";
+            $lastModRun = Cache::get($lockKey, 0);
+            if (!$force && ($now - $lastModRun) < 600) {
+                return [
+                    'skipped' => true,
+                    'module' => $target,
+                    'message' => "Automation for {$target} executed recently (throttled to 600s).",
+                    'last_run' => date('Y-m-d H:i:s', $lastModRun),
+                ];
+            }
+            Cache::put($lockKey, $now, 3600);
         }
-
-        Cache::put('automation_last_run', $now, 3600);
 
         // Housekeeping: purge expired file-cache entries after the response is sent (non-blocking for the user).
         if (function_exists('app') && app()->bound('events')) {
@@ -98,12 +123,26 @@ class AutomationService
         }
 
         $results = [
-            'overdue_installments' => self::checkOverdueInstallments(),
-            'inventory_thresholds' => self::checkInventoryThresholds(),
-            'attendance_automations' => self::checkAttendanceAutomations(),
-            'weekly_payday_cutoff' => \App\Http\Controllers\PayrollController::autoFinalizeWeeklyPaydayCutoff(),
             'executed_at' => date('Y-m-d H:i:s', $now),
+            'module' => $target,
         ];
+
+        if ($target === 'all' || $target === 'installments') {
+            $results['overdue_installments'] = self::checkOverdueInstallments();
+            Cache::put('automation_last_run_installments', $now, 3600);
+        }
+        if ($target === 'all' || $target === 'products') {
+            $results['inventory_thresholds'] = self::checkInventoryThresholds();
+            Cache::put('automation_last_run_products', $now, 3600);
+        }
+        if ($target === 'all' || $target === 'attendance') {
+            $results['attendance_automations'] = self::checkAttendanceAutomations();
+            Cache::put('automation_last_run_attendance', $now, 3600);
+        }
+        if ($target === 'all' || $target === 'payroll') {
+            $results['weekly_payday_cutoff'] = \App\Http\Controllers\PayrollController::autoFinalizeWeeklyPaydayCutoff();
+            Cache::put('automation_last_run_payroll', $now, 3600);
+        }
 
         return $results;
     }

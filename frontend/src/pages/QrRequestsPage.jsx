@@ -90,7 +90,7 @@ export default function QrRequestsPage() {
 
   useRealtimeSync(() => {
     loadData(true)
-  }, [page, statusFilter, roleFilter, search], { module: 'employees' })
+  }, [page, statusFilter, roleFilter, search], { module: 'qr_requests' })
 
   const handleSearchSubmit = (e) => {
     e?.preventDefault()
@@ -162,10 +162,7 @@ export default function QrRequestsPage() {
         showToast(`QR Request ${selectedRequest.request_code} approved! Permanent QR is now ACTIVE.`, 'success')
         setApproveModalOpen(false)
         setReviewModalOpen(false)
-        loadData(true)
         triggerDataSync('qr_requests')
-        triggerDataSync('employees')
-        triggerDataSync('attendance')
       } else {
         showToast(res.message || 'Approval failed', 'error')
       }
@@ -197,9 +194,7 @@ export default function QrRequestsPage() {
         showToast(`QR Request ${selectedRequest.request_code} rejected.`, 'info')
         setRejectModalOpen(false)
         setReviewModalOpen(false)
-        loadData(true)
         triggerDataSync('qr_requests')
-        triggerDataSync('employees')
       } else {
         showToast(res.message || 'Rejection failed', 'error')
       }

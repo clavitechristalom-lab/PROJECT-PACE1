@@ -611,17 +611,16 @@ body {
 }
 
 .dark .bg-card:hover {
-  transform: translateY(-1px);
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.5) !important;
 }
 
 /* Solid Clean Sidebar & Header */
 .sidebar-shell {
-  background: #ffffff !important;
+  background: #F5F5F5 !important;
   backdrop-filter: none !important;
   -webkit-backdrop-filter: none !important;
   border-right: none !important;
-  box-shadow: 1px 0 3px rgba(15, 23, 42, 0.04);
+  box-shadow: 1px 0 3px rgba(15, 23, 42, 0.06);
 }
 
 .dark .sidebar-shell {
@@ -633,6 +632,15 @@ body {
 }
 
 .header-shell {
+  background: #F5F5F5 !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  border-left: none !important;
+  border-bottom: 1px solid #e2e8f0 !important;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06);
+}
+
+.dark .header-shell {
   background: #081226 !important;
   backdrop-filter: none !important;
   -webkit-backdrop-filter: none !important;
@@ -641,31 +649,22 @@ body {
   box-shadow: 0 2px 12px rgba(2, 6, 23, 0.5);
 }
 
-.dark .header-shell {
-  background: #ffffff !important;
+.brand-logo-shell {
+  background: #F5F5F5 !important;
   backdrop-filter: none !important;
   -webkit-backdrop-filter: none !important;
-  border-left: none !important;
+  border-right: none !important;
   border-bottom: 1px solid #e2e8f0 !important;
-  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06);
 }
 
-.brand-logo-shell {
+.dark .brand-logo-shell {
   background: #081226 !important;
   backdrop-filter: none !important;
   -webkit-backdrop-filter: none !important;
   border-right: none !important;
   border-bottom: 1px solid rgba(59, 130, 246, 0.2) !important;
   box-shadow: 0 1px 4px rgba(2, 6, 23, 0.4);
-}
-
-.dark .brand-logo-shell {
-  background: #ffffff !important;
-  backdrop-filter: none !important;
-  -webkit-backdrop-filter: none !important;
-  border-right: none !important;
-  border-bottom: 1px solid #e2e8f0 !important;
-  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
 }
 
 /* === LOGIN PAGE STYLES === */
@@ -1313,4 +1312,45 @@ select.dark-select option {
 
 input[type="date"] {
   color-scheme: dark light;
+  cursor: pointer;
+}
+
+@media print {
+  html,
+  body,
+  #root {
+    height: auto !important;
+    min-height: 0 !important;
+    overflow: visible !important;
+    background: #ffffff !important;
+    color: #0f172a !important;
+  }
+
+  .no-print {
+    display: none !important;
+  }
+
+  .print-exact {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  .reports-print-document table {
+    page-break-inside: auto;
+    border-collapse: collapse;
+  }
+
+  .reports-print-document thead {
+    display: table-header-group;
+  }
+
+  .reports-print-document tfoot {
+    display: table-footer-group;
+  }
+
+  .reports-print-document tr,
+  .reports-print-document .print-avoid-break {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
 }

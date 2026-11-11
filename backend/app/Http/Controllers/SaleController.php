@@ -23,7 +23,7 @@ class SaleController extends Controller
 
         // 1-2s Performance Cache: bypass if exporting CSV
         if (!$request->boolean('export_csv')) {
-            $fp = SyncController::computeFingerprint();
+            $fp = SyncController::computeFingerprint('sales');
             $cacheKey = 'pace_sales_idx_' . md5(json_encode([
                 'u' => $user ? $user->user_id : 0,
                 'r' => $user ? $user->role : '',
@@ -183,29 +183,63 @@ class SaleController extends Controller
 
     public function show($id)
     {
-        $sale = SaleTransaction::with(['customer', 'processedBy.employee', 'items.product', 'installmentAccount'])->findOrFail($id);
+        $sale = SaleTransaction::with([
+            'customer',
+            'processedBy.employee',
+            'branch',
+            'items.product',
+            'installmentAccount.paymentSchedules' => fn($q) => $q->orderBy('installment_no'),
+        ])->findOrFail($id);
+
+        $sysSettings = \App\Models\Setting::whereIn('key', [
+            'company_name', 'name', 'tax_id', 'address', 'phone', 'email'
+        ])->pluck('value', 'key');
+
+        $companyName = $sysSettings['company_name'] ?? $sysSettings['name'] ?? 'Z-LICZ APPLIANCES';
+        $branchProfile = $sale->branch;
 
         $items = $sale->items->map(function ($item) {
             return [
                 'sale_item_id' => $item->sale_item_id,
                 'product_id' => $item->product_id,
                 'product_name' => $item->product ? $item->product->product_name : 'Item',
-                'product_code' => $item->product ? $item->product->product_code : '',
-                'quantity' => $item->quantity,
+                'product_code' => $item->product ? ($item->product->product_code ?? '') : '',
+                'brand' => $item->product ? ($item->product->brand ?? '') : '',
+                'category' => $item->product ? ($item->product->category ?? '') : '',
+                'quantity' => (float)$item->quantity == (int)$item->quantity ? (int)$item->quantity : (float)$item->quantity,
                 'unit_price' => (float)$item->unit_price,
                 'discount_amount' => (float)$item->discount_amount,
                 'line_total' => (float)$item->line_total,
             ];
         });
 
+        $cust = $sale->customer;
+        $processedByName = $sale->processedBy
+            ? ($sale->processedBy->employee
+                ? trim("{$sale->processedBy->employee->first_name} {$sale->processedBy->employee->last_name}")
+                : $sale->processedBy->username)
+            : 'Staff';
+
         return response()->json([
             'sale' => [
                 'sale_id' => $sale->sale_id,
                 'invoice_no' => $sale->invoice_no,
                 'customer_id' => $sale->customer_id,
-                'customer_name' => $sale->customer ? "{$sale->customer->first_name} {$sale->customer->last_name}" : 'Walk-in',
-                'processed_by' => $sale->processedBy ? ($sale->processedBy->employee ? "{$sale->processedBy->employee->first_name} {$sale->processedBy->employee->last_name}" : $sale->processedBy->username) : 'Staff',
+                'customer_name' => $cust ? trim("{$cust->first_name} {$cust->last_name}") : 'Walk-in Customer',
+                'customer_code' => $cust?->customer_code ?? '',
+                'customer_phone' => $cust?->phone ?? '',
+                'customer_email' => $cust?->email ?? '',
+                'customer_address' => $cust?->address ?? '',
+                'processed_by' => $processedByName,
+                'branch_id' => $sale->branch_id,
+                'branch_name' => $branchProfile?->name ?? '',
+                'branch_location' => $branchProfile?->location ?? ($sysSettings['address'] ?? ''),
+                'branch_contact' => $branchProfile?->contact_number ?? ($sysSettings['phone'] ?? ''),
+                'company_name' => $companyName,
+                'company_tax_id' => $sysSettings['tax_id'] ?? '',
+                'company_email' => $sysSettings['email'] ?? '',
                 'sale_date' => date('Y-m-d', strtotime($sale->sale_date)),
+                'sale_datetime' => date('M d, Y h:i A', strtotime($sale->sale_date)),
                 'payment_method' => $sale->payment_method,
                 'subtotal' => (float)$sale->subtotal,
                 'discount_amount' => (float)$sale->discount_amount,
@@ -229,13 +263,14 @@ class SaleController extends Controller
         $validated = $request->validate([
             'customer_id' => 'required|exists:customers,customer_id',
             'payment_method' => 'required|in:Cash,GCash,Maya,Bank Account,Installment',
+            'sale_date' => 'nullable|date',
             'items' => 'required|array|min:1',
             'items.*.product_id' => 'required|exists:products,product_id',
             'items.*.quantity' => 'required|integer|min:1',
             'items.*.discount' => 'nullable|numeric|min:0',
             'down_payment' => 'nullable|numeric|min:0',
             'interest_rate' => 'nullable|numeric|min:0',
-            'number_of_installments' => 'nullable|integer|in:3,6,12,18',
+            'number_of_installments' => 'nullable|integer|in:3,6,12,18,24',
             'frequency' => 'nullable|string|in:Weekly,Biweekly,Monthly',
             'notes' => 'nullable|string',
         ]);
@@ -251,9 +286,9 @@ class SaleController extends Controller
             foreach ($validated['items'] as $itemData) {
                 $product = Product::lockForUpdate()->findOrFail($itemData['product_id']);
                 
-                // Enforce Branch Security
+                // Enforce Branch Security (allow global products with null branch_id)
                 if ($user && in_array($user->role, ['Store Administrator', 'Store Admin'])) {
-                    if ($product->branch_id != $userBranch) {
+                    if ($product->branch_id && $product->branch_id != $userBranch) {
                         return response()->json([
                             'message' => "Unauthorized: Product {$product->product_name} does not belong to your branch."
                         ], 403);
@@ -276,19 +311,27 @@ class SaleController extends Controller
             $totalAmount = max(0, $subtotal - $totalDiscount);
             $payMethod = $validated['payment_method'];
 
-            $amountPaid = $payMethod === 'Cash' ? $totalAmount : (float)($validated['down_payment'] ?? 0);
+            $amountPaid = $payMethod === 'Cash'
+                ? $totalAmount
+                : min($totalAmount, (float)($validated['down_payment'] ?? 0));
             $balanceDue = max(0, $totalAmount - $amountPaid);
-            $status = $payMethod === 'Cash' ? 'Completed' : ($amountPaid > 0 ? 'Partially Paid' : 'Pending');
+            $status = ($payMethod === 'Cash' || $balanceDue <= 0)
+                ? 'Completed'
+                : ($amountPaid > 0 ? 'Partially Paid' : 'Pending');
 
             $invoiceCount = SaleTransaction::count() + 1;
             $invoiceNo = 'INV-' . date('Y') . '-' . str_pad($invoiceCount, 3, '0', STR_PAD_LEFT);
+
+            $saleDate = !empty($validated['sale_date'])
+                ? \Carbon\Carbon::parse($validated['sale_date'])->setTimeFrom(now())
+                : now();
 
             $sale = SaleTransaction::create([
                 'invoice_no'      => $invoiceNo,
                 'customer_id'     => $validated['customer_id'],
                 'processed_by'    => $user ? $user->user_id : ($request->input('user_id') && \App\Models\User::where('user_id', $request->input('user_id'))->exists() ? $request->input('user_id') : \App\Models\User::value('user_id')),
                 'branch_id'       => $userBranch,
-                'sale_date'       => now(),
+                'sale_date'       => $saleDate,
                 'payment_method'  => $payMethod,
                 'subtotal'        => $subtotal,
                 'discount_amount' => $totalDiscount,

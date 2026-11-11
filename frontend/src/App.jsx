@@ -67,6 +67,7 @@ const SystemAdminDashboard = lazyRetry(() => import('./pages/SystemAdminDashboar
 const BranchesPage = lazyRetry(() => import('./pages/BranchesPage'))
 const CarouselPage = lazyRetry(() => import('./pages/CarouselPage'))
 const StoreSettingsPage = lazyRetry(() => import('./pages/StoreSettingsPage'))
+const StoreAdminProfilePage = lazyRetry(() => import('./pages/StoreAdminProfilePage'))
 
 // Synchronize initial URL hash with browser pathname or saved route if needed
 if (typeof window !== 'undefined') {
@@ -105,10 +106,10 @@ function canUserAccessPath(role, path) {
   const r = (role || '').trim().toLowerCase()
 
   if (r === 'customer') {
-    return cleanPath.startsWith('/customer') || cleanPath === '/notifications'
+    return cleanPath.startsWith('/customer') || cleanPath === '/notifications' || cleanPath === '/profile'
   }
   if (r === 'employee') {
-    return cleanPath.startsWith('/employee') || cleanPath === '/notifications'
+    return cleanPath.startsWith('/employee') || cleanPath === '/notifications' || cleanPath === '/profile'
   }
   if (r === 'store administrator' || r === 'store admin') {
     if (cleanPath.startsWith('/customer') || cleanPath.startsWith('/employee')) return false
@@ -166,8 +167,6 @@ function RoutePersistenceTracker() {
     const ref = searchParams.get('ref')
     if (paymentStatus === 'success' && ref) {
       triggerDataSync('payments')
-      triggerDataSync('sales')
-      triggerDataSync('installments')
       try {
         window.history.replaceState(null, '', window.location.pathname + window.location.hash)
       } catch (_) { }
@@ -333,8 +332,10 @@ function AppRoutes() {
             <Route path="/employee/leave-letter" element={<Navigate to="/employee/excuse-letter" replace />} />
             <Route path="/employee/notifications" element={<RequireAuth roles={['Employee']}><NotificationsPage /></RequireAuth>} />
 
-            {/* Store Administrator QR Attendance Terminal */}
+            {/* Store Administrator QR Attendance Terminal & Profile */}
             <Route path="/store-admin/attendance/scanner" element={<RequireAuth roles={['Store Administrator', 'Store Admin']}><QrScannerPage /></RequireAuth>} />
+            <Route path="/store-admin/profile" element={<RequireAuth roles={['Store Administrator', 'Store Admin']}><StoreAdminProfilePage /></RequireAuth>} />
+            <Route path="/profile" element={<RequireAuth><StoreAdminProfilePage /></RequireAuth>} />
             <Route path="/store-settings" element={<RequireAuth roles={['Store Administrator', 'Store Admin']}><StoreSettingsPage /></RequireAuth>} />
 
             {/* Administrator only routes */}

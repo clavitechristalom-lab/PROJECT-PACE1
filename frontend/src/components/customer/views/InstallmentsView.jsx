@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { 
   FiCreditCard, FiCalendar, FiPackage, FiCheckCircle, FiClock,
-  FiAlertCircle, FiArrowUpRight, FiSearch, FiLayers, FiFileText,
+  FiAlertCircle, FiArrowUpRight, FiLayers, FiFileText,
   FiShoppingBag, FiChevronRight, FiTrendingUp
 } from 'react-icons/fi';
 import { TbCurrencyPeso } from 'react-icons/tb';
@@ -19,7 +19,6 @@ export default function InstallmentsView({
   const [installments, setInstallments] = useState(propInstallments);
   const [loading, setLoading] = useState(propInstallments.length === 0);
   const [activeFilter, setActiveFilter] = useState('All'); // 'All' | 'Active' | 'Overdue' | 'Completed'
-  const [searchQuery, setSearchQuery] = useState('');
   const inFlightRef = useRef(false);
 
   const loadData = useCallback(async (silent = false, signal) => {
@@ -75,14 +74,6 @@ export default function InstallmentsView({
       if (!( i.status === 'Complete Payment' || i.status === 'Completed' || Number(i.balance) <= 0 )) return false;
     }
 
-    // Filter by search
-    if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase();
-      const matchProduct = (i.product || '').toLowerCase().includes(q);
-      const matchAcct = (i.account_no || '').toLowerCase().includes(q);
-      if (!matchProduct && !matchAcct) return false;
-    }
-
     return true;
   });
 
@@ -105,18 +96,6 @@ export default function InstallmentsView({
           <p className="text-xs sm:text-sm text-muted-foreground">
             Track your repayment progress, due dates, and settlement status across all appliance and furniture accounts.
           </p>
-        </div>
-
-        {/* Search */}
-        <div className="relative w-full md:w-72">
-          <FiSearch className="absolute left-3.5 top-1/2 -translate-y-1/2 text-muted-foreground w-4 h-4" />
-          <input
-            type="text"
-            placeholder="Search account or product..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full pl-10 pr-4 py-2 text-xs sm:text-sm rounded-2xl bg-card border border-border/80 text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-purple-500/30 transition-all shadow-xs"
-          />
         </div>
       </div>
 

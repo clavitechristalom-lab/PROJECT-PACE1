@@ -29,9 +29,9 @@ class EmployeeLetterController extends Controller
             'reviewer.employee',
         ])->orderBy('created_at', 'desc');
 
-        // Role-based scoping
+        // Role-based scoping (or personal scope when my_only is requested)
         if ($user) {
-            if ($user->role === 'Employee') {
+            if ($user->role === 'Employee' || $request->boolean('my_only')) {
                 $query->where(function ($q) use ($user) {
                     if ($user->employee_id) {
                         $q->where('employee_id', $user->employee_id);
@@ -39,7 +39,7 @@ class EmployeeLetterController extends Controller
                         $q->where('user_id', $user->user_id);
                     }
                 });
-            } elseif ($user->role === 'Store Administrator' && $user->employee && $user->employee->branch_id) {
+            } elseif (in_array($user->role, ['Store Administrator', 'Store Admin']) && $user->employee && $user->employee->branch_id) {
                 $branchId = $user->employee->branch_id;
                 $query->whereHas('employee', function ($q) use ($branchId) {
                     $q->where('branch_id', $branchId);
@@ -92,7 +92,7 @@ class EmployeeLetterController extends Controller
         // Calculate summary counts for tabs based on current role scoping
         $countsQuery = EmployeeLetter::query();
         if ($user) {
-            if ($user->role === 'Employee') {
+            if ($user->role === 'Employee' || $request->boolean('my_only')) {
                 $countsQuery->where(function ($q) use ($user) {
                     if ($user->employee_id) {
                         $q->where('employee_id', $user->employee_id);
@@ -100,7 +100,7 @@ class EmployeeLetterController extends Controller
                         $q->where('user_id', $user->user_id);
                     }
                 });
-            } elseif ($user->role === 'Store Administrator' && $user->employee && $user->employee->branch_id) {
+            } elseif (in_array($user->role, ['Store Administrator', 'Store Admin']) && $user->employee && $user->employee->branch_id) {
                 $branchId = $user->employee->branch_id;
                 $countsQuery->whereHas('employee', function ($q) use ($branchId) {
                     $q->where('branch_id', $branchId);
@@ -309,13 +309,15 @@ class EmployeeLetterController extends Controller
         ];
 
         NotificationService::sendToAdmins($notifData);
-        if ($employee->branch_id) {
-            NotificationService::sendToStoreAdmins($notifData, $employee->branch_id);
-        } else {
-            NotificationService::sendToStoreAdmins($notifData);
+        if (!in_array($user?->role, ['Store Administrator', 'Store Admin'])) {
+            if ($employee->branch_id) {
+                NotificationService::sendToStoreAdmins($notifData, $employee->branch_id);
+            } else {
+                NotificationService::sendToStoreAdmins($notifData);
+            }
         }
 
-        SyncController::invalidateFingerprint();
+        SyncController::invalidateFingerprint(['employees', 'attendance', 'payroll']);
         if ($letter->employee) {
             \App\Http\Controllers\PayrollController::recalculateDraftPayrollForEmployee($letter->employee);
         }
@@ -444,7 +446,7 @@ class EmployeeLetterController extends Controller
             ]);
         }
 
-        SyncController::invalidateFingerprint();
+        SyncController::invalidateFingerprint(['employees', 'attendance', 'payroll']);
         if ($letter->employee) {
             \App\Http\Controllers\PayrollController::recalculateDraftPayrollForEmployee($letter->employee);
         }
@@ -496,7 +498,7 @@ class EmployeeLetterController extends Controller
         }
 
         $letter->delete();
-        SyncController::invalidateFingerprint();
+        SyncController::invalidateFingerprint(['employees', 'attendance', 'payroll']);
         if ($letter->employee) {
             \App\Http\Controllers\PayrollController::recalculateDraftPayrollForEmployee($letter->employee);
         }
@@ -533,7 +535,7 @@ class EmployeeLetterController extends Controller
             'details' => "{$reviewerName} moved {$letter->category} #{$letter->letter_id} to archive",
         ]);
 
-        SyncController::invalidateFingerprint();
+        SyncController::invalidateFingerprint(['employees', 'attendance', 'payroll']);
 
         return response()->json([
             'success' => true,
@@ -568,7 +570,7 @@ class EmployeeLetterController extends Controller
             'details' => "{$reviewerName} restored {$letter->category} #{$letter->letter_id} from archive",
         ]);
 
-        SyncController::invalidateFingerprint();
+        SyncController::invalidateFingerprint(['employees', 'attendance', 'payroll']);
 
         return response()->json([
             'success' => true,

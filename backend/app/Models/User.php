@@ -277,23 +277,32 @@ class User extends Authenticatable
 
     /**
      * Synchronize account active/inactive statuses based on live login sessions.
-     * Logged-in accounts are automatically marked Active; logged-out accounts are marked Inactive.
+    /**
+     * Synchronize account statuses for the requested scope individually
+     * (without touching unrelated tables on every read, and throttled safely).
      */
-    public static function syncSessionStatuses(?User $currentUser = null): void
+    public static function syncSessionStatuses(?User $currentUser = null, string $scope = 'all'): void
     {
         try {
+            $normalizedScope = strtolower(trim($scope)) ?: 'all';
+            if (!\Illuminate\Support\Facades\Cache::add("pace_session_sync_{$normalizedScope}", true, 15)) {
+                return;
+            }
+
             $now = now();
 
-            // 1. Clean up never-used tokens (created > 5 mins ago) or expired tokens (idle > 2 hours)
-            \Illuminate\Support\Facades\DB::table('personal_access_tokens')
-                ->where('tokenable_type', self::class)
-                ->where(function ($q) use ($now) {
-                    $q->where(function ($sub) use ($now) {
-                        $sub->whereNull('last_used_at')
-                            ->where('created_at', '<', $now->copy()->subMinutes(5));
-                    })->orWhere('last_used_at', '<', $now->copy()->subHours(2));
-                })
-                ->delete();
+            // 1. Clean up stale tokens at most once per minute (avoids DELETE lock on every GET)
+            if (\Illuminate\Support\Facades\Cache::add('pace_token_prune_lock', true, 60)) {
+                \Illuminate\Support\Facades\DB::table('personal_access_tokens')
+                    ->where('tokenable_type', self::class)
+                    ->where(function ($q) use ($now) {
+                        $q->where(function ($sub) use ($now) {
+                            $sub->whereNull('last_used_at')
+                                ->where('created_at', '<', $now->copy()->subMinutes(5));
+                        })->orWhere('last_used_at', '<', $now->copy()->subHours(2));
+                    })
+                    ->delete();
+            }
 
             // 2. Collect all user IDs with an active login session token
             $activeUserIds = \Illuminate\Support\Facades\DB::table('personal_access_tokens')
@@ -322,46 +331,50 @@ class User extends Authenticatable
                 self::where('is_active', true)->update(['is_active' => false]);
             }
 
-            // 4. Sync linked employees table status ('Active' when logged in, 'Inactive' when logged out)
-            $activeEmpIds = !empty($activeUserIds)
-                ? self::whereIn('user_id', $activeUserIds)
-                    ->whereNotNull('employee_id')
-                    ->pluck('employee_id')
-                    ->map(fn($id) => (int) $id)
-                    ->all()
-                : [];
+            // 4. Only sync employees table when on employees/users/all scope
+            if ($normalizedScope === 'all' || $normalizedScope === 'employees') {
+                $activeEmpIds = !empty($activeUserIds)
+                    ? self::whereIn('user_id', $activeUserIds)
+                        ->whereNotNull('employee_id')
+                        ->pluck('employee_id')
+                        ->map(fn($id) => (int) $id)
+                        ->all()
+                    : [];
 
-            if (!empty($activeEmpIds)) {
-                Employee::whereIn('employee_id', $activeEmpIds)
-                    ->where('status', '!=', 'Active')
-                    ->update(['status' => 'Active']);
+                if (!empty($activeEmpIds)) {
+                    Employee::whereIn('employee_id', $activeEmpIds)
+                        ->where('status', '!=', 'Active')
+                        ->update(['status' => 'Active']);
 
-                Employee::whereNotIn('employee_id', $activeEmpIds)
-                    ->where('status', '!=', 'Inactive')
-                    ->update(['status' => 'Inactive']);
-            } else {
-                Employee::where('status', '!=', 'Inactive')->update(['status' => 'Inactive']);
+                    Employee::whereNotIn('employee_id', $activeEmpIds)
+                        ->where('status', '!=', 'Inactive')
+                        ->update(['status' => 'Inactive']);
+                } else {
+                    Employee::where('status', '!=', 'Inactive')->update(['status' => 'Inactive']);
+                }
             }
 
-            // 5. Sync linked customers table status ('Active' when logged in, 'Inactive' when logged out)
-            $activeCustIds = !empty($activeUserIds)
-                ? self::whereIn('user_id', $activeUserIds)
-                    ->whereNotNull('customer_id')
-                    ->pluck('customer_id')
-                    ->map(fn($id) => (int) $id)
-                    ->all()
-                : [];
+            // 5. Only sync customers table when on customers/users/all scope
+            if ($normalizedScope === 'all' || $normalizedScope === 'customers') {
+                $activeCustIds = !empty($activeUserIds)
+                    ? self::whereIn('user_id', $activeUserIds)
+                        ->whereNotNull('customer_id')
+                        ->pluck('customer_id')
+                        ->map(fn($id) => (int) $id)
+                        ->all()
+                    : [];
 
-            if (!empty($activeCustIds)) {
-                Customer::whereIn('customer_id', $activeCustIds)
-                    ->where('status', '!=', 'Active')
-                    ->update(['status' => 'Active']);
+                if (!empty($activeCustIds)) {
+                    Customer::whereIn('customer_id', $activeCustIds)
+                        ->where('status', '!=', 'Active')
+                        ->update(['status' => 'Active']);
 
-                Customer::whereNotIn('customer_id', $activeCustIds)
-                    ->where('status', '!=', 'Inactive')
-                    ->update(['status' => 'Inactive']);
-            } else {
-                Customer::where('status', '!=', 'Inactive')->update(['status' => 'Inactive']);
+                    Customer::whereNotIn('customer_id', $activeCustIds)
+                        ->where('status', '!=', 'Inactive')
+                        ->update(['status' => 'Inactive']);
+                } else {
+                    Customer::where('status', '!=', 'Inactive')->update(['status' => 'Inactive']);
+                }
             }
         } catch (\Throwable $e) {
             // Silently ignore during migrations or if tables are not ready

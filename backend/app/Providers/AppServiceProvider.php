@@ -18,9 +18,16 @@ class AppServiceProvider extends ServiceProvider
     }
 
     /**
-     * Whether a deferred mutation bump is already scheduled for the current request.
+     * Whether a deferred per-module mutation bump is already scheduled for the current request.
      */
     private static bool $mutationBumpScheduled = false;
+
+    /**
+     * Modules queued for fingerprint invalidation at the end of the current request.
+     *
+     * @var array<string, bool>
+     */
+    private static array $pendingMutationModules = [];
 
     /**
      * Bootstrap any application services.
@@ -40,54 +47,60 @@ class AppServiceProvider extends ServiceProvider
             // Silently ignore if connection not yet established
         }
 
-        // 2. Global Write-Invalidation: automatically bump mutation version on database writes
-        $modelsToTrack = [
-            \App\Models\Payment::class,
-            \App\Models\SaleTransaction::class,
-            \App\Models\Product::class,
-            \App\Models\Customer::class,
-            \App\Models\Attendance::class,
-            \App\Models\AttendanceScanLog::class,
-            \App\Models\Employee::class,
-            \App\Models\User::class,
-            \App\Models\InstallmentAccount::class,
-            \App\Models\PaymentSchedule::class,
-            \App\Models\Notification::class,
-            \App\Models\QrRequest::class,
-            \App\Models\SupportMessage::class,
-            \App\Models\CarouselImage::class,
-            \App\Models\BranchProfile::class,
-            \App\Models\Payroll::class,
-            // Previously untracked: changes here only showed up via the 1.4s full-data polling
-            \App\Models\EmployeeLetter::class,
-            \App\Models\PayrollPeriod::class,
-            \App\Models\PayrollDeduction::class,
-            \App\Models\EmployeeLoan::class,
-            \App\Models\EmployeeAllowance::class,
-            \App\Models\EmployeeBonus::class,
-            \App\Models\EmployeeDeduction::class,
-            \App\Models\EWalletDeposit::class,
-            \App\Models\SaleItem::class,
-            \App\Models\Setting::class,
+        // 2. Per-Module Write-Invalidation: only invalidate caches of the specific module(s) touched
+        $modelModuleMap = [
+            \App\Models\Payment::class => ['payments', 'installments', 'customers', 'sales', 'dashboard'],
+            \App\Models\SaleTransaction::class => ['sales', 'installments', 'dashboard'],
+            \App\Models\SaleItem::class => ['sales', 'installments', 'dashboard'],
+            \App\Models\Product::class => ['products', 'sales', 'installments', 'dashboard'],
+            \App\Models\Customer::class => ['customers', 'sales', 'installments', 'payments', 'dashboard'],
+            \App\Models\Attendance::class => ['attendance', 'employees', 'dashboard'],
+            \App\Models\AttendanceScanLog::class => ['attendance', 'employees', 'dashboard'],
+            \App\Models\Employee::class => ['employees', 'attendance', 'payroll', 'dashboard'],
+            \App\Models\User::class => ['employees', 'customers', 'system', 'dashboard'],
+            \App\Models\InstallmentAccount::class => ['installments', 'payments', 'customers', 'dashboard'],
+            \App\Models\PaymentSchedule::class => ['installments', 'payments', 'customers', 'dashboard'],
+            \App\Models\Notification::class => ['notifications'],
+            \App\Models\QrRequest::class => ['employees', 'attendance', 'dashboard'],
+            \App\Models\SupportMessage::class => ['support', 'dashboard'],
+            \App\Models\CarouselImage::class => ['carousels'],
+            \App\Models\BranchProfile::class => ['branches', 'employees', 'customers', 'products', 'sales', 'payroll', 'dashboard'],
+            \App\Models\Payroll::class => ['payroll', 'dashboard'],
+            \App\Models\EmployeeLetter::class => ['employees', 'attendance'],
+            \App\Models\PayrollPeriod::class => ['payroll', 'dashboard'],
+            \App\Models\PayrollDeduction::class => ['payroll', 'dashboard'],
+            \App\Models\EmployeeLoan::class => ['payroll', 'employees'],
+            \App\Models\EmployeeAllowance::class => ['payroll', 'employees'],
+            \App\Models\EmployeeBonus::class => ['payroll', 'employees'],
+            \App\Models\EmployeeDeduction::class => ['payroll', 'employees'],
+            \App\Models\EWalletDeposit::class => ['payments', 'installments', 'customers'],
+            \App\Models\Setting::class => ['system', 'attendance', 'payroll'],
         ];
 
-        // Bump once per request (after the response is sent) instead of 7 cache-file writes per saved row.
-        $scheduleBump = static function () {
-            if (self::$mutationBumpScheduled) {
-                return;
+        // Bump only affected modules once per request (after the response is sent)
+        foreach ($modelModuleMap as $modelClass => $modules) {
+            if (!class_exists($modelClass)) {
+                continue;
             }
-            self::$mutationBumpScheduled = true;
-            app()->terminating(static function () {
-                self::$mutationBumpScheduled = false;
-                SyncController::bumpMutation();
-            });
-        };
-
-        foreach ($modelsToTrack as $modelClass) {
-            if (class_exists($modelClass)) {
-                $modelClass::saved($scheduleBump);
-                $modelClass::deleted($scheduleBump);
-            }
+            $scheduleBump = static function () use ($modules) {
+                foreach ($modules as $mod) {
+                    self::$pendingMutationModules[$mod] = true;
+                }
+                if (self::$mutationBumpScheduled) {
+                    return;
+                }
+                self::$mutationBumpScheduled = true;
+                app()->terminating(static function () {
+                    $toBump = array_keys(self::$pendingMutationModules);
+                    self::$pendingMutationModules = [];
+                    self::$mutationBumpScheduled = false;
+                    if (!empty($toBump)) {
+                        SyncController::bumpMutation($toBump);
+                    }
+                });
+            };
+            $modelClass::saved($scheduleBump);
+            $modelClass::deleted($scheduleBump);
         }
     }
 }

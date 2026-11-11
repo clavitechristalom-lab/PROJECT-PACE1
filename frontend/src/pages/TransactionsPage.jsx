@@ -512,6 +512,7 @@ export default function TransactionsPage() {
               <input
                 type="date"
                 value={dateFrom || ''}
+                max={dateTo || undefined}
                 onChange={e => {
                   setDateRange('Custom')
                   setDateFrom(e.target.value)

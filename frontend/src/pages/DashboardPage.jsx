@@ -442,6 +442,7 @@ function AdminBusinessDashboard() {
               <input
                 type="date"
                 value={customStart}
+                max={customEnd || undefined}
                 onChange={e => setCustomStart(e.target.value)}
                 className="px-2.5 py-1 rounded-xl border border-border dark:border-slate-700 bg-card dark:bg-[#0B1120] text-foreground dark:text-white font-mono"
               />
@@ -451,6 +452,7 @@ function AdminBusinessDashboard() {
               <input
                 type="date"
                 value={customEnd}
+                min={customStart || undefined}
                 onChange={e => setCustomEnd(e.target.value)}
                 className="px-2.5 py-1 rounded-xl border border-border dark:border-slate-700 bg-card dark:bg-[#0B1120] text-foreground dark:text-white font-mono"
               />
@@ -848,13 +850,6 @@ function StoreAdminBusinessDashboard() {
         action={
           <div className="flex flex-wrap items-center gap-2">
             <SyncButton sync={syncStoreDashboard} isSyncing={isSyncingStoreDashboard} label="Sync" />
-            <button
-              onClick={() => navigate('/sales')}
-              className="flex items-center gap-2 px-4 py-2 bg-primary hover:bg-primary/90 text-primary-foreground font-semibold text-xs rounded-xl shadow-xs transition-all cursor-pointer"
-            >
-              <FiPlus className="w-4 h-4" />
-              <span>Create Sale</span>
-            </button>
           </div>
         }
       />
@@ -870,7 +865,7 @@ function StoreAdminBusinessDashboard() {
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-        <StatCard title="Installment" value={stats?.active_installments?.toString() || '0'} sub="active branch accounts" icon={<FiCreditCard className="w-5 h-5" />} color="blue" />
+        <StatCard title="Installments" value={stats?.active_installments?.toString() || '0'} sub="active branch accounts" icon={<FiCreditCard className="w-5 h-5" />} color="blue" />
         <StatCard title="Outstanding Balance" value={fmt(stats?.total_outstanding_balance || 0)} sub="branch receivables" icon={<FiTrendingDown className="w-5 h-5 text-rose-500" />} color="red" />
         <StatCard title="Overdue Accounts" value={stats?.overdue_installments?.toString() || '0'} sub="past-due schedules" icon={<FiAlertTriangle className="w-5 h-5 text-amber-500" />} color="yellow" />
         <StatCard title="Low Stock Products" value={stats?.low_stock_products?.toString() || '0'} sub="in catalog" icon={<FiPackage className="w-5 h-5 text-rose-500" />} color="red" />
@@ -923,7 +918,7 @@ function StoreAdminBusinessDashboard() {
           className="flex items-center gap-2 p-3 rounded-2xl bg-card border border-border hover:shadow-md transition-all font-semibold text-xs text-foreground cursor-pointer"
         >
           <FiShoppingCart className="w-4 h-4 text-blue-500" />
-          <span>New Sale</span>
+          <span>View Sales</span>
         </button>
         <button
           onClick={() => navigate('/payments')}
@@ -1162,7 +1157,6 @@ export function ExcuseLeaveLetterModal({ isOpen, onClose, user, onCreated }) {
       const res = await api.supportMessages.create(payload)
       showToast(`${formData.category} submitted to Management!`, 'success')
       triggerDataSync('support')
-      triggerDataSync('notifications')
       if (onCreated && res?.data) {
         onCreated(res.data)
       }
@@ -1245,6 +1239,7 @@ export function ExcuseLeaveLetterModal({ isOpen, onClose, user, onCreated }) {
             <input
               type="date"
               value={formData.from_date || ''}
+              max={formData.to_date || undefined}
               onChange={e => handleAutoFieldChange('from_date', e.target.value)}
               className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground font-mono text-xs focus:outline-none focus:ring-2 focus:ring-primary/30"
               required

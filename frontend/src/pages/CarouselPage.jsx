@@ -47,7 +47,6 @@ export default function CarouselPage() {
     try {
       await api.carouselImages.create(formData);
       await loadImages();
-      triggerDataSync('carousel');
       showToast('Carousel image uploaded successfully', 'success');
     } catch (err) {
       console.error(err);
@@ -68,7 +67,6 @@ export default function CarouselPage() {
       try {
         await api.carouselImages.delete(id);
         setImages(images.filter(img => img.id !== id));
-        triggerDataSync('carousel');
         showToast('Carousel image deleted successfully', 'success');
       } catch (err) {
         console.error(err);

@@ -74,18 +74,18 @@ function getMailConfig(): array
         }
     }
 
-    $user = $envVars['GMAIL_USER'] ?? ($envVars['MAIL_USERNAME'] ?? '35barangay@gmail.com');
-    if (strcasecmp($user, 'Z-LICZ@gmail.com') === 0) {
-        $user = '35barangay@gmail.com';
+    $user = $envVars['GMAIL_USER'] ?? ($envVars['MAIL_USERNAME'] ?? 'z.licz2000@gmail.com');
+    if (empty($user)) {
+        $user = 'z.licz2000@gmail.com';
     }
-    $pass = $envVars['GMAIL_APP_PASSWORD'] ?? ($envVars['MAIL_PASSWORD'] ?? 'sziq apba sink lsch');
+    $pass = $envVars['GMAIL_APP_PASSWORD'] ?? ($envVars['MAIL_PASSWORD'] ?? '');
     if ((str_starts_with($pass, '"') && str_ends_with($pass, '"')) ||
         (str_starts_with($pass, "'") && str_ends_with($pass, "'"))) {
         $pass = substr($pass, 1, -1);
     }
-    $fromEmail = $envVars['MAIL_FROM_ADDRESS'] ?? '35barangay@gmail.com';
-    if (strcasecmp($fromEmail, 'Z-LICZ@gmail.com') === 0 || empty($fromEmail)) {
-        $fromEmail = '35barangay@gmail.com';
+    $fromEmail = $envVars['MAIL_FROM_ADDRESS'] ?? ($user ?: 'z.licz2000@gmail.com');
+    if (empty($fromEmail)) {
+        $fromEmail = $user ?: 'z.licz2000@gmail.com';
     }
 
     return [

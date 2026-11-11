@@ -108,9 +108,7 @@ export default function StoreSettingsPage() {
       await api.branches.update(branchId, formData)
       
       showToast('Store settings updated successfully', 'success')
-      fetchBranchDetails()
       triggerDataSync('branches')
-      triggerDataSync('dashboard')
     } catch (err) {
       showToast(err.message || 'Failed to update store settings', 'error')
     } finally {

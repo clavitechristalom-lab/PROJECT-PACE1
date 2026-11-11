@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useMemo } from 'react'
 import { useSearchParams, Navigate } from 'react-router-dom'
 import {
-  FiUser, FiUsers, FiPlus, FiEdit, FiTrash2, FiEye,
+  FiUser, FiUsers, FiEdit, FiTrash2, FiEye,
   FiPhone, FiMail, FiMapPin, FiKey, FiCamera, FiPrinter, FiCreditCard, FiCalendar, FiClock, FiShield,
   FiCheckCircle, FiAlertTriangle, FiX, FiSearch, FiFilter,
   FiDownload, FiRefreshCw, FiSlash, FiLayers, FiActivity,
@@ -351,7 +351,6 @@ export default function EmployeesPage({ branchFilter, embedded }) {
       const res = await api.employees.generateQr(generateModalEmp.employee_id)
       showToast(res.message || 'Permanent QR code generated successfully.', 'success')
       setGenerateModalEmp(null)
-      loadEmployees()
       triggerDataSync('employees')
     } catch (err) {
       showToast(err.message || 'Failed to generate QR code', 'error')
@@ -367,7 +366,6 @@ export default function EmployeesPage({ branchFilter, embedded }) {
     try {
       const res = await api.employees.revokeQr(emp.employee_id)
       showToast(res.message || 'QR code successfully revoked.', 'success')
-      loadEmployees()
       triggerDataSync('employees')
     } catch (err) {
       showToast(err.message || 'Failed to revoke QR code', 'error')
@@ -383,7 +381,6 @@ export default function EmployeesPage({ branchFilter, embedded }) {
     try {
       const res = await api.employees.reissueQr(emp.employee_id)
       showToast(res.message || 'New permanent QR code issued successfully.', 'success')
-      loadEmployees()
       triggerDataSync('employees')
     } catch (err) {
       showToast(err.message || 'Failed to reissue QR code', 'error')
@@ -459,7 +456,6 @@ export default function EmployeesPage({ branchFilter, embedded }) {
           qr_active: res.qr_active,
         }
       }))
-      loadEmployees()
       triggerDataSync('employees')
     } catch (err) {
       showToast(err.message || 'Failed to toggle QR status', 'error')
@@ -490,7 +486,6 @@ export default function EmployeesPage({ branchFilter, embedded }) {
           }
         }))
       }
-      loadEmployees()
       triggerDataSync('employees')
     } catch (err) {
       showToast(err.message || 'Failed to update verification status', 'error')
@@ -588,15 +583,6 @@ export default function EmployeesPage({ branchFilter, embedded }) {
           action={
             <div className="flex items-center gap-2">
               <SyncButton sync={syncEmployees} isSyncing={isSyncingEmployees} label="Sync" />
-              {(isAdmin || isStoreAdmin) && (
-                <button
-                  onClick={() => { setEditItem(null); setFormTab('personal'); setForm(emptyForm); setAddModal(true) }}
-                  className="flex items-center gap-2 px-4 py-2 bg-primary hover:bg-primary/90 text-primary-foreground font-semibold text-xs rounded-xl shadow-xs transition-all cursor-pointer hover:shadow-md active:scale-98"
-                >
-                  <FiPlus className="w-4 h-4" />
-                  <span>Add Employee</span>
-                </button>
-              )}
             </div>
           }
         />
@@ -820,18 +806,7 @@ export default function EmployeesPage({ branchFilter, embedded }) {
             <EmptyState
               icon={<FiUsers className="w-12 h-12 text-muted-foreground/30 mx-auto" />}
               title="No employees found"
-              description={search || deptFilter !== 'All' ? 'Try adjusting your search query or filters' : 'Add your first employee to get started'}
-              action={
-                !isAdmin ? (
-                  <button
-                    onClick={() => { setEditItem(null); setFormTab('personal'); setForm(emptyForm); setAddModal(true) }}
-                    className="flex items-center gap-1.5 px-3.5 py-1.5 bg-primary text-primary-foreground font-bold text-xs rounded-xl cursor-pointer"
-                  >
-                    <FiPlus className="w-4 h-4" />
-                    <span>Add Employee</span>
-                  </button>
-                ) : null
-              }
+              description={search || deptFilter !== 'All' ? 'Try adjusting your search query or filters' : 'No employee records available yet'}
             />
           ) : (
             <>
@@ -1048,11 +1023,11 @@ export default function EmployeesPage({ branchFilter, embedded }) {
                     <select
                       value={form.gender}
                       onChange={e => setForm(f => ({ ...f, gender: e.target.value }))}
-                      className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground font-semibold cursor-pointer [color-scheme:dark] [&>option]:bg-[#0f172a] [&>option]:text-white"
+                      className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground font-semibold cursor-pointer"
                     >
-                      <option value="Male" className="bg-[#0f172a] text-white">Male</option>
-                      <option value="Female" className="bg-[#0f172a] text-white">Female</option>
-                      <option value="Other" className="bg-[#0f172a] text-white">Other</option>
+                      <option value="Male">Male</option>
+                      <option value="Female">Female</option>
+                      <option value="Other">Other</option>
                     </select>
                   </div>
                   <div>
@@ -1061,9 +1036,8 @@ export default function EmployeesPage({ branchFilter, embedded }) {
                       type="date"
                       max={new Date().toISOString().split('T')[0]}
                       value={form.date_of_birth}
-                      onClick={(e) => { try { e.target.showPicker() } catch (_) { } }}
                       onChange={e => setForm(f => ({ ...f, date_of_birth: e.target.value, birth_date: e.target.value }))}
-                      className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground font-mono cursor-pointer [color-scheme:dark]"
+                      className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground font-mono cursor-pointer"
                     />
                   </div>
                   <div>
@@ -1071,13 +1045,13 @@ export default function EmployeesPage({ branchFilter, embedded }) {
                     <select
                       value={form.marital_status}
                       onChange={e => setForm(f => ({ ...f, marital_status: e.target.value }))}
-                      className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground font-semibold cursor-pointer [color-scheme:dark] [&>option]:bg-[#0f172a] [&>option]:text-white"
+                      className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground font-semibold cursor-pointer"
                     >
-                      <option value="Single" className="bg-[#0f172a] text-white">Single</option>
-                      <option value="Married" className="bg-[#0f172a] text-white">Married</option>
-                      <option value="Widowed" className="bg-[#0f172a] text-white">Widowed</option>
-                      <option value="Separated" className="bg-[#0f172a] text-white">Separated</option>
-                      <option value="Divorced" className="bg-[#0f172a] text-white">Divorced</option>
+                      <option value="Single">Single</option>
+                      <option value="Married">Married</option>
+                      <option value="Widowed">Widowed</option>
+                      <option value="Separated">Separated</option>
+                      <option value="Divorced">Divorced</option>
                     </select>
                   </div>
                 </div>
@@ -1184,11 +1158,11 @@ export default function EmployeesPage({ branchFilter, embedded }) {
                           position: newDept === 'Store Admin' ? 'Manager (Store Admin)' : (f.position === 'Manager (Store Admin)' ? 'Cashier (Employee)' : f.position)
                         }))
                       }}
-                      className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground font-semibold cursor-pointer [color-scheme:dark] [&>option]:bg-[#0f172a] [&>option]:text-white"
+                      className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground font-semibold cursor-pointer"
                     >
-                      <option value="Employee" className="bg-[#0f172a] text-white">Employee</option>
-                      <option value="Store Admin" className="bg-[#0f172a] text-white">Store Admin</option>
-                      <option value="Unassigned" className="bg-[#0f172a] text-white">Unassigned</option>
+                      <option value="Employee">Employee</option>
+                      <option value="Store Admin">Store Admin</option>
+                      <option value="Unassigned">Unassigned</option>
                     </select>
                   </div>
                   <div>
@@ -1204,15 +1178,15 @@ export default function EmployeesPage({ branchFilter, embedded }) {
                         }))
                       }}
                       required
-                      className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground font-semibold cursor-pointer [color-scheme:dark] [&>option]:bg-[#0f172a] [&>option]:text-white"
+                      className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground font-semibold cursor-pointer"
                     >
                       {form.department === 'Store Admin' ? (
-                        <option value="Manager (Store Admin)" className="bg-[#0f172a] text-white">Manager (Store Admin)</option>
+                        <option value="Manager (Store Admin)">Manager (Store Admin)</option>
                       ) : (
                         <>
-                          <option value="Cashier (Employee)" className="bg-[#0f172a] text-white">Cashier (Employee)</option>
-                          <option value="Collector (Employee)" className="bg-[#0f172a] text-white">Collector (Employee)</option>
-                          <option value="Utility (Employee)" className="bg-[#0f172a] text-white">Utility (Employee)</option>
+                          <option value="Cashier (Employee)">Cashier (Employee)</option>
+                          <option value="Collector (Employee)">Collector (Employee)</option>
+                          <option value="Utility (Employee)">Utility (Employee)</option>
                         </>
                       )}
                     </select>
@@ -1516,7 +1490,7 @@ export default function EmployeesPage({ branchFilter, embedded }) {
                         <div className="p-3.5 bg-muted/20 rounded-xl border border-border space-y-2.5">
                           <div className="flex items-center justify-between">
                             <h4 className="font-bold text-xs text-foreground">Badge Security Settings</h4>
-                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${!detailItem.employee.qr_token ? 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300' : detailItem.employee.qr_active ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'}`}>
+                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${!detailItem.employee.qr_token ? 'bg-muted text-muted-foreground' : detailItem.employee.qr_active ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300' : 'bg-rose-100 text-rose-800 dark:bg-rose-950/60 dark:text-rose-300'}`}>
                               {!detailItem.employee.qr_token ? 'Empty' : detailItem.employee.qr_active ? 'Active' : 'Disabled'}
                             </span>
                           </div>
@@ -1850,33 +1824,33 @@ export default function EmployeesPage({ branchFilter, embedded }) {
           size="lg"
         >
           <div className="space-y-4 text-xs">
-            <div className="p-4 rounded-xl bg-slate-950/80 border border-slate-800 space-y-2.5">
-              <div className="flex justify-between py-1 border-b border-slate-800/60">
-                <span className="text-slate-400">Employee:</span>
-                <span className="font-bold text-slate-100">{generateModalEmp.first_name} {generateModalEmp.last_name}</span>
+            <div className="p-4 rounded-xl bg-muted/40 border border-border space-y-2.5">
+              <div className="flex justify-between py-1 border-b border-border">
+                <span className="text-muted-foreground">Employee:</span>
+                <span className="font-bold text-foreground">{generateModalEmp.first_name} {generateModalEmp.last_name}</span>
               </div>
-              <div className="flex justify-between py-1 border-b border-slate-800/60">
-                <span className="text-slate-400">Employee ID:</span>
-                <span className="font-mono font-bold text-primary-400">{generateModalEmp.employee_code}</span>
+              <div className="flex justify-between py-1 border-b border-border">
+                <span className="text-muted-foreground">Employee ID:</span>
+                <span className="font-mono font-bold text-primary">{generateModalEmp.employee_code}</span>
               </div>
-              <div className="flex justify-between py-1 border-b border-slate-800/60">
-                <span className="text-slate-400">Position:</span>
-                <span className="font-semibold text-slate-200">{generateModalEmp.position}</span>
+              <div className="flex justify-between py-1 border-b border-border">
+                <span className="text-muted-foreground">Position:</span>
+                <span className="font-semibold text-foreground">{generateModalEmp.position}</span>
               </div>
 
-              <div className="flex justify-between items-center bg-muted/30 p-2.5 rounded-lg border border-border text-xs">
-                <span className="text-slate-400">Branch:</span>
-                <span className="font-semibold text-emerald-400">{generateModalEmp.branch?.name || 'Unassigned'}</span>
+              <div className="flex justify-between items-center bg-card p-2.5 rounded-lg border border-border text-xs">
+                <span className="text-muted-foreground">Branch:</span>
+                <span className="font-semibold text-emerald-600 dark:text-emerald-400">{generateModalEmp.branch?.name || 'Unassigned'}</span>
               </div>
             </div>
 
-            <div className="p-4 rounded-xl bg-primary-500/10 border border-primary-500/20 text-primary-300">
+            <div className="p-4 rounded-xl bg-primary/10 border border-primary/20 text-primary">
               <p className="font-medium text-center leading-relaxed">
                 "This permanent QR code will be assigned to this employee and used for attendance verification."
               </p>
             </div>
 
-            <div className="flex justify-end gap-3 pt-4 border-t border-slate-800">
+            <div className="flex justify-end gap-3 pt-4 border-t border-border">
               <Btn variant="outline" onClick={() => setGenerateModalEmp(null)} disabled={qrActionLoading}>
                 Cancel
               </Btn>

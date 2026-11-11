@@ -40,7 +40,7 @@ export default function StorageManagementTab({ onNavigateToBackups }) {
 
   useRealtimeSync((_source, signal) => {
     loadStorage(true, signal);
-  }, [loadStorage], { module: 'system' });
+  }, [loadStorage], { module: 'storage' });
 
   const handleCleanAction = async (action, actionLabel) => {
     const confirmed = await confirmAction({
@@ -58,9 +58,8 @@ export default function StorageManagementTab({ onNavigateToBackups }) {
         if (response.storage) {
           setStorage(response.storage);
         } else {
-          loadStorage(true);
+          triggerDataSync('storage');
         }
-        triggerDataSync('storage');
 
         showSuccess(
           'Maintenance Completed',

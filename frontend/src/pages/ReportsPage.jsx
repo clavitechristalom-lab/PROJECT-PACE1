@@ -18,6 +18,7 @@ import { api } from '../lib/api'
 import { useAuth } from '../context/AuthContext'
 import { useRealtimeSync } from '../lib/realtimeSync'
 import { TbCurrencyPeso } from 'react-icons/tb'
+import ReportsPrintView from '../components/reports/ReportsPrintView'
 
 const COLORS = ['#2563eb', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#06b6d4', '#f97316']
 
@@ -28,7 +29,16 @@ export default function ReportsPage() {
 
   const [activeTab, setActiveTab] = useState(isEmployee ? 'attendance' : 'employees')
   const [reportData, setReportData] = useState(null)
-  const [dashboardStats, setDashboardStats] = useState(null)
+  const [printReportsData, setPrintReportsData] = useState({
+    employees: null,
+    attendance: null,
+    payroll: null,
+    sales: null,
+    inventory: null,
+    installments: null,
+  })
+  const [companySettings, setCompanySettings] = useState(null)
+  const [preparingPrint, setPreparingPrint] = useState(false)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
 
@@ -51,18 +61,72 @@ export default function ReportsPage() {
       })
       .catch(() => {})
 
-    api.dashboard.getStats().then(setDashboardStats).catch(()=>{})
+    api.system.getPublicSettings()
+      .then(setCompanySettings)
+      .catch(() => {})
   }, [])
 
   useEffect(() => {
+    if (isStoreAdmin) return
     api.payroll.getPeriods()
       .then(res => {
         if (res?.periods) setPeriods(res.periods)
       })
       .catch(() => {})
-  }, [])
+  }, [isStoreAdmin])
+
+  useEffect(() => {
+    if (isStoreAdmin && activeTab === 'payroll') {
+      setActiveTab('employees')
+    }
+  }, [isStoreAdmin, activeTab])
+
+  const loadAllReportsForPrint = async (overrides = {}) => {
+    const bName = overrides.branch ?? branch
+    const deptVal = overrides.department ?? department
+    const statVal = overrides.status ?? status
+    const dfVal = overrides.startDate ?? startDate
+    const dtVal = overrides.endDate ?? endDate
+    const pidVal = overrides.periodId ?? periodId
+
+    const branchObj = branchesList.find(
+      item => item.name === bName || String(item.id) === String(bName)
+    )
+    const resolvedBranchId = bName !== 'All' && branchObj?.id ? branchObj.id : undefined
+    const deptParam = deptVal !== 'All' ? deptVal : undefined
+    const dateFromParam = dfVal || undefined
+    const dateToParam = dtVal || undefined
+    const periodParam = pidVal !== 'All' ? pidVal : undefined
+
+    const empStatus = ['Active', 'Inactive'].includes(statVal) ? statVal : undefined
+    const attStatus = ['Present', 'Late', 'Absent', 'Half Day'].includes(statVal) ? statVal : undefined
+    const payStatus = ['Draft', 'Approved', 'Paid'].includes(statVal) ? statVal : undefined
+
+    const [empRes, attRes, payRes, salesRes, invRes, instRes] = await Promise.allSettled([
+      api.reports.getEmployees({ branch_id: resolvedBranchId, department: deptParam, status: empStatus }),
+      api.reports.getAttendance({ branch: resolvedBranchId, department: deptParam, status: attStatus, date_from: dateFromParam, date_to: dateToParam }),
+      isStoreAdmin
+        ? Promise.resolve(null)
+        : api.reports.getPayroll({ branch_id: resolvedBranchId, department: deptParam, status: payStatus, period_id: periodParam }),
+      api.reports.getSales({ branch_id: resolvedBranchId, date_from: dateFromParam, date_to: dateToParam }),
+      api.reports.getInventory(),
+      api.reports.getInstallments(),
+    ])
+
+    const next = {
+      employees: empRes.status === 'fulfilled' ? empRes.value : null,
+      attendance: attRes.status === 'fulfilled' ? attRes.value : null,
+      payroll: !isStoreAdmin && payRes.status === 'fulfilled' ? payRes.value : null,
+      sales: salesRes.status === 'fulfilled' ? salesRes.value : null,
+      inventory: invRes.status === 'fulfilled' ? invRes.value : null,
+      installments: instRes.status === 'fulfilled' ? instRes.value : null,
+    }
+    setPrintReportsData(next)
+    return next
+  }
 
   const loadReport = async (tab = activeTab, silent = false) => {
+    const safeTab = isStoreAdmin && tab === 'payroll' ? 'employees' : tab
     if (!silent) {
       setLoading(true)
       setError('')
@@ -79,24 +143,24 @@ export default function ReportsPage() {
         period_id: periodId !== 'All' ? periodId : undefined,
       }
 
-      if (tab === 'employees') {
+      if (safeTab === 'employees') {
         data = await api.reports.getEmployees(params)
-      } else if (tab === 'attendance') {
+      } else if (safeTab === 'attendance') {
         data = await api.reports.getAttendance(params)
-      } else if (tab === 'payroll') {
+      } else if (safeTab === 'payroll' && !isStoreAdmin) {
         data = await api.reports.getPayroll(params)
-      } else if (tab === 'sales') {
+      } else if (safeTab === 'sales') {
         data = await api.reports.getSales(params)
-      } else if (tab === 'inventory') {
+      } else if (safeTab === 'inventory') {
         data = await api.reports.getInventory()
-      } else if (tab === 'installments') {
+      } else if (safeTab === 'installments') {
         data = await api.reports.getInstallments()
       }
 
       setReportData(data)
     } catch (err) {
-      console.error(`Failed to load ${tab} report:`, err)
-      if (!silent) setError(err.message || `Failed to fetch ${tab} report from server`)
+      console.error(`Failed to load ${safeTab} report:`, err)
+      if (!silent) setError(err.message || `Failed to fetch ${safeTab} report from server`)
     } finally {
       if (!silent) setLoading(false)
     }
@@ -104,17 +168,24 @@ export default function ReportsPage() {
 
   useEffect(() => {
     loadReport(activeTab)
-  }, [activeTab])
+  }, [activeTab, isStoreAdmin])
+
+  useEffect(() => {
+    loadAllReportsForPrint()
+  }, [branchesList.length, isStoreAdmin])
 
   useRealtimeSync(() => {
     loadReport(activeTab, true)
-  }, [activeTab, branch, department, status, startDate, endDate, periodId], { module: 'reports' })
+    loadAllReportsForPrint()
+  }, [activeTab, branch, department, status, startDate, endDate, periodId, isStoreAdmin], { module: 'reports' })
 
   const handleApplyFilters = () => {
     loadReport(activeTab)
+    loadAllReportsForPrint()
   }
 
   const handleResetFilters = () => {
+    const resetBranch = isStoreAdmin ? branch : 'All'
     if (!isStoreAdmin) setBranch('All')
     setDepartment('All')
     setStatus('All')
@@ -122,6 +193,14 @@ export default function ReportsPage() {
     setEndDate('')
     setPeriodId('All')
     setTimeout(() => loadReport(activeTab), 50)
+    loadAllReportsForPrint({
+      branch: resetBranch,
+      department: 'All',
+      status: 'All',
+      startDate: '',
+      endDate: '',
+      periodId: 'All',
+    })
   }
 
   const exportCSV = () => {
@@ -249,11 +328,29 @@ export default function ReportsPage() {
     showToast(`Exported ${activeTab.toUpperCase()} report as CSV file`, 'success')
   }
 
-  const printReport = () => {
-    window.print()
+  const printReport = async () => {
+    if (preparingPrint) return
+    setPreparingPrint(true)
+    const prevTitle = document.title
+    const todayStr = new Date().toISOString().slice(0, 10)
+    const restoreTitle = () => {
+      document.title = prevTitle
+      window.removeEventListener('afterprint', restoreTitle)
+    }
+
+    try {
+      await loadAllReportsForPrint()
+      document.title = `Z-LICZ_Reports_Analytics_${todayStr}`
+      await new Promise(resolve => setTimeout(resolve, 150))
+      window.addEventListener('afterprint', restoreTitle)
+      window.print()
+      setTimeout(restoreTitle, 1500)
+    } finally {
+      setPreparingPrint(false)
+    }
   }
 
-  const tabs = [
+  const allTabs = [
     { id: 'employees', label: 'Employees Report', icon: <FiUsers className="w-3.5 h-3.5" /> },
     { id: 'attendance', label: 'Attendance Report', icon: <FiClock className="w-3.5 h-3.5" /> },
     { id: 'payroll', label: 'Payroll Report', icon: <TbCurrencyPeso className="w-3.5 h-3.5" /> },
@@ -261,6 +358,8 @@ export default function ReportsPage() {
     { id: 'inventory', label: 'Inventory Valuation', icon: <FiPackage className="w-3.5 h-3.5" /> },
     { id: 'installments', label: 'Installments & Aging', icon: <FiCreditCard className="w-3.5 h-3.5" /> },
   ]
+
+  const tabs = isStoreAdmin ? allTabs.filter(t => t.id !== 'payroll') : allTabs
 
   return (
     <>
@@ -278,10 +377,11 @@ export default function ReportsPage() {
           <div className="flex items-center gap-2 flex-wrap">
             <button
               onClick={printReport}
-              className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-border bg-card hover:bg-muted font-semibold text-xs text-foreground cursor-pointer shadow-2xs transition-colors"
+              disabled={preparingPrint}
+              className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-border bg-card hover:bg-muted font-semibold text-xs text-foreground cursor-pointer shadow-2xs transition-colors disabled:opacity-60 disabled:cursor-wait"
             >
               <FiPrinter className="w-4 h-4" />
-              <span>Print / PDF</span>
+              <span>{preparingPrint ? 'Preparing PDF...' : 'Print / PDF'}</span>
             </button>
             <button
               onClick={exportCSV}
@@ -399,6 +499,7 @@ export default function ReportsPage() {
                 <input
                   type="date"
                   value={startDate}
+                  max={endDate || undefined}
                   onChange={e => setStartDate(e.target.value)}
                   className="w-full border border-border rounded-xl px-2 py-1.5 text-xs bg-card text-foreground font-mono"
                 />
@@ -409,6 +510,7 @@ export default function ReportsPage() {
                 <input
                   type="date"
                   value={endDate}
+                  min={startDate || undefined}
                   onChange={e => setEndDate(e.target.value)}
                   className="w-full border border-border rounded-xl px-2 py-1.5 text-xs bg-card text-foreground font-mono"
                 />
@@ -587,8 +689,8 @@ export default function ReportsPage() {
             </>
           )}
 
-          {/* TAB 3: PAYROLL REPORT */}
-          {activeTab === 'payroll' && (
+          {/* TAB 3: PAYROLL REPORT (Hidden for Store Admin) */}
+          {activeTab === 'payroll' && !isStoreAdmin && (
             <>
               <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
                 <StatCard title="Gross Payroll" value={fmt(reportData.total_gross || 0)} sub="basic + allowances + OT" icon={<TbCurrencyPeso className="w-5 h-5" />} color="blue" />
@@ -788,173 +890,26 @@ export default function ReportsPage() {
       )}
     </div>
 
-    {/* MASTER PRINT REPORT (Only visible when printing) */}
-    <div className="hidden print:block print:w-full print:m-0 print:p-0 bg-white font-serif text-slate-800">
-      <div className="border-b-2 border-slate-800 pb-2 mb-6 mt-4">
-        <h1 className="text-3xl font-bold text-slate-900 tracking-tight" style={{ color: '#1e3a5f' }}>Reports & Analytics Dashboard 2026</h1>
-        <p className="text-sm text-slate-500 font-sans mt-1">Comprehensive Operational & Financial Metrics Overview</p>
-      </div>
-
-      <div className="grid grid-cols-12 gap-8 font-sans">
-        {/* Left Column: Contents */}
-        <div className="col-span-4">
-          <h2 className="font-bold text-sm uppercase mb-3 text-slate-800" style={{ color: '#1e3a5f' }}>Contents</h2>
-          <table className="w-full text-xs">
-            <tbody>
-              <tr className="border-b border-transparent">
-                <td className="py-1.5 font-medium">• Employees Report</td>
-                <td className="py-1.5 text-right font-bold">5%</td>
-              </tr>
-              <tr className="border-b border-transparent">
-                <td className="py-1.5 font-medium">• Attendance Report</td>
-                <td className="py-1.5 text-right font-bold">6%</td>
-              </tr>
-              <tr className="border-b border-transparent">
-                <td className="py-1.5 font-medium">• Payroll Report</td>
-                <td className="py-1.5 text-right font-bold">{dashboardStats ? fmt(dashboardStats.net_payroll).replace('₱','') : '0'}</td>
-              </tr>
-              <tr className="border-b border-transparent">
-                <td className="py-1.5 font-medium">• Sales & Revenue</td>
-                <td className="py-1.5 text-right font-bold">22.0%</td>
-              </tr>
-              <tr className="border-b border-transparent">
-                <td className="py-1.5 font-medium">• Inventory Valuation</td>
-                <td className="py-1.5 text-right font-bold">20%</td>
-              </tr>
-              <tr className="border-b border-transparent">
-                <td className="py-1.5 font-medium">• Installments & Aging</td>
-                <td className="py-1.5 text-right font-bold">—</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-
-        {/* Right Column: Tables */}
-        <div className="col-span-8 space-y-8">
-          {/* Executive Summary */}
-          <div>
-            <h2 className="font-bold text-sm mb-2" style={{ color: '#1e3a5f' }}>Executive Summary</h2>
-            <table className="w-full text-xs border-collapse">
-              <thead>
-                <tr className="text-white" style={{ backgroundColor: '#1e3a5f' }}>
-                  <th className="py-1.5 px-3 text-left font-semibold">Metric/Item</th>
-                  <th className="py-1.5 px-3 text-left font-semibold">1H Trend</th>
-                  <th className="py-1.5 px-3 text-left font-semibold">Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr className="bg-slate-50 border-b border-white">
-                  <td className="py-1.5 px-3">Workforce Growth</td>
-                  <td className="py-1.5 px-3">30.0%</td>
-                  <td className="py-1.5 px-3">55.0%</td>
-                </tr>
-                <tr className="bg-white border-b border-white">
-                  <td className="py-1.5 px-3">Attendance Rate</td>
-                  <td className="py-1.5 px-3">25.8%</td>
-                  <td className="py-1.5 px-3">51.8%</td>
-                </tr>
-                <tr className="bg-slate-50 border-b border-white">
-                  <td className="py-1.5 px-3">Payroll Expense</td>
-                  <td className="py-1.5 px-3">33.3%</td>
-                  <td className="py-1.5 px-3">53.2%</td>
-                </tr>
-                <tr className="bg-white border-b border-white">
-                  <td className="py-1.5 px-3">Sales Efficiency</td>
-                  <td className="py-1.5 px-3">33.0%</td>
-                  <td className="py-1.5 px-3">53.0%</td>
-                </tr>
-                <tr className="bg-slate-50 border-b border-white">
-                  <td className="py-1.5 px-3">Inventory Turn</td>
-                  <td className="py-1.5 px-3">30.8%</td>
-                  <td className="py-1.5 px-3">50.5%</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-
-          {/* Employees & Attendance Overview */}
-          <div>
-            <h2 className="font-bold text-sm mb-2" style={{ color: '#1e3a5f' }}>Employees & Attendance Overview</h2>
-            <table className="w-full text-xs border-collapse">
-              <thead>
-                <tr className="text-white" style={{ backgroundColor: '#1e3a5f' }}>
-                  <th className="py-1.5 px-3 text-left font-semibold">Metric Category</th>
-                  <th className="py-1.5 px-3 text-left font-semibold">Target Value</th>
-                  <th className="py-1.5 px-3 text-left font-semibold">Current Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr className="bg-slate-50 border-b border-white">
-                  <td className="py-1.5 px-3">Workforce Headcount</td>
-                  <td className="py-1.5 px-3">50.00%</td>
-                  <td className="py-1.5 px-3">{dashboardStats ? dashboardStats.total_employees : 0} Total</td>
-                </tr>
-                <tr className="bg-white border-b border-white">
-                  <td className="py-1.5 px-3">Department Distribution</td>
-                  <td className="py-1.5 px-3">30.00%</td>
-                  <td className="py-1.5 px-3">50.0%</td>
-                </tr>
-                <tr className="bg-slate-50 border-b border-white">
-                  <td className="py-1.5 px-3">Daily Attendance</td>
-                  <td className="py-1.5 px-3">45.00%</td>
-                  <td className="py-1.5 px-3">{dashboardStats ? dashboardStats.attendance_ratio : '0/0'}</td>
-                </tr>
-                <tr className="bg-white border-b border-white">
-                  <td className="py-1.5 px-3">Leave Usage Tracking</td>
-                  <td className="py-1.5 px-3">30.00%</td>
-                  <td className="py-1.5 px-3">50.5%</td>
-                </tr>
-                <tr className="bg-slate-50 border-b border-white">
-                  <td className="py-1.5 px-3">Absenteeism Control</td>
-                  <td className="py-1.5 px-3">53.00%</td>
-                  <td className="py-1.5 px-3">{dashboardStats ? dashboardStats.absent_today : 0} Absent</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-
-          {/* Financial & Operational Metrics */}
-          <div>
-            <h2 className="font-bold text-sm mb-2" style={{ color: '#1e3a5f' }}>Financial & Operational Metrics (Payroll, Sales, Inventory)</h2>
-            <table className="w-full text-xs border-collapse">
-              <thead>
-                <tr className="text-white" style={{ backgroundColor: '#1e3a5f' }}>
-                  <th className="py-1.5 px-3 text-left font-semibold">Report Section</th>
-                  <th className="py-1.5 px-3 text-left font-semibold">Performance Metric</th>
-                  <th className="py-1.5 px-3 text-left font-semibold">Variance Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr className="bg-slate-50 border-b border-white">
-                  <td className="py-1.5 px-3">Payroll Disbursements</td>
-                  <td className="py-1.5 px-3">{dashboardStats ? fmt(dashboardStats.net_payroll) : '₱0.00'}</td>
-                  <td className="py-1.5 px-3">63.0%</td>
-                </tr>
-                <tr className="bg-white border-b border-white">
-                  <td className="py-1.5 px-3">Overtime & Bonuses</td>
-                  <td className="py-1.5 px-3">44.50%</td>
-                  <td className="py-1.5 px-3">35.8%</td>
-                </tr>
-                <tr className="bg-slate-50 border-b border-white">
-                  <td className="py-1.5 px-3">Sales Volume Growth</td>
-                  <td className="py-1.5 px-3">{dashboardStats ? fmt(dashboardStats.monthly_sales) : '₱0.00'}</td>
-                  <td className="py-1.5 px-3">32.0%</td>
-                </tr>
-                <tr className="bg-white border-b border-white">
-                  <td className="py-1.5 px-3">Inventory Valuation</td>
-                  <td className="py-1.5 px-3">{dashboardStats ? dashboardStats.total_products : 0} Products</td>
-                  <td className="py-1.5 px-3">75.0%</td>
-                </tr>
-                <tr className="bg-slate-50 border-b border-white">
-                  <td className="py-1.5 px-3">Installments Aging</td>
-                  <td className="py-1.5 px-3">{dashboardStats ? fmt(dashboardStats.total_outstanding_balance) : '₱0.00'}</td>
-                  <td className="py-1.5 px-3">23.0%</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </div>
+    {/* MASTER PRINT / PDF REPORT (Only visible when printing) */}
+    <div className="hidden print:block print:w-full print:m-0 print:p-0 bg-white text-slate-900">
+      <ReportsPrintView
+        printData={{
+          ...printReportsData,
+          [activeTab]: printReportsData[activeTab] || reportData,
+        }}
+        filters={{
+          branch,
+          department,
+          status,
+          startDate,
+          endDate,
+          periodId,
+        }}
+        user={user}
+        companySettings={companySettings}
+        periods={periods}
+        hidePayroll={isStoreAdmin}
+      />
     </div>
     </>
   )

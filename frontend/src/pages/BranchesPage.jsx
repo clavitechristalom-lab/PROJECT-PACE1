@@ -64,7 +64,6 @@ export default function BranchesPage() {
   const handleCreateSuccess = () => {
     setShowCreateModal(false)
     showToast('Branch successfully created!', 'success')
-    loadData(true)
     triggerDataSync('branches')
   }
 
@@ -129,7 +128,6 @@ export default function BranchesPage() {
     try {
       await api.branches.delete(id)
       showToast('Branch deleted successfully', 'success')
-      loadData(true)
       triggerDataSync('branches')
     } catch (err) {
       showToast(err.message || 'Failed to delete branch', 'error')
@@ -171,7 +169,6 @@ export default function BranchesPage() {
       setEditItem(null)
       setEditImageFile(null)
       setEditImagePreview('')
-      loadData(true)
       triggerDataSync('branches')
     } catch (err) {
       showToast(err.message || 'Failed to update branch', 'error')

@@ -18,10 +18,9 @@ class EmployeeController extends Controller
     public function index(Request $request)
     {
         $user = $request->user();
-        User::syncSessionStatuses($user);
 
         // 1-2s Performance Cache
-        $fp = SyncController::computeFingerprint();
+        $fp = SyncController::computeFingerprint('employees');
         $cacheKey = 'pace_emp_idx_' . md5(json_encode([
             'u' => $user ? $user->user_id : 0,
             'r' => $user ? $user->role : '',
@@ -36,6 +35,8 @@ class EmployeeController extends Controller
         if ($cached !== null) {
             return response()->json($cached);
         }
+
+        User::syncSessionStatuses($user, 'employees');
 
         $query = Employee::with(['branch:id,name', 'user:user_id,employee_id,is_active,role']);
 
@@ -146,7 +147,7 @@ class EmployeeController extends Controller
     public function show(Request $request, $id)
     {
         $user = $request->user();
-        User::syncSessionStatuses($user);
+        User::syncSessionStatuses($user, 'employees');
         $employee = Employee::with([
             'user:user_id,employee_id,is_active,role',
             'attendances' => function ($q) {
@@ -546,8 +547,8 @@ class EmployeeController extends Controller
             ]);
         });
 
-        // Invalidate cached employee lists
-        Cache::flush();
+        // Invalidate only employee-related module caches (not global Cache::flush)
+        SyncController::bumpMutation(['employees', 'attendance', 'payroll', 'dashboard']);
 
         return response()->json(['message' => 'Employee deleted successfully']);
     }
@@ -802,22 +803,36 @@ class EmployeeController extends Controller
         $approvedRequests = \App\Models\QrRequest::where('status', 'APPROVED')->count();
         $rejectedRequests = \App\Models\QrRequest::where('status', 'REJECTED')->count();
 
+        $branches = \App\Models\BranchProfile::orderBy('name')->get(['id', 'name']);
+        $branchMap = $branches->pluck('name', 'id');
+
         // Recent Audit Logs
-        $recentLogs = AttendanceScanLog::with(['employee', 'scannedBy.employee'])
+        $rawLogs = AttendanceScanLog::with(['employee.branch', 'scannedBy.employee'])
             ->orderByDesc('id')
             ->limit(50)
-            ->get()
-            ->map(function ($l) {
+            ->get();
+        $attMap = AttendanceScanLog::batchAttendanceMap($rawLogs);
+
+        $recentLogs = $rawLogs->map(function ($l) use ($branchMap, $attMap) {
                 $emp = $l->employee;
                 $scanner = $l->scannedBy;
                 $scannedByName = $scanner ? ($scanner->employee ? "{$scanner->employee->first_name} {$scanner->employee->last_name}" : $scanner->username) : 'Store Administrator';
+
+                $rawBranch = $l->branch;
+                $resolvedBranchId = is_numeric($rawBranch) ? (int)$rawBranch : ($emp?->branch_id ?? null);
+                $empBranchName = $emp ? ($emp->branch_name ?? (is_object($emp->branch) ? $emp->branch->name : ($emp->branch ?: null))) : null;
+                $resolvedBranchName = (is_numeric($rawBranch) && $branchMap->has((int)$rawBranch))
+                    ? $branchMap->get((int)$rawBranch)
+                    : ($rawBranch ?: ($empBranchName ?: ($resolvedBranchId && $branchMap->has((int)$resolvedBranchId) ? $branchMap->get((int)$resolvedBranchId) : null)));
+                $verifMeta = AttendanceScanLog::resolveVerificationMeta($l, $attMap);
 
                 return [
                     'id' => $l->id,
                     'employee_id' => $l->employee_id,
                     'employee_name' => $emp ? "{$emp->first_name} {$emp->last_name}" : 'Unidentified',
                     'employee_code' => $emp ? $emp->employee_code : 'N/A',
-                    'branch' => $l->branch ?: ($emp ? $emp->branch : null),
+                    'branch_id' => $resolvedBranchId,
+                    'branch' => $resolvedBranchName,
                     'department' => $emp ? $emp->department : '—',
                     'action_type' => $l->action_type,
                     'status' => $l->status,
@@ -825,7 +840,8 @@ class EmployeeController extends Controller
                     'scan_time' => $l->scan_time ? $l->scan_time->format('M d, Y h:i A') : '',
                     'qr_verified' => (bool)$l->qr_verified,
                     'pin_verified' => (bool)$l->pin_verified,
-                    'verification_method' => ($l->qr_verified && $l->pin_verified) ? 'QR + PIN' : ($l->qr_verified ? 'QR Only' : 'Failed'),
+                    'face_verified' => $verifMeta['face_verified'],
+                    'verification_method' => $verifMeta['verification_method'],
                     'scanned_by' => $scannedByName,
                     'device_info' => $l->device_info,
                     'ip_address' => $l->ip_address,
@@ -834,6 +850,7 @@ class EmployeeController extends Controller
 
         return response()->json([
             'success' => true,
+            'branches' => $branches,
             'stats' => [
                 'total_employees' => $totalEmployees,
                 'qr_generated' => $qrGenerated,

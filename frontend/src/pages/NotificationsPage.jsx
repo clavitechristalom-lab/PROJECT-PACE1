@@ -118,7 +118,7 @@ export default function NotificationsPage() {
         setUnreadCount(prev => Math.max(0, prev - 1))
         showToast('Marked as read', 'success')
       }
-      triggerDataSync('notifications')
+      window.dispatchEvent(new CustomEvent('pace:notifications-sync'))
     } catch (err) {
       showToast(err.message || 'Failed to update notification', 'error')
     }
@@ -131,7 +131,7 @@ export default function NotificationsPage() {
       setNotifications(prev => prev.map(item => ({ ...item, is_read: true })))
       setUnreadCount(0)
       showToast(res.message || 'All notifications marked as read', 'success')
-      triggerDataSync('notifications')
+      window.dispatchEvent(new CustomEvent('pace:notifications-sync'))
     } catch (err) {
       showToast(err.message || 'Failed to mark all as read', 'error')
     }
@@ -143,7 +143,7 @@ export default function NotificationsPage() {
       const res = await api.notifications.clearAllRead()
       setNotifications(prev => prev.filter(item => !item.is_read))
       showToast(res.message || 'Cleared read notifications', 'info')
-      triggerDataSync('notifications')
+      window.dispatchEvent(new CustomEvent('pace:notifications-sync'))
     } catch (err) {
       showToast(err.message || 'Failed to clear notifications', 'error')
     }
@@ -155,7 +155,7 @@ export default function NotificationsPage() {
       await api.notifications.delete(id)
       setNotifications(prev => prev.filter(item => item.id !== id))
       showToast('Notification deleted', 'info')
-      triggerDataSync('notifications')
+      window.dispatchEvent(new CustomEvent('pace:notifications-sync'))
     } catch (err) {
       showToast(err.message || 'Failed to delete notification', 'error')
     }

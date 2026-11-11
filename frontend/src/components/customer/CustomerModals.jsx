@@ -643,56 +643,6 @@ export function PaymentDetailsModal({ isOpen, onClose, installments }) {
   );
 }
 
-export function CreditDetailsModal({ isOpen, onClose, installments }) {
-  const activeInstallments = installments.filter(i => i.status === 'Active' || i.status === 'Pending');
-  const totalPayable = activeInstallments.reduce((acc, curr) => acc + (parseFloat(curr.total_amount) || 0), 0);
-  const totalPaid = activeInstallments.reduce((acc, curr) => acc + (parseFloat(curr.paid_amount) || 0), 0);
-  const totalBalance = activeInstallments.reduce((acc, curr) => acc + (parseFloat(curr.balance) || 0), 0);
-
-  if (!isOpen) return null;
-
-  return (
-    <Modal isOpen={isOpen} onClose={onClose} title="Credit Balance Breakdown" size="lg">
-      <div className="space-y-4">
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
-          <div className="bg-muted/30 border border-border p-3 rounded-xl text-center">
-            <div className="text-[10px] uppercase font-bold text-muted-foreground mb-1">Total Credit</div>
-            <div className="font-mono font-bold text-foreground">{fmt(totalPayable)}</div>
-          </div>
-          <div className="bg-emerald-50/50 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-800 p-3 rounded-xl text-center">
-            <div className="text-[10px] uppercase font-bold text-emerald-600 mb-1">Total Paid</div>
-            <div className="font-mono font-bold text-emerald-700 dark:text-emerald-400">{fmt(totalPaid)}</div>
-          </div>
-          <div className="bg-rose-50/50 dark:bg-rose-950/20 border border-rose-200 dark:border-rose-800 p-3 rounded-xl text-center">
-            <div className="text-[10px] uppercase font-bold text-rose-600 mb-1">Remaining Balance</div>
-            <div className="font-mono font-bold text-rose-700 dark:text-rose-400">{fmt(totalBalance)}</div>
-          </div>
-        </div>
-
-        <h4 className="text-sm font-bold text-foreground mt-4 mb-2">Active Accounts</h4>
-        <div className="space-y-2 max-h-[40vh] overflow-y-auto p-1">
-          {activeInstallments.length === 0 ? (
-            <div className="text-center text-xs text-muted-foreground py-4">No active credit accounts.</div>
-          ) : (
-            activeInstallments.map(i => (
-              <div key={i.installment_id} className="flex justify-between items-center p-3 border border-border rounded-xl">
-                <div>
-                  <div className="font-semibold text-xs text-foreground">{i.product}</div>
-                  <div className="font-mono text-[10px] text-muted-foreground">{i.account_no}</div>
-                </div>
-                <div className="text-right">
-                  <div className="font-mono font-bold text-rose-600">{fmt(i.balance)}</div>
-                  <div className="text-[10px] text-muted-foreground">of {fmt(i.total_amount)}</div>
-                </div>
-              </div>
-            ))
-          )}
-        </div>
-      </div>
-    </Modal>
-  );
-}
-
 export function OverduePaymentsModal({ isOpen, onClose, installments }) {
   const overdueSchedules = installments.flatMap(i =>
     (i.paymentSchedules || []).filter(s => Number(s.balance_due) > 0 && new Date(s.due_date) < new Date(new Date().setHours(0, 0, 0, 0))).map(s => ({
@@ -1745,10 +1695,12 @@ export function MakePaymentModal({ isOpen, onClose, installments, onPaymentSucce
         paymentType === 'Get Product' ? 'Request Submitted' : 'Payment Submitted',
         paymentType === 'Get Product' ? 'Your new product request has been successfully submitted.' : 'Your payment request has been received and applied.'
       );
-      triggerDataSync('payments');
-      triggerDataSync('installments');
+      if (onPaymentSuccess) {
+        onPaymentSuccess();
+      } else {
+        triggerDataSync('installments');
+      }
       onClose();
-      if (onPaymentSuccess) onPaymentSuccess();
     } catch (err) {
       console.error(err);
       showError('Payment Failed', err.message || 'An error occurred while submitting your payment.');

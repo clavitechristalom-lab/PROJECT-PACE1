@@ -74,7 +74,7 @@ class SystemController extends Controller
     // ─── Users ──────────────────────────────────────────────────────────────────
     public function users(Request $request)
     {
-        User::syncSessionStatuses($request->user());
+        User::syncSessionStatuses($request->user(), 'users');
 
         $users = User::with(['employee.branch', 'customer.branch', 'verifiedBy'])->orderBy('user_id')->get()->map(function ($u) {
             $emp = $u->employee;
@@ -148,7 +148,7 @@ class SystemController extends Controller
 
     public function showUser(Request $request, $id)
     {
-        User::syncSessionStatuses($request->user());
+        User::syncSessionStatuses($request->user(), 'users');
 
         $u = User::with(['employee.branch', 'customer.branch', 'verifiedBy'])->findOrFail($id);
         $emp = $u->employee;
@@ -475,6 +475,7 @@ class SystemController extends Controller
             'is_active' => 'nullable|boolean',
             'employee_id' => 'nullable|exists:employees,employee_id',
             'customer_id' => 'nullable|exists:customers,customer_id',
+            'basic_salary' => 'nullable|numeric|min:0',
         ]);
 
         if (in_array($validated['role'], ['Store Administrator', 'Store Admin']) && !empty($validated['employee_id']) && ($validated['is_active'] ?? $user->is_active)) {
@@ -793,7 +794,7 @@ class SystemController extends Controller
         }
 
         SystemLog::query()->delete();
-        Cache::forget('pace_unified_fingerprint');
+        SyncController::invalidateFingerprint('system');
 
         return response()->json([
             'success' => true,

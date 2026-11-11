@@ -102,8 +102,6 @@ class NotificationController extends Controller
             return response()->json(['message' => 'Unauthenticated.'], 401);
         }
 
-        $this->syncSystemAlerts($user);
-
         $limit = (int)$request->query('limit', 15);
         $items = Notification::forUser($user->user_id)
             ->orderByDesc('notification_id')
@@ -156,8 +154,6 @@ class NotificationController extends Controller
             return response()->json(['unread_count' => 0, 'critical_count' => 0, 'high_count' => 0]);
         }
 
-        $this->syncSystemAlerts($user);
-
         $counts = Notification::forUser($user->user_id)->unread()
             ->selectRaw("COUNT(*) as total, SUM(CASE WHEN priority = 'critical' THEN 1 ELSE 0 END) as critical, SUM(CASE WHEN priority = 'high' THEN 1 ELSE 0 END) as high")
             ->first();
@@ -190,7 +186,7 @@ class NotificationController extends Controller
         $notification->save();
 
         $unreadCount = Notification::forUser($user->user_id)->unread()->count();
-        \Illuminate\Support\Facades\Cache::forget('pace_unified_fingerprint');
+        SyncController::invalidateFingerprint('notifications');
 
         return response()->json([
             'success' => true,
@@ -217,7 +213,7 @@ class NotificationController extends Controller
         $notification->save();
 
         $unreadCount = Notification::forUser($user->user_id)->unread()->count();
-        \Illuminate\Support\Facades\Cache::forget('pace_unified_fingerprint');
+        SyncController::invalidateFingerprint('notifications');
 
         return response()->json([
             'success' => true,
@@ -239,7 +235,7 @@ class NotificationController extends Controller
                 'is_read' => true,
                 'read_at' => now(),
             ]);
-        \Illuminate\Support\Facades\Cache::forget('pace_unified_fingerprint');
+        SyncController::invalidateFingerprint('notifications');
 
         return response()->json([
             'success' => true,
@@ -264,7 +260,7 @@ class NotificationController extends Controller
         $notification->delete();
 
         $unreadCount = Notification::forUser($user->user_id)->unread()->count();
-        \Illuminate\Support\Facades\Cache::forget('pace_unified_fingerprint');
+        SyncController::invalidateFingerprint('notifications');
 
         return response()->json([
             'success' => true,
@@ -280,7 +276,7 @@ class NotificationController extends Controller
     {
         $user = $request->user();
         $count = Notification::forUser($user->user_id)->read()->delete();
-        \Illuminate\Support\Facades\Cache::forget('pace_unified_fingerprint');
+        SyncController::invalidateFingerprint('notifications');
 
         return response()->json([
             'success' => true,

@@ -252,9 +252,7 @@ export default function SupportPage() {
   const handleSendResponse = async (id, responseText) => {
     try {
       await api.supportMessages.update(id, { new_message: responseText })
-      loadMessages(true)
       triggerDataSync('support')
-      triggerDataSync('notifications')
       showToast('Response sent successfully to customer!', 'success')
     } catch (err) {
       showError('Failed to Send', err.message || 'Could not send response')
@@ -269,9 +267,7 @@ export default function SupportPage() {
     if (confirmed) {
       try {
         await api.supportMessages.delete(id)
-        loadMessages(true)
         triggerDataSync('support')
-        triggerDataSync('notifications')
         showToast('Inquiry deleted successfully', 'success')
       } catch (err) {
         console.error(err)

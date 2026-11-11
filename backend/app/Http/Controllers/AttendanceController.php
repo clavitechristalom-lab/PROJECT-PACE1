@@ -32,7 +32,7 @@ class AttendanceController extends Controller
 
         // 1-2s Performance Cache: bypass if exporting CSV
         if (!$request->boolean('export_csv')) {
-            $fp = SyncController::computeFingerprint();
+            $fp = SyncController::computeFingerprint('attendance');
             $cacheKey = 'pace_att_idx_' . md5(json_encode([
                 'u' => $user ? $user->user_id : 0,
                 'r' => $user ? $user->role : '',
@@ -317,11 +317,26 @@ class AttendanceController extends Controller
             });
         }
 
-        $records = (clone $query)->where('attendance_date', $date)->get();
-        if ($records->isEmpty()) {
-            $latestDate = (clone $query)->max('attendance_date') ?? $date;
-            $records = (clone $query)->where('attendance_date', $latestDate)->get();
-            $date = $latestDate;
+        $dateFrom = $request->query('date_from');
+        $dateTo = $request->query('date_to');
+
+        if ($dateFrom || $dateTo) {
+            $rangeQuery = clone $query;
+            if ($dateFrom) {
+                $rangeQuery->where('attendance_date', '>=', $dateFrom);
+            }
+            if ($dateTo) {
+                $rangeQuery->where('attendance_date', '<=', $dateTo);
+            }
+            $records = $rangeQuery->get();
+            $date = trim(($dateFrom ?: '') . ($dateFrom && $dateTo ? ' to ' : '') . ($dateTo ?: ''));
+        } else {
+            $records = (clone $query)->where('attendance_date', $date)->get();
+            if ($records->isEmpty()) {
+                $latestDate = (clone $query)->max('attendance_date') ?? $date;
+                $records = (clone $query)->where('attendance_date', $latestDate)->get();
+                $date = $latestDate;
+            }
         }
 
         $present = $records->whereIn('status', ['Present', 'COMPLETE'])->count();
@@ -663,11 +678,11 @@ class AttendanceController extends Controller
                 $employee->pin_locked_until = now()->addMinutes(15);
                 $employee->save();
                 
-                $log->update(['status' => 'FAILED', 'failure_reason' => 'PIN lockout']);
+                $log->update(['status' => 'FAILED', 'action_type' => 'PIN_VERIFICATION_FAILED', 'failure_reason' => 'PIN lockout']);
                 return response()->json(['success' => false, 'is_locked' => true, 'message' => 'Too many failed attempts. Account locked.'], 423);
             }
             $employee->save();
-            $log->update(['status' => 'FAILED', 'failure_reason' => 'Incorrect PIN']);
+            $log->update(['status' => 'FAILED', 'action_type' => 'PIN_VERIFICATION_FAILED', 'failure_reason' => 'Incorrect PIN']);
             return response()->json(['success' => false, 'message' => 'INCORRECT PIN. Please enter your correct Personal PIN. EMPLOYEE VERIFICATION FAILED. Attendance was not recorded.'], 422);
         }
 
@@ -724,8 +739,7 @@ class AttendanceController extends Controller
                 'ip_address'  => $request->ip(),
                 'user_agent'  => $request->userAgent(),
             ]);
-            \Illuminate\Support\Facades\Cache::forget('pace_unified_fingerprint');
-            SyncController::invalidateFingerprint();
+            SyncController::invalidateFingerprint(['attendance', 'employees', 'dashboard']);
             \App\Http\Controllers\PayrollController::recalculateDraftPayrollForEmployee($employee);
             
             \Illuminate\Support\Facades\DB::commit();
@@ -789,11 +803,62 @@ class AttendanceController extends Controller
         }
 
         if ($request->filled('status') && $request->query('status') !== 'All') {
-            $query->where('status', $request->query('status'));
+            $statusFilter = $request->query('status');
+            if (in_array($statusFilter, ['PENDING', 'PENDING_PIN'], true)) {
+                $query->whereIn('status', ['PENDING', 'PENDING_PIN']);
+            } else {
+                $query->where('status', $statusFilter);
+            }
         }
 
         if ($request->filled('action_type') && $request->query('action_type') !== 'All') {
-            $query->where('action_type', $request->query('action_type'));
+            $actionType = $request->query('action_type');
+            if ($actionType === 'ATTENDANCE_CREATED') {
+                $query->where('action_type', 'like', 'ATTENDANCE_%');
+            } elseif ($actionType === 'QR_SCAN_SUCCESS') {
+                $query->where('status', 'SUCCESS')->where('qr_verified', true);
+            } elseif ($actionType === 'PIN_VERIFICATION_FAILED') {
+                $query->where(function ($q) {
+                    $q->where('action_type', 'PIN_VERIFICATION_FAILED')
+                      ->orWhere(function ($sq) {
+                          $sq->whereIn('action_type', ['PIN_VERIFICATION', 'PENDING_VERIFICATION'])
+                             ->where('status', 'FAILED')
+                             ->where('failure_reason', 'like', '%PIN%');
+                      });
+                });
+            } elseif ($actionType === 'FACE_RECOGNITION') {
+                $query->where(function ($q) {
+                    $q->whereIn('action_type', ['FACE_RECOGNITION', 'FACE_VERIFICATION'])
+                      ->orWhereExists(function ($sub) {
+                          $sub->select(\Illuminate\Support\Facades\DB::raw(1))
+                              ->from('attendance')
+                              ->whereColumn('attendance.employee_id', 'attendance_scan_logs.employee_id')
+                              ->whereRaw('DATE(attendance.attendance_date) = DATE(attendance_scan_logs.scan_time)')
+                              ->where(function ($aq) {
+                                  $aq->where(function ($qIn) {
+                                      $qIn->where('attendance_scan_logs.action_type', 'ATTENDANCE_TIME_IN')
+                                          ->where('attendance.qr_scan_in', 'QR_FACE_VERIFIED');
+                                  })->orWhere(function ($qOut) {
+                                      $qOut->where('attendance_scan_logs.action_type', 'ATTENDANCE_TIME_OUT')
+                                           ->where('attendance.qr_scan_out', 'QR_FACE_VERIFIED');
+                                  })->orWhere(function ($qOther) {
+                                      $qOther->whereNotIn('attendance_scan_logs.action_type', ['ATTENDANCE_TIME_IN', 'ATTENDANCE_TIME_OUT'])
+                                             ->where('attendance.verification_method', 'like', '%Face Recognition%');
+                                  });
+                              });
+                      });
+                });
+            } elseif ($actionType === 'FACE_VERIFICATION_FAILED') {
+                $query->where(function ($q) {
+                    $q->where('action_type', 'FACE_VERIFICATION_FAILED')
+                      ->orWhere(function ($sq) {
+                          $sq->where('status', 'FAILED')
+                             ->where('failure_reason', 'like', '%Face%');
+                      });
+                });
+            } else {
+                $query->where('action_type', $actionType);
+            }
         }
 
         if ($request->filled('search')) {
@@ -810,11 +875,19 @@ class AttendanceController extends Controller
         }
 
         $logs = $query->orderByDesc('id')->paginate($request->query('per_page', 20));
+        $branchMap = \App\Models\BranchProfile::pluck('name', 'id');
+        $attMap = AttendanceScanLog::batchAttendanceMap($logs->getCollection());
 
-        $mapped = $logs->getCollection()->map(function ($l) {
+        $mapped = $logs->getCollection()->map(function ($l) use ($branchMap, $attMap) {
             $emp = $l->employee;
             $scanner = $l->scannedBy;
             $scannedByName = $scanner ? ($scanner->employee ? "{$scanner->employee->first_name} {$scanner->employee->last_name}" : $scanner->username) : 'Store Administrator';
+            $rawBranch = $l->branch;
+            $empBranchName = $emp ? ($emp->branch_name ?? (is_object($emp->branch) ? $emp->branch->name : ((string)$emp->branch ?: null))) : null;
+            $resolvedBranch = (is_numeric($rawBranch) && $branchMap->has((int)$rawBranch))
+                ? $branchMap->get((int)$rawBranch)
+                : ($rawBranch ?: ($empBranchName ?: ($emp?->branch_id && $branchMap->has((int)$emp->branch_id) ? $branchMap->get((int)$emp->branch_id) : null)));
+            $verifMeta = AttendanceScanLog::resolveVerificationMeta($l, $attMap);
 
             return [
                 'id' => $l->id,
@@ -822,11 +895,13 @@ class AttendanceController extends Controller
                 'employee_name' => $emp ? "{$emp->first_name} {$emp->last_name}" : 'Unidentified',
                 'employee_code' => $emp ? $emp->employee_code : 'N/A',
                 'department' => $emp ? $emp->department : '—',
-                'branch' => $l->branch ?: ($emp ? ($emp->branch_name ?? (is_object($emp->branch) ? $emp->branch->name : ((string)$emp->branch ?: null))) : null),
+                'branch' => $resolvedBranch,
                 'qr_token_scanned' => $l->qr_token_scanned ? substr($l->qr_token_scanned, 0, 8) . '...' : '—',
                 'scan_time' => $l->scan_time ? $l->scan_time->format('Y-m-d H:i:s') : '',
                 'qr_verified' => (bool)$l->qr_verified,
                 'pin_verified' => (bool)$l->pin_verified,
+                'face_verified' => $verifMeta['face_verified'],
+                'verification_method' => $verifMeta['verification_method'],
                 'action_type' => $l->action_type,
                 'status' => $l->status,
                 'failure_reason' => $l->failure_reason,
@@ -967,7 +1042,7 @@ class AttendanceController extends Controller
             // Strict Face ID match check: If explicitly marked false or face not registered, reject
             $isFaceMatched = $request->has('face_matched') ? $request->boolean('face_matched') : true;
             if (!$isFaceMatched || empty($user->face_biometric_image)) {
-                $log->update(['status' => 'FAILED', 'failure_reason' => 'Face does not match registered Face ID. Access denied.']);
+                $log->update(['status' => 'FAILED', 'action_type' => 'FACE_VERIFICATION_FAILED', 'failure_reason' => 'Face does not match registered Face ID. Access denied.']);
                 return response()->json([
                     'success' => false,
                     'face_matched' => false,
@@ -1001,7 +1076,7 @@ class AttendanceController extends Controller
                     $employee->pin_locked_until = now()->addMinutes(15);
                     $employee->save();
                     
-                    $log->update(['status' => 'FAILED', 'failure_reason' => 'PIN lockout']);
+                    $log->update(['status' => 'FAILED', 'action_type' => 'PIN_VERIFICATION_FAILED', 'failure_reason' => 'PIN lockout']);
                     return response()->json(['success' => false, 'is_locked' => true, 'message' => 'Too many failed attempts. Account locked.'], 423);
                 }
                 $employee->save();
@@ -1067,7 +1142,7 @@ class AttendanceController extends Controller
             'ip_address'  => $request->ip(),
             'user_agent'  => $request->userAgent(),
         ]);
-        \Illuminate\Support\Facades\Cache::forget('pace_unified_fingerprint');
+        SyncController::invalidateFingerprint(['attendance', 'employees', 'dashboard']);
 
         // Immediately recalculate active weekly draft payroll for this employee
         try {
@@ -1112,8 +1187,7 @@ class AttendanceController extends Controller
                 'failure_reason' => $reason
             ]);
 
-            \Illuminate\Support\Facades\Cache::forget('pace_unified_fingerprint');
-            SyncController::invalidateFingerprint();
+            SyncController::invalidateFingerprint(['attendance', 'employees', 'dashboard']);
             \App\Http\Controllers\PayrollController::recalculateDraftPayrollForEmployee($employee);
 
             try {

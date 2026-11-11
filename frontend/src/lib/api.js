@@ -37,21 +37,48 @@ const CACHE_TTL_MS = 800; // 2-minute on-demand cache: avoids repeating identica
 
 export const ENDPOINT_MODULE_MAP = {
   branches: ['/branches', '/dashboard/branch-comparison'],
-  customers: ['/customers', '/customer/wallet'],
-  employees: ['/employees', '/employee', '/attendance', '/excuse-letters', '/leave-requests', '/qr'],
-  attendance: ['/attendance', '/attendance-verifications', '/employee/me/attendance'],
+  customers: ['/customers', '/customer/wallet', '/customer/dashboard'],
+  customer_installments: ['/customer/installments', '/customer/statements', '/customer/request-installment', '/customer/product-requests'],
+  employees: ['/employees', '/employee/verify-account'],
+  employee_financials: ['/employees/allowances', '/employees/deductions', '/employees/loans'],
+  qr_requests: ['/qr-requests', '/admin/qr-requests'],
+  qr_monitoring: ['/admin/qr-monitoring'],
+  employee_letters: ['/employee-letters'],
+  attendance: [
+    '/attendance',
+    '/employee/me/attendance',
+    '/employee/me/pending-verifications',
+    '/employee/me/face-template',
+    '/employee/me/verify-attendance-pin',
+    '/employee/me/cancel-attendance-verification',
+  ],
   products: ['/products', '/categories'],
-  sales: ['/sales', '/transactions', '/installments', '/payment-schedules', '/dashboard', '/reports'],
-  installments: ['/installments', '/payment-schedules', '/sales', '/transactions'],
-  payments: ['/payments', '/installments', '/sales', '/transactions', '/dashboard'],
-  payroll: ['/payroll', '/payrolls'],
-  dashboard: ['/dashboard', '/reports'],
-  carousels: ['/carousel', '/carousels'],
-  support: ['/support', '/tickets'],
+  sales: ['/sales'],
+  transactions: ['/transactions'],
+  installments: ['/installments', '/payment-schedules', '/statements'],
+  payment_schedules: ['/payment-schedules'],
+  payments: ['/payments'],
+  payroll: ['/payroll', '/payroll-periods', '/payslips'],
+  dashboard: ['/dashboard'],
+  store_dashboard: ['/dashboard'],
+  employee_dashboard: ['/dashboard'],
+  reports: ['/reports'],
+  carousels: ['/carousel-images'],
+  carousel: ['/carousel-images'],
+  support: ['/support-messages'],
   notifications: ['/notifications'],
-  system: ['/system', '/audit-logs', '/sync/status'],
-  reports: ['/reports', '/dashboard'],
-  profile: ['/user/profile', '/employee/me']
+  storage: ['/system/storage'],
+  users: ['/users'],
+  settings: ['/settings', '/public/settings'],
+  system: ['/system', '/system-logs', '/system-stats', '/backups', '/users', '/settings', '/sync/status'],
+  profile: ['/user/profile-image', '/user/face-biometric-image', '/employee/me', '/employee/me/pin'],
+};
+
+const extractCleanPath = (endpoint) => String(endpoint || '').split('?')[0].toLowerCase();
+
+const matchesPrefixBoundary = (cleanPath, prefix) => {
+  const p = prefix.toLowerCase();
+  return cleanPath === p || cleanPath.startsWith(`${p}/`);
 };
 
 export function clearApiCache(endpointPrefix = null) {
@@ -59,8 +86,9 @@ export function clearApiCache(endpointPrefix = null) {
     responseCache.clear();
     return;
   }
+  const needle = String(endpointPrefix).toLowerCase();
   for (const key of responseCache.keys()) {
-    if (key.includes(endpointPrefix)) {
+    if (extractCleanPath(key).includes(needle)) {
       responseCache.delete(key);
     }
   }
@@ -72,12 +100,19 @@ export function clearApiCacheForModule(module, targetId = null) {
   const prefixes = ENDPOINT_MODULE_MAP[modLower] || [`/${modLower}`];
 
   for (const key of responseCache.keys()) {
+    const cleanPath = extractCleanPath(key);
     const keyLower = key.toLowerCase();
-    const matchesPrefix = prefixes.some(p => keyLower.includes(p.toLowerCase()));
+    const matchesPrefix = prefixes.some(p => matchesPrefixBoundary(cleanPath, p));
     const matchesParam = keyLower.includes(`module=${modLower}`);
 
     if (matchesPrefix || matchesParam) {
-      if (targetId === null || targetId === undefined || key.includes(String(targetId))) {
+      if (
+        targetId === null ||
+        targetId === undefined ||
+        cleanPath.endsWith(`/${String(targetId).toLowerCase()}`) ||
+        keyLower.includes(`/${String(targetId).toLowerCase()}/`) ||
+        keyLower.includes(`id=${String(targetId).toLowerCase()}`)
+      ) {
         responseCache.delete(key);
       }
     }
@@ -86,22 +121,38 @@ export function clearApiCacheForModule(module, targetId = null) {
 
 export function clearApiCacheForEndpoint(endpoint) {
   if (!endpoint) return;
-  const cleanEndpoint = endpoint.split('?')[0].toLowerCase();
+  const cleanEndpoint = extractCleanPath(endpoint);
 
-  // Find module by endpoint prefix
+  // Match the single most specific (longest prefix) module so unrelated features stay cached
+  let bestModule = null;
+  let bestLength = 0;
+
   for (const [mod, prefixes] of Object.entries(ENDPOINT_MODULE_MAP)) {
-    if (prefixes.some(p => cleanEndpoint.startsWith(p.toLowerCase()))) {
-      clearApiCacheForModule(mod);
-      return;
+    for (const prefix of prefixes) {
+      if (matchesPrefixBoundary(cleanEndpoint, prefix) && prefix.length > bestLength) {
+        bestLength = prefix.length;
+        bestModule = mod;
+      }
     }
   }
 
-  // Fallback: clear keys matching the first URL segment
+  // Handle nested employee financial subroutes (e.g. /employees/{id}/allowances) individually
+  if (/^\/employees\/[^/]+\/(financials|allowances|deductions|loans)(\/|$)/.test(cleanEndpoint)) {
+    clearApiCacheForModule('employee_financials');
+    return;
+  }
+
+  if (bestModule) {
+    clearApiCacheForModule(bestModule);
+    return;
+  }
+
+  // Fallback: clear only keys sharing the first URL segment
   const segments = cleanEndpoint.split('/').filter(Boolean);
   if (segments.length > 0) {
     const base = `/${segments[0]}`;
     for (const key of responseCache.keys()) {
-      if (key.toLowerCase().includes(base)) {
+      if (matchesPrefixBoundary(extractCleanPath(key), base)) {
         responseCache.delete(key);
       }
     }
@@ -633,6 +684,8 @@ export const api = {
       const qs = new URLSearchParams(cleanParams(params)).toString();
       const sumQs = new URLSearchParams(cleanParams({
         date: params.date,
+        date_from: params.date_from,
+        date_to: params.date_to,
         branch: params.branch,
       })).toString();
       const [attData, summaryData] = await Promise.all([

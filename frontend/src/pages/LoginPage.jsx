@@ -1752,9 +1752,6 @@ export default function LoginPage() {
                           type="date"
                           max={new Date().toISOString().split('T')[0]}
                           value={signUpData.date_of_birth}
-                          onClick={(e) => {
-                            try { e.target.showPicker() } catch (_) { }
-                          }}
                           onChange={(e) => {
                             setSignUpData({ ...signUpData, date_of_birth: e.target.value })
                             if (signUpErrors.date_of_birth) setSignUpErrors({ ...signUpErrors, date_of_birth: '' })

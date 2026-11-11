@@ -7,14 +7,52 @@ import { api } from '../../../lib/api';
 import { Spinner, showSuccess, showError, confirmDelete } from '../../ui';
 import { useRealtimeSync, triggerDataSync, fastDeepEqual } from '../../../lib/realtimeSync';
 
-export default function CustomerSupportView({ user = null }) {
+export default function CustomerSupportView({ user = null, stats = null }) {
   const [activeTab, setActiveTab] = useState('submit'); // 'submit' | 'history'
   const [topic, setTopic] = useState('Installment Payment Query');
   const [message, setMessage] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [messages, setMessages] = useState([]);
   const [loadingHistory, setLoadingHistory] = useState(false);
+  const [storeAdminContact, setStoreAdminContact] = useState({
+    phone: stats?.store_admin_phone || '',
+    name: stats?.store_admin_name || '',
+  });
   const inFlightRef = useRef(false);
+
+  useEffect(() => {
+    if (stats?.store_admin_phone || stats?.store_admin_name) {
+      setStoreAdminContact({
+        phone: stats?.store_admin_phone || '',
+        name: stats?.store_admin_name || '',
+      });
+    }
+  }, [stats?.store_admin_phone, stats?.store_admin_name]);
+
+  const loadStoreAdminContact = useCallback(async (signal) => {
+    try {
+      const res = await api.customerApp.getDashboard({ signal });
+      if (signal?.aborted) return;
+      const metrics = res?.metrics;
+      if (metrics) {
+        setStoreAdminContact(prev => {
+          const next = {
+            phone: metrics.store_admin_phone || '',
+            name: metrics.store_admin_name || '',
+          };
+          return fastDeepEqual(prev, next) ? prev : next;
+        });
+      }
+    } catch (err) {
+      if (err?.name !== 'AbortError') console.debug('Store admin contact lookup:', err);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!stats?.store_admin_phone) {
+      loadStoreAdminContact();
+    }
+  }, [stats?.store_admin_phone, loadStoreAdminContact]);
 
   const loadMessages = useCallback(async (silent = false, signal) => {
     if (inFlightRef.current && silent) return;
@@ -40,7 +78,8 @@ export default function CustomerSupportView({ user = null }) {
 
   useRealtimeSync((_source, signal) => {
     loadMessages(true, signal);
-  }, [loadMessages], { module: 'support' });
+    loadStoreAdminContact(signal);
+  }, [loadMessages, loadStoreAdminContact], { module: 'support' });
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -119,12 +158,12 @@ export default function CustomerSupportView({ user = null }) {
               Hotline
             </span>
           </div>
-          <p className="text-xs font-semibold text-teal-950/70 dark:text-teal-300/70">Store Assistance</p>
+          <p className="text-xs font-semibold text-teal-950/70 dark:text-teal-300/70">Store Admin</p>
           <p className="text-base sm:text-lg font-black text-teal-950 dark:text-teal-100 mt-0.5 truncate">
-            0917-889-4512
+            {storeAdminContact.phone || '0917-889-4512'}
           </p>
-          <p className="text-[11px] text-teal-900/60 dark:text-teal-400/60 mt-1">
-            Direct mobile & SMS support
+          <p className="text-[11px] text-teal-900/60 dark:text-teal-400/60 mt-1 truncate">
+            {storeAdminContact.name ? `${storeAdminContact.name} • Direct mobile & SMS support` : 'Direct mobile & SMS support'}
           </p>
         </div>
 
@@ -138,9 +177,9 @@ export default function CustomerSupportView({ user = null }) {
               Store Branch
             </span>
           </div>
-          <p className="text-xs font-semibold text-purple-950/70 dark:text-purple-300/70">Iligan City Main</p>
+          <p className="text-xs font-semibold text-purple-950/70 dark:text-purple-300/70">Iligan City Branch</p>
           <p className="text-base sm:text-lg font-black text-purple-950 dark:text-purple-100 mt-0.5 truncate">
-            Quezon Ave, Iligan
+            Iligan City
           </p>
           <p className="text-[11px] text-purple-900/60 dark:text-purple-400/60 mt-1 truncate">
             Near City Hall, Poblacion

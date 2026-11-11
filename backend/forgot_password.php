@@ -166,9 +166,9 @@ try {
             ]
         ];
 
-        $fromAddress = !empty($mailConfig['from_email']) && strcasecmp($mailConfig['from_email'], 'Z-LICZ@gmail.com') !== 0
+        $fromAddress = !empty($mailConfig['from_email'])
             ? $mailConfig['from_email']
-            : '35barangay@gmail.com';
+            : 'z.licz2000@gmail.com';
         $fromName    = $mailConfig['from_name'] ?? 'Z-LICZ Furniture & Appliances';
 
         $mail->setFrom($fromAddress, $fromName);

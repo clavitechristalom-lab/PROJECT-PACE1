@@ -25,7 +25,7 @@ class ProductController extends Controller
 
         // 1-2s Performance Cache: bypass if exporting CSV
         if (!$request->boolean('export_csv')) {
-            $fp = SyncController::computeFingerprint();
+            $fp = SyncController::computeFingerprint('products');
             $cacheKey = 'pace_prod_idx_' . md5(json_encode([
                 'u' => $user ? $user->user_id : 0,
                 'r' => $user ? $user->role : '',
@@ -390,7 +390,7 @@ class ProductController extends Controller
             'user_agent' => $request->userAgent(),
         ]);
 
-        SyncController::invalidateFingerprint();
+        SyncController::invalidateFingerprint(['products', 'sales', 'dashboard']);
 
         return response()->json([
             'message' => 'Product updated successfully',
@@ -426,7 +426,7 @@ class ProductController extends Controller
             'user_agent' => $request->userAgent(),
         ]);
 
-        SyncController::invalidateFingerprint();
+        SyncController::invalidateFingerprint(['products', 'sales', 'dashboard']);
 
         return response()->json(['message' => 'Product deleted successfully']);
     }

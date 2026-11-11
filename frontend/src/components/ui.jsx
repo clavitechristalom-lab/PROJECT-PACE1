@@ -156,8 +156,10 @@ export function Btn({
 // ─── Badge ────────────────────────────────────────────────────────────────────
 const badgeMap = {
   green: 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-800',
+  emerald: 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-800',
   red: 'bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-950/40 dark:text-rose-300 dark:border-rose-800',
   yellow: 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-800',
+  orange: 'bg-orange-50 text-orange-700 border-orange-200 dark:bg-orange-950/40 dark:text-orange-300 dark:border-orange-800',
   blue: 'bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-950/40 dark:text-blue-300 dark:border-blue-800',
   gray: 'bg-muted text-muted-foreground border-border',
   purple: 'bg-purple-50 text-purple-700 border-purple-200 dark:bg-purple-950/40 dark:text-purple-300 dark:border-purple-800',
@@ -479,21 +481,24 @@ export function StatCard({ title, value, sub, icon, color = 'blue', className = 
     cyan: 'bg-sky-500/15 text-sky-700 border-sky-300/80 dark:bg-sky-500/20 dark:text-sky-300 dark:border-sky-500/40 dark:shadow-[0_0_12px_rgba(14,165,233,0.25)]',
     indigo: 'bg-indigo-500/15 text-indigo-700 border-indigo-300/80 dark:bg-indigo-500/20 dark:text-indigo-300 dark:border-indigo-500/40 dark:shadow-[0_0_12px_rgba(99,102,241,0.25)]',
     green: 'bg-emerald-500/15 text-emerald-700 border-emerald-300/80 dark:bg-emerald-500/20 dark:text-emerald-300 dark:border-emerald-500/40 dark:shadow-[0_0_12px_rgba(16,185,129,0.25)]',
+    emerald: 'bg-emerald-500/15 text-emerald-700 border-emerald-300/80 dark:bg-emerald-500/20 dark:text-emerald-300 dark:border-emerald-500/40 dark:shadow-[0_0_12px_rgba(16,185,129,0.25)]',
     red: 'bg-rose-500/15 text-rose-700 border-rose-300/80 dark:bg-rose-900/30 dark:text-rose-300 dark:border-rose-500/40 dark:shadow-[0_0_12px_rgba(244,63,94,0.25)]',
+    rose: 'bg-rose-500/15 text-rose-700 border-rose-300/80 dark:bg-rose-900/30 dark:text-rose-300 dark:border-rose-500/40 dark:shadow-[0_0_12px_rgba(244,63,94,0.25)]',
     yellow: 'bg-amber-500/15 text-amber-700 border-amber-300/80 dark:bg-amber-500/20 dark:text-amber-300 dark:border-amber-500/40 dark:shadow-[0_0_12px_rgba(245,158,11,0.25)]',
+    amber: 'bg-amber-500/15 text-amber-700 border-amber-300/80 dark:bg-amber-500/20 dark:text-amber-300 dark:border-amber-500/40 dark:shadow-[0_0_12px_rgba(245,158,11,0.25)]',
     purple: 'bg-purple-500/15 text-purple-700 border-purple-300/80 dark:bg-purple-500/20 dark:text-purple-300 dark:border-purple-500/40 dark:shadow-[0_0_12px_rgba(168,85,247,0.25)]',
   }
   return (
-    <div className={`bg-card dark:bg-[#0F172A] rounded-2xl border border-border dark:border-slate-800 p-4 sm:p-5 flex flex-col justify-between h-full hover:shadow-md transition-all duration-300 hover:scale-[1.01] overflow-hidden ${className}`}>
+    <div className={`bg-card rounded-2xl border border-border p-4 sm:p-5 flex flex-col justify-between h-full hover:shadow-md transition-all duration-300 overflow-hidden ${className}`}>
       <div className="flex items-start justify-between gap-2 mb-2.5">
-        <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider leading-tight">{title}</span>
+        <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider leading-tight">{title}</span>
         <span className={`w-8 h-8 rounded-xl flex items-center justify-center text-sm flex-shrink-0 border shadow-2xs ${colors[color] || colors.blue}`}>
           {icon}
         </span>
       </div>
       <div>
-        <div className="text-xl sm:text-2xl font-sans font-bold text-slate-900 dark:text-white tracking-tight truncate">{value !== undefined ? value : '—'}</div>
-        {sub && <div className="text-xs text-slate-500 dark:text-slate-400 font-normal mt-1 truncate">{sub}</div>}
+        <div className="text-xl sm:text-2xl font-sans font-bold text-foreground tracking-tight truncate">{value !== undefined ? value : '—'}</div>
+        {sub && <div className="text-xs text-muted-foreground font-normal mt-1 truncate">{sub}</div>}
       </div>
     </div>
   )

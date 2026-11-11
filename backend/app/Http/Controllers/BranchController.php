@@ -35,16 +35,36 @@ class BranchController extends Controller
      */
     public function show($id)
     {
-        $branch = BranchProfile::findOrFail($id);
+        $branch = BranchProfile::withCount(['employees', 'customers', 'products', 'sales'])
+            ->findOrFail($id);
         
-        // Find the Store Administrator assigned to this branch
+        // Find the Store Administrator assigned to this branch (fallback to manager_id if set)
         $manager = \App\Models\User::where('role', 'Store Administrator')
             ->whereHas('employee', function ($q) use ($branch) {
                 $q->where('branch_id', $branch->id);
-            })->first();
+            })
+            ->with('employee:employee_id,first_name,middle_name,last_name,phone,email,branch_id')
+            ->first();
+
+        if (!$manager && $branch->manager_id) {
+            $manager = \App\Models\User::with('employee:employee_id,first_name,middle_name,last_name,phone,email,branch_id')
+                ->find($branch->manager_id);
+        }
+
+        $managerFullName = null;
+        if ($manager && $manager->employee) {
+            $managerFullName = trim(implode(' ', array_filter([
+                $manager->employee->first_name,
+                $manager->employee->middle_name,
+                $manager->employee->last_name,
+            ])));
+        }
         
-        // Append the manager name dynamically
+        // Append the manager details dynamically
         $branch->manager = $manager ? $manager->username : null;
+        $branch->manager_name = $managerFullName ?: ($manager ? $manager->username : null);
+        $branch->manager_email = $manager?->employee?->email ?: ($manager?->email ?? null);
+        $branch->manager_phone = $manager?->employee?->phone ?: ($manager?->phone_number ?? null);
 
         return response()->json([
             'branch' => $branch

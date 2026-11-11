@@ -25,7 +25,7 @@ class PaymentController extends Controller
 
         // 1-2s Performance Cache: bypass if exporting CSV
         if (!$request->boolean('export_csv')) {
-            $fp = SyncController::computeFingerprint();
+            $fp = SyncController::computeFingerprint('payments');
             $cacheKey = 'pace_pay_idx_' . md5(json_encode([
                 'u' => $user ? $user->user_id : 0,
                 'r' => $user ? $user->role : '',
@@ -227,7 +227,7 @@ class PaymentController extends Controller
         $currentMonth = (int)date('m');
         $currentYear = (int)date('Y');
 
-        $fp = SyncController::computeFingerprint();
+        $fp = SyncController::computeFingerprint('payments');
         $cacheKey = 'pace_pay_mon_' . md5(json_encode([
             'u' => $user ? $user->user_id : 0,
             'r' => $user ? $user->role : '',

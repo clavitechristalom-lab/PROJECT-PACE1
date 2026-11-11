@@ -523,7 +523,6 @@ export default function InstallmentsPage({ branchFilter: propBranchFilter, embed
 
       showToast(res.message || 'Payment recorded successfully', 'success')
       triggerDataSync('installments')
-      triggerDataSync('notifications')
       setPayModalItem(null)
 
       // Refresh detail modal if open
@@ -573,7 +572,7 @@ export default function InstallmentsPage({ branchFilter: propBranchFilter, embed
       {/* ─── PAGE HEADER WITH ADD ACCOUNT BUTTON (NO REFRESH BUTTON) ─── */}
       {!embedded && (
         <PageHeader
-          title="Customer Installment"
+          title="Customer Installments"
           subtitle={
             isStoreAdmin
               ? `Store Branch Ledger (${user?.employee?.branch?.name || (typeof user?.employee?.branch === 'string' ? user.employee.branch : 'Assigned Branch')})`

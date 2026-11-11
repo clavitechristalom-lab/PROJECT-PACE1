@@ -39,7 +39,7 @@ export default function PaymentScheduleView({
 }) {
   const [installments, setInstallments] = useState(propInstallments);
   const [loading, setLoading] = useState(propInstallments.length === 0);
-  const [activeFilter, setActiveFilter] = useState('upcoming'); // 'all' | 'upcoming' | 'paid' | 'overdue'
+  const [activeFilter, setActiveFilter] = useState('all'); // 'all' | 'upcoming' | 'overdue' | 'paid'
   const [searchQuery, setSearchQuery] = useState('');
   const [viewMode, setViewMode] = useState('list'); // 'list' | 'calendar'
   const inFlightRef = useRef(false);
@@ -402,10 +402,10 @@ export default function PaymentScheduleView({
         {/* Filter Pills */}
         <div className="flex items-center gap-1.5 p-1 rounded-2xl bg-muted/60 border border-border/70">
           {[
+            { id: 'all', label: 'All', count: allSchedules.length },
             { id: 'upcoming', label: 'Upcoming Dues', count: pendingSchedules.length },
-            { id: 'all', label: 'All Milestones', count: allSchedules.length },
+            { id: 'overdue', label: 'Overdue Payment', count: overdueSchedules.length },
             { id: 'paid', label: 'Settled / Paid', count: paidSchedules.length },
-            { id: 'overdue', label: 'Overdue Attention', count: overdueSchedules.length },
           ].map(tab => (
             <button
               key={tab.id}
@@ -647,7 +647,7 @@ export default function PaymentScheduleView({
                 </span>
                 <span className="flex items-center gap-1.5">
                   <span className="w-2.5 h-2.5 rounded-full bg-amber-500" />
-                  <span>Overdue Attention</span>
+                  <span>Overdue Payment</span>
                 </span>
               </div>
 

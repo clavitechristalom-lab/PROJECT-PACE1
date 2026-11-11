@@ -28,17 +28,38 @@ export default function QrMonitoringPage() {
     failed_scans: 0,
   })
   const [logs, setLogs] = useState([])
+  const [branches, setBranches] = useState([])
   const [search, setSearch] = useState('')
+  const [branchFilter, setBranchFilter] = useState('All')
   const [statusFilter, setStatusFilter] = useState('All')
   const [actionFilter, setActionFilter] = useState('All')
+
+  const resolveBranchName = (item, branchList = branches) => {
+    const raw = item?.branch
+    if (raw && typeof raw === 'object' && raw.name) return raw.name
+    if (raw && !/^\d+$/.test(String(raw).trim())) return String(raw)
+    const idLookup = item?.branch_id ?? (raw && /^\d+$/.test(String(raw).trim()) ? Number(raw) : null)
+    if (idLookup !== null && idLookup !== undefined) {
+      const matched = branchList.find(b => String(b.id) === String(idLookup))
+      if (matched?.name) return matched.name
+    }
+    return raw ? String(raw) : 'Unassigned'
+  }
 
   const loadData = async (silent = false) => {
     if (!silent) setLoading(true)
     try {
-      const res = await api.system.getQrMonitoring()
+      const [res, branchRes] = await Promise.all([
+        api.system.getQrMonitoring(),
+        branches.length === 0 ? api.branches.getAll().catch(() => null) : Promise.resolve(null),
+      ])
       if (res.success) {
         setStats(res.stats || {})
         setLogs(res.recent_logs || [])
+        const nextBranches = Array.isArray(res.branches) && res.branches.length > 0
+          ? res.branches
+          : (Array.isArray(branchRes?.branches) ? branchRes.branches : [])
+        if (nextBranches.length > 0) setBranches(nextBranches)
       }
     } catch (err) {
       console.error('Failed to load QR monitoring stats:', err)
@@ -54,7 +75,7 @@ export default function QrMonitoringPage() {
 
   useRealtimeSync(() => {
     loadData(true)
-  }, [], { module: 'employees' })
+  }, [], { module: 'qr_monitoring' })
 
   if (!isAdmin) {
     return (
@@ -62,26 +83,49 @@ export default function QrMonitoringPage() {
         <div className="w-20 h-20 rounded-2xl bg-rose-500/10 border border-rose-500/30 flex items-center justify-center text-rose-500 text-4xl mb-4">
           <FiShield />
         </div>
-        <h1 className="text-2xl font-bold text-slate-100 mb-2">403 FORBIDDEN</h1>
-        <p className="text-slate-400 max-w-md text-sm">
+        <h1 className="text-2xl font-bold text-foreground mb-2">403 FORBIDDEN</h1>
+        <p className="text-muted-foreground max-w-md text-sm">
           Access to the QR Monitoring Center is restricted to Administrators only.
         </p>
       </div>
     )
   }
 
+  const branchOptions = Array.from(new Set([
+    ...branches.map(b => b.name).filter(Boolean),
+    ...logs.map(l => resolveBranchName(l)).filter(b => b && b !== 'Unassigned' && !/^\d+$/.test(b)),
+  ])).sort()
+
   const filteredLogs = logs.filter(item => {
+    const branchLabel = resolveBranchName(item)
     const s = search.toLowerCase()
     const matchesSearch = !search ||
       item.employee_name?.toLowerCase().includes(s) ||
       item.employee_code?.toLowerCase().includes(s) ||
-      item.branch?.toLowerCase().includes(s) ||
-      item.action_type?.toLowerCase().includes(s)
+      branchLabel.toLowerCase().includes(s) ||
+      item.action_type?.toLowerCase().includes(s) ||
+      item.verification_method?.toLowerCase().includes(s)
 
-    const matchesStatus = statusFilter === 'All' || item.status === statusFilter
-    const matchesAction = actionFilter === 'All' || item.action_type === actionFilter
+    const matchesBranch = branchFilter === 'All' || branchLabel === branchFilter
+    const matchesStatus =
+      statusFilter === 'All' ||
+      item.status === statusFilter ||
+      (statusFilter === 'PENDING' && item.status === 'PENDING_PIN')
+    const matchesAction =
+      actionFilter === 'All' ||
+      item.action_type === actionFilter ||
+      (actionFilter === 'PIN_VERIFICATION_FAILED' &&
+        (item.action_type === 'PIN_VERIFICATION' || item.action_type === 'PENDING_VERIFICATION') &&
+        item.status === 'FAILED' &&
+        String(item.failure_reason || '').toLowerCase().includes('pin')) ||
+      (actionFilter === 'FACE_RECOGNITION' &&
+        (item.face_verified === true ||
+          String(item.verification_method || '').toLowerCase().includes('face recognition'))) ||
+      (actionFilter === 'FACE_VERIFICATION_FAILED' &&
+        item.status === 'FAILED' &&
+        String(item.failure_reason || '').toLowerCase().includes('face'))
 
-    return matchesSearch && matchesStatus && matchesAction
+    return matchesSearch && matchesBranch && matchesStatus && matchesAction
   })
 
   const [page, setPage] = useState(1)
@@ -91,18 +135,18 @@ export default function QrMonitoringPage() {
 
   useEffect(() => {
     setPage(1)
-  }, [search, statusFilter, actionFilter])
+  }, [search, branchFilter, statusFilter, actionFilter])
 
   return (
     <div className="space-y-6 pb-12">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b border-slate-800 pb-4">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b border-border pb-4">
         <div>
-          <div className="flex items-center gap-2 text-primary-400 text-xs font-semibold uppercase tracking-wider mb-1">
+          <div className="flex items-center gap-2 text-primary text-xs font-semibold uppercase tracking-wider mb-1">
             <FiShield /> System Administration
           </div>
-          <h1 className="text-2xl font-bold text-slate-100">QR Attendance Monitoring</h1>
-          <p className="text-xs text-slate-400">
+          <h1 className="text-2xl font-bold text-foreground">QR Attendance Monitoring</h1>
+          <p className="text-xs text-muted-foreground">
             Real-time organizational QR security metrics, branch scan activity, and audit logs.
           </p>
         </div>
@@ -162,42 +206,58 @@ export default function QrMonitoringPage() {
       </div>
 
       {/* Filter Bar & Live Activity Table */}
-      <Card className="p-6 border-slate-800 bg-slate-900/60 shadow-xl space-y-4">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <h2 className="text-base font-bold text-slate-100 flex items-center gap-2">
-            <FiClock className="text-primary-400" /> Real-time QR Activity Log
+      <Card className="p-6 space-y-4">
+        <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-4">
+          <h2 className="text-base font-bold text-foreground flex items-center gap-2 whitespace-nowrap shrink-0">
+            <FiClock className="text-primary shrink-0" />
+            <span>Real-time QR Activity Log</span>
           </h2>
 
-          <div className="flex flex-wrap items-center gap-3">
+          <div className="flex flex-wrap lg:flex-nowrap items-center gap-2.5 min-w-0">
             <SearchBar
               value={search}
               onChange={setSearch}
               placeholder="Search employee, branch, or action..."
-              className="w-full sm:w-64 text-xs"
+              className="w-full sm:w-52 text-xs"
             />
+
+            <select
+              value={branchFilter}
+              onChange={(e) => setBranchFilter(e.target.value)}
+              className="bg-card border border-border text-foreground rounded-xl px-3 py-2 text-xs font-semibold focus:ring-1 focus:ring-primary outline-none cursor-pointer max-w-[160px] shrink-0"
+            >
+              <option value="All">All Branches</option>
+              {branchOptions.map(b => (
+                <option key={b} value={b}>{b}</option>
+              ))}
+            </select>
 
             <select
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value)}
-              className="bg-slate-950 border border-slate-800 text-slate-300 rounded-xl px-3 py-2 text-xs focus:ring-1 focus:ring-primary-500 outline-none"
+              className="bg-card border border-border text-foreground rounded-xl px-3 py-2 text-xs font-semibold focus:ring-1 focus:ring-primary outline-none cursor-pointer shrink-0"
             >
               <option value="All">All Statuses</option>
               <option value="SUCCESS">SUCCESS</option>
               <option value="FAILED">FAILED</option>
-              <option value="PENDING_PIN">PENDING PIN</option>
+              <option value="PENDING">PENDING</option>
             </select>
 
             <select
               value={actionFilter}
               onChange={(e) => setActionFilter(e.target.value)}
-              className="bg-slate-950 border border-slate-800 text-slate-300 rounded-xl px-3 py-2 text-xs focus:ring-1 focus:ring-primary-500 outline-none"
+              className="bg-card border border-border text-foreground rounded-xl px-3 py-2 text-xs font-semibold focus:ring-1 focus:ring-primary outline-none cursor-pointer max-w-[180px] shrink-0"
             >
               <option value="All">All Event Types</option>
-              <option value="ATTENDANCE_CREATED">ATTENDANCE CREATED</option>
-              <option value="QR_SCAN_SUCCESS">QR SCAN SUCCESS</option>
-              <option value="PIN_VERIFICATION_FAILED">PIN FAILED</option>
-              <option value="UNAUTHORIZED_BRANCH_SCAN">CROSS BRANCH SCAN</option>
+              <option value="ATTENDANCE_TIME_IN">ATTENDANCE TIME IN</option>
+              <option value="ATTENDANCE_TIME_OUT">ATTENDANCE TIME OUT</option>
+              <option value="FACE_RECOGNITION">FACE RECOGNITION</option>
+              <option value="FACE_VERIFICATION_FAILED">FACE FAILED</option>
+              <option value="PENDING_VERIFICATION">PENDING VERIFICATION</option>
+              <option value="UNAUTHORIZED_BRANCH_SCAN">CROSS BRANCH</option>
               <option value="REVOKED_QR_SCAN">REVOKED QR</option>
+              <option value="INVALID_QR">INVALID QR</option>
+              <option value="REJECTED">REJECTED ACCOUNT</option>
             </select>
           </div>
         </div>
@@ -214,7 +274,7 @@ export default function QrMonitoringPage() {
           <div className="overflow-x-auto">
             <Table>
               <thead>
-                <tr className="border-b border-slate-800 text-[11px] uppercase tracking-wider text-slate-400 font-semibold">
+                <tr className="border-b border-border bg-muted/40 text-[11px] uppercase tracking-wider text-muted-foreground font-semibold">
                   <th className="py-3 px-4 text-left">Employee</th>
                   <th className="py-3 px-4 text-left">Branch</th>
                   <th className="py-3 px-4 text-left">Action / Event</th>
@@ -227,33 +287,37 @@ export default function QrMonitoringPage() {
               </thead>
               <tbody>
                 {paginatedLogs.map(log => (
-                  <TR key={log.id} className="hover:bg-slate-800/40 text-xs">
+                  <TR key={log.id} className="hover:bg-muted/40 text-xs">
                     <TD className="py-3 px-4">
-                      <div className="font-semibold text-slate-200">{log.employee_name}</div>
-                      <div className="text-[11px] font-mono text-slate-400">{log.employee_code}</div>
+                      <div className="font-semibold text-foreground">{log.employee_name}</div>
+                      <div className="text-[11px] font-mono text-muted-foreground">{log.employee_code}</div>
                     </TD>
                     <TD className="py-3 px-4">
-                      <span className="text-slate-300 font-medium">{log.branch}</span>
-                      <span className="text-[10px] text-slate-400 block">{log.department}</span>
+                      <span className="text-foreground font-medium">{resolveBranchName(log)}</span>
+                      <span className="text-[10px] text-muted-foreground block">{log.department}</span>
                     </TD>
                     <TD className="py-3 px-4">
-                      <span className="font-mono text-[11px] font-bold text-primary-400">
+                      <span className="font-mono text-[11px] font-bold text-primary">
                         {log.action_type}
                       </span>
                     </TD>
                     <TD className="py-3 px-4">
-                      <span className="inline-flex items-center gap-1 text-[11px] text-slate-300 font-medium">
-                        {log.verification_method === 'QR + PIN' ? (
-                          <span className="text-emerald-400 font-bold">✓ QR + PIN</span>
+                      <span className="inline-flex items-center gap-1 text-[11px] text-foreground font-medium">
+                        {log.face_verified || String(log.verification_method || '').includes('Face Recognition') ? (
+                          <span className="text-emerald-600 dark:text-emerald-400 font-bold">✓ QR + Face Recognition</span>
+                        ) : log.verification_method === 'Face Failed' ? (
+                          <span className="text-rose-600 dark:text-rose-400 font-bold">✗ Face Failed</span>
+                        ) : log.verification_method === 'QR + PIN' ? (
+                          <span className="text-emerald-600 dark:text-emerald-400 font-bold">✓ QR + PIN</span>
                         ) : log.verification_method === 'QR Only' ? (
-                          <span className="text-amber-400">QR Step</span>
+                          <span className="text-amber-600 dark:text-amber-400">QR Step</span>
                         ) : (
-                          <span className="text-rose-400">Failed</span>
+                          <span className="text-rose-600 dark:text-rose-400">Failed</span>
                         )}
                       </span>
                     </TD>
                     <TD className="py-3 px-4">
-                      <span className="text-slate-300 font-medium text-[11px]">{log.scanned_by || 'Store Admin'}</span>
+                      <span className="text-foreground font-medium text-[11px]">{log.scanned_by || 'Store Administrator'}</span>
                     </TD>
                     <TD className="py-3 px-4">
                       <Badge
@@ -261,8 +325,8 @@ export default function QrMonitoringPage() {
                           log.status === 'SUCCESS'
                             ? 'success'
                             : log.status === 'FAILED'
-                            ? 'danger'
-                            : 'warning'
+                              ? 'danger'
+                              : 'warning'
                         }
                       >
                         {log.status}
@@ -270,12 +334,12 @@ export default function QrMonitoringPage() {
                     </TD>
                     <TD className="py-3 px-4 max-w-xs">
                       {log.failure_reason ? (
-                        <span className="text-rose-400 text-[11px]">{log.failure_reason}</span>
+                        <span className="text-rose-600 dark:text-rose-400 text-[11px]">{log.failure_reason}</span>
                       ) : (
-                        <span className="text-slate-400 text-[11px] font-mono">{log.ip_address || 'Terminal Verified'}</span>
+                        <span className="text-muted-foreground text-[11px] font-mono">{log.ip_address || 'Terminal Verified'}</span>
                       )}
                     </TD>
-                    <TD className="py-3 px-4 whitespace-nowrap font-mono text-[11px] text-slate-300">
+                    <TD className="py-3 px-4 whitespace-nowrap font-mono text-[11px] text-muted-foreground">
                       {log.scan_time}
                     </TD>
                   </TR>

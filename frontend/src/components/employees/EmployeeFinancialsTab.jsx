@@ -47,7 +47,7 @@ export default function EmployeeFinancialsTab({ employeeId }) {
 
   useRealtimeSync((_source, signal) => {
     loadFinancials(true, signal);
-  }, [employeeId, loadFinancials], { module: 'employees' });
+  }, [employeeId, loadFinancials], { module: 'employee_financials' });
 
   const handleAddAllowance = async (e) => {
     e.preventDefault();
@@ -57,9 +57,7 @@ export default function EmployeeFinancialsTab({ employeeId }) {
       await api.employees.addAllowance(employeeId, { name: allowanceName, amount: allowanceAmount, is_active: true });
       showToast('Allowance added', 'success');
       setAllowanceName(''); setAllowanceAmount('');
-      triggerDataSync('employees');
-      triggerDataSync('payroll');
-      loadFinancials(true);
+      triggerDataSync('employee_financials');
     } catch (err) {
       showToast(err.message, 'error');
     } finally { closeLoading(); }
@@ -73,9 +71,7 @@ export default function EmployeeFinancialsTab({ employeeId }) {
       await api.employees.addDeduction(employeeId, { name: deductionName, amount: deductionAmount, is_active: true });
       showToast('Deduction added', 'success');
       setDeductionName(''); setDeductionAmount('');
-      triggerDataSync('employees');
-      triggerDataSync('payroll');
-      loadFinancials(true);
+      triggerDataSync('employee_financials');
     } catch (err) {
       showToast(err.message, 'error');
     } finally { closeLoading(); }
@@ -89,9 +85,7 @@ export default function EmployeeFinancialsTab({ employeeId }) {
       await api.employees.addLoan(employeeId, { name: loanName, total_amount: loanTotal, monthly_deduction: loanMonthly });
       showToast('Loan added', 'success');
       setLoanName(''); setLoanTotal(''); setLoanMonthly('');
-      triggerDataSync('employees');
-      triggerDataSync('payroll');
-      loadFinancials(true);
+      triggerDataSync('employee_financials');
     } catch (err) {
       showToast(err.message, 'error');
     } finally { closeLoading(); }
@@ -106,9 +100,7 @@ export default function EmployeeFinancialsTab({ employeeId }) {
       if (type === 'deduction') await api.employees.deleteDeduction(id);
       if (type === 'loan') await api.employees.deleteLoan(id);
       showToast('Removed successfully', 'success');
-      triggerDataSync('employees');
-      triggerDataSync('payroll');
-      loadFinancials(true);
+      triggerDataSync('employee_financials');
     } catch (err) {
       showToast(err.message, 'error');
     } finally { closeLoading(); }

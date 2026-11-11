@@ -8,6 +8,20 @@ import './index.css'
 
 // Handle Vite dynamic import preload failures (e.g. after builds, dev server restarts, or network blips)
 if (typeof window !== 'undefined') {
+  // Open the native calendar picker whenever any enabled date input is clicked
+  document.addEventListener('click', (event) => {
+    const target = event.target
+    if (!(target instanceof HTMLInputElement) || target.type !== 'date') return
+    if (target.disabled || target.readOnly) return
+    try {
+      if (typeof target.showPicker === 'function') {
+        target.showPicker()
+      }
+    } catch (_) {
+      // Ignore if browser rejects showPicker() or picker is already active
+    }
+  })
+
   window.addEventListener('vite:preloadError', (event) => {
     console.warn('Vite preload error detected, refreshing page...', event)
     window.location.reload()

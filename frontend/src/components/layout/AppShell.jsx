@@ -14,7 +14,6 @@ import { api } from '../../lib/api'
 import { triggerDataSync } from '../../lib/realtimeSync'
 import { fastDeepEqual } from '../../lib/utils'
 import { useTheme } from '../../context/ThemeContext'
-import ProfileModal from './ProfileModal'
 import CompanyConfigurationModal, { resolveLogoUrl } from '../CompanyConfigurationModal'
 import EmployeePinVerificationModal from '../attendance/EmployeePinVerificationModal'
 import FaceRecognitionAttendanceModal from '../attendance/FaceRecognitionAttendanceModal'
@@ -57,10 +56,10 @@ function navByRole(role, onOpenConfig, pendingLettersCount = 0) {
   if (role === 'Customer') {
     return [
       { label: 'My Dashboard', path: '/customer/dashboard', icon: icons.dashboard },
-      { label: 'Installments', path: '/customer/dashboard?tab=installments', icon: icons.installment },
-      { label: 'Payment Schedule', path: '/customer/dashboard?tab=schedule', icon: icons.schedule },
-      { label: 'Statements', path: '/customer/dashboard?tab=statements', icon: icons.payslip },
       { label: 'Product List', path: '/customer/dashboard?tab=products', icon: icons.products },
+      { label: 'Installments', path: '/customer/dashboard?tab=installments', icon: icons.installment },
+      { label: 'Statements', path: '/customer/dashboard?tab=statements', icon: icons.payslip },
+      { label: 'Payment Schedule', path: '/customer/dashboard?tab=schedule', icon: icons.schedule },
       { label: 'Customer Support', path: '/customer/dashboard?tab=support', icon: icons.support },
     ]
   }
@@ -80,7 +79,7 @@ function navByRole(role, onOpenConfig, pendingLettersCount = 0) {
     label: 'Installment Monitoring',
     icon: icons.installment,
     items: [
-      { label: 'Installment', path: '/installments', icon: icons.installment },
+      { label: 'Installments', path: '/installments', icon: icons.installment },
       { label: 'Payment Schedule', path: '/payment-schedule', icon: icons.schedule },
       { label: 'Payments', path: '/payments', icon: icons.payments },
     ],
@@ -214,10 +213,10 @@ function getCollapsedRailItems(role, onOpenConfig, pendingLettersCount = 0) {
   if (role === 'Customer') {
     return [
       { label: 'My Dashboard', path: '/customer/dashboard', icon: <FiHome className="w-5 h-5" /> },
-      { label: 'Installments', path: '/customer/dashboard?tab=installments', icon: <FiCreditCard className="w-5 h-5" /> },
-      { label: 'Payment Schedule', path: '/customer/dashboard?tab=schedule', icon: <FiCalendar className="w-5 h-5" /> },
-      { label: 'Statements', path: '/customer/dashboard?tab=statements', icon: <FiFileText className="w-5 h-5" /> },
       { label: 'Product List', path: '/customer/dashboard?tab=products', icon: <FiShoppingBag className="w-5 h-5" /> },
+      { label: 'Installments', path: '/customer/dashboard?tab=installments', icon: <FiCreditCard className="w-5 h-5" /> },
+      { label: 'Statements', path: '/customer/dashboard?tab=statements', icon: <FiFileText className="w-5 h-5" /> },
+      { label: 'Payment Schedule', path: '/customer/dashboard?tab=schedule', icon: <FiCalendar className="w-5 h-5" /> },
       { label: 'Customer Support', path: '/customer/dashboard?tab=support', icon: <FiMessageSquare className="w-5 h-5" /> },
     ]
   }
@@ -237,10 +236,7 @@ function getCollapsedRailItems(role, onOpenConfig, pendingLettersCount = 0) {
     // 4. Customers
     { label: 'Customers', path: '/customers', icon: <FiUser className="w-5 h-5" /> },
 
-    // 5. Create Sale / Cart
-    { label: 'Create Sale', path: '/sales/create', icon: <FiShoppingCart className="w-5 h-5" /> },
-
-    // 6. Transaction History / Activity
+    // 5. Transaction History / Activity
     { label: 'Transaction History', path: '/transactions', icon: <FiActivity className="w-5 h-5 stroke-[2.2]" /> },
 
     // 7. Installments
@@ -300,12 +296,94 @@ function getCollapsedRailItems(role, onOpenConfig, pendingLettersCount = 0) {
   return items
 }
 
+function SidebarStoreAdminProfile({ user, collapsed = false, onNavigate }) {
+  const displayName =
+    user?.name ||
+    (user?.employee ? `${user.employee.first_name || ''} ${user.employee.last_name || ''}`.trim() : '') ||
+    user?.username ||
+    'Store Admin'
+  const branchName =
+    user?.employee?.branch?.name ||
+    (typeof user?.employee?.branch === 'string' && user.employee.branch) ||
+    user?.employee?.branch_name ||
+    user?.branch_name ||
+    ''
+  const avatarLetter = displayName ? displayName.charAt(0).toUpperCase() : 'S'
+
+  if (collapsed) {
+    return (
+      <div className="p-2 border-t border-r border-blue-500/15 dark:border-blue-500/20 flex justify-center flex-shrink-0">
+        <NavLink
+          to="/store-admin/profile"
+          onClick={() => onNavigate?.()}
+          title={`Store Admin Profile — ${displayName}`}
+          aria-label="Store Admin Profile"
+          className={({ isActive }) => `relative w-11 h-11 rounded-[14px] font-bold text-xs flex items-center justify-center shadow-md transition-all cursor-pointer active:scale-95 group overflow-visible ${
+            isActive
+              ? 'bg-gradient-to-br from-blue-600 to-indigo-700 text-white ring-2 ring-blue-400/70 shadow-blue-600/35'
+              : 'bg-gradient-to-br from-blue-600 to-indigo-700 text-white hover:brightness-110'
+          }`}
+        >
+          {user?.profile_image ? (
+            <img src={user.profile_image} alt={displayName} className="w-full h-full object-cover rounded-[14px]" />
+          ) : (
+            <span>{avatarLetter}</span>
+          )}
+          <span className="pointer-events-none absolute left-14 z-50 whitespace-nowrap rounded-lg bg-slate-900 dark:bg-slate-800 px-2.5 py-1 text-xs font-semibold text-white shadow-xl opacity-0 transition-opacity group-hover:opacity-100 hidden md:block">
+            Store Admin Profile
+          </span>
+        </NavLink>
+      </div>
+    )
+  }
+
+  return (
+    <div className="p-2.5 border-t border-r border-blue-500/15 dark:border-blue-500/20 flex-shrink-0">
+      <NavLink
+        to="/store-admin/profile"
+        onClick={() => onNavigate?.()}
+        className={({ isActive }) => `w-full flex items-center gap-2.5 px-2.5 py-2 rounded-xl border transition-all cursor-pointer text-left shadow-2xs group ${
+          isActive
+            ? 'bg-gradient-to-r from-blue-600 via-blue-600 to-indigo-700 border-blue-400/40 text-white shadow-md shadow-blue-950/30'
+            : 'border-blue-500/20 bg-white/85 dark:bg-[#0c1b3a]/90 hover:bg-blue-50 dark:hover:bg-blue-500/15'
+        }`}
+      >
+        {({ isActive }) => (
+          <>
+            <div className={`w-9 h-9 rounded-full flex items-center justify-center text-xs font-bold overflow-hidden shadow-xs shrink-0 border ${
+              isActive
+                ? 'bg-white/20 border-white/40 text-white'
+                : 'bg-gradient-to-br from-blue-600 to-indigo-700 border-blue-400/30 text-white'
+            }`}>
+              {user?.profile_image ? (
+                <img src={user.profile_image} alt={displayName} className="w-full h-full object-cover" />
+              ) : (
+                avatarLetter
+              )}
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className={`text-xs font-bold truncate leading-tight ${isActive ? 'text-white' : 'text-slate-900 dark:text-white'}`}>
+                {displayName}
+              </div>
+              <div className={`text-[10px] font-semibold truncate leading-tight mt-0.5 ${isActive ? 'text-blue-100' : 'text-blue-700 dark:text-blue-300'}`}>
+                Store Admin Profile{branchName ? ` • ${branchName}` : ''}
+              </div>
+            </div>
+            <FiUser className={`w-3.5 h-3.5 shrink-0 ${isActive ? 'text-white' : 'text-blue-600 dark:text-blue-400 opacity-75 group-hover:opacity-100'}`} />
+          </>
+        )}
+      </NavLink>
+    </div>
+  )
+}
+
 function Sidebar({ collapsed, settings, mobileOpen, onCloseMobile, onOpenConfig }) {
   const { user } = useAuth()
   const { isDark } = useTheme()
-  const isLogoDark = !isDark
+  const isLogoDark = isDark
   const location = useLocation()
   const [pendingLettersCount, setPendingLettersCount] = useState(0)
+  const isStoreAdmin = user?.role === 'Store Administrator' || user?.role === 'Store Admin'
 
   // Real-time pending count for sidebar notification badge
   useEffect(() => {
@@ -365,7 +443,7 @@ function Sidebar({ collapsed, settings, mobileOpen, onCloseMobile, onOpenConfig 
             onClick={onCloseMobile}
           />
           <aside
-            className="fixed inset-y-0 left-0 z-50 w-[260px] bg-white dark:bg-[#071328] border-r border-blue-500/20 shadow-2xl flex flex-col h-full overflow-hidden animate-[slideRight_0.2s_ease]"
+            className="sidebar-shell fixed inset-y-0 left-0 z-50 w-[260px] bg-[#F5F5F5] dark:bg-[#071328] border-r border-slate-300/80 dark:border-blue-500/20 shadow-2xl flex flex-col h-full overflow-hidden animate-[slideRight_0.2s_ease]"
           >
             {/* Drawer Logo */}
             <div className="brand-logo-shell relative flex flex-col items-center justify-center px-3 py-4 sm:py-5 border-b flex-shrink-0 overflow-hidden transition-colors duration-200">
@@ -436,6 +514,13 @@ function Sidebar({ collapsed, settings, mobileOpen, onCloseMobile, onOpenConfig 
                 )
               )}
             </nav>
+            {isStoreAdmin && (
+              <SidebarStoreAdminProfile
+                user={user}
+                collapsed={false}
+                onNavigate={onCloseMobile}
+              />
+            )}
           </aside>
         </>
       )}
@@ -444,7 +529,7 @@ function Sidebar({ collapsed, settings, mobileOpen, onCloseMobile, onOpenConfig 
       {collapsed ? (
         /* Icon-Only Mini Sidebar */
         <aside
-          className="sidebar-shell flex flex-col h-full overflow-hidden flex-shrink-0 select-none z-30 print:hidden transition-all duration-200 border-r-0 bg-white dark:bg-[#071328] w-[68px] min-w-[68px]"
+          className="sidebar-shell flex flex-col h-full overflow-hidden flex-shrink-0 select-none z-30 print:hidden transition-all duration-200 border-r-0 bg-[#F5F5F5] dark:bg-[#071328] w-[68px] min-w-[68px]"
         >
           {/* Mini Brand Logo Header */}
           <div className="brand-logo-shell h-14 flex items-center justify-center border-b border-r-0 flex-shrink-0 overflow-hidden transition-colors duration-200">
@@ -509,11 +594,17 @@ function Sidebar({ collapsed, settings, mobileOpen, onCloseMobile, onOpenConfig 
               )
             })}
           </div>
+          {isStoreAdmin && (
+            <SidebarStoreAdminProfile
+              user={user}
+              collapsed={true}
+            />
+          )}
         </aside>
       ) : (
         /* Full Expanded Sidebar */
         <aside
-          className="sidebar-shell flex flex-col h-full overflow-hidden flex-shrink-0 transition-all duration-200 select-none z-30 print:hidden border-r-0 bg-white dark:bg-[#071328] w-[240px] min-w-[240px]"
+          className="sidebar-shell flex flex-col h-full overflow-hidden flex-shrink-0 transition-all duration-200 select-none z-30 print:hidden border-r-0 bg-[#F5F5F5] dark:bg-[#071328] w-[240px] min-w-[240px]"
         >
           {/* Brand Logo Header */}
           <div className="brand-logo-shell flex flex-col items-center justify-center px-3 py-4 sm:py-5 border-b border-r-0 flex-shrink-0 overflow-hidden transition-colors duration-200">
@@ -573,6 +664,12 @@ function Sidebar({ collapsed, settings, mobileOpen, onCloseMobile, onOpenConfig 
               )
             )}
           </nav>
+          {isStoreAdmin && (
+            <SidebarStoreAdminProfile
+              user={user}
+              collapsed={false}
+            />
+          )}
         </aside>
       )}
     </>
@@ -602,7 +699,6 @@ function RealTimeClock({ isHeaderDark = false }) {
 function Header({
   title,
   onToggle,
-  onOpenProfile,
   notifs,
   unreadCount,
   onMarkAllRead,
@@ -611,8 +707,9 @@ function Header({
   onOpenConfig,
 }) {
   const { user, logout } = useAuth()
+  const isStoreAdm = user?.role === 'Store Administrator' || user?.role === 'Store Admin'
   const { isDark, toggleMode } = useTheme()
-  const isHeaderDark = !isDark
+  const isHeaderDark = isDark
   const [userOpen, setUserOpen] = useState(false)
   const userRef = useRef(null)
   const navigate = useNavigate()
@@ -737,7 +834,7 @@ function Header({
           className={`w-8 h-8 rounded-xl border flex items-center justify-center transition-colors cursor-pointer shrink-0 ${
             isHeaderDark
               ? 'border-blue-500/20 bg-[#071328] text-blue-200 hover:bg-blue-500/20 hover:text-white'
-              : 'border-blue-500/20 bg-blue-50 text-blue-800 hover:bg-blue-500/20 hover:text-blue-950'
+              : 'border-slate-300/80 bg-white/75 text-blue-800 hover:bg-white hover:text-blue-950'
           }`}
           aria-label="Toggle sidebar"
         >
@@ -765,7 +862,7 @@ function Header({
             className={`w-full h-9 pl-9 pr-16 text-xs rounded-xl border transition-all focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-500 ${
               isHeaderDark
                 ? 'border-blue-500/25 bg-[#071328] text-slate-50 placeholder:text-blue-300/40'
-                : 'border-blue-500/25 bg-blue-50/80 text-slate-900 placeholder:text-blue-700/50'
+                : 'border-slate-300/80 bg-white/75 text-slate-900 placeholder:text-slate-500'
             }`}
           />
           <div className={`absolute left-3 top-2.5 pointer-events-none ${
@@ -893,10 +990,10 @@ function Header({
             setTimeout(() => searchInputRef.current?.focus(), 100)
           }}
           title="Search system"
-          className={`sm:hidden w-8 h-8 flex items-center justify-center rounded-xl border transition-colors cursor-pointer text-base shadow-2xs shrink-0 ${
+          className={`sm:hidden w-8 h-8 flex items-center justify-center rounded-xl border transition-colors cursor-pointer text-base shadow-2xs shrink-0 focus:outline-none ${
             isHeaderDark
               ? 'border-blue-500/25 bg-[#071328] hover:bg-blue-500/20 text-blue-100'
-              : 'border-blue-500/25 bg-blue-50/50 hover:bg-blue-500/20 text-blue-900'
+              : 'border-slate-300/80 bg-white/75 hover:bg-white text-blue-900'
           }`}
         >
           <FiSearch className="w-4 h-4" />
@@ -906,16 +1003,16 @@ function Header({
         <button
           onClick={toggleMode}
           title={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
-          className={`w-8 h-8 sm:w-9 sm:h-9 flex items-center justify-center rounded-xl border transition-colors cursor-pointer text-base shadow-2xs shrink-0 ${
+          className={`w-8 h-8 sm:w-9 sm:h-9 flex items-center justify-center rounded-xl border transition-colors cursor-pointer text-base shadow-2xs shrink-0 focus:outline-none ${
             isHeaderDark
               ? 'border-blue-500/25 bg-[#071328] hover:bg-blue-500/20 text-blue-100'
-              : 'border-blue-500/25 bg-blue-50/50 hover:bg-blue-500/20 text-blue-900'
+              : 'border-slate-300/80 bg-white/75 hover:bg-white text-blue-900'
           }`}
         >
           {isDark ? (
             <FiSun className="w-4 h-4 text-amber-500 drop-shadow-[0_0_6px_rgba(245,158,11,0.5)]" />
           ) : (
-            <FiMoon className="w-4 h-4 text-blue-300" />
+            <FiMoon className="w-4 h-4 text-blue-700" />
           )}
         </button>
 
@@ -930,7 +1027,7 @@ function Header({
           className={
             isHeaderDark
               ? 'border-blue-500/25 bg-[#071328] text-blue-200 hover:bg-blue-500/20 hover:text-white'
-              : 'border-blue-500/25 bg-blue-50/50 text-blue-800 hover:bg-blue-500/20 hover:text-blue-950'
+              : 'border-slate-300/80 bg-white/75 text-blue-800 hover:bg-white hover:text-blue-950'
           }
         />
 
@@ -938,42 +1035,59 @@ function Header({
         <div className="relative shrink-0" ref={userRef}>
           <button
             onClick={() => setUserOpen(o => !o)}
-            className={`flex items-center gap-1.5 p-1 sm:px-2.5 sm:py-1.5 rounded-xl border transition-colors cursor-pointer shadow-2xs shrink-0 ${
+            className={`flex items-center gap-1.5 p-1 sm:px-2.5 sm:py-1.5 rounded-xl border transition-colors cursor-pointer shadow-2xs shrink-0 focus:outline-none ${
               isHeaderDark
                 ? 'border-blue-500/25 bg-[#071328] hover:bg-blue-500/20'
-                : 'border-blue-500/25 bg-blue-50/80 hover:bg-blue-500/20'
+                : 'border-slate-300/80 bg-white/75 hover:bg-white'
             }`}
           >
             <div className="w-7 h-7 rounded-full bg-gradient-to-br from-blue-600 to-indigo-700 border border-blue-400/30 flex items-center justify-center text-white text-xs font-bold overflow-hidden shadow-xs shrink-0">
-              {user?.profile_image ? (
+              {isStoreAdm ? (
+                <span>S</span>
+              ) : user?.profile_image ? (
                 <img src={user.profile_image} alt="Profile" className="w-full h-full object-cover" />
               ) : (
                 user?.name ? user.name[0] : 'U'
               )}
             </div>
             <div className="hidden sm:block text-left">
-              <div className={`text-xs font-semibold leading-tight ${
-                isHeaderDark ? 'text-slate-100' : 'text-slate-900'
-              }`}>{user?.name ? user.name.split(' ')[0] : 'User'}</div>
-              <div className={`text-[10px] font-mono leading-tight ${
-                isHeaderDark ? 'text-blue-300/80' : 'text-blue-700'
-              }`}>{user?.role}</div>
+              {isStoreAdm ? (
+                <div className={`text-xs font-semibold leading-tight ${
+                  isHeaderDark ? 'text-slate-100' : 'text-slate-900'
+                }`}>Store Admin</div>
+              ) : (
+                <>
+                  <div className={`text-xs font-semibold leading-tight ${
+                    isHeaderDark ? 'text-slate-100' : 'text-slate-900'
+                  }`}>{user?.name ? user.name.split(' ')[0] : 'User'}</div>
+                  <div className={`text-[10px] font-mono leading-tight ${
+                    isHeaderDark ? 'text-blue-300/80' : 'text-blue-700'
+                  }`}>{user?.role}</div>
+                </>
+              )}
             </div>
           </button>
           {userOpen && (
             <div className="absolute right-0 top-12 w-56 !bg-white dark:!bg-[#071328] rounded-2xl border border-blue-500/30 shadow-2xl z-40 overflow-hidden animate-[slideUp_0.15s_ease]">
-              <div className="px-4 py-3 border-b border-blue-500/20 !bg-blue-50/70 dark:!bg-blue-950/70">
-                <div className="text-xs font-bold text-slate-900 dark:text-white truncate">{user.name}</div>
-                <div className="text-[11px] text-blue-700 dark:text-blue-300 font-mono truncate">{user.username}</div>
-              </div>
+              {!isStoreAdm && (
+                <div className="px-4 py-3 border-b border-blue-500/20 !bg-blue-50/70 dark:!bg-blue-950/70">
+                  <div className="text-xs font-bold text-slate-900 dark:text-white truncate">{user.name}</div>
+                  <div className="text-[11px] text-blue-700 dark:text-blue-300 font-mono truncate">{user.username}</div>
+                </div>
+              )}
               <div className="p-1 space-y-0.5 !bg-transparent">
-                <button
-                  onClick={() => { onOpenProfile?.(); setUserOpen(false) }}
-                  className="w-full text-left px-3 py-2 text-xs text-foreground hover:bg-blue-500/10 rounded-xl cursor-pointer flex items-center gap-2 font-medium transition-colors"
-                >
-                  <FiUser className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
-                  <span>Profile Information</span>
-                </button>
+                {!isStoreAdm && (
+                  <button
+                    onClick={() => {
+                      navigate('/profile')
+                      setUserOpen(false)
+                    }}
+                    className="w-full text-left px-3 py-2 text-xs text-foreground hover:bg-blue-500/10 rounded-xl cursor-pointer flex items-center gap-2 font-medium transition-colors"
+                  >
+                    <FiUser className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
+                    <span>Profile Information</span>
+                  </button>
+                )}
                 <button
                   onClick={() => {
                     window.dispatchEvent(new CustomEvent('open:notifications'))
@@ -984,13 +1098,13 @@ function Header({
                   <FiBell className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
                   <span>Notifications</span>
                 </button>
-                {(user?.role === 'Administrator' || user?.role === 'Store Administrator' || user?.role === 'Store Admin') && (
+                {(user?.role === 'Administrator' || isStoreAdm) && (
                   <button
                     onClick={() => { onOpenConfig?.(); setUserOpen(false) }}
                     className="w-full text-left px-3 py-2 text-xs text-foreground hover:bg-blue-500/10 rounded-xl cursor-pointer flex items-center gap-2 font-medium transition-colors"
                   >
                     <FiSettings className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
-                    <span>{(user?.role === 'Store Administrator' || user?.role === 'Store Admin') ? 'Branch Configuration' : 'Company Configuration'}</span>
+                    <span>{isStoreAdm ? 'Branch Configuration' : 'Company Configuration'}</span>
                   </button>
                 )}
                 <button
@@ -1014,7 +1128,6 @@ const ROUTE_TITLES = {
   '/products': 'Products / Inventory',
   '/customers': 'Customers',
   '/sales': 'Sales Transactions',
-  '/sales/create': 'Create Sale',
   '/installments': 'Installment',
   '/payment-schedule': 'Payment Schedule',
   '/payments': 'Payments',
@@ -1025,6 +1138,8 @@ const ROUTE_TITLES = {
   '/attendance': 'Attendance Records',
   '/attendance/qr': 'QR Attendance',
   '/store-admin/attendance/scanner': 'QR Attendance Terminal',
+  '/store-admin/profile': 'Store Admin Profile',
+  '/profile': 'My Profile',
   '/qr-monitoring': 'QR Attendance Monitoring',
   '/admin/qr-monitoring': 'QR Attendance Monitoring',
   '/reports': 'Reports',
@@ -1048,7 +1163,6 @@ export default function AppShell() {
     return user?.role === 'Customer'
   })
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
-  const [profileOpen, setProfileOpen] = useState(false)
   const [notifs, setNotifs] = useState([])
   const [unreadCount, setUnreadCount] = useState(0)
   const [pendingVerification, setPendingVerification] = useState(null)
@@ -1093,6 +1207,65 @@ export default function AppShell() {
     } catch (_) { }
   }
 
+  const applyNotificationsPayload = (res) => {
+    if (!res) return
+    const fetchedNotifs = res.notifications || []
+
+    if (fetchedNotifs.length > 0) {
+      const currentHighest = Math.max(...fetchedNotifs.map(n => n.id || n.notification_id || 0))
+
+      if (latestNotifIdRef.current !== null && currentHighest > latestNotifIdRef.current) {
+        const newNotifs = fetchedNotifs.filter(n => (n.id || n.notification_id || 0) > latestNotifIdRef.current)
+        if (newNotifs.length > 0) {
+          playNotificationChime()
+          newNotifs.forEach(n => {
+            showToast(`${n.title}: ${n.message}`, 'info')
+          })
+        }
+      }
+
+      latestNotifIdRef.current = Math.max(latestNotifIdRef.current || 0, currentHighest)
+    }
+
+    setNotifs(prev => fastDeepEqual(prev, fetchedNotifs) ? prev : fetchedNotifs)
+    setUnreadCount(prev => prev === (res.unread_count || 0) ? prev : (res.unread_count || 0))
+  }
+
+  const applyPendingVerificationsPayload = (pRes) => {
+    if (!pRes) return
+    if (pRes.pending && pRes.pending.length > 0) {
+      const activePending = pRes.pending.filter(item => !cancelledVerifIdsRef.current.has(item.id))
+      if (activePending.length > 0) {
+        setPendingVerification(prev => (!prev || prev.id !== activePending[0].id ? activePending[0] : prev))
+      } else {
+        setPendingVerification(null)
+      }
+    } else {
+      setPendingVerification(null)
+    }
+  }
+
+  const loadNotificationsOnly = async () => {
+    if (!user) return
+    try {
+      const res = await api.notifications.getLatest({ limit: 30 })
+      applyNotificationsPayload(res)
+    } catch (_) { }
+  }
+
+  const loadPendingVerificationsOnly = async () => {
+    if (!user) return
+    const checkVerifications =
+      user.role === 'Employee' ||
+      user.role === 'Store Administrator' ||
+      user.role === 'Store Admin'
+    if (!checkVerifications) return
+    try {
+      const pRes = await api.attendance.pendingVerifications()
+      applyPendingVerificationsPayload(pRes)
+    } catch (_) { }
+  }
+
   const loadData = async (options = {}) => {
     if (!user || isLoadingDataRef.current) return
     isLoadingDataRef.current = true
@@ -1111,27 +1284,7 @@ export default function AppShell() {
       ])
 
       if (notifTask.status === 'fulfilled' && notifTask.value) {
-        const res = notifTask.value
-        const fetchedNotifs = res.notifications || []
-
-        if (fetchedNotifs.length > 0) {
-          const currentHighest = Math.max(...fetchedNotifs.map(n => n.id || n.notification_id || 0))
-
-          if (latestNotifIdRef.current !== null && currentHighest > latestNotifIdRef.current) {
-            const newNotifs = fetchedNotifs.filter(n => (n.id || n.notification_id || 0) > latestNotifIdRef.current)
-            if (newNotifs.length > 0) {
-              playNotificationChime()
-              newNotifs.forEach(n => {
-                showToast(`${n.title}: ${n.message}`, 'info')
-              })
-            }
-          }
-
-          latestNotifIdRef.current = Math.max(latestNotifIdRef.current || 0, currentHighest)
-        }
-
-        setNotifs(prev => fastDeepEqual(prev, fetchedNotifs) ? prev : fetchedNotifs)
-        setUnreadCount(prev => prev === (res.unread_count || 0) ? prev : (res.unread_count || 0))
+        applyNotificationsPayload(notifTask.value)
       }
 
       if (shouldLoadSettings && settingsTask.status === 'fulfilled' && settingsTask.value) {
@@ -1140,17 +1293,7 @@ export default function AppShell() {
       }
 
       if (checkVerifications && verifTask.status === 'fulfilled' && verifTask.value) {
-        const pRes = verifTask.value
-        if (pRes.pending && pRes.pending.length > 0) {
-          const activePending = pRes.pending.filter(item => !cancelledVerifIdsRef.current.has(item.id))
-          if (activePending.length > 0) {
-            setPendingVerification(prev => (!prev || prev.id !== activePending[0].id ? activePending[0] : prev))
-          } else {
-            setPendingVerification(null)
-          }
-        } else {
-          setPendingVerification(null)
-        }
+        applyPendingVerificationsPayload(verifTask.value)
       }
     } finally {
       isLoadingDataRef.current = false
@@ -1164,10 +1307,10 @@ export default function AppShell() {
 
   useEffect(() => {
     const handleNotifSync = () => {
-      loadData()
+      loadNotificationsOnly()
     }
     const handleVerifSync = () => {
-      loadData()
+      loadPendingVerificationsOnly()
     }
     const handleReturnToQr = (e) => {
       const reqId = e?.detail?.requestId
@@ -1255,7 +1398,7 @@ export default function AppShell() {
       : `role-${roleRaw.replace(/\s+/g, '-')}`
 
   return (
-    <div className={`admin-shell ${roleClass} flex h-screen bg-slate-50 dark:bg-[#081026] text-foreground overflow-hidden font-sans`}>
+    <div className={`admin-shell ${roleClass} flex h-screen bg-slate-50 dark:bg-[#081026] text-foreground overflow-hidden font-sans print:block print:h-auto print:min-h-0 print:overflow-visible print:bg-white`}>
       <Sidebar
         collapsed={collapsed}
         settings={appSettings}
@@ -1264,21 +1407,20 @@ export default function AppShell() {
         onOpenConfig={() => setConfigOpen(true)}
       />
 
-      <div className="flex flex-col flex-1 min-w-0 overflow-x-hidden h-full">
+      <div className="flex flex-col flex-1 min-w-0 overflow-x-hidden h-full print:block print:h-auto print:overflow-visible">
         <Header
           title={pageTitle}
           onToggle={handleToggle}
-          onOpenProfile={() => setProfileOpen(true)}
           notifs={notifs}
           unreadCount={unreadCount}
           onMarkAllRead={handleMarkAllRead}
           onNotificationClick={handleNotificationClick}
-          onRefreshNotifs={loadData}
+          onRefreshNotifs={loadNotificationsOnly}
           onOpenConfig={() => setConfigOpen(true)}
         />
 
-        <main className="flex-1 overflow-y-auto overflow-x-hidden p-3 sm:p-4 md:p-6 bg-transparent">
-          <div className="max-w-7xl mx-auto w-full min-w-0">
+        <main className="flex-1 overflow-y-auto overflow-x-hidden p-3 sm:p-4 md:p-6 bg-transparent print:overflow-visible print:p-0 print:m-0">
+          <div className="max-w-7xl mx-auto w-full min-w-0 print:max-w-none print:mx-0">
             <Suspense
               fallback={
                 <div className="py-20 flex items-center justify-center">
@@ -1291,11 +1433,6 @@ export default function AppShell() {
           </div>
         </main>
       </div>
-
-      <ProfileModal
-        isOpen={profileOpen}
-        onClose={() => setProfileOpen(false)}
-      />
 
       <CompanyConfigurationModal
         isOpen={configOpen}

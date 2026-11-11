@@ -1021,6 +1021,7 @@ export default function PayrollWorkflowModal({
                     type="date"
                     id="payroll-from-date"
                     value={fromDate}
+                    max={toDate || undefined}
                     onChange={(e) => setFromDate(e.target.value)}
                     className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground text-xs font-medium focus:ring-2 focus:ring-emerald-500/20"
                   />
@@ -1034,6 +1035,7 @@ export default function PayrollWorkflowModal({
                     type="date"
                     id="payroll-to-date"
                     value={toDate}
+                    min={fromDate || undefined}
                     onChange={(e) => setToDate(e.target.value)}
                     className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground text-xs font-medium focus:ring-2 focus:ring-emerald-500/20"
                   />

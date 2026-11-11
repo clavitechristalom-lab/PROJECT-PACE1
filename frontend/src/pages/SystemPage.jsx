@@ -204,6 +204,14 @@ export default function SystemPage({ defaultTab = 'users' }) {
 
     try {
       if (editUser) {
+        const normalizedSalary =
+          userForm.basic_salary !== '' &&
+          userForm.basic_salary !== null &&
+          userForm.basic_salary !== undefined &&
+          !isNaN(Number(userForm.basic_salary))
+            ? Number(userForm.basic_salary)
+            : 0
+
         const payload = {
           ...userForm,
           role: userForm.role === 'Store Admin' ? 'Store Administrator' : userForm.role,
@@ -212,9 +220,20 @@ export default function SystemPage({ defaultTab = 'users' }) {
           branch_id: userForm.branch_id || null,
           auth_user_id: user?.user_id || 1,
         }
-        delete payload.basic_salary // Basic salary is omitted from standard user edit
+        if (userForm.role === 'Customer') {
+          delete payload.basic_salary
+        } else {
+          payload.basic_salary = normalizedSalary
+        }
         const res = await api.system.updateUser(editUser.user_id, payload)
         setUsers(prev => prev.map(u => u.user_id === editUser.user_id ? (res.user || { ...u, ...payload }) : u))
+        if (res.user?.employee) {
+          setEmployeesList(prev => prev.map(emp =>
+            String(emp.employee_id) === String(res.user.employee.employee_id)
+              ? { ...emp, ...res.user.employee }
+              : emp
+          ))
+        }
         showToast('User account updated successfully', 'success')
       } else {
         const rolePayload = userForm.role === 'Store Admin' ? 'Store Administrator' : userForm.role
@@ -247,9 +266,6 @@ export default function SystemPage({ defaultTab = 'users' }) {
         setUsers(userData.users || [])
         setEmployeesList(empData.employees || [])
       }
-      triggerDataSync('users')
-      triggerDataSync('dashboard')
-      triggerDataSync('employees')
       setUserModal(false)
       setUserFormStep(1)
       setEditUser(null)
@@ -269,8 +285,6 @@ export default function SystemPage({ defaultTab = 'users' }) {
       setUsers(prev => prev.filter(u => u.user_id !== deleteUser.user_id))
       showToast('User account deleted successfully', 'success')
       setDeleteUser(null)
-      triggerDataSync('users')
-      triggerDataSync('dashboard')
     } catch (err) {
       showToast(err.message || 'Failed to delete user', 'error')
     } finally {
@@ -394,8 +408,6 @@ export default function SystemPage({ defaultTab = 'users' }) {
       const res = await api.system.clearLogs()
       setLogs([])
       showToast(res?.message || 'All system audit logs cleared successfully', 'success')
-      triggerDataSync('system')
-      triggerDataSync('storage')
     } catch (err) {
       console.error('Failed to clear logs:', err)
       showToast(err.message || 'Failed to clear system audit logs', 'error')
@@ -412,9 +424,7 @@ export default function SystemPage({ defaultTab = 'users' }) {
     try {
       const res = await api.system.createBackup(user?.user_id || 1)
       showToast(res.message || 'Manual backup completed successfully', 'success')
-      loadTabData('backups', true)
       triggerDataSync('system')
-      triggerDataSync('storage')
     } catch (err) {
       showToast(err.message || 'Failed to create database backup', 'error')
     } finally {
@@ -430,9 +440,7 @@ export default function SystemPage({ defaultTab = 'users' }) {
       const res = await api.system.restoreBackup(restoringItem.backup_id, user?.user_id || 1)
       showToast(res.message || 'Database restored successfully', 'success')
       setRestoringItem(null)
-      loadTabData('backups', true)
       triggerDataSync('system')
-      triggerDataSync('storage')
     } catch (err) {
       showToast(err.message || 'Failed to restore backup', 'error')
     } finally {
@@ -1419,12 +1427,12 @@ export default function SystemPage({ defaultTab = 'users' }) {
                             department: newRole === 'Store Admin' ? 'Store Admin' : (newRole === 'Employee' ? 'Employee' : f.department)
                           }))
                         }}
-                        className="w-full border border-border rounded-xl px-3 py-2 text-xs font-semibold bg-card text-foreground cursor-pointer [color-scheme:dark] [&>option]:bg-[#0f172a] [&>option]:text-white"
+                        className="w-full border border-border rounded-xl px-3 py-2 text-xs font-semibold bg-card text-foreground cursor-pointer"
                       >
-                        <option value="Administrator" className="bg-[#0f172a] text-white">Administrator</option>
-                        <option value="Store Admin" className="bg-[#0f172a] text-white">Manager (Store Admin)</option>
-                        <option value="Employee" className="bg-[#0f172a] text-white">Employee</option>
-                        <option value="Customer" className="bg-[#0f172a] text-white">Customer</option>
+                        <option value="Administrator">Administrator</option>
+                        <option value="Store Admin">Manager (Store Admin)</option>
+                        <option value="Employee">Employee</option>
+                        <option value="Customer">Customer</option>
                       </select>
                     </div>
                     <div>
@@ -1556,11 +1564,11 @@ export default function SystemPage({ defaultTab = 'users' }) {
                         <select
                           value={userForm.gender || 'Male'}
                           onChange={e => setUserForm(f => ({ ...f, gender: e.target.value }))}
-                          className="w-full border border-border rounded-xl px-3 py-2 bg-card text-foreground text-xs font-medium cursor-pointer [color-scheme:dark] [&>option]:bg-[#0f172a] [&>option]:text-white"
+                          className="w-full border border-border rounded-xl px-3 py-2 bg-card text-foreground text-xs font-medium cursor-pointer"
                         >
-                          <option value="Male" className="bg-[#0f172a] text-white">Male</option>
-                          <option value="Female" className="bg-[#0f172a] text-white">Female</option>
-                          <option value="Other" className="bg-[#0f172a] text-white">Other</option>
+                          <option value="Male">Male</option>
+                          <option value="Female">Female</option>
+                          <option value="Other">Other</option>
                         </select>
                       </div>
                       <div>
@@ -1571,9 +1579,8 @@ export default function SystemPage({ defaultTab = 'users' }) {
                           type="date"
                           max={new Date().toISOString().split('T')[0]}
                           value={userForm.date_of_birth ? new Date(userForm.date_of_birth).toISOString().split('T')[0] : ''}
-                          onClick={(e) => { try { e.target.showPicker() } catch (_) { } }}
                           onChange={e => setUserForm(f => ({ ...f, date_of_birth: e.target.value }))}
-                          className="w-full border border-border rounded-xl px-3 py-2 bg-card text-foreground text-xs font-medium cursor-pointer [color-scheme:dark]"
+                          className="w-full border border-border rounded-xl px-3 py-2 bg-card text-foreground text-xs font-medium cursor-pointer"
                         />
                       </div>
                       <div>
@@ -1583,12 +1590,12 @@ export default function SystemPage({ defaultTab = 'users' }) {
                         <select
                           value={userForm.marital_status || 'Single'}
                           onChange={e => setUserForm(f => ({ ...f, marital_status: e.target.value }))}
-                          className="w-full border border-border rounded-xl px-3 py-2 bg-card text-foreground text-xs font-medium cursor-pointer [color-scheme:dark] [&>option]:bg-[#0f172a] [&>option]:text-white"
+                          className="w-full border border-border rounded-xl px-3 py-2 bg-card text-foreground text-xs font-medium cursor-pointer"
                         >
-                          <option value="Single" className="bg-[#0f172a] text-white">Single</option>
-                          <option value="Married" className="bg-[#0f172a] text-white">Married</option>
-                          <option value="Divorced" className="bg-[#0f172a] text-white">Divorced</option>
-                          <option value="Widowed" className="bg-[#0f172a] text-white">Widowed</option>
+                          <option value="Single">Single</option>
+                          <option value="Married">Married</option>
+                          <option value="Divorced">Divorced</option>
+                          <option value="Widowed">Widowed</option>
                         </select>
                       </div>
                       <div>
@@ -1615,15 +1622,15 @@ export default function SystemPage({ defaultTab = 'users' }) {
                                 department: pos === 'Manager (Store Admin)' ? 'Store Admin' : 'Employee'
                               }))
                             }}
-                            className="w-full border border-border rounded-xl px-3 py-2 bg-card text-foreground text-xs font-medium cursor-pointer [color-scheme:dark] [&>option]:bg-[#0f172a] [&>option]:text-white font-semibold"
+                            className="w-full border border-border rounded-xl px-3 py-2 bg-card text-foreground text-xs font-semibold cursor-pointer"
                           >
                             {userForm.role === 'Store Admin' || userForm.role === 'Store Administrator' ? (
-                              <option value="Manager (Store Admin)" className="bg-[#0f172a] text-white">Manager (Store Admin)</option>
+                              <option value="Manager (Store Admin)">Manager (Store Admin)</option>
                             ) : (
                               <>
-                                <option value="Cashier (Employee)" className="bg-[#0f172a] text-white">Cashier (Employee)</option>
-                                <option value="Collector (Employee)" className="bg-[#0f172a] text-white">Collector (Employee)</option>
-                                <option value="Utility (Employee)" className="bg-[#0f172a] text-white">Utility (Employee)</option>
+                                <option value="Cashier (Employee)">Cashier (Employee)</option>
+                                <option value="Collector (Employee)">Collector (Employee)</option>
+                                <option value="Utility (Employee)">Utility (Employee)</option>
                               </>
                             )}
                           </select>
@@ -1656,7 +1663,7 @@ export default function SystemPage({ defaultTab = 'users' }) {
                           <select
                             value={userForm.branch_id || ''}
                             onChange={e => setUserForm(f => ({ ...f, branch_id: e.target.value }))}
-                            className="w-full border border-border rounded-xl px-3 py-2 bg-card text-foreground text-xs font-medium cursor-pointer [color-scheme:dark] [&>option]:bg-[#0f172a] [&>option]:text-white"
+                            className="w-full border border-border rounded-xl px-3 py-2 bg-card text-foreground text-xs font-medium cursor-pointer"
                           >
                             <option value="">Select Branch (Optional)</option>
                             {registrationOptions.branches.map(b => (
@@ -1686,7 +1693,7 @@ export default function SystemPage({ defaultTab = 'users' }) {
                             className="w-full border border-border rounded-xl px-3 py-2 bg-card text-foreground text-xs font-medium"
                           />
                         </div>
-                        <div className="col-span-2">
+                        <div>
                           <label className="text-[10px] text-muted-foreground uppercase tracking-wider font-bold mb-1 block">
                             Working Hours
                           </label>
@@ -1696,6 +1703,23 @@ export default function SystemPage({ defaultTab = 'users' }) {
                             onChange={e => setUserForm(f => ({ ...f, working_hours: e.target.value }))}
                             className="w-full border border-border rounded-xl px-3 py-2 bg-card text-foreground text-xs font-medium"
                           />
+                        </div>
+                        <div>
+                          <label className="text-[10px] text-muted-foreground uppercase tracking-wider font-bold mb-1 block">
+                            Basic Salary (Monthly PHP)
+                          </label>
+                          <div className="relative">
+                            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs font-bold text-muted-foreground">₱</span>
+                            <input
+                              type="number"
+                              min="0"
+                              step="0.01"
+                              value={userForm.basic_salary ?? ''}
+                              onChange={e => setUserForm(f => ({ ...f, basic_salary: e.target.value }))}
+                              placeholder="0.00"
+                              className="w-full pl-7 pr-3 py-2 rounded-xl border border-border bg-card text-foreground text-xs font-mono font-semibold"
+                            />
+                          </div>
                         </div>
                       </div>
                     ) : userForm.role === 'Customer' ? (
@@ -1840,15 +1864,15 @@ export default function SystemPage({ defaultTab = 'users' }) {
                                 department: pos === 'Manager (Store Admin)' ? 'Store Admin' : 'Employee'
                               }))
                             }}
-                            className="w-full border border-border rounded-xl px-3 py-2 bg-card text-foreground text-xs font-medium cursor-pointer [color-scheme:dark] [&>option]:bg-[#0f172a] [&>option]:text-white font-semibold"
+                            className="w-full border border-border rounded-xl px-3 py-2 bg-card text-foreground text-xs cursor-pointer font-semibold"
                           >
                             {userForm.role === 'Store Admin' || userForm.role === 'Store Administrator' ? (
-                              <option value="Manager (Store Admin)" className="bg-[#0f172a] text-white">Manager (Store Admin)</option>
+                              <option value="Manager (Store Admin)">Manager (Store Admin)</option>
                             ) : (
                               <>
-                                <option value="Cashier (Employee)" className="bg-[#0f172a] text-white">Cashier (Employee)</option>
-                                <option value="Collector (Employee)" className="bg-[#0f172a] text-white">Collector (Employee)</option>
-                                <option value="Utility (Employee)" className="bg-[#0f172a] text-white">Utility (Employee)</option>
+                                <option value="Cashier (Employee)">Cashier (Employee)</option>
+                                <option value="Collector (Employee)">Collector (Employee)</option>
+                                <option value="Utility (Employee)">Utility (Employee)</option>
                               </>
                             )}
                           </select>
@@ -1867,6 +1891,30 @@ export default function SystemPage({ defaultTab = 'users' }) {
                             <option value="Cheque">Cheque</option>
                             <option value="E-Wallet">E-Wallet</option>
                           </select>
+                        </div>
+                        <div className="col-span-2">
+                          <label className="text-[10px] text-muted-foreground uppercase tracking-wider font-bold mb-1 block">
+                            Basic Salary (Monthly PHP)
+                          </label>
+                          <div className="relative">
+                            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs font-bold text-muted-foreground">₱</span>
+                            <input
+                              type="number"
+                              min="0"
+                              step="0.01"
+                              value={userForm.basic_salary ?? ''}
+                              onChange={e => setUserForm(f => ({ ...f, basic_salary: e.target.value }))}
+                              placeholder="e.g. 13000.00"
+                              className="w-full pl-7 pr-3 py-2 rounded-xl border border-border bg-card text-foreground text-xs font-mono font-semibold"
+                            />
+                          </div>
+                          {Number(userForm.basic_salary) > 0 && (
+                            <p className="text-[10px] text-muted-foreground mt-1 font-mono">
+                              Daily: ₱{(Number(userForm.basic_salary) / 26).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                              {' • '}Weekly: ₱{((Number(userForm.basic_salary) / 26) * 6).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                              {' • '}Hourly: ₱{(Number(userForm.basic_salary) / 26 / 8).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            </p>
+                          )}
                         </div>
                       </div>
                     )}
@@ -1983,23 +2031,23 @@ export default function SystemPage({ defaultTab = 'users' }) {
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
                   <div>
                     <label className="block font-bold text-muted-foreground mb-1">Gender *</label>
-                    <select value={userForm.gender} onChange={e => setUserForm(f => ({ ...f, gender: e.target.value }))} className="w-full border border-border rounded-xl px-3 py-2 bg-card text-foreground cursor-pointer [color-scheme:dark] [&>option]:bg-[#0f172a] [&>option]:text-white">
-                      <option value="Male" className="bg-[#0f172a] text-white">Male</option>
-                      <option value="Female" className="bg-[#0f172a] text-white">Female</option>
-                      <option value="Other" className="bg-[#0f172a] text-white">Other</option>
+                    <select value={userForm.gender} onChange={e => setUserForm(f => ({ ...f, gender: e.target.value }))} className="w-full border border-border rounded-xl px-3 py-2 bg-card text-foreground cursor-pointer">
+                      <option value="Male">Male</option>
+                      <option value="Female">Female</option>
+                      <option value="Other">Other</option>
                     </select>
                   </div>
                   <div>
                     <label className="block font-bold text-muted-foreground mb-1">Birthday *</label>
-                    <input type="date" max={new Date().toISOString().split('T')[0]} value={userForm.date_of_birth} onClick={(e) => { try { e.target.showPicker() } catch (_) { } }} onChange={e => setUserForm(f => ({ ...f, date_of_birth: e.target.value }))} required className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground cursor-pointer [color-scheme:dark]" />
+                    <input type="date" max={new Date().toISOString().split('T')[0]} value={userForm.date_of_birth} onChange={e => setUserForm(f => ({ ...f, date_of_birth: e.target.value }))} required className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground cursor-pointer" />
                   </div>
                   <div>
                     <label className="block font-bold text-muted-foreground mb-1">Status *</label>
-                    <select value={userForm.marital_status} onChange={e => setUserForm(f => ({ ...f, marital_status: e.target.value }))} className="w-full border border-border rounded-xl px-3 py-2 bg-card text-foreground cursor-pointer [color-scheme:dark] [&>option]:bg-[#0f172a] [&>option]:text-white">
-                      <option value="Single" className="bg-[#0f172a] text-white">Single</option>
-                      <option value="Married" className="bg-[#0f172a] text-white">Married</option>
-                      <option value="Widowed" className="bg-[#0f172a] text-white">Widowed</option>
-                      <option value="Divorced" className="bg-[#0f172a] text-white">Divorced</option>
+                    <select value={userForm.marital_status} onChange={e => setUserForm(f => ({ ...f, marital_status: e.target.value }))} className="w-full border border-border rounded-xl px-3 py-2 bg-card text-foreground cursor-pointer">
+                      <option value="Single">Single</option>
+                      <option value="Married">Married</option>
+                      <option value="Widowed">Widowed</option>
+                      <option value="Divorced">Divorced</option>
                     </select>
                   </div>
                 </div>
@@ -2036,11 +2084,11 @@ export default function SystemPage({ defaultTab = 'users' }) {
                         <select
                           value={userForm.branch_id || ''}
                           onChange={e => setUserForm(f => ({ ...f, branch_id: e.target.value }))}
-                          className="w-full border border-border rounded-xl px-3 py-2 bg-card text-foreground cursor-pointer [color-scheme:dark] [&>option]:bg-[#0f172a] [&>option]:text-white text-xs font-medium"
+                          className="w-full border border-border rounded-xl px-3 py-2 bg-card text-foreground cursor-pointer text-xs font-medium"
                         >
-                          <option value="" className="bg-[#0f172a] text-white">Unassigned (Assign Later)</option>
+                          <option value="">Unassigned (Assign Later)</option>
                           {registrationOptions.branches.map(b => (
-                            <option key={b.id} value={b.id} className="bg-[#0f172a] text-white">{b.name}</option>
+                            <option key={b.id} value={b.id}>{b.name}</option>
                           ))}
                         </select>
                       </div>
@@ -2061,15 +2109,15 @@ export default function SystemPage({ defaultTab = 'users' }) {
                             }))
                           }}
                           required
-                          className="w-full border border-border rounded-xl px-3 py-2 bg-card text-foreground cursor-pointer [color-scheme:dark] [&>option]:bg-[#0f172a] [&>option]:text-white text-xs font-semibold"
+                          className="w-full border border-border rounded-xl px-3 py-2 bg-card text-foreground cursor-pointer text-xs font-semibold"
                         >
                           {userForm.role === 'Store Admin' || userForm.role === 'Store Administrator' ? (
-                            <option value="Manager (Store Admin)" className="bg-[#0f172a] text-white">Manager (Store Admin)</option>
+                            <option value="Manager (Store Admin)">Manager (Store Admin)</option>
                           ) : (
                             <>
-                              <option value="Cashier (Employee)" className="bg-[#0f172a] text-white">Cashier (Employee)</option>
-                              <option value="Collector (Employee)" className="bg-[#0f172a] text-white">Collector (Employee)</option>
-                              <option value="Utility (Employee)" className="bg-[#0f172a] text-white">Utility (Employee)</option>
+                              <option value="Cashier (Employee)">Cashier (Employee)</option>
+                              <option value="Collector (Employee)">Collector (Employee)</option>
+                              <option value="Utility (Employee)">Utility (Employee)</option>
                             </>
                           )}
                         </select>

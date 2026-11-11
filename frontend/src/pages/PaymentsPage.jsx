@@ -276,11 +276,8 @@ export default function PaymentsPage() {
       if (res.payment) {
         setPayments(prev => [res.payment, ...prev])
       } else {
-        loadData(true)
+        triggerDataSync('payments')
       }
-      triggerDataSync('payments')
-      triggerDataSync('installments')
-      triggerDataSync('dashboard')
     } catch (err) {
       showToast(err.message || 'Failed to record payment', 'error')
     } finally {
@@ -301,10 +298,7 @@ export default function PaymentsPage() {
     try {
       await api.payments.delete(id)
       showToast('Payment deleted successfully', 'success')
-      loadData(true)
       triggerDataSync('payments')
-      triggerDataSync('installments')
-      triggerDataSync('dashboard')
     } catch (err) {
       showToast(err.message || 'Failed to delete payment', 'error')
     } finally {
@@ -368,10 +362,7 @@ export default function PaymentsPage() {
     try {
       await api.payments.receive(p.payment_id);
       showToast('Payment received and credited successfully! 🎉', 'success');
-      loadData(true);
       triggerDataSync('payments');
-      triggerDataSync('installments');
-      triggerDataSync('dashboard');
     } catch (err) {
       showToast(err.message || 'Failed to receive payment', 'error');
     } finally {

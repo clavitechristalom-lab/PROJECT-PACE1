@@ -20,7 +20,7 @@ import { fmt, fastDeepEqual } from '../lib/utils'
 import { useAuth } from '../context/AuthContext'
 import { api } from '../lib/api'
 import { useRealtimeSync, triggerDataSync, SyncButton } from '../lib/realtimeSync'
-import { ComposedChart, Bar, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend } from 'recharts'
+import { ComposedChart, Bar, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts'
 import { TbCurrencyPeso } from 'react-icons/tb'
 import EmployeePayslipModal from '../components/payslip/EmployeePayslipModal'
 import PayrollWorkflowModal from '../components/payroll/PayrollWorkflowModal'
@@ -364,8 +364,6 @@ export default function PayrollPage() {
       } else {
         await loadData(selectedPeriodId, { branch: targetBranch }, true)
       }
-
-      triggerDataSync('payroll')
     } catch (err) {
       showToast(err.message || 'Failed to generate payroll', 'error')
     } finally {
@@ -390,7 +388,6 @@ export default function PayrollPage() {
       })
       showToast(res.message || '13th Month Pay generated successfully', 'success')
       loadData(undefined, { branch: branchFilter }, true)
-      triggerDataSync('payroll')
     } catch (err) {
       showToast(err.message || 'Failed to generate 13th month pay', 'error')
     } finally {
@@ -483,7 +480,6 @@ export default function PayrollPage() {
       setEndDate('')
       setPayDate('')
       loadData(res.period?.period_id ? res.period.period_id.toString() : undefined, { branch: branchFilter }, true)
-      triggerDataSync('payroll')
     } catch (err) {
       showToast(err.message || 'Failed to create period', 'error')
     } finally {
@@ -596,21 +592,85 @@ export default function PayrollPage() {
   const totalDeductions = displayed.reduce((acc, p) => acc + (p.total_deductions || 0), 0)
   const totalNet = displayed.reduce((acc, p) => acc + (p.net_pay || 0), 0)
 
-  // Group by department for chart
-  const deptSummary = useMemo(() => {
-    const map = {}
-    displayed.forEach(p => {
-      const dept = p.department || (p.position?.includes('Store Admin') ? 'Store Admin' : 'Employee')
-      if (!map[dept]) map[dept] = { department: dept, Gross: 0, Net: 0, Deductions: 0 }
+  const [chartYear, setChartYear] = useState(() => new Date().getFullYear())
+
+  // Extract date and year safely from YYYY-MM-DD without UTC timezone shift
+  const resolvePayrollYearMonth = (p) => {
+    const rawDate =
+      p.pay_date ||
+      p.end_date ||
+      p.start_date ||
+      (p.period_dates ? (p.period_dates.split(' to ')[1] || p.period_dates.split(' to ')[0]) : '') ||
+      p.created_at ||
+      ''
+    const match = String(rawDate).trim().match(/^(\d{4})-(\d{2})-(\d{2})/)
+    if (match) {
+      return { year: Number(match[1]), monthIdx: Number(match[2]) - 1 }
+    }
+    if (rawDate) {
+      const d = new Date(rawDate)
+      if (!Number.isNaN(d.getTime())) {
+        return { year: d.getFullYear(), monthIdx: d.getMonth() }
+      }
+    }
+    return null
+  }
+
+  // Monthly Jan-Dec payroll distribution for chart (scoped by branch, status, and search filters)
+  const { monthlyChartData, availableChartYears } = useMemo(() => {
+    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+    const grouped = months.map(m => ({ month: m, Gross: 0, Net: 0, Deductions: 0, count: 0 }))
+
+    let list = payroll
+    if (branchFilter && branchFilter !== 'All') {
+      list = list.filter(p => (p.branch || '').toLowerCase() === branchFilter.toLowerCase())
+    }
+    if (filterStatus && filterStatus !== 'All') {
+      const st = filterStatus.toLowerCase().trim()
+      list = list.filter(p => {
+        const rowStatus = (p.status || '').toLowerCase().trim()
+        return st === 'pending' ? (rowStatus === 'pending' || rowStatus === 'draft') : rowStatus === st
+      })
+    }
+    if (search.trim()) {
+      const tokens = search.toLowerCase().trim().split(/\s+/).filter(Boolean)
+      list = list.filter(p => {
+        const haystack = [
+          p.employee_name, p.code, p.employee_code, p.department,
+          p.position, p.branch, p.status, p.payout_method, p.pay_type, p.period_name,
+        ].filter(Boolean).join(' ').toLowerCase()
+        return tokens.every(t => haystack.includes(t))
+      })
+    }
+
+    const yearsSet = new Set([new Date().getFullYear()])
+    const parsedRows = []
+    list.forEach(p => {
+      const ym = resolvePayrollYearMonth(p)
+      if (ym) {
+        yearsSet.add(ym.year)
+        parsedRows.push({ p, ...ym })
+      }
+    })
+
+    const sortedYears = Array.from(yearsSet).sort((a, b) => b - a)
+    const activeYear = yearsSet.has(chartYear) ? chartYear : (sortedYears[0] || new Date().getFullYear())
+
+    parsedRows.forEach(({ p, year, monthIdx }) => {
+      if (year !== activeYear || monthIdx < 0 || monthIdx > 11) return
       const baseVal = resolveRowWeeklyBase(p)
       const grossVal = (p.gross_pay !== undefined && p.gross_pay !== null) ? Number(p.gross_pay) : baseVal
-      const netVal = (p.net_pay !== undefined && p.net_pay !== null) ? Number(p.net_pay) : Math.max(0, grossVal - Number(p.total_deductions || 0))
-      map[dept].Gross += grossVal
-      map[dept].Deductions += Number(p.total_deductions || 0)
-      map[dept].Net += netVal
+      const dedVal = Number(p.total_deductions || 0)
+      const netVal = (p.net_pay !== undefined && p.net_pay !== null) ? Number(p.net_pay) : Math.max(0, grossVal - dedVal)
+
+      grouped[monthIdx].Gross += Number.isFinite(grossVal) ? grossVal : 0
+      grouped[monthIdx].Deductions += Number.isFinite(dedVal) ? dedVal : 0
+      grouped[monthIdx].Net += Number.isFinite(netVal) ? netVal : 0
+      grouped[monthIdx].count += 1
     })
-    return Object.values(map)
-  }, [displayed])
+
+    return { monthlyChartData: grouped, availableChartYears: sortedYears }
+  }, [payroll, branchFilter, filterStatus, search, chartYear])
 
   return (
     <div className="space-y-6">
@@ -772,41 +832,103 @@ export default function PayrollPage() {
       </div>
 
       {/* Payroll Summary Chart (Admin Only) */}
-      {user?.role !== 'Employee' && displayed.length > 0 && (
-        <Card noPad className="p-4 border border-border">
-          <h3 className="text-xs font-bold text-foreground mb-4 uppercase tracking-wide">Payroll Distribution by Department</h3>
-          <div className="h-[220px] w-full">
+      {user?.role !== 'Employee' && (
+        <div className="rounded-[24px] bg-card border border-border overflow-hidden p-6 relative">
+          <div className="mb-6 relative z-10 flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h4 className="text-[10px] font-bold text-primary tracking-widest uppercase mb-1">Payroll Analytics</h4>
+              <h3 className="text-xl font-bold text-foreground mb-1">Payroll Distribution Overview</h3>
+              <p className="text-xs text-muted-foreground">Monthly gross payroll and net take-home payout across Jan–Dec</p>
+            </div>
+
+            <div className="flex items-center gap-4">
+              <div className="flex items-center gap-4 text-xs font-medium text-muted-foreground">
+                <span className="inline-flex items-center gap-1.5">
+                  <span className="w-2.5 h-2.5 rounded-sm bg-[#3b82f6] inline-block" />
+                  Gross Pay
+                </span>
+                <span className="inline-flex items-center gap-1.5">
+                  <span className="w-4 h-0.5 border-t-2 border-dashed border-[#38bdf8] inline-block" />
+                  Net Pay
+                </span>
+              </div>
+
+              {availableChartYears.length > 1 && (
+                <select
+                  aria-label="Chart Year"
+                  value={chartYear}
+                  onChange={(e) => setChartYear(Number(e.target.value))}
+                  className="h-8 px-2.5 text-xs font-semibold rounded-xl border border-border bg-card text-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 cursor-pointer"
+                >
+                  {availableChartYears.map(yr => (
+                    <option key={yr} value={yr}>{yr}</option>
+                  ))}
+                </select>
+              )}
+            </div>
+          </div>
+
+          <div className="h-64 w-full relative z-10">
             <ResponsiveContainer width="100%" height="100%">
-              <ComposedChart data={deptSummary} margin={{ top: 10, right: 20, left: 0, bottom: 0 }} barGap={8}>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--border)" />
+              <ComposedChart data={monthlyChartData} margin={{ top: 10, right: 12, left: -10, bottom: 0 }}>
+                <defs>
+                  <linearGradient id="colorPayrollGross" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.9} />
+                    <stop offset="95%" stopColor="#3b82f6" stopOpacity={0.25} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="0" vertical={false} stroke="#64748b30" />
                 <XAxis
-                  dataKey="department"
+                  dataKey="month"
+                  tick={{ fill: '#64748b', fontSize: 11 }}
                   axisLine={false}
                   tickLine={false}
-                  tick={{ fontSize: 11, fill: 'var(--muted-foreground)' }}
                   dy={10}
                 />
                 <YAxis
                   allowDecimals={false}
                   domain={[0, dataMax => Math.max(Number(dataMax) || 0, 5000)]}
+                  tick={{ fill: '#64748b', fontSize: 11 }}
+                  tickFormatter={v => `₱${v >= 1000 ? (v / 1000).toFixed(v % 1000 === 0 ? 0 : 1) + 'k' : v}`}
                   axisLine={false}
                   tickLine={false}
-                  tick={{ fontSize: 11, fill: 'var(--muted-foreground)' }}
-                  tickFormatter={v => `₱${v >= 1000 ? (v / 1000).toFixed(v % 1000 === 0 ? 0 : 1) + 'k' : v}`}
+                  dx={-6}
                 />
                 <Tooltip
                   formatter={(value) => fmt(value)}
-                  contentStyle={{ borderRadius: '12px', border: '1px solid var(--border)', backgroundColor: 'var(--card)', color: 'var(--foreground)', fontSize: '12px' }}
-                  labelStyle={{ color: 'var(--foreground)', fontWeight: 700, marginBottom: '4px' }}
-                  cursor={{ fill: 'rgba(148, 163, 184, 0.12)' }}
+                  contentStyle={{
+                    backgroundColor: '#081329',
+                    borderColor: '#1d3557',
+                    borderRadius: '14px',
+                    color: '#f8fafc',
+                    fontSize: '12px',
+                    boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.5)',
+                  }}
+                  labelStyle={{ color: '#f8fafc', fontWeight: 700, marginBottom: '4px' }}
+                  itemStyle={{ color: '#e2e8f0' }}
+                  cursor={{ fill: 'rgba(100, 116, 139, 0.12)' }}
                 />
-                <Legend iconType="circle" wrapperStyle={{ fontSize: '11px', paddingTop: '8px' }} />
-                <Bar dataKey="Gross" name="Gross Pay" fill="#8b5cf6" barSize={36} radius={[6, 6, 0, 0]} />
-                <Bar dataKey="Net" name="Net Pay" fill="#10b981" barSize={36} radius={[6, 6, 0, 0]} minPointSize={4} />
+                <Bar
+                  dataKey="Gross"
+                  name="Gross Pay"
+                  fill="url(#colorPayrollGross)"
+                  barSize={24}
+                  radius={[6, 6, 0, 0]}
+                />
+                <Line
+                  type="monotone"
+                  dataKey="Net"
+                  name="Net Pay"
+                  stroke="#38bdf8"
+                  strokeWidth={3}
+                  strokeDasharray="5 5"
+                  dot={false}
+                  activeDot={{ r: 5, fill: '#38bdf8', stroke: '#081329', strokeWidth: 2 }}
+                />
               </ComposedChart>
             </ResponsiveContainer>
           </div>
-        </Card>
+        </div>
       )}
 
       {error && <ErrorAlert message={error} onRetry={loadData} />}
@@ -862,11 +984,11 @@ export default function PayrollPage() {
           )}
           <div className="flex flex-col">
             <label className="text-[11px] font-bold text-muted-foreground uppercase leading-none mb-1.5 block">From Date</label>
-            <input type="date" value={fromDate} onChange={e => { setFromDate(e.target.value); setPage(1); }} className="w-full h-9 px-3 text-xs border border-border rounded-lg bg-card text-foreground focus:outline-none focus:ring-2 focus:ring-primary/20" />
+            <input type="date" value={fromDate} max={toDate || undefined} onChange={e => { setFromDate(e.target.value); setPage(1); }} className="w-full h-9 px-3 text-xs border border-border rounded-lg bg-card text-foreground focus:outline-none focus:ring-2 focus:ring-primary/20" />
           </div>
           <div className="flex flex-col">
             <label className="text-[11px] font-bold text-muted-foreground uppercase leading-none mb-1.5 block">To Date</label>
-            <input type="date" value={toDate} onChange={e => { setToDate(e.target.value); setPage(1); }} className="w-full h-9 px-3 text-xs border border-border rounded-lg bg-card text-foreground focus:outline-none focus:ring-2 focus:ring-primary/20" />
+            <input type="date" value={toDate} min={fromDate || undefined} onChange={e => { setToDate(e.target.value); setPage(1); }} className="w-full h-9 px-3 text-xs border border-border rounded-lg bg-card text-foreground focus:outline-none focus:ring-2 focus:ring-primary/20" />
           </div>
           <div className="flex flex-col">
             <label className="text-[11px] font-bold text-muted-foreground uppercase leading-none mb-1.5 block">Payroll Period</label>
@@ -1407,6 +1529,7 @@ export default function PayrollPage() {
                 <input
                   type="date"
                   value={startDate}
+                  max={endDate || undefined}
                   onChange={e => setStartDate(e.target.value)}
                   required
                   className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground font-mono"
@@ -1417,6 +1540,7 @@ export default function PayrollPage() {
                 <input
                   type="date"
                   value={endDate}
+                  min={startDate || undefined}
                   onChange={e => setEndDate(e.target.value)}
                   required
                   className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground font-mono"
@@ -1466,7 +1590,6 @@ export default function PayrollPage() {
         userBranchName={userBranchName}
         onSuccess={() => {
           loadData(selectedPeriodId, { branch: branchFilter }, true)
-          triggerDataSync('payroll')
         }}
       />
 
@@ -1545,7 +1668,6 @@ export default function PayrollPage() {
             })
           }
           loadData(selectedPeriodId, { branch: branchFilter }, true)
-          triggerDataSync('payroll')
         }}
       />
 
@@ -2981,6 +3103,7 @@ export function DetailedPayrollViewModal({
                 <input
                   type="date"
                   value={customFrom}
+                  max={customTo || undefined}
                   onChange={(e) => setCustomFrom(e.target.value)}
                   className="w-full px-3 py-1.5 text-xs rounded-lg border border-border bg-card text-foreground focus:outline-none focus:ring-2 focus:ring-blue-500/20"
                 />
@@ -2990,6 +3113,7 @@ export function DetailedPayrollViewModal({
                 <input
                   type="date"
                   value={customTo}
+                  min={customFrom || undefined}
                   onChange={(e) => setCustomTo(e.target.value)}
                   className="w-full px-3 py-1.5 text-xs rounded-lg border border-border bg-card text-foreground focus:outline-none focus:ring-2 focus:ring-blue-500/20"
                 />

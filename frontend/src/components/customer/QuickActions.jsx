@@ -1,5 +1,5 @@
 import React from 'react';
-import { FiShoppingCart, FiFileText, FiCreditCard, FiHelpCircle, FiChevronRight, FiBell } from 'react-icons/fi';
+import { FiShoppingCart, FiCreditCard, FiHelpCircle, FiChevronRight } from 'react-icons/fi';
 import { BiWallet } from 'react-icons/bi';
 
 export default function QuickActions({ onAction }) {
@@ -7,8 +7,6 @@ export default function QuickActions({ onAction }) {
     { name: 'Make Payment', icon: <BiWallet size={20} />, color: 'text-purple-600 dark:text-purple-400', bg: 'bg-purple-100 dark:bg-purple-900/40', border: 'border-purple-200 dark:border-purple-800' },
     { name: 'Browse Products', icon: <FiShoppingCart size={20} />, color: 'text-blue-600 dark:text-blue-400', bg: 'bg-blue-100 dark:bg-blue-900/40', border: 'border-blue-200 dark:border-blue-800' },
     { name: 'Installments', icon: <FiCreditCard size={20} />, color: 'text-emerald-600 dark:text-emerald-400', bg: 'bg-emerald-100 dark:bg-emerald-900/40', border: 'border-emerald-200 dark:border-emerald-800' },
-    { name: 'Notifications', icon: <FiBell size={20} />, color: 'text-amber-600 dark:text-amber-400', bg: 'bg-amber-100 dark:bg-amber-900/40', border: 'border-amber-200 dark:border-amber-800' },
-    { name: 'View Statements', icon: <FiFileText size={20} />, color: 'text-[#176B87] dark:text-[#64ccc5]', bg: 'bg-[#176B87]/10 dark:bg-[#176B87]/20', border: 'border-[#176B87]/20 dark:border-[#176B87]/30' },
     { name: 'Support', icon: <FiHelpCircle size={20} />, color: 'text-slate-600 dark:text-slate-400', bg: 'bg-muted', border: 'border-border' },
   ];
 

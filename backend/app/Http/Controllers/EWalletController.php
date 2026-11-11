@@ -366,7 +366,9 @@ class EWalletController extends Controller
             return response()->json(['success' => false, 'message' => 'Transaction record not found.'], 404);
         }
 
-        if (!$request->boolean('auto_verify')) {
+        $isCash = strtolower((string)$deposit->payment_method) === 'cash';
+
+        if (!$request->boolean('auto_verify') && !$isCash) {
             if (!$request->filled('customer_reference') && empty($deposit->customer_reference)) {
                 return response()->json([
                     'success' => false,

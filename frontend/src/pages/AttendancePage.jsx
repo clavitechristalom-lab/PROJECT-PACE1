@@ -136,7 +136,8 @@ export default function AttendancePage({ branchFilter: propBranchFilter, embedde
 
   // Logs & Filters
   const [search, setSearch] = useState('')
-  const [selectedDate, setSelectedDate] = useState('')
+  const [dateFrom, setDateFrom] = useState('')
+  const [dateTo, setDateTo] = useState('')
   const [deptFilter, setDeptFilter] = useState('All')
   const [statusFilter, setStatusFilter] = useState('All')
   const [page, setPage] = useState(1)
@@ -208,7 +209,8 @@ export default function AttendancePage({ branchFilter: propBranchFilter, embedde
     if (!isBg) setError('')
     try {
       const data = await api.attendance.getDaily({
-        date: selectedDate || undefined,
+        date_from: dateFrom || undefined,
+        date_to: dateTo || undefined,
         department: deptFilter !== 'All' ? deptFilter : undefined,
         status: statusFilter !== 'All' ? statusFilter : undefined,
         branch: branchFilter !== 'All' ? branchFilter : undefined,
@@ -222,7 +224,7 @@ export default function AttendancePage({ branchFilter: propBranchFilter, embedde
         setSchedule(prev => (fastDeepEqual(prev, data.schedule) ? prev : data.schedule))
       }
       try {
-        if (!selectedDate && deptFilter === 'All' && statusFilter === 'All' && branchFilter === 'All') {
+        if (!dateFrom && !dateTo && deptFilter === 'All' && statusFilter === 'All' && branchFilter === 'All') {
           sessionStorage.setItem('pace_cached_attendance_records', JSON.stringify(newRecords))
           if (newSummary) {
             sessionStorage.setItem('pace_cached_attendance_summary', JSON.stringify(newSummary))
@@ -304,7 +306,7 @@ export default function AttendancePage({ branchFilter: propBranchFilter, embedde
     } else if (activeTab === 'audit') {
       loadScanLogs()
     }
-  }, [activeTab, selectedDate, deptFilter, statusFilter, branchFilter, scanLogsPage, scanLogsStatusFilter, scanLogsActionFilter])
+  }, [activeTab, dateFrom, dateTo, deptFilter, statusFilter, branchFilter, scanLogsPage, scanLogsStatusFilter, scanLogsActionFilter])
 
   // On-demand click-driven synchronization
   const { sync: syncAttendance, isSyncing: isSyncingAttendance } = useRealtimeSync(
@@ -325,6 +327,8 @@ export default function AttendancePage({ branchFilter: propBranchFilter, embedde
   useEffect(() => {
     const searchParam = searchParams.get('search')
     const dateParam = searchParams.get('date')
+    const dateFromParam = searchParams.get('date_from')
+    const dateToParam = searchParams.get('date_to')
     const idParam = searchParams.get('id')
     const tabParam = searchParams.get('tab')
     if (tabParam) {
@@ -337,10 +341,15 @@ export default function AttendancePage({ branchFilter: propBranchFilter, embedde
         setCameraActive(true)
         isProcessingScan.current = false
       }
-    } else if (idParam || searchParam || dateParam) {
+    } else if (idParam || searchParam || dateParam || dateFromParam || dateToParam) {
       setActiveTab('log')
       if (searchParam) setSearch(searchParam)
-      if (dateParam) setSelectedDate(dateParam)
+      if (dateParam) {
+        setDateFrom(dateParam)
+        setDateTo(dateParam)
+      }
+      if (dateFromParam) setDateFrom(dateFromParam)
+      if (dateToParam) setDateTo(dateToParam)
     }
   }, [searchParams])
 
@@ -546,7 +555,6 @@ export default function AttendancePage({ branchFilter: propBranchFilter, embedde
             })
             setStationStep('result')
             triggerDataSync('attendance')
-            triggerDataSync('dashboard')
           } else if (res.status === 'FAILED') {
             clearInterval(interval)
             playTone('error')
@@ -682,9 +690,7 @@ export default function AttendancePage({ branchFilter: propBranchFilter, embedde
         setPunchResult(res)
         setStationStep('result')
         startAutoResetCountdown()
-        loadData(true)
         triggerDataSync('attendance')
-        triggerDataSync('dashboard')
         showToast(res.message || 'Attendance verified and recorded!', 'success')
       } else {
         playTone('error')
@@ -774,8 +780,14 @@ export default function AttendancePage({ branchFilter: propBranchFilter, embedde
         return b.toLowerCase() === branchFilter.toLowerCase()
       })
     }
+    if (dateFrom) {
+      result = result.filter(r => String(r.attendance_date || '').slice(0, 10) >= dateFrom)
+    }
+    if (dateTo) {
+      result = result.filter(r => String(r.attendance_date || '').slice(0, 10) <= dateTo)
+    }
     return result
-  }, [records, search, branchFilter])
+  }, [records, search, branchFilter, dateFrom, dateTo])
 
   const total = filtered.length
   const paginated = filtered.slice((page - 1) * pageSize, page * pageSize)
@@ -785,7 +797,8 @@ export default function AttendancePage({ branchFilter: propBranchFilter, embedde
     setExporting(true)
     try {
       await downloadCsv('/attendance', {
-        date: selectedDate || undefined,
+        date_from: dateFrom || undefined,
+        date_to: dateTo || undefined,
         department: deptFilter !== 'All' ? deptFilter : undefined,
         status: statusFilter !== 'All' ? statusFilter : undefined,
         branch: branchFilter !== 'All' ? branchFilter : undefined,
@@ -805,6 +818,12 @@ export default function AttendancePage({ branchFilter: propBranchFilter, embedde
         const b = r.branch?.name || (typeof r.branch === 'string' ? r.branch : '')
         return b.toLowerCase() === branchFilter.toLowerCase()
       })
+    }
+    if (dateFrom) {
+      sourceRecords = sourceRecords.filter(r => String(r.attendance_date || '').slice(0, 10) >= dateFrom)
+    }
+    if (dateTo) {
+      sourceRecords = sourceRecords.filter(r => String(r.attendance_date || '').slice(0, 10) <= dateTo)
     }
     return Object.values(sourceRecords.reduce((acc, a) => {
       if (!acc[a.employee_id]) {
@@ -828,7 +847,7 @@ export default function AttendancePage({ branchFilter: propBranchFilter, embedde
       if (a.status === 'Present' || a.status === 'Late' || a.status === 'COMPLETE') emp.present_count++
       return acc
     }, {}))
-  }, [records, branchFilter])
+  }, [records, branchFilter, dateFrom, dateTo])
 
   // Determine Tab Options
   const tabList = isEmployee
@@ -1413,38 +1432,58 @@ export default function AttendancePage({ branchFilter: propBranchFilter, embedde
           </Card>
 
           <Card noPad className="p-3.5 border border-border">
-            <div className="flex flex-col sm:flex-row gap-3">
-              <div className="flex-1 relative">
-                <FiSearch className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
-                <input
-                  type="text"
-                  value={search}
-                  onChange={e => { setSearch(e.target.value); setPage(1); }}
-                  placeholder="Search employee name, code, department..."
-                  className="w-full pl-9 pr-8 py-2 rounded-xl border border-border bg-card text-foreground text-xs focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all placeholder:text-muted-foreground/70"
-                />
-                {search && (
-                  <button
-                    onClick={() => setSearch('')}
-                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground cursor-pointer"
-                  >
-                    <FiX className="w-3.5 h-3.5" />
-                  </button>
-                )}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:flex lg:flex-row gap-3 items-end">
+              <div className="sm:col-span-2 lg:flex-1 min-w-0 flex flex-col">
+                <label className="text-[11px] font-bold text-muted-foreground uppercase leading-none mb-1.5 block">Employee Search</label>
+                <div className="relative">
+                  <FiSearch className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
+                  <input
+                    type="text"
+                    value={search}
+                    onChange={e => { setSearch(e.target.value); setPage(1); }}
+                    placeholder="Search employee name, code, department..."
+                    className="w-full h-9 pl-9 pr-8 rounded-xl border border-border bg-card text-foreground text-xs focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all placeholder:text-muted-foreground/70"
+                  />
+                  {search && (
+                    <button
+                      onClick={() => setSearch('')}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground cursor-pointer"
+                    >
+                      <FiX className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
               </div>
 
-              <div className="flex gap-2 flex-wrap sm:flex-nowrap">
+              <div className="w-full lg:w-[150px] shrink-0 flex flex-col">
+                <label className="text-[11px] font-bold text-muted-foreground uppercase leading-none mb-1.5 block">From Days</label>
                 <input
                   type="date"
-                  value={selectedDate}
-                  onChange={e => { setSelectedDate(e.target.value); setPage(1) }}
-                  className="border border-border rounded-xl px-3 py-2 text-xs font-semibold text-foreground bg-card cursor-pointer"
+                  value={dateFrom}
+                  max={dateTo || undefined}
+                  onChange={e => { setDateFrom(e.target.value); setPage(1) }}
+                  className="w-full h-9 border border-border rounded-xl px-3 text-xs font-semibold text-foreground bg-card cursor-pointer focus:outline-none focus:ring-2 focus:ring-primary/20"
                 />
+              </div>
+
+              <div className="w-full lg:w-[150px] shrink-0 flex flex-col">
+                <label className="text-[11px] font-bold text-muted-foreground uppercase leading-none mb-1.5 block">To Days</label>
+                <input
+                  type="date"
+                  value={dateTo}
+                  min={dateFrom || undefined}
+                  onChange={e => { setDateTo(e.target.value); setPage(1) }}
+                  className="w-full h-9 border border-border rounded-xl px-3 text-xs font-semibold text-foreground bg-card cursor-pointer focus:outline-none focus:ring-2 focus:ring-primary/20"
+                />
+              </div>
+
+              <div className="w-full lg:w-[165px] shrink-0 flex flex-col">
+                <label className="text-[11px] font-bold text-muted-foreground uppercase leading-none mb-1.5 block">Branch</label>
                 <select
                   value={branchFilter}
                   disabled={isStoreAdmin || !!propBranchFilter}
                   onChange={e => { setLocalBranchFilter(e.target.value); setPage(1) }}
-                  className="border border-border rounded-xl px-3 py-2 text-xs font-semibold text-foreground bg-card cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
+                  className="w-full h-9 border border-border rounded-xl px-3 text-xs font-semibold text-foreground bg-card cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-primary/20"
                 >
                   <option value="All">All Branches</option>
                   {branchOptions.map(bName => (
@@ -1453,22 +1492,55 @@ export default function AttendancePage({ branchFilter: propBranchFilter, embedde
                     </option>
                   ))}
                 </select>
+              </div>
+
+              <div className="w-full lg:w-[150px] shrink-0 flex flex-col">
+                <label className="text-[11px] font-bold text-muted-foreground uppercase leading-none mb-1.5 block">Department</label>
                 <select
                   value={deptFilter}
                   onChange={e => { setDeptFilter(e.target.value); setPage(1) }}
-                  className="border border-border rounded-xl px-3 py-2 text-xs font-semibold text-foreground bg-card cursor-pointer"
+                  className="w-full h-9 border border-border rounded-xl px-3 text-xs font-semibold text-foreground bg-card cursor-pointer focus:outline-none focus:ring-2 focus:ring-primary/20"
                 >
                   {DEPARTMENTS.map(d => <option key={d} value={d}>{d === 'All' ? 'All Departments' : d}</option>)}
                 </select>
+              </div>
+
+              <div className="w-full lg:w-[130px] shrink-0 flex flex-col">
+                <label className="text-[11px] font-bold text-muted-foreground uppercase leading-none mb-1.5 block">Status</label>
                 <select
                   value={statusFilter}
                   onChange={e => { setStatusFilter(e.target.value); setPage(1) }}
-                  className="border border-border rounded-xl px-3 py-2 text-xs font-semibold text-foreground bg-card cursor-pointer"
+                  className="w-full h-9 border border-border rounded-xl px-3 text-xs font-semibold text-foreground bg-card cursor-pointer focus:outline-none focus:ring-2 focus:ring-primary/20"
                 >
                   {STATUSES.map(s => <option key={s} value={s}>{s === 'All' ? 'All Statuses' : s}</option>)}
                 </select>
               </div>
             </div>
+            {(dateFrom || dateTo || search || deptFilter !== 'All' || statusFilter !== 'All' || (!isStoreAdmin && !propBranchFilter && branchFilter !== 'All')) && (
+              <div className="mt-2.5 pt-2.5 border-t border-border/60 flex items-center justify-between text-[11px] text-muted-foreground">
+                <span>
+                  {dateFrom || dateTo
+                    ? `Showing records ${dateFrom ? `from ${dateFrom}` : ''}${dateFrom && dateTo ? ' ' : ''}${dateTo ? `to ${dateTo}` : ''}`
+                    : 'Active filters applied'}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSearch('')
+                    setDateFrom('')
+                    setDateTo('')
+                    if (!isStoreAdmin && !propBranchFilter) setLocalBranchFilter('All')
+                    setDeptFilter('All')
+                    setStatusFilter('All')
+                    setPage(1)
+                  }}
+                  className="inline-flex items-center gap-1 font-semibold text-primary hover:underline cursor-pointer"
+                >
+                  <FiX className="w-3 h-3" />
+                  <span>Reset Filters</span>
+                </button>
+              </div>
+            )}
           </Card>
 
           <Card noPad className="border border-border overflow-hidden">
@@ -1478,58 +1550,58 @@ export default function AttendancePage({ branchFilter: propBranchFilter, embedde
               <EmptyState
                 icon={<FiClock className="w-12 h-12 text-muted-foreground/30 mx-auto" />}
                 title="No attendance records found"
-                description={search || selectedDate || deptFilter !== 'All' || branchFilter !== 'All' ? 'Try adjusting your date or filter options' : 'Punches made via the QR terminal will appear here'}
+                description={search || dateFrom || dateTo || deptFilter !== 'All' || branchFilter !== 'All' ? 'Try adjusting your date or filter options' : 'Punches made via the QR terminal will appear here'}
                 action={isStoreAdmin ? <Btn size="sm" onClick={() => setActiveTab('punch')}>Open QR Terminal Scanner</Btn> : null}
               />
             ) : (
               <>
                 <div className="overflow-x-auto">
-                  <table className="w-full text-xs min-w-[1150px]">
+                  <table className="w-full text-xs min-w-[1200px]">
                     <thead>
-                      <tr className="border-b border-border bg-muted/50 text-muted-foreground uppercase font-semibold text-[11px]">
-                        <th className="py-3 px-4 text-left">Date</th>
-                        <th className="py-3 px-4 text-left">Code</th>
-                        <th className="py-3 px-4 text-left">Employee Name</th>
-                        <th className="py-3 px-4 text-left">Branch</th>
-                        <th className="py-3 px-4 text-left">Department</th>
-                        <th className="py-3 px-4 text-left">Time In</th>
-                        <th className="py-3 px-4 text-left">Lunch Out</th>
-                        <th className="py-3 px-4 text-left">Lunch In</th>
-                        <th className="py-3 px-4 text-left">Time Out</th>
-                        <th className="py-3 px-4 text-right">Regular</th>
-                        <th className="py-3 px-4 text-right">OT</th>
-                        <th className="py-3 px-4 text-center">Verification</th>
-                        <th className="py-3 px-4 text-left">Verified By</th>
-                        <th className="py-3 px-4 text-center">Status</th>
+                      <tr className="border-b border-border bg-muted/50 text-muted-foreground uppercase font-semibold text-[11px] whitespace-nowrap">
+                        <th className="py-3 px-3 text-left">Date</th>
+                        <th className="py-3 px-3 text-left">Code</th>
+                        <th className="py-3 px-3 text-left">Employee Name</th>
+                        <th className="py-3 px-3 text-left">Branch</th>
+                        <th className="py-3 px-3 text-left">Department</th>
+                        <th className="py-3 px-3 text-left">Time In</th>
+                        <th className="py-3 px-3 text-left">Lunch Out</th>
+                        <th className="py-3 px-3 text-left">Lunch In</th>
+                        <th className="py-3 px-3 text-left">Time Out</th>
+                        <th className="py-3 px-3 text-right">Regular</th>
+                        <th className="py-3 px-3 text-right">OT</th>
+                        <th className="py-3 px-3 text-center">Verification</th>
+                        <th className="py-3 px-3 text-left">Verified By</th>
+                        <th className="py-3 px-3 text-center">Status</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-border">
                       {paginated.map((a, i) => (
                         <tr key={a.attendance_id || i} className={`hover:bg-muted/40 transition-colors ${i % 2 === 1 ? 'bg-muted/10' : ''}`}>
-                          <td className="py-3 px-4 font-mono text-muted-foreground">{a.attendance_date}</td>
-                          <td className="py-3 px-4 font-mono font-bold text-foreground">{a.employee_code}</td>
-                          <td className="py-3 px-4 font-semibold text-foreground">{a.employee_name}</td>
-                          <td className="py-3 px-4 font-medium text-foreground">{a.branch?.name || (typeof a.branch === 'string' && a.branch ? a.branch : '—')}</td>
-                          <td className="py-3 px-4"><Badge text={a.department || 'General'} variant="neutral" /></td>
-                          <td className="py-3 px-4 whitespace-nowrap">
+                          <td className="py-3 px-3 font-mono text-muted-foreground whitespace-nowrap">{a.attendance_date}</td>
+                          <td className="py-3 px-3 font-mono font-bold text-foreground whitespace-nowrap">{a.employee_code}</td>
+                          <td className="py-3 px-3 font-semibold text-foreground whitespace-nowrap">{a.employee_name}</td>
+                          <td className="py-3 px-3 font-medium text-foreground whitespace-nowrap">{a.branch?.name || (typeof a.branch === 'string' && a.branch ? a.branch : '—')}</td>
+                          <td className="py-3 px-3 whitespace-nowrap"><Badge text={a.department || 'General'} variant="neutral" /></td>
+                          <td className="py-3 px-3 whitespace-nowrap">
                             <div className={`font-mono ${a.late_minutes > 0 ? 'text-rose-600 font-bold' : ''}`}>{a.time_in || '—'}</div>
                             {a.late_minutes > 0 && <div className="text-[10px] text-rose-500 font-bold uppercase tracking-wider mt-0.5">Late {a.late_minutes} min</div>}
                           </td>
-                          <td className="py-3 px-4 font-mono whitespace-nowrap">{a.lunch_out || '—'}</td>
-                          <td className="py-3 px-4 font-mono whitespace-nowrap">{a.lunch_in || (a.lunch_out ? <span className="text-amber-600 text-[10px] font-bold uppercase">On Lunch</span> : '—')}</td>
-                          <td className="py-3 px-4 whitespace-nowrap">
+                          <td className="py-3 px-3 font-mono whitespace-nowrap">{a.lunch_out || '—'}</td>
+                          <td className="py-3 px-3 font-mono whitespace-nowrap">{a.lunch_in || (a.lunch_out ? <span className="text-amber-600 text-[10px] font-bold uppercase">On Lunch</span> : '—')}</td>
+                          <td className="py-3 px-3 whitespace-nowrap">
                             <div className="font-mono">{a.time_out || (a.time_in ? <span className="text-emerald-600 text-[10px] font-bold uppercase">On Duty</span> : '—')}</div>
                             {a.undertime_minutes > 0 && <div className="text-[10px] text-amber-600 font-bold uppercase tracking-wider mt-0.5">Undertime {a.undertime_minutes} min</div>}
                           </td>
-                          <td className="py-3 px-4 text-right font-mono font-bold">{a.time_out ? `${Number(a.regular_hours || 0).toFixed(2)}h` : '—'}</td>
-                          <td className="py-3 px-4 text-right font-mono font-bold text-amber-600">{Number(a.overtime_hours) > 0 ? `${Number(a.overtime_hours).toFixed(2)}h` : '—'}</td>
-                          <td className="py-3 px-4 text-center">
-                            <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200">
+                          <td className="py-3 px-3 text-right font-mono font-bold whitespace-nowrap">{a.time_out ? `${Number(a.regular_hours || 0).toFixed(2)}h` : '—'}</td>
+                          <td className="py-3 px-3 text-right font-mono font-bold text-amber-600 whitespace-nowrap">{Number(a.overtime_hours) > 0 ? `${Number(a.overtime_hours).toFixed(2)}h` : '—'}</td>
+                          <td className="py-3 px-3 text-center whitespace-nowrap">
+                            <span className="inline-flex items-center justify-center whitespace-nowrap text-[10px] font-mono px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-700">
                               {a.verification_method || 'QR + PIN'}
                             </span>
                           </td>
-                          <td className="py-3 px-4 text-muted-foreground text-[11px]">{a.verified_by || 'Store Admin'}</td>
-                          <td className="py-3 px-4 text-center"><StatusBadge status={a.status} /></td>
+                          <td className="py-3 px-3 text-muted-foreground text-[11px] whitespace-nowrap">{a.verified_by || 'Store Admin'}</td>
+                          <td className="py-3 px-3 text-center whitespace-nowrap"><StatusBadge status={a.status} /></td>
                         </tr>
                       ))}
                     </tbody>
@@ -1614,7 +1686,6 @@ export default function AttendancePage({ branchFilter: propBranchFilter, embedde
                   <option value="All">All Results</option>
                   <option value="SUCCESS">Success Only</option>
                   <option value="FAILED">Failed / Rejected Only</option>
-                  <option value="PENDING_PIN">Pending PIN Only</option>
                 </select>
 
                 <select
@@ -1623,11 +1694,16 @@ export default function AttendancePage({ branchFilter: propBranchFilter, embedde
                   className="border border-border rounded-xl px-3 py-2 text-xs font-semibold text-foreground bg-card cursor-pointer"
                 >
                   <option value="All">All Event Types</option>
-                  <option value="ATTENDANCE_CREATED">ATTENDANCE CREATED</option>
-                  <option value="QR_SCAN_SUCCESS">QR SCAN SUCCESS</option>
+                  <option value="ATTENDANCE_TIME_IN">ATTENDANCE TIME IN</option>
+                  <option value="ATTENDANCE_TIME_OUT">ATTENDANCE TIME OUT</option>
+                  <option value="FACE_RECOGNITION">FACE RECOGNITION</option>
+                  <option value="FACE_VERIFICATION_FAILED">FACE FAILED</option>
+                  <option value="PENDING_VERIFICATION">PENDING VERIFICATION</option>
                   <option value="PIN_VERIFICATION_FAILED">PIN FAILED</option>
                   <option value="UNAUTHORIZED_BRANCH_SCAN">CROSS BRANCH</option>
                   <option value="REVOKED_QR_SCAN">REVOKED QR</option>
+                  <option value="INVALID_QR">INVALID QR</option>
+                  <option value="REJECTED">REJECTED ACCOUNT</option>
                 </select>
               </div>
 
@@ -1644,7 +1720,7 @@ export default function AttendancePage({ branchFilter: propBranchFilter, embedde
               <EmptyState
                 icon={<FiShield className="w-12 h-12 text-muted-foreground/30 mx-auto" />}
                 title="No scan logs recorded yet"
-                description="Live scans from the QR terminal and PIN verification attempts will be audited here."
+                description="Live scans from the QR terminal and Face/PIN verification attempts will be audited here."
               />
             ) : (
               <>
@@ -1656,7 +1732,7 @@ export default function AttendancePage({ branchFilter: propBranchFilter, embedde
                         <th className="py-3 px-4 text-left">Branch</th>
                         <th className="py-3 px-4 text-left">Action / Event</th>
                         <th className="py-3 px-4 text-center">QR Result</th>
-                        <th className="py-3 px-4 text-center">PIN Result</th>
+                        <th className="py-3 px-4 text-center">Face / PIN Auth</th>
                         <th className="py-3 px-4 text-center">Status</th>
                         <th className="py-3 px-4 text-left">Scanned By</th>
                         <th className="py-3 px-4 text-left">Timestamp</th>
@@ -1679,10 +1755,14 @@ export default function AttendancePage({ branchFilter: propBranchFilter, embedde
                             )}
                           </td>
                           <td className="py-3 px-4 text-center">
-                            {l.pin_verified ? (
-                              <span className="text-emerald-500 font-bold">✓ Verified</span>
-                            ) : l.action_type === 'PIN_VERIFICATION_FAILED' ? (
-                              <span className="text-rose-500 font-bold">✗ Failed</span>
+                            {l.face_verified || String(l.verification_method || '').includes('Face Recognition') ? (
+                              <span className="text-emerald-500 font-bold">✓ Face Recognition</span>
+                            ) : l.action_type === 'FACE_VERIFICATION_FAILED' || (l.status === 'FAILED' && String(l.failure_reason || '').toLowerCase().includes('face')) ? (
+                              <span className="text-rose-500 font-bold">✗ Face Failed</span>
+                            ) : l.pin_verified ? (
+                              <span className="text-emerald-500 font-bold">✓ PIN Verified</span>
+                            ) : (l.action_type === 'PIN_VERIFICATION_FAILED' || (l.status === 'FAILED' && String(l.failure_reason || '').toLowerCase().includes('pin'))) ? (
+                              <span className="text-rose-500 font-bold">✗ PIN Failed</span>
                             ) : (
                               <span className="text-muted-foreground">—</span>
                             )}

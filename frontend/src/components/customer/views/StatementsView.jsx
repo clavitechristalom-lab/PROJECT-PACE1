@@ -260,7 +260,7 @@ export default function StatementsView({
               {customerData?.name || user?.name || user?.full_name || 'Customer Account'}
             </h3>
             <p className="text-xs text-muted-foreground">
-              Customer ID: <span className="font-mono font-bold text-foreground">{customerData?.id || user?.id || 'CUST-001'}</span> • Quezon Ave, Iligan City
+              Customer ID: <span className="font-mono font-bold text-foreground">{customerData?.id || user?.id || 'CUST-001'}</span> • Iligan City
             </p>
           </div>
         </div>

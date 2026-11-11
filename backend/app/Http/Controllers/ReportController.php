@@ -210,13 +210,12 @@ class ReportController extends Controller
         $query = Payroll::with(['employee', 'period', 'deductions']);
 
         // Role scoping
-        if ($user && $user->role === 'Employee') {
+        if ($user && in_array($user->role, ['Store Administrator', 'Store Admin'])) {
+            return response()->json([
+                'message' => 'Store Administrators do not have access to payroll reports.'
+            ], 403);
+        } elseif ($user && $user->role === 'Employee') {
             $query->where('employee_id', $user->employee_id);
-        } elseif ($user && in_array($user->role, ['Store Administrator', 'Store Admin'])) {
-            $branchId = $user->employee ? $user->employee->branch_id : -1;
-            $query->whereHas('employee', function ($eq) use ($branchId) {
-                $eq->where('branch_id', $branchId);
-            });
         } elseif ($request->filled('branch_id') && $request->query('branch_id') !== 'All') {
             $branchId = $request->query('branch_id');
             $query->whereHas('employee', function ($eq) use ($branchId) {

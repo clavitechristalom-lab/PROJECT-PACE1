@@ -113,17 +113,18 @@ export function triggerDataSync(module = 'general', extra = {}) {
   const targetId = extra?.id || extra?.targetId || null
   const action = extra?.action || 'mutation'
 
-  // 1. Immediately invalidate targeted API cache so subsequent on-demand fetches are fresh
+  // 1. Immediately invalidate ONLY the targeted module's API cache
   if (module && module !== 'general') {
     clearApiCacheForModule(module, targetId)
   }
 
-  // 2. Dispatch strictly targeted events
+  // 2. Dispatch strictly to the targeted module listener (no global broadcast collision)
   if (typeof window !== 'undefined') {
     const detail = { module, targetId, action, timestamp: Date.now() }
-    window.dispatchEvent(new CustomEvent('pace:data-sync', { detail }))
     if (module && module !== 'general') {
       window.dispatchEvent(new CustomEvent(`pace:sync:${module}`, { detail }))
+    } else {
+      window.dispatchEvent(new CustomEvent('pace:data-sync', { detail }))
     }
   }
 
@@ -193,8 +194,9 @@ export function useRealtimeSync(refreshFn, deps = [], options = {}) {
 
     const onDataSync = (e) => {
       const mod = e?.detail?.module
-      // Strictly isolated: only trigger if the event matches this component's specific module
-      if (!mod || mod !== module) return
+      // Strictly isolated: only trigger when the active component's specific module matches
+      if (!mod || mod !== module || isFetchingRef.current) return
+      if (typeof document !== 'undefined' && document.hidden) return
 
       // Micro-debounce & yield to the main thread (guarantees 60fps UI responsiveness)
       if (debounceTimerRef.current) {
@@ -215,12 +217,10 @@ export function useRealtimeSync(refreshFn, deps = [], options = {}) {
       }, 50)
     }
 
-    window.addEventListener('pace:data-sync', onDataSync)
     const specificEvent = `pace:sync:${module}`
     window.addEventListener(specificEvent, onDataSync)
 
     return () => {
-      window.removeEventListener('pace:data-sync', onDataSync)
       window.removeEventListener(specificEvent, onDataSync)
       if (debounceTimerRef.current) {
         clearTimeout(debounceTimerRef.current)

@@ -33,7 +33,7 @@ class EmployeeFinancialController extends Controller
         $data['employee_id'] = $employee_id;
         
         $item = EmployeeAllowance::create($data);
-        SyncController::invalidateFingerprint();
+        SyncController::invalidateFingerprint(['employees', 'payroll', 'dashboard']);
         return response()->json($item);
     }
 
@@ -47,7 +47,7 @@ class EmployeeFinancialController extends Controller
         $data['employee_id'] = $employee_id;
         
         $item = EmployeeDeduction::create($data);
-        SyncController::invalidateFingerprint();
+        SyncController::invalidateFingerprint(['employees', 'payroll', 'dashboard']);
         return response()->json($item);
     }
 
@@ -63,28 +63,28 @@ class EmployeeFinancialController extends Controller
         $data['amount_paid'] = 0;
         
         $item = EmployeeLoan::create($data);
-        SyncController::invalidateFingerprint();
+        SyncController::invalidateFingerprint(['employees', 'payroll', 'dashboard']);
         return response()->json($item);
     }
 
     public function deleteAllowance($id)
     {
         EmployeeAllowance::destroy($id);
-        SyncController::invalidateFingerprint();
+        SyncController::invalidateFingerprint(['employees', 'payroll', 'dashboard']);
         return response()->json(['success' => true]);
     }
 
     public function deleteDeduction($id)
     {
         EmployeeDeduction::destroy($id);
-        SyncController::invalidateFingerprint();
+        SyncController::invalidateFingerprint(['employees', 'payroll', 'dashboard']);
         return response()->json(['success' => true]);
     }
 
     public function deleteLoan($id)
     {
         EmployeeLoan::destroy($id);
-        SyncController::invalidateFingerprint();
+        SyncController::invalidateFingerprint(['employees', 'payroll', 'dashboard']);
         return response()->json(['success' => true]);
     }
 }

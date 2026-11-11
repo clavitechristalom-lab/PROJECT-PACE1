@@ -35,6 +35,14 @@ class OtpService
      */
     public static function getEnvValue(string $key, ?string $configKey = null, ?string $default = null): ?string
     {
+        // 0. For mail/Gmail keys, always prefer fresh backend/.env on disk so edits work even without restarting php artisan serve
+        if (str_starts_with($key, 'MAIL_') || str_starts_with($key, 'GMAIL_')) {
+            $freshEnv = self::parseDirectEnv();
+            if (isset($freshEnv[$key]) && $freshEnv[$key] !== '' && $freshEnv[$key] !== 'null') {
+                return trim((string)$freshEnv[$key]);
+            }
+        }
+
         // 1. Check Laravel env() helper directly
         try {
             $val = env($key);
@@ -150,8 +158,8 @@ class OtpService
             }
         }
 
-        if (empty($resolvedUser) || strcasecmp($resolvedUser, 'Z-LICZ@gmail.com') === 0) {
-            $resolvedUser = self::getEnvValue('GMAIL_AUTH_ACCOUNT') ?: '35barangay@gmail.com';
+        if (empty($resolvedUser)) {
+            $resolvedUser = self::getEnvValue('GMAIL_AUTH_ACCOUNT') ?: 'z.licz2000@gmail.com';
         }
 
         // Resolve Password / Secret
@@ -177,13 +185,9 @@ class OtpService
             }
         }
 
-        if (empty($resolvedPass)) {
-            $resolvedPass = 'sziq apba sink lsch';
-        }
-
         $fromAddress = self::getEnvValue('MAIL_FROM_ADDRESS', 'mail.from.address');
-        if (empty($fromAddress) || strcasecmp($fromAddress, 'Z-LICZ@gmail.com') === 0) {
-            $fromAddress = $resolvedUser ?: '35barangay@gmail.com';
+        if (empty($fromAddress)) {
+            $fromAddress = $resolvedUser ?: 'z.licz2000@gmail.com';
         }
         $fromName = self::getEnvValue('MAIL_FROM_NAME', 'mail.from.name') ?: 'Z-LICZ Furniture & Appliances';
 

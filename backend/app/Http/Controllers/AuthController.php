@@ -348,7 +348,7 @@ class AuthController extends Controller
             'ip_address'  => $request->ip(),
             'user_agent'  => $request->userAgent(),
         ]);
-        Cache::forget('pace_unified_fingerprint');
+        SyncController::invalidateFingerprint(['employees', 'customers', 'system']);
 
         $maskedEmail = self::maskEmail($normalizedEmail);
 
@@ -783,7 +783,7 @@ class AuthController extends Controller
         } catch (\Throwable $e) {}
         $sessionToken = $newToken->plainTextToken;
 
-        SyncController::invalidateFingerprint();
+        SyncController::invalidateFingerprint(['employees', 'customers', 'system']);
 
         return response()->json([
             'success'       => true,
@@ -980,7 +980,7 @@ class AuthController extends Controller
                 } catch (\Throwable $ex) {}
             }
 
-            SyncController::invalidateFingerprint();
+            SyncController::invalidateFingerprint(['employees', 'customers', 'system']);
         }
 
         return response()->json([

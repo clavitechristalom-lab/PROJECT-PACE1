@@ -115,8 +115,8 @@ function getMailConfig(): array
 {
     $env = getEnvConfig();
 
-    $user = $env['GMAIL_USER'] ?? ($env['MAIL_USERNAME'] ?? '35barangay@gmail.com');
-    $pass = $env['GMAIL_APP_PASSWORD'] ?? ($env['MAIL_PASSWORD'] ?? 'sziq apba sink lsch');
+    $user = $env['GMAIL_USER'] ?? ($env['MAIL_USERNAME'] ?? 'z.licz2000@gmail.com');
+    $pass = $env['GMAIL_APP_PASSWORD'] ?? ($env['MAIL_PASSWORD'] ?? '');
 
     // Strip quotes if any
     if ((str_starts_with($pass, '"') && str_ends_with($pass, '"')) ||
@@ -124,14 +124,14 @@ function getMailConfig(): array
         $pass = substr($pass, 1, -1);
     }
 
-    $fromEmail = $env['MAIL_FROM_ADDRESS'] ?? '35barangay@gmail.com';
-    if (strcasecmp($fromEmail, 'Z-LICZ@gmail.com') === 0 || empty($fromEmail)) {
-        $fromEmail = '35barangay@gmail.com';
+    $fromEmail = $env['MAIL_FROM_ADDRESS'] ?? ($user ?: 'z.licz2000@gmail.com');
+    if (empty($fromEmail)) {
+        $fromEmail = $user ?: 'z.licz2000@gmail.com';
     }
 
-    $authUsername = (!empty($user) && strcasecmp($user, 'Z-LICZ@gmail.com') !== 0) 
-        ? $user 
-        : ($env['GMAIL_AUTH_ACCOUNT'] ?? '35barangay@gmail.com');
+    $authUsername = !empty($user)
+        ? $user
+        : ($env['GMAIL_AUTH_ACCOUNT'] ?? 'z.licz2000@gmail.com');
 
     return [
         'host'       => $env['MAIL_HOST'] ?? 'smtp.gmail.com',
@@ -242,9 +242,9 @@ function sendPHPMailerEmail(string $recipientEmail, string $subject, string $htm
             ]
         ];
 
-        $fromAddress = !empty($config['from_email']) && strcasecmp($config['from_email'], 'Z-LICZ@gmail.com') !== 0
+        $fromAddress = !empty($config['from_email'])
             ? $config['from_email']
-            : '35barangay@gmail.com';
+            : 'z.licz2000@gmail.com';
         $fromName    = $config['from_name'] ?? 'Z-LICZ Furniture & Appliances';
 
         $mail->setFrom($fromAddress, $fromName);
