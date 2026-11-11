@@ -99,18 +99,27 @@ export default function SystemPage({ defaultTab = 'users' }) {
     if (!silent) setError('')
     try {
       if (tab === 'users') {
-        const [userData, empData, custList, regOptions, branchList] = await Promise.all([
-          api.system.getUsers().catch(() => ({ users: [] })),
-          api.employees.getAll().catch(() => ({ employees: [] })),
-          api.customers.getAll().catch(() => ({ customers: [] })),
-          api.auth.registrationOptions().catch(() => ({ branches: [] })),
-          api.branches.getAll().catch(() => ({ branches: [] })),
-        ])
-        setUsers(userData.users || [])
-        setEmployeesList(empData.employees || [])
-        setCustomersList(custList.customers || [])
-        const allBranches = (regOptions?.branches?.length) ? regOptions.branches : (branchList?.branches || branchList || [])
-        setRegistrationOptions({ branches: Array.isArray(allBranches) ? allBranches : [] })
+        const needCatalog = !silent || employeesList.length === 0 || customersList.length === 0 || registrationOptions.branches.length === 0
+        if (needCatalog) {
+          const [userData, empData, custList, regOptions] = await Promise.all([
+            api.system.getUsers().catch(() => ({ users: [] })),
+            api.employees.getAll().catch(() => ({ employees: [] })),
+            api.customers.getAll().catch(() => ({ customers: [] })),
+            api.auth.registrationOptions().catch(() => ({ branches: [] })),
+          ])
+          setUsers(userData.users || [])
+          setEmployeesList(empData.employees || [])
+          setCustomersList(custList.customers || [])
+          let allBranches = regOptions?.branches || []
+          if (!Array.isArray(allBranches) || allBranches.length === 0) {
+            const branchList = await api.branches.getAll().catch(() => ({ branches: [] }))
+            allBranches = branchList?.branches || branchList || []
+          }
+          setRegistrationOptions({ branches: Array.isArray(allBranches) ? allBranches : [] })
+        } else {
+          const userData = await api.system.getUsers().catch(() => ({ users: [] }))
+          setUsers(userData.users || [])
+        }
       } else if (tab === 'logs') {
         const data = await api.system.getLogs({
           module: logModule !== 'All' ? logModule : undefined,

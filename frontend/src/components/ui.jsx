@@ -35,6 +35,17 @@ export {
 }
 
 // ─── Error Boundary ───────────────────────────────────────────────────────────
+function isModuleLoadError(error) {
+  const msg = error?.message || ''
+  return (
+    msg.includes('Failed to fetch dynamically imported module') ||
+    msg.includes('dynamically imported module') ||
+    msg.includes('Loading chunk') ||
+    msg.includes('does not provide an export named') ||
+    msg.includes('Importing a module script failed')
+  )
+}
+
 export class ErrorBoundary extends Component {
   constructor(props) {
     super(props)
@@ -47,11 +58,7 @@ export class ErrorBoundary extends Component {
 
   componentDidCatch(error, errorInfo) {
     console.error('UI Runtime Error caught by ErrorBoundary:', error, errorInfo)
-    const isChunkError =
-      error?.message?.includes('Failed to fetch dynamically imported module') ||
-      error?.message?.includes('dynamically imported module') ||
-      error?.message?.includes('Loading chunk')
-    if (isChunkError && typeof window !== 'undefined') {
+    if (isModuleLoadError(error) && typeof window !== 'undefined') {
       const reloadKey = 'pace_errorboundary_chunk_reload'
       const lastReload = sessionStorage.getItem(reloadKey)
       const now = Date.now()
@@ -64,10 +71,7 @@ export class ErrorBoundary extends Component {
 
   render() {
     if (this.state.hasError) {
-      const isChunkError =
-        this.state.error?.message?.includes('Failed to fetch dynamically imported module') ||
-        this.state.error?.message?.includes('dynamically imported module') ||
-        this.state.error?.message?.includes('Loading chunk')
+      const isChunkError = isModuleLoadError(this.state.error)
 
       return (
         <div className="p-8 max-w-2xl mx-auto my-12 bg-card border border-rose-200 dark:border-rose-900 rounded-2xl shadow-lg text-center space-y-4">

@@ -12,7 +12,12 @@ const lazyRetry = (factory, retries = 2, delay = 400) => {
     new Promise((resolve, reject) => {
       const attempt = (attemptsLeft) => {
         factory()
-          .then(resolve)
+          .then((mod) => {
+            if (!mod || !mod.default) {
+              throw new Error('Dynamic module missing default export during HMR update')
+            }
+            resolve(mod)
+          })
           .catch((err) => {
             console.warn(`Dynamic import retry (${attemptsLeft} remaining):`, err)
             if (attemptsLeft > 0) {

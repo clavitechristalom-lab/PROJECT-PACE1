@@ -97,6 +97,12 @@ class AppServiceProvider extends ServiceProvider
                     if (!empty($toBump)) {
                         SyncController::bumpMutation($toBump);
                     }
+                    try {
+                        if (\Illuminate\Support\Facades\Cache::add('pace_prune_cache_lock', true, 120)) {
+                            \App\Services\AutomationService::pruneExpiredFileCache(400);
+                        }
+                    } catch (\Throwable) {
+                    }
                 });
             };
             $modelClass::saved($scheduleBump);

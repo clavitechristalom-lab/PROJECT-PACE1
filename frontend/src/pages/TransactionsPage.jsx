@@ -11,6 +11,7 @@ import {
   LoadingState, ErrorAlert, TableSkeleton, EmptyState,
 } from '../components/ui'
 import { fmt, fmtDate, filterBySearch, fastDeepEqual } from '../lib/utils'
+import { formatQty, extractDigitalRefAndNotes, printOfficialInvoice } from '../lib/invoicePrint'
 import { useAuth } from '../context/AuthContext'
 import { api } from '../lib/api'
 import { useRealtimeSync, SyncButton } from '../lib/realtimeSync'
@@ -160,17 +161,57 @@ export default function TransactionsPage() {
     { module: 'transactions' }
   )
 
+  const handleOpenProof = (tx) => {
+    if (!tx) return
+    setSelectedTx(tx)
+
+    if (tx.category === 'sales' && (tx.raw_id || tx.sale_id) && api.sales?.getById) {
+      const targetId = tx.id
+      const saleId = tx.raw_id || tx.sale_id
+      api.sales.getById(saleId)
+        .then((detail) => {
+          if (!isMountedRef.current || !detail?.sale) return
+          const fullSale = detail.sale
+          setSelectedTx((curr) => {
+            if (!curr || curr.id !== targetId) return curr
+            const { refNo } = extractDigitalRefAndNotes(
+              fullSale.notes ?? curr.notes,
+              curr.reference_no,
+              curr.channel,
+              'sales'
+            )
+            return {
+              ...curr,
+              ...fullSale,
+              id: curr.id,
+              raw_id: curr.raw_id ?? fullSale.sale_id,
+              category: 'sales',
+              channel: curr.channel,
+              provider: curr.provider,
+              reference_code: fullSale.invoice_no || curr.reference_code,
+              reference_no: refNo,
+              date: fullSale.sale_date || curr.date,
+              amount: Number(fullSale.total_amount ?? curr.amount ?? 0),
+              items: Array.isArray(detail.items) ? detail.items : (curr.items || []),
+              installment_account: detail.installment_account || curr.installment_account || null,
+            }
+          })
+        })
+        .catch(() => {})
+    }
+  }
+
   useEffect(() => {
     const id = searchParams.get('id')
     if (id) {
       const found = transactions.find(t => String(t.sale_id) === String(id))
       if (found) {
-        setSelectedTx(found)
+        handleOpenProof(found)
       } else {
         api.transactions.getAll({ search: id })
           .then(res => {
             if (res.transactions?.length > 0) {
-              setSelectedTx(res.transactions[0])
+              handleOpenProof(res.transactions[0])
             }
           })
           .catch(err => console.warn('Could not auto-open transaction:', err))
@@ -578,7 +619,7 @@ export default function TransactionsPage() {
               <div className="overflow-x-auto">
                 <table className="w-full text-xs min-w-[850px]">
                   <thead>
-                    <tr className="border-b border-border bg-muted/50 text-muted-foreground uppercase font-semibold text-[11px]">
+                    <tr className="border-b border-border bg-muted/50 text-muted-foreground uppercase font-semibold text-[11px] whitespace-nowrap">
                       <th className="py-3 px-4 text-left">Reference / Code</th>
                       <th className="py-3 px-4 text-left">Payment Channel</th>
                       <th className="py-3 px-4 text-left">Digital Ref / Trace #</th>
@@ -593,9 +634,10 @@ export default function TransactionsPage() {
                   <tbody className="divide-y divide-border">
                     {paged.map((tx, i) => {
                       const isSale = tx.category === 'sales'
+                      const { refNo: rowRef } = extractDigitalRefAndNotes(tx.notes, tx.reference_no, tx.channel, tx.category)
                       return (
                         <tr key={tx.id || i} className={`hover:bg-muted/40 transition-colors ${i % 2 === 1 ? 'bg-muted/10' : ''}`}>
-                          <td className="py-3 px-4 font-mono font-semibold text-primary">
+                          <td className="py-3 px-4 font-mono font-semibold text-primary whitespace-nowrap">
                             <div className="flex items-center gap-1.5">
                               <FiFileText className="w-3.5 h-3.5 shrink-0" />
                               <span>{tx.reference_code}</span>
@@ -606,26 +648,26 @@ export default function TransactionsPage() {
                               {tx.account_no && tx.account_no !== 'N/A' && ` · ${tx.account_no}`}
                             </div>
                           </td>
-                          <td className="py-3 px-4">
+                          <td className="py-3 px-4 whitespace-nowrap">
                             <ProviderBadge provider={tx.provider} channel={tx.channel} />
                           </td>
-                          <td className="py-3 px-4 font-mono">
-                            {tx.reference_no && tx.reference_no.trim() !== '' ? (
+                          <td className="py-3 px-4 font-mono whitespace-nowrap">
+                            {rowRef ? (
                               <span className="font-semibold text-foreground bg-muted px-2 py-0.5 rounded-md border border-border">
-                                {tx.reference_no}
+                                {rowRef}
                               </span>
                             ) : (
                               <span className="text-muted-foreground">—</span>
                             )}
                           </td>
-                          <td className="py-3 px-4 font-mono text-muted-foreground">{tx.date}</td>
+                          <td className="py-3 px-4 font-mono text-muted-foreground whitespace-nowrap">{tx.date}</td>
                           <td className="py-3 px-4">
-                            <div className="font-medium text-foreground">{tx.customer_name}</div>
+                            <div className="font-medium text-foreground whitespace-nowrap">{tx.customer_name}</div>
                             {tx.customer_code !== '—' && (
-                              <div className="text-[10px] text-muted-foreground font-mono">{tx.customer_code}</div>
+                              <div className="text-[10px] text-muted-foreground font-mono whitespace-nowrap">{tx.customer_code}</div>
                             )}
                           </td>
-                          <td className="py-3 px-4 text-right font-mono font-bold text-foreground">
+                          <td className="py-3 px-4 text-right font-mono font-bold text-foreground whitespace-nowrap">
                             {fmt(tx.amount)}
                             {isSale && tx.payment_method === 'Installment' && tx.amount_paid > 0 && (
                               <div className="text-[10px] text-emerald-600 font-normal">
@@ -633,13 +675,13 @@ export default function TransactionsPage() {
                               </div>
                             )}
                           </td>
-                          <td className="py-3 px-4 text-center">
+                          <td className="py-3 px-4 text-center whitespace-nowrap">
                             <StatusBadge status={tx.status} />
                           </td>
-                          <td className="py-3 px-4 text-muted-foreground">{tx.processed_by}</td>
-                          <td className="py-3 px-4 text-center">
+                          <td className="py-3 px-4 text-muted-foreground whitespace-nowrap">{tx.processed_by}</td>
+                          <td className="py-3 px-4 text-center whitespace-nowrap">
                             <button
-                              onClick={() => setSelectedTx(tx)}
+                              onClick={() => handleOpenProof(tx)}
                               className="inline-flex items-center gap-1 px-2.5 py-1 text-xs rounded-lg border border-border hover:bg-muted font-semibold cursor-pointer transition-colors"
                             >
                               <FiEye className="w-3.5 h-3.5" />
@@ -809,53 +851,159 @@ export default function TransactionsPage() {
         </div>
       )}
 
-      {/* Transaction Details & Digital Payment Proof Modal */}
-      {selectedTx && (
-        <Modal
-          isOpen={true}
-          title={
-            selectedTx.category === 'sales'
-              ? `Sales Invoice #${selectedTx.reference_code}`
-              : `Official Collection Receipt #${selectedTx.reference_code}`
-          }
-          onClose={() => setSelectedTx(null)}
-          size="xl"
-        >
-          <div className="space-y-5 text-xs">
-            {/* Header info */}
-            <div className="bg-muted/20 border border-border rounded-2xl p-4">
-              <div className="flex justify-between items-start mb-3 border-b border-border pb-2">
-                <div>
-                  <div className="text-xs font-mono font-bold text-primary">Z-LICZ FURNITURE & APPLIANCES</div>
-                  <div className="text-[10px] text-muted-foreground">Z-LICZ • Digital Transaction Audit</div>
-                </div>
-                <div className="text-right">
-                  <ProviderBadge provider={selectedTx.provider} channel={selectedTx.channel} />
-                  <div className="text-[11px] font-mono text-muted-foreground mt-1">{selectedTx.date}</div>
-                </div>
-              </div>
+      {/* Transaction Details & Official Sales Invoice / Collection Receipt Modal */}
+      {selectedTx && (() => {
+        const isSaleTx = selectedTx.category === 'sales'
+        const txItems = Array.isArray(selectedTx.items) ? selectedTx.items : []
+        const txInst = selectedTx.installment_account || null
+        const txSchedules = txInst?.payment_schedules || txInst?.paymentSchedules || []
+        const txPaySchedule = selectedTx.payment_schedule || null
+        const txTotalUnits = txItems.reduce((sum, it) => sum + (Number(it.quantity) || 0), 0)
+        const { refNo: txRefNo, cleanNotes: txCleanNotes } = extractDigitalRefAndNotes(
+          selectedTx.notes,
+          selectedTx.reference_no,
+          selectedTx.channel,
+          selectedTx.category
+        )
+        const companyLabel = selectedTx.company_name || settings?.company_name || 'Z-LICZ APPLIANCES'
+        const branchLabel = selectedTx.branch_name || user?.employee?.branch?.name || user?.customer?.branch_name || 'Main Branch'
+        const branchLoc = selectedTx.branch_location || ''
+        const branchTel = selectedTx.branch_contact || ''
+        const compEmail = selectedTx.company_email || ''
+        const compTin = selectedTx.company_tax_id || ''
 
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+        const subtotalVal = Number(selectedTx.subtotal ?? selectedTx.total_amount ?? selectedTx.amount ?? 0)
+        const discountVal = Number(selectedTx.discount_amount ?? 0)
+        const totalVal = Number(selectedTx.total_amount ?? selectedTx.amount ?? 0)
+        const paidVal = Number(selectedTx.amount_paid ?? selectedTx.amount ?? 0)
+        const balanceVal = Number(selectedTx.balance_due ?? 0)
+        const channelText = selectedTx.provider && selectedTx.payment_method && selectedTx.provider !== selectedTx.payment_method
+          ? `${selectedTx.payment_method} (${selectedTx.provider})`
+          : (selectedTx.provider || selectedTx.payment_method || 'Cash')
+
+        return (
+          <Modal
+            isOpen={true}
+            title={
+              isSaleTx
+                ? `Sales Invoice #${selectedTx.reference_code}`
+                : `Official Collection Receipt #${selectedTx.reference_code}`
+            }
+            onClose={() => setSelectedTx(null)}
+            size="xl"
+          >
+            <div className="space-y-4 text-xs">
+              {/* Company, Branch & Invoice Header */}
+              <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3 pb-3 border-b border-border">
                 <div>
-                  <span className="text-muted-foreground block text-[10px] uppercase font-bold">Customer:</span>
-                  <span className="font-bold text-foreground text-sm">{selectedTx.customer_name}</span>
-                  {selectedTx.customer_code !== '—' && (
-                    <span className="text-muted-foreground block font-mono text-[10px]">{selectedTx.customer_code}</span>
+                  <h2 className="text-lg font-black tracking-tight text-foreground">
+                    {companyLabel}
+                  </h2>
+                  <p className="text-[11px] font-semibold text-primary">
+                    {isSaleTx ? 'Official Sales Transaction Invoice' : 'Official Installment Collection Receipt'}
+                  </p>
+                  <p className="text-[11px] text-muted-foreground mt-0.5">
+                    {branchLabel}
+                    {branchLoc ? ` • ${branchLoc}` : ''}
+                  </p>
+                  {(branchTel || compEmail || compTin) && (
+                    <p className="text-[11px] text-muted-foreground font-mono">
+                      {[
+                        branchTel ? `Tel: ${branchTel}` : '',
+                        compEmail,
+                        compTin ? `TIN: ${compTin}` : '',
+                      ].filter(Boolean).join(' • ')}
+                    </p>
                   )}
                 </div>
-                <div>
-                  <span className="text-muted-foreground block text-[10px] uppercase font-bold">Channel / Provider:</span>
-                  <span className="font-semibold text-foreground">{selectedTx.provider || selectedTx.payment_method}</span>
-                </div>
-                <div>
-                  <span className="text-muted-foreground block text-[10px] uppercase font-bold">Handled / Verified By:</span>
-                  <span className="font-semibold text-foreground">{selectedTx.processed_by}</span>
+
+                <div className="sm:text-right space-y-1">
+                  <div className="font-mono font-black text-base text-foreground">{selectedTx.reference_code}</div>
+                  <div className="font-mono text-[11px] text-muted-foreground">
+                    {selectedTx.sale_datetime || selectedTx.date}
+                  </div>
+                  <div className="flex sm:justify-end items-center flex-wrap gap-1.5 pt-0.5">
+                    <StatusBadge status={selectedTx.status || 'Completed'} />
+                    <ProviderBadge provider={selectedTx.provider} channel={selectedTx.channel} />
+                  </div>
                 </div>
               </div>
 
-              {/* Digital Reference Box */}
-              {selectedTx.reference_no && (
-                <div className="mt-3 pt-3 border-t border-border flex items-center justify-between bg-card p-3 rounded-xl border border-border">
+              {/* Billing & Transaction Metadata Grid */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="p-3.5 bg-muted/20 rounded-2xl border border-border space-y-1">
+                  <span className="text-[10px] uppercase font-bold tracking-wider text-muted-foreground block">
+                    Billed To (Customer)
+                  </span>
+                  <p className="font-bold text-foreground text-sm">{selectedTx.customer_name}</p>
+                  <div className="text-[11px] text-muted-foreground space-y-0.5">
+                    {selectedTx.customer_code && selectedTx.customer_code !== '—' && (
+                      <div>
+                        Code: <strong className="font-mono text-foreground">{selectedTx.customer_code}</strong>
+                      </div>
+                    )}
+                    {selectedTx.customer_phone && (
+                      <div>
+                        Phone: <strong className="font-mono text-foreground">{selectedTx.customer_phone}</strong>
+                      </div>
+                    )}
+                    {selectedTx.customer_email && <div>Email: {selectedTx.customer_email}</div>}
+                    {selectedTx.customer_address && <div>Address: {selectedTx.customer_address}</div>}
+                  </div>
+                </div>
+
+                <div className="p-3.5 bg-muted/20 rounded-2xl border border-border space-y-1.5">
+                  <span className="text-[10px] uppercase font-bold tracking-wider text-muted-foreground block">
+                    Transaction Metadata
+                  </span>
+                  <div className="flex justify-between text-[11px] gap-2">
+                    <span className="text-muted-foreground">Payment Channel:</span>
+                    <span className="font-semibold text-foreground text-right">{channelText}</span>
+                  </div>
+                  {txRefNo && (
+                    <div className="flex justify-between text-[11px] gap-2">
+                      <span className="text-muted-foreground">Digital Ref / Trace #:</span>
+                      <span className="font-mono font-semibold text-foreground text-right">{txRefNo}</span>
+                    </div>
+                  )}
+                  {!isSaleTx && selectedTx.account_no && selectedTx.account_no !== 'N/A' && (
+                    <div className="flex justify-between text-[11px] gap-2">
+                      <span className="text-muted-foreground">Installment Account:</span>
+                      <span className="font-mono font-semibold text-foreground">{selectedTx.account_no}</span>
+                    </div>
+                  )}
+                  {!isSaleTx && selectedTx.invoice_no && (
+                    <div className="flex justify-between text-[11px] gap-2">
+                      <span className="text-muted-foreground">Linked Invoice:</span>
+                      <span className="font-mono font-semibold text-foreground">{selectedTx.invoice_no}</span>
+                    </div>
+                  )}
+                  <div className="flex justify-between text-[11px] gap-2">
+                    <span className="text-muted-foreground">Store Branch:</span>
+                    <span className="font-semibold text-foreground text-right">{branchLabel}</span>
+                  </div>
+                  <div className="flex justify-between text-[11px] gap-2">
+                    <span className="text-muted-foreground">Handled / Verified By:</span>
+                    <span className="font-semibold text-foreground text-right">{selectedTx.processed_by}</span>
+                  </div>
+                  {txItems.length > 0 && (
+                    <div className="flex justify-between text-[11px] gap-2">
+                      <span className="text-muted-foreground">Items Summary:</span>
+                      <span className="font-mono font-semibold text-foreground">
+                        {txItems.length} item(s) · {formatQty(txTotalUnits)} unit(s)
+                      </span>
+                    </div>
+                  )}
+                  <div className="flex justify-between text-[11px] gap-2">
+                    <span className="text-muted-foreground">Currency:</span>
+                    <span className="font-mono font-semibold text-foreground">PHP (₱)</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Verified Digital Reference Highlight Box */}
+              {txRefNo && (
+                <div className="flex items-center justify-between bg-card p-3 rounded-2xl border border-border">
                   <div className="flex items-center gap-2.5">
                     {selectedTx.channel === 'ewallet' ? (
                       <FiSmartphone className="w-5 h-5 text-blue-500" />
@@ -866,58 +1014,255 @@ export default function TransactionsPage() {
                       <span className="text-[10px] text-muted-foreground uppercase font-bold block">
                         {selectedTx.channel === 'ewallet' ? 'E-Wallet Reference Number' : 'Bank Confirmation / Trace No.'}
                       </span>
-                      <span className="font-mono font-bold text-sm text-foreground">{selectedTx.reference_no}</span>
+                      <span className="font-mono font-bold text-sm text-foreground">{txRefNo}</span>
                     </div>
                   </div>
                   <span className="inline-flex items-center gap-1 text-xs bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 font-semibold px-2.5 py-0.5 rounded-full border border-emerald-200 dark:border-emerald-800">
                     <FiCheckCircle className="w-3 h-3" />
-                    <span>Verified</span>
+                    <span>{selectedTx.status === 'Pending Verification' ? 'Pending Verification' : 'Verified'}</span>
                   </span>
                 </div>
               )}
-            </div>
 
-            {/* Total summary */}
-            <div className="bg-muted/20 border border-border rounded-2xl p-4 flex justify-between items-center">
-              <div>
-                <span className="text-xs text-muted-foreground block">Total Amount Settled:</span>
-                <span className="text-xl font-bold font-mono text-primary">{fmt(selectedTx.amount)}</span>
+              {/* Detailed Line Items Table */}
+              {(isSaleTx || txItems.length > 0) && (
+                <div className="border border-border rounded-2xl overflow-hidden">
+                  {!isSaleTx && (
+                    <div className="px-3 py-2 bg-muted/30 border-b border-border text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+                      Financed Invoice Items {selectedTx.invoice_no ? `(${selectedTx.invoice_no})` : ''}
+                    </div>
+                  )}
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-xs">
+                      <thead>
+                        <tr className="border-b border-border bg-muted/50 text-muted-foreground uppercase text-[10px]">
+                          <th className="py-2.5 px-3 text-center w-10">#</th>
+                          <th className="py-2.5 px-3 text-left">Item Description / SKU</th>
+                          <th className="py-2.5 px-3 text-right">Unit Price</th>
+                          <th className="py-2.5 px-3 text-center">Qty</th>
+                          <th className="py-2.5 px-3 text-right">Discount</th>
+                          <th className="py-2.5 px-3 text-right">Line Total</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-border">
+                        {txItems.length > 0 ? (
+                          txItems.map((it, idx) => {
+                            const lineDisc = Number(it.discount_amount ?? it.discount ?? 0)
+                            const lineTot = Number(it.line_total ?? it.total_price ?? 0)
+                            return (
+                              <tr key={it.sale_item_id || idx}>
+                                <td className="py-2.5 px-3 text-center font-mono text-muted-foreground">{idx + 1}</td>
+                                <td className="py-2.5 px-3">
+                                  <p className="font-semibold text-foreground leading-tight">{it.product_name}</p>
+                                  {(it.product_code || it.brand || it.category) && (
+                                    <p className="text-[10px] text-muted-foreground font-mono mt-0.5">
+                                      {[it.product_code, it.brand, it.category].filter(Boolean).join(' • ')}
+                                    </p>
+                                  )}
+                                </td>
+                                <td className="py-2.5 px-3 text-right font-mono text-muted-foreground">{fmt(it.unit_price)}</td>
+                                <td className="py-2.5 px-3 text-center font-mono font-bold text-foreground">{formatQty(it.quantity)}</td>
+                                <td className="py-2.5 px-3 text-right font-mono">
+                                  {lineDisc > 0 ? (
+                                    <span className="text-rose-500">-{fmt(lineDisc)}</span>
+                                  ) : (
+                                    <span className="text-muted-foreground">₱0.00</span>
+                                  )}
+                                </td>
+                                <td className="py-2.5 px-3 text-right font-mono font-bold text-foreground">{fmt(lineTot)}</td>
+                              </tr>
+                            )
+                          })
+                        ) : (
+                          <tr>
+                            <td colSpan="6" className="py-4 text-center text-muted-foreground">No line items recorded</td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {/* Installment Contract & Amortization Schedule */}
+              {txInst && (
+                <div className="p-3.5 bg-amber-50/50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-900 rounded-2xl space-y-2.5">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="font-bold uppercase tracking-wider text-[11px] text-amber-900 dark:text-amber-300 flex items-center gap-1.5">
+                      <FiCreditCard className="w-3.5 h-3.5" />
+                      <span>Installment Contract ({txInst.account_no || 'Active'})</span>
+                    </span>
+                    <StatusBadge status={txInst.status || 'Active'} />
+                  </div>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px]">
+                    <div className="p-2 rounded-xl bg-card border border-border">
+                      <span className="text-[10px] text-muted-foreground block">Principal</span>
+                      <strong className="font-mono text-foreground">{fmt(txInst.principal_amount)}</strong>
+                    </div>
+                    <div className="p-2 rounded-xl bg-card border border-border">
+                      <span className="text-[10px] text-muted-foreground block">Interest ({Number(txInst.interest_rate || 0)}%)</span>
+                      <strong className="font-mono text-amber-600 dark:text-amber-400">+{fmt(txInst.interest_amount)}</strong>
+                    </div>
+                    <div className="p-2 rounded-xl bg-card border border-border">
+                      <span className="text-[10px] text-muted-foreground block">Total Financed</span>
+                      <strong className="font-mono text-foreground">{fmt(txInst.total_payable)}</strong>
+                    </div>
+                    <div className="p-2 rounded-xl bg-primary/5 border border-primary/30">
+                      <span className="text-[10px] text-muted-foreground block">{txInst.frequency || 'Monthly'} Due</span>
+                      <strong className="font-mono text-primary">
+                        {fmt(txInst.installment_amount)} &times; {txInst.number_of_installments}
+                      </strong>
+                    </div>
+                  </div>
+
+                  {txPaySchedule && (
+                    <div className="p-2.5 rounded-xl bg-card border border-amber-500/20 flex flex-wrap justify-between gap-2 text-[11px]">
+                      <span>
+                        Applied Schedule: <strong className="font-mono text-foreground">Installment #{txPaySchedule.installment_no}</strong>
+                      </span>
+                      <span>
+                        Due Date: <strong className="font-mono text-foreground">{txPaySchedule.due_date}</strong>
+                      </span>
+                      <span>
+                        Schedule Balance: <strong className="font-mono text-foreground">{fmt(txPaySchedule.balance_due)}</strong>
+                      </span>
+                    </div>
+                  )}
+
+                  {txSchedules.length > 0 && (
+                    <div className="border border-amber-500/20 rounded-xl overflow-hidden bg-card">
+                      <div className="max-h-36 overflow-y-auto">
+                        <table className="w-full text-[11px]">
+                          <thead className="bg-muted/50 text-muted-foreground uppercase text-[10px] sticky top-0">
+                            <tr>
+                              <th className="py-1.5 px-2.5 text-center">#</th>
+                              <th className="py-1.5 px-2.5 text-left">Due Date</th>
+                              <th className="py-1.5 px-2.5 text-right">Amount Due</th>
+                              <th className="py-1.5 px-2.5 text-right">Balance</th>
+                              <th className="py-1.5 px-2.5 text-center">Status</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-border">
+                            {txSchedules.map(sc => (
+                              <tr key={sc.schedule_id || sc.installment_no}>
+                                <td className="py-1.5 px-2.5 text-center font-mono">{sc.installment_no}</td>
+                                <td className="py-1.5 px-2.5 font-mono">{sc.due_date}</td>
+                                <td className="py-1.5 px-2.5 text-right font-mono">{fmt(sc.amount_due)}</td>
+                                <td className="py-1.5 px-2.5 text-right font-mono font-bold">{fmt(sc.balance_due)}</td>
+                                <td className="py-1.5 px-2.5 text-center">
+                                  <StatusBadge status={sc.status} />
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Financial Summary & Notes */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="p-3.5 bg-muted/20 border border-border rounded-2xl space-y-1.5">
+                  <span className="text-[10px] uppercase font-bold tracking-wider text-muted-foreground block">
+                    {isSaleTx ? 'Notes / Warranty Remarks' : 'Transaction Remarks'}
+                  </span>
+                  <p className="text-[11px] text-foreground whitespace-pre-wrap leading-relaxed">
+                    {txCleanNotes || (isSaleTx
+                      ? 'Standard store warranty applies. Retain this invoice for warranty claims and account reference.'
+                      : 'Installment collection recorded and posted to customer ledger.')}
+                  </p>
+                </div>
+
+                {isSaleTx ? (
+                  <div className="space-y-1.5 p-3.5 bg-card border border-border rounded-2xl text-xs">
+                    <div className="flex justify-between text-muted-foreground">
+                      <span>Subtotal ({formatQty(txTotalUnits)} unit{txTotalUnits !== 1 ? 's' : ''})</span>
+                      <span className="font-mono font-semibold text-foreground">{fmt(subtotalVal)}</span>
+                    </div>
+                    <div className="flex justify-between text-muted-foreground">
+                      <span>Total Discount</span>
+                      <span className="font-mono text-rose-600">- {fmt(discountVal)}</span>
+                    </div>
+                    <div className="flex justify-between items-center font-black text-sm text-foreground border-t border-border pt-1.5 mt-1.5">
+                      <span>TOTAL AMOUNT</span>
+                      <span className="font-mono text-base font-bold text-primary">{fmt(totalVal)}</span>
+                    </div>
+                    <div className="flex justify-between text-muted-foreground pt-1">
+                      <span>Amount Paid</span>
+                      <span className="font-mono font-bold text-emerald-600">{fmt(paidVal)}</span>
+                    </div>
+                    <div className="flex justify-between text-muted-foreground">
+                      <span>Balance Due</span>
+                      <span className={`font-mono font-bold ${balanceVal > 0 ? 'text-rose-600' : 'text-emerald-600'}`}>
+                        {fmt(balanceVal)}
+                      </span>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="space-y-1.5 p-3.5 bg-card border border-border rounded-2xl text-xs">
+                    <div className="flex justify-between items-center font-black text-sm text-foreground">
+                      <span>AMOUNT COLLECTED</span>
+                      <span className="font-mono text-base font-bold text-primary">{fmt(paidVal)}</span>
+                    </div>
+                    <div className="flex justify-between items-center text-muted-foreground pt-1 border-t border-border">
+                      <span>Payment Status</span>
+                      <StatusBadge status={selectedTx.status || 'Completed'} />
+                    </div>
+                    {txInst && (
+                      <>
+                        <div className="flex justify-between text-muted-foreground pt-1">
+                          <span>Contract Total Payable</span>
+                          <span className="font-mono font-semibold text-foreground">{fmt(txInst.total_payable)}</span>
+                        </div>
+                        <div className="flex justify-between text-muted-foreground">
+                          <span>Total Paid To Date</span>
+                          <span className="font-mono font-bold text-emerald-600">{fmt(txInst.total_paid)}</span>
+                        </div>
+                        <div className="flex justify-between text-muted-foreground">
+                          <span>Remaining Contract Balance</span>
+                          <span className={`font-mono font-bold ${Number(txInst.balance) > 0 ? 'text-rose-600' : 'text-emerald-600'}`}>
+                            {fmt(txInst.balance)}
+                          </span>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                )}
               </div>
-              <div className="text-right">
-                <span className="text-xs text-muted-foreground block">Payment Status:</span>
-                <StatusBadge status={selectedTx.status} />
+
+              {/* Modal actions */}
+              <div className="flex justify-between items-center gap-3 pt-4 border-t border-border">
+                <button
+                  type="button"
+                  onClick={() => printOfficialInvoice({
+                    sale: selectedTx,
+                    items: txItems,
+                    installmentAccount: txInst,
+                    paymentSchedule: txPaySchedule,
+                    isCollection: !isSaleTx,
+                    defaultBranch: branchLabel,
+                    onPopupBlocked: () => showToast('Please allow pop-ups to print the document', 'error'),
+                  })}
+                  className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-primary hover:bg-primary/90 text-primary-foreground font-bold cursor-pointer shadow-xs transition-all"
+                >
+                  <FiPrinter className="w-4 h-4" />
+                  <span>{isSaleTx ? 'Print Invoice' : 'Print Receipt'}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSelectedTx(null)}
+                  className="flex items-center gap-1 px-4 py-2 rounded-xl border border-border hover:bg-muted font-semibold cursor-pointer"
+                >
+                  <FiX className="w-3.5 h-3.5" />
+                  <span>Close</span>
+                </button>
               </div>
             </div>
-
-            {selectedTx.notes && (
-              <div className="p-3 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900 rounded-xl text-xs text-amber-900 dark:text-amber-200">
-                <span className="font-semibold">Transaction Remarks: </span>
-                {selectedTx.notes}
-              </div>
-            )}
-
-            {/* Modal actions */}
-            <div className="flex justify-between items-center gap-3 pt-4 border-t border-border">
-              <button
-                type="button"
-                onClick={() => window.print()}
-                className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl border border-border hover:bg-muted font-semibold cursor-pointer"
-              >
-                <FiPrinter className="w-4 h-4" />
-                <span>Print Record</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setSelectedTx(null)}
-                className="flex items-center gap-1 px-4 py-1.5 rounded-xl border border-border hover:bg-muted font-semibold cursor-pointer"
-              >
-                <FiX className="w-3.5 h-3.5" />
-                <span>Close</span>
-              </button>
-            </div>
-          </div>
-        </Modal>
-      )}
+          </Modal>
+        )
+      })()}
     </>
   )
 }

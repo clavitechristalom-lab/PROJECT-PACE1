@@ -234,6 +234,7 @@ export default function EmployeesPage({ branchFilter, embedded }) {
   }
 
   const handleDelete = async (targetEmp) => {
+    if (!isAdmin || isStoreAdmin) return
     const empToDelete = targetEmp || deleteItem
     if (!empToDelete) return
 
@@ -935,13 +936,15 @@ export default function EmployeesPage({ branchFilter, embedded }) {
                               >
                                 <FiEdit className="w-3.5 h-3.5" />
                               </button>
-                              <button
-                                onClick={() => handleDelete(emp)}
-                                title="Delete employee"
-                                className="p-1.5 rounded-lg border border-border hover:bg-rose-50 hover:text-rose-600 dark:hover:bg-rose-950/40 text-muted-foreground transition-colors cursor-pointer"
-                              >
-                                <FiTrash2 className="w-3.5 h-3.5" />
-                              </button>
+                              {isAdmin && !isStoreAdmin && (
+                                <button
+                                  onClick={() => handleDelete(emp)}
+                                  title="Delete employee"
+                                  className="p-1.5 rounded-lg border border-border hover:bg-rose-50 hover:text-rose-600 dark:hover:bg-rose-950/40 text-muted-foreground transition-colors cursor-pointer"
+                                >
+                                  <FiTrash2 className="w-3.5 h-3.5" />
+                                </button>
+                              )}
                             </div>
                           </td>
                         )}

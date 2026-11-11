@@ -79,15 +79,22 @@ class TransactionController extends Controller
             : null;
 
         $transactions = collect();
+        $sysSettings = \App\Models\Setting::whereIn('key', [
+            'company_name', 'name', 'tax_id', 'address', 'phone', 'email'
+        ])->pluck('value', 'key');
+        $companyName = $sysSettings['company_name'] ?? $sysSettings['name'] ?? 'Z-LICZ APPLIANCES';
 
         // 1. Fetch Sales Transactions
         if ($type === 'All' || $type === 'Sale') {
             $salesQuery = SaleTransaction::with([
-                'customer:customer_id,first_name,last_name,customer_code',
+                'customer:customer_id,first_name,last_name,customer_code,phone,email,address',
                 'processedBy:user_id,username,employee_id',
                 'processedBy.employee:employee_id,first_name,last_name',
+                'branch:id,name,location,contact_number',
                 'items:sale_item_id,sale_id,product_id,quantity,unit_price,discount_amount,line_total',
-                'items.product:product_id,product_name,product_code'
+                'items.product:product_id,product_name,product_code,brand,category',
+                'installmentAccount.payments:payment_id,installment_id,amount,status,reference_no,notes',
+                'installmentAccount.paymentSchedules' => fn($q) => $q->orderBy('installment_no'),
             ]);
 
             if ($user && $user->role === 'Customer') {
@@ -122,14 +129,25 @@ class TransactionController extends Controller
                 $salesQuery->whereDate('sale_date', '<=', $dateTo);
             }
 
-            $sales = $salesQuery->get()->map(function ($s) {
+            $sales = $salesQuery->get()->map(function ($s) use ($companyName, $sysSettings) {
                 $cust = $s->customer;
-                $staff = $s->processedBy ? ($s->processedBy->employee ? "{$s->processedBy->employee->first_name} {$s->processedBy->employee->last_name}" : $s->processedBy->username) : 'Staff';
+                $branchProfile = $s->branch;
+                $staff = $s->processedBy
+                    ? ($s->processedBy->employee
+                        ? trim("{$s->processedBy->employee->first_name} {$s->processedBy->employee->last_name}")
+                        : $s->processedBy->username)
+                    : 'Staff';
                 $detection = $this->detectChannelAndProvider($s->payment_method, $s->notes ?? '');
+
+                $extractedRef = '';
+                if (!empty($s->notes) && preg_match('/(?:^|\|)\s*Ref\s*#?\s*:\s*([^|\r\n]+)/i', $s->notes, $refMatch)) {
+                    $extractedRef = trim($refMatch[1]);
+                }
 
                 return [
                     'id' => 'SALE-' . $s->sale_id,
                     'raw_id' => $s->sale_id,
+                    'sale_id' => $s->sale_id,
                     'type' => 'Sale Invoice',
                     'category' => 'sales',
                     'channel' => $detection['channel'],
@@ -137,29 +155,50 @@ class TransactionController extends Controller
                     'badge_color' => $detection['badge_color'],
                     'reference_code' => $s->invoice_no,
                     'date' => date('Y-m-d', strtotime($s->sale_date)),
+                    'sale_datetime' => date('M d, Y h:i A', strtotime($s->sale_date)),
                     'timestamp' => strtotime($s->sale_date),
                     'customer_id' => $s->customer_id,
-                    'customer_name' => $cust ? "{$cust->first_name} {$cust->last_name}" : 'Walk-in Customer',
+                    'customer_name' => $cust ? trim("{$cust->first_name} {$cust->last_name}") : 'Walk-in Customer',
                     'customer_code' => $cust ? $cust->customer_code : '—',
+                    'customer_phone' => $cust?->phone ?? '',
+                    'customer_email' => $cust?->email ?? '',
+                    'customer_address' => $cust?->address ?? '',
+                    'branch_id' => $s->branch_id,
+                    'branch_name' => $branchProfile?->name ?? '',
+                    'branch_location' => $branchProfile?->location ?? ($sysSettings['address'] ?? ''),
+                    'branch_contact' => $branchProfile?->contact_number ?? ($sysSettings['phone'] ?? ''),
+                    'company_name' => $companyName,
+                    'company_tax_id' => $sysSettings['tax_id'] ?? '',
+                    'company_email' => $sysSettings['email'] ?? '',
+                    'subtotal' => (float)($s->subtotal ?? $s->total_amount),
+                    'discount_amount' => (float)($s->discount_amount ?? 0),
+                    'total_amount' => (float)$s->total_amount,
                     'amount' => (float)$s->total_amount,
                     'amount_paid' => (float)$s->amount_paid,
                     'balance_due' => (float)$s->balance_due,
                     'payment_method' => $s->payment_method,
-                    'reference_no' => $s->notes ?? '',
+                    'reference_no' => $extractedRef,
                     'status' => $s->status ?? 'Completed',
                     'processed_by' => $staff,
                     'items_count' => $s->items->count(),
                     'notes' => $s->notes ?? '',
                     'items' => $s->items->map(function ($item) {
                         return [
+                            'sale_item_id' => $item->sale_item_id,
+                            'product_id' => $item->product_id,
                             'product_name' => $item->product ? $item->product->product_name : 'Product',
-                            'product_code' => $item->product ? $item->product->product_code : '',
-                            'quantity' => $item->quantity,
+                            'product_code' => $item->product ? ($item->product->product_code ?? '') : '',
+                            'brand' => $item->product ? ($item->product->brand ?? '') : '',
+                            'category' => $item->product ? ($item->product->category ?? '') : '',
+                            'quantity' => (float)$item->quantity == (int)$item->quantity ? (int)$item->quantity : (float)$item->quantity,
                             'unit_price' => (float)$item->unit_price,
+                            'discount_amount' => (float)($item->discount_amount ?? $item->discount ?? 0),
                             'discount' => (float)($item->discount_amount ?? $item->discount ?? 0),
+                            'line_total' => (float)($item->line_total ?? $item->total_price ?? 0),
                             'total_price' => (float)($item->line_total ?? $item->total_price ?? 0),
                         ];
                     }),
+                    'installment_account' => $s->installmentAccount,
                 ];
             });
 
@@ -169,8 +208,14 @@ class TransactionController extends Controller
         // 2. Fetch Installment Payments
         if ($type === 'All' || $type === 'Payment') {
             $paymentsQuery = Payment::with([
-                'installmentAccount:installment_id,account_no,customer_id',
-                'installmentAccount.customer:customer_id,first_name,last_name,customer_code',
+                'installmentAccount:installment_id,account_no,customer_id,sale_id,principal_amount,down_payment,interest_rate,interest_amount,total_payable,installment_amount,number_of_installments,frequency,status',
+                'installmentAccount.payments:payment_id,installment_id,amount,status,reference_no,notes',
+                'installmentAccount.customer:customer_id,first_name,last_name,customer_code,phone,email,address',
+                'installmentAccount.saleTransaction:sale_id,invoice_no,branch_id,subtotal,discount_amount,total_amount',
+                'installmentAccount.saleTransaction.branch:id,name,location,contact_number',
+                'installmentAccount.saleTransaction.items:sale_item_id,sale_id,product_id,quantity,unit_price,discount_amount,line_total',
+                'installmentAccount.saleTransaction.items.product:product_id,product_name,product_code,brand,category',
+                'paymentSchedule:schedule_id,installment_id,installment_no,due_date,amount_due,amount_paid,balance_due,status',
                 'receivedBy:user_id,username,employee_id',
                 'receivedBy.employee:employee_id,first_name,last_name'
             ]);
@@ -209,15 +254,42 @@ class TransactionController extends Controller
                 $paymentsQuery->whereDate('payment_date', '<=', $dateTo);
             }
 
-            $payments = $paymentsQuery->get()->map(function ($p) {
+            $payments = $paymentsQuery->get()->map(function ($p) use ($companyName, $sysSettings) {
                 $inst = $p->installmentAccount;
                 $cust = $inst ? $inst->customer : null;
-                $staff = $p->receivedBy ? ($p->receivedBy->employee ? "{$p->receivedBy->employee->first_name} {$p->receivedBy->employee->last_name}" : $p->receivedBy->username) : 'Staff';
+                $linkedSale = $inst ? $inst->saleTransaction : null;
+                $branchProfile = $linkedSale ? $linkedSale->branch : null;
+                $staff = $p->receivedBy
+                    ? ($p->receivedBy->employee
+                        ? trim("{$p->receivedBy->employee->first_name} {$p->receivedBy->employee->last_name}")
+                        : $p->receivedBy->username)
+                    : 'Staff';
                 $detection = $this->detectChannelAndProvider($p->payment_method, $p->notes ?? '', $p->reference_no ?? '');
+                $linkedItems = $linkedSale && $linkedSale->items
+                    ? $linkedSale->items->map(function ($item) {
+                        return [
+                            'sale_item_id' => $item->sale_item_id,
+                            'product_id' => $item->product_id,
+                            'product_name' => $item->product ? $item->product->product_name : 'Product',
+                            'product_code' => $item->product ? ($item->product->product_code ?? '') : '',
+                            'brand' => $item->product ? ($item->product->brand ?? '') : '',
+                            'category' => $item->product ? ($item->product->category ?? '') : '',
+                            'quantity' => (float)$item->quantity == (int)$item->quantity ? (int)$item->quantity : (float)$item->quantity,
+                            'unit_price' => (float)$item->unit_price,
+                            'discount_amount' => (float)($item->discount_amount ?? $item->discount ?? 0),
+                            'discount' => (float)($item->discount_amount ?? $item->discount ?? 0),
+                            'line_total' => (float)($item->line_total ?? $item->total_price ?? 0),
+                            'total_price' => (float)($item->line_total ?? $item->total_price ?? 0),
+                        ];
+                    })
+                    : [];
 
                 return [
                     'id' => 'PAY-' . $p->payment_id,
                     'raw_id' => $p->payment_id,
+                    'payment_id' => $p->payment_id,
+                    'sale_id' => $inst?->sale_id,
+                    'invoice_no' => $linkedSale?->invoice_no ?? '',
                     'type' => 'Installment Payment',
                     'category' => 'payment',
                     'channel' => $detection['channel'],
@@ -227,20 +299,36 @@ class TransactionController extends Controller
                     'account_no' => $inst ? $inst->account_no : 'N/A',
                     'installment_id' => $p->installment_id,
                     'date' => date('Y-m-d', strtotime($p->payment_date)),
+                    'sale_datetime' => date('M d, Y h:i A', strtotime($p->payment_date)),
                     'timestamp' => strtotime($p->payment_date),
                     'customer_id' => $cust ? $cust->customer_id : null,
-                    'customer_name' => $cust ? "{$cust->first_name} {$cust->last_name}" : 'Customer',
+                    'customer_name' => $cust ? trim("{$cust->first_name} {$cust->last_name}") : 'Customer',
                     'customer_code' => $cust ? $cust->customer_code : '—',
+                    'customer_phone' => $cust?->phone ?? '',
+                    'customer_email' => $cust?->email ?? '',
+                    'customer_address' => $cust?->address ?? '',
+                    'branch_id' => $linkedSale?->branch_id,
+                    'branch_name' => $branchProfile?->name ?? '',
+                    'branch_location' => $branchProfile?->location ?? ($sysSettings['address'] ?? ''),
+                    'branch_contact' => $branchProfile?->contact_number ?? ($sysSettings['phone'] ?? ''),
+                    'company_name' => $companyName,
+                    'company_tax_id' => $sysSettings['tax_id'] ?? '',
+                    'company_email' => $sysSettings['email'] ?? '',
+                    'subtotal' => (float)$p->amount,
+                    'discount_amount' => 0.0,
+                    'total_amount' => (float)$p->amount,
                     'amount' => (float)$p->amount,
                     'amount_paid' => (float)$p->amount,
                     'balance_due' => 0.00,
                     'payment_method' => $p->payment_method,
                     'reference_no' => $p->reference_no ?? '',
-                    'status' => 'Completed',
+                    'status' => $p->status ?? 'Completed',
                     'processed_by' => $staff,
-                    'items_count' => 1,
+                    'items_count' => is_countable($linkedItems) && count($linkedItems) > 0 ? count($linkedItems) : 1,
                     'notes' => $p->notes ?? '',
-                    'items' => [],
+                    'items' => $linkedItems,
+                    'payment_schedule' => $p->paymentSchedule,
+                    'installment_account' => $inst,
                 ];
             });
 

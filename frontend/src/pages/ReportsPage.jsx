@@ -170,22 +170,15 @@ export default function ReportsPage() {
     loadReport(activeTab)
   }, [activeTab, isStoreAdmin])
 
-  useEffect(() => {
-    loadAllReportsForPrint()
-  }, [branchesList.length, isStoreAdmin])
-
   useRealtimeSync(() => {
     loadReport(activeTab, true)
-    loadAllReportsForPrint()
   }, [activeTab, branch, department, status, startDate, endDate, periodId, isStoreAdmin], { module: 'reports' })
 
   const handleApplyFilters = () => {
     loadReport(activeTab)
-    loadAllReportsForPrint()
   }
 
   const handleResetFilters = () => {
-    const resetBranch = isStoreAdmin ? branch : 'All'
     if (!isStoreAdmin) setBranch('All')
     setDepartment('All')
     setStatus('All')
@@ -193,14 +186,6 @@ export default function ReportsPage() {
     setEndDate('')
     setPeriodId('All')
     setTimeout(() => loadReport(activeTab), 50)
-    loadAllReportsForPrint({
-      branch: resetBranch,
-      department: 'All',
-      status: 'All',
-      startDate: '',
-      endDate: '',
-      periodId: 'All',
-    })
   }
 
   const exportCSV = () => {
