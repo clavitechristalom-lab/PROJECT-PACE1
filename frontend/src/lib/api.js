@@ -263,12 +263,15 @@ async function request(endpoint, options = {}) {
         // Cleanly handle aborted request without throwing unhandled exceptions
         return null;
       }
-      if (error.name === 'TypeError' && error.message.includes('fetch')) {
-        throw new Error(`Unable to connect to backend server at ${API_BASE}. Please ensure Laravel is running.`);
+      if (error.name === 'TypeError' && /fetch|networkerror|load failed/i.test(error.message || '')) {
+        if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+          throw new Error('Browser is offline (ERR_INTERNET_DISCONNECTED). Check your Wi-Fi or DevTools Offline mode.');
+        }
+        throw new Error(`Unable to reach backend server at ${API_BASE}. Please ensure Laravel is running and your network is connected.`);
       }
       throw error;
     } finally {
-      if (isGet) {
+      if (isGet && inFlightControllers.get(endpoint) === controller) {
         inFlightControllers.delete(endpoint);
       }
     }
@@ -276,7 +279,14 @@ async function request(endpoint, options = {}) {
 
   if (isGet) {
     inFlightGets.set(endpoint, promise);
-    promise.finally(() => inFlightGets.delete(endpoint));
+    // Attach .catch() on cleanup chain so rejected GETs don't trigger Uncaught (in promise)
+    promise
+      .finally(() => {
+        if (inFlightGets.get(endpoint) === promise) {
+          inFlightGets.delete(endpoint);
+        }
+      })
+      .catch(() => { });
   }
 
   return promise;
