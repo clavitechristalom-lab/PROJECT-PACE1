@@ -5,6 +5,12 @@ import {
 } from 'react-icons/fi';
 import { api } from '../../lib/api';
 import { fmt } from '../../lib/utils';
+import {
+  MAIN_CATEGORIES,
+  resolveCategoryHierarchy,
+  matchesCategoryFilter,
+  getMainCategoryBadgeMeta,
+} from '../../lib/categories';
 
 export default function SelectProductModal({
   isOpen,
@@ -15,7 +21,7 @@ export default function SelectProductModal({
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
-  const [selectedCategory, setSelectedCategory] = useState('All'); // 'All' | 'Furniture' | 'Appliances'
+  const [selectedCategory, setSelectedCategory] = useState('All'); // 'All' | Main Categories | Group/Subcategory
   const [selectedMap, setSelectedMap] = useState({}); // { [productId]: { product, quantity } }
 
   // Load active products on open
@@ -56,26 +62,22 @@ export default function SelectProductModal({
     }
   }, [isOpen, initialSelectedItems]);
 
-  // Filter products by category and search
+  // Filter products by category hierarchy and search
   const filteredProducts = useMemo(() => {
     return products.filter((p) => {
-      // Category filter: support case-insensitive matching
-      const pCat = (p.category || '').toLowerCase();
-      if (selectedCategory === 'Furniture' && !pCat.includes('furniture')) {
-        return false;
-      }
-      if (selectedCategory === 'Appliances' && !pCat.includes('appliance')) {
+      if (!matchesCategoryFilter(p, selectedCategory)) {
         return false;
       }
 
-      // Search filter: name, brand, description, or product_code
+      // Search filter: name, brand, description, category, or product_code
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase();
         const matchesName = (p.product_name || '').toLowerCase().includes(q);
         const matchesBrand = (p.brand || '').toLowerCase().includes(q);
         const matchesDesc = (p.description || '').toLowerCase().includes(q);
         const matchesCode = (p.product_code || '').toLowerCase().includes(q);
-        if (!matchesName && !matchesBrand && !matchesDesc && !matchesCode) {
+        const matchesCat = (p.category || '').toLowerCase().includes(q);
+        if (!matchesName && !matchesBrand && !matchesDesc && !matchesCode && !matchesCat) {
           return false;
         }
       }
@@ -84,15 +86,17 @@ export default function SelectProductModal({
     });
   }, [products, selectedCategory, searchQuery]);
 
-  // Count items per category
+  // Count items per Main Category using hierarchy resolution
   const categoryCounts = useMemo(() => {
-    const furniture = products.filter(p => (p.category || '').toLowerCase().includes('furniture')).length;
-    const appliances = products.filter(p => (p.category || '').toLowerCase().includes('appliance')).length;
-    return {
-      all: products.length,
-      furniture,
-      appliances
-    };
+    const counts = { All: products.length };
+    MAIN_CATEGORIES.forEach((m) => { counts[m] = 0; });
+    products.forEach((p) => {
+      const mainCat = resolveCategoryHierarchy(p).mainCategory;
+      if (mainCat && counts[mainCat] !== undefined) {
+        counts[mainCat] += 1;
+      }
+    });
+    return counts;
   }, [products]);
 
   // Toggle or select product
@@ -175,7 +179,7 @@ export default function SelectProductModal({
               <h2 className="text-xl font-black text-foreground tracking-tight">Select Products</h2>
             </div>
             <p className="text-xs text-muted-foreground mt-1">
-              Browse our verified Furniture and Appliances catalog. Select items to add them directly to your payment checkout.
+              Browse our verified Furniture and Appliances catalog (including Consumer Electronics &amp; Audio-Visual). Select items to add them directly to your payment checkout.
             </p>
           </div>
 
@@ -190,9 +194,10 @@ export default function SelectProductModal({
         {/* ─── Filters & Search Toolbar ─── */}
         <div className="p-4 sm:px-6 border-b border-border/60 bg-background/50 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 shrink-0">
 
-          {/* Categorized Tabs: All, Furniture, Appliances */}
+          {/* Categorized Tabs: All + Main Categories (Furniture & Appliances) */}
           <div className="flex items-center gap-1.5 p-1 rounded-2xl bg-muted/70 border border-border shrink-0 overflow-x-auto">
             <button
+              key="All"
               type="button"
               onClick={() => setSelectedCategory('All')}
               className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap flex items-center gap-1.5 ${
@@ -203,39 +208,31 @@ export default function SelectProductModal({
             >
               <span>All Products</span>
               <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-muted text-muted-foreground font-mono">
-                {categoryCounts.all}
+                {categoryCounts.All}
               </span>
             </button>
 
-            <button
-              type="button"
-              onClick={() => setSelectedCategory('Furniture')}
-              className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap flex items-center gap-1.5 ${
-                selectedCategory === 'Furniture'
-                  ? 'bg-card text-purple-600 dark:text-purple-400 shadow-xs'
-                  : 'text-muted-foreground hover:text-foreground'
-              }`}
-            >
-              <span>🛋️ Furniture</span>
-              <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-purple-100 dark:bg-purple-950 text-purple-700 dark:text-purple-300 font-mono">
-                {categoryCounts.furniture}
-              </span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setSelectedCategory('Appliances')}
-              className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap flex items-center gap-1.5 ${
-                selectedCategory === 'Appliances'
-                  ? 'bg-card text-blue-600 dark:text-blue-400 shadow-xs'
-                  : 'text-muted-foreground hover:text-foreground'
-              }`}
-            >
-              <span>🔌 Appliances</span>
-              <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-blue-100 dark:bg-blue-950 text-blue-700 dark:text-blue-300 font-mono">
-                {categoryCounts.appliances}
-              </span>
-            </button>
+            {MAIN_CATEGORIES.map((mainCat) => {
+              const meta = getMainCategoryBadgeMeta(mainCat);
+              const isActive = selectedCategory === mainCat;
+              return (
+                <button
+                  key={mainCat}
+                  type="button"
+                  onClick={() => setSelectedCategory(mainCat)}
+                  className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap flex items-center gap-1.5 ${
+                    isActive
+                      ? 'bg-card text-foreground shadow-xs'
+                      : 'text-muted-foreground hover:text-foreground'
+                  }`}
+                >
+                  <span>{meta.shortLabel}</span>
+                  <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono ${meta.badgeClass}`}>
+                    {categoryCounts[mainCat] ?? 0}
+                  </span>
+                </button>
+              );
+            })}
           </div>
 
           {/* Search Box */}
@@ -293,7 +290,7 @@ export default function SelectProductModal({
                 const selectedQty = selectedMap[p.product_id]?.quantity || 1;
                 const effectivePrice = Number(p.discount_price || p.unit_price || 0);
                 const hasDiscount = p.discount_price && Number(p.discount_price) < Number(p.unit_price);
-                const isFurniture = (p.category || '').toLowerCase().includes('furniture');
+                const badgeMeta = getMainCategoryBadgeMeta(p);
 
                 return (
                   <div
@@ -322,12 +319,8 @@ export default function SelectProductModal({
 
                         {/* Category Pill */}
                         <div className="absolute top-2.5 left-2.5">
-                          <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold shadow-xs ${
-                            isFurniture
-                              ? 'bg-amber-100 text-amber-800 dark:bg-amber-950/80 dark:text-amber-300'
-                              : 'bg-blue-100 text-blue-800 dark:bg-blue-950/80 dark:text-blue-300'
-                          }`}>
-                            {isFurniture ? '🛋️ Furniture' : '🔌 Appliances'}
+                          <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold shadow-xs ${badgeMeta.badgeClass}`}>
+                            {p.category || badgeMeta.shortLabel}
                           </span>
                         </div>
 

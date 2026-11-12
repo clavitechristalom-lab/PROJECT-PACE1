@@ -85,7 +85,17 @@ class CustomerDashboardController extends Controller
 
         $categories = (clone $prodQuery)->select('category', \Illuminate\Support\Facades\DB::raw('count(*) as count'))
             ->groupBy('category')
-            ->get();
+            ->get()
+            ->map(function ($row) {
+                $hier = \App\Services\CategoryFramework::resolveHierarchy($row->category);
+                return [
+                    'category' => $row->category,
+                    'count' => (int) $row->count,
+                    'main_category' => $hier['main_category'],
+                    'category_group' => $hier['category_group'],
+                    'subcategory' => $hier['subcategory'],
+                ];
+            });
 
         // Financial metrics for this customer
         if ($customerId) {

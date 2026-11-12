@@ -1,11 +1,19 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Modal, LoadingState, EmptyState, Badge, StatusBadge, showToast, showSuccess, showError, showWarning, confirmDelete } from '../ui';
 import { api } from '../../lib/api';
-import { fmt } from '../../lib/utils';
+import { fmt, formatProductMeasurements } from '../../lib/utils';
 import { FiPackage, FiCalendar, FiClock, FiCreditCard, FiAlertCircle, FiCheckCircle, FiFileText, FiMessageCircle, FiChevronLeft, FiChevronRight, FiShoppingCart, FiX, FiTrash2, FiPrinter, FiSearch, FiRefreshCw, FiMaximize2, FiMinimize2, FiZoomIn } from 'react-icons/fi';
 import { TbCurrencyPeso } from 'react-icons/tb';
 import { useAuth } from '../../context/AuthContext';
 import { triggerDataSync, useRealtimeSync, fastDeepEqual } from '../../lib/realtimeSync';
+import {
+  MASTER_CATEGORY_FRAMEWORK,
+  MAIN_CATEGORIES,
+  matchesCategoryFilter,
+  resolveCategoryHierarchy,
+  getMainCategoryBadgeMeta,
+  getScopedCategoryOptions,
+} from '../../lib/categories';
 
 export function ProductListModal({ isOpen, onClose, category, availableCategories = [], initialProductId = null, onBuyProduct }) {
   const [products, setProducts] = useState([]);
@@ -15,6 +23,7 @@ export function ProductListModal({ isOpen, onClose, category, availableCategorie
   // Search and Filter State
   const [searchQuery, setSearchQuery] = useState('');
   const [activeCategory, setActiveCategory] = useState(category || 'All');
+  const [categoryTree, setCategoryTree] = useState(MASTER_CATEGORY_FRAMEWORK);
 
   // Carousel state
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -22,6 +31,17 @@ export function ProductListModal({ isOpen, onClose, category, availableCategorie
 
   // Detail Modal state
   const [selectedProduct, setSelectedProduct] = useState(null);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    api.products.getCategories()
+      .then((res) => {
+        if (Array.isArray(res?.tree) && res.tree.length > 0) {
+          setCategoryTree(prev => (fastDeepEqual(prev, res.tree) ? prev : res.tree));
+        }
+      })
+      .catch(() => {});
+  }, [isOpen]);
 
   useEffect(() => {
     if (initialProductId && products.length > 0 && !selectedProduct) {
@@ -78,8 +98,15 @@ export function ProductListModal({ isOpen, onClose, category, availableCategorie
 
   if (!isOpen) return null;
 
+  const activeMain = (() => {
+    if (activeCategory === 'All' || activeCategory === 'Sale Items') return activeCategory;
+    return resolveCategoryHierarchy(activeCategory, categoryTree).mainCategory || 'All';
+  })();
+
+  const displayedProducts = products.filter((p) => matchesCategoryFilter(p, activeCategory, categoryTree));
+
   const handleNext = () => {
-    if (currentIndex + itemsPerPage < products.length) {
+    if (currentIndex + itemsPerPage < displayedProducts.length) {
       setCurrentIndex(currentIndex + itemsPerPage);
     }
   };
@@ -90,8 +117,8 @@ export function ProductListModal({ isOpen, onClose, category, availableCategorie
     }
   };
 
-  const visibleProducts = products.slice(currentIndex, currentIndex + itemsPerPage);
-  const totalPages = Math.ceil(products.length / itemsPerPage);
+  const visibleProducts = displayedProducts.slice(currentIndex, currentIndex + itemsPerPage);
+  const totalPages = Math.ceil(displayedProducts.length / itemsPerPage);
   const currentPage = Math.floor(currentIndex / itemsPerPage);
 
   return (
@@ -100,37 +127,59 @@ export function ProductListModal({ isOpen, onClose, category, availableCategorie
       <Modal isOpen={isOpen} onClose={onClose} title="Product Catalog" size="xl">
         <div className="flex flex-col relative h-[520px]">
           {/* Filter & Search Bar */}
-          <div className="flex flex-col sm:flex-row justify-between items-center gap-4 mb-4 pb-4 border-b border-border shrink-0">
-            <div className="flex gap-2 overflow-x-auto pb-1 max-w-full">
-              {Array.from(new Set(['All', ...availableCategories, 'Sale Items'])).map(cat => (
-                <button
-                  key={cat}
-                  onClick={() => { setActiveCategory(cat); setCurrentIndex(0); }}
-                  className={`px-4 py-1.5 rounded-full text-sm font-semibold whitespace-nowrap transition-colors ${activeCategory === cat
-                    ? 'bg-[#176B87] text-white cursor-default shadow-sm'
-                    : 'bg-muted text-muted-foreground hover:bg-slate-200 dark:hover:bg-slate-800 cursor-pointer'
-                    }`}
+          <div className="flex flex-col gap-3 mb-4 pb-4 border-b border-border shrink-0">
+            <div className="flex flex-col sm:flex-row justify-between items-stretch sm:items-center gap-3">
+              <div className="flex gap-2 overflow-x-auto pb-1 max-w-full">
+                {Array.from(new Set(['All', ...MAIN_CATEGORIES, 'Sale Items', ...availableCategories.filter(c => resolveCategoryHierarchy(c, categoryTree).level === 'custom')])).map(cat => (
+                  <button
+                    key={`modal-cat-${cat}`}
+                    onClick={() => { setActiveCategory(cat); setCurrentIndex(0); }}
+                    className={`px-3.5 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap transition-colors ${activeCategory === cat
+                      ? 'bg-[#176B87] text-white cursor-default shadow-sm'
+                      : 'bg-muted text-muted-foreground hover:bg-slate-200 dark:hover:bg-slate-800 cursor-pointer'
+                      }`}
+                  >
+                    {cat}
+                  </button>
+                ))}
+              </div>
+              <div className="relative w-full sm:w-56 shrink-0">
+                <input
+                  type="text"
+                  placeholder="Search products..."
+                  value={searchQuery}
+                  onChange={(e) => { setSearchQuery(e.target.value); setCurrentIndex(0); }}
+                  className="w-full bg-background border border-border rounded-lg pl-3 pr-4 py-1.5 text-sm focus:outline-none focus:border-[#176B87]"
+                />
+              </div>
+            </div>
+
+            {activeMain !== 'All' && activeMain !== 'Sale Items' && (
+              <div className="flex items-center gap-2">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground shrink-0">
+                  {activeMain} Sub-Category:
+                </span>
+                <select
+                  value={activeCategory}
+                  onChange={(e) => { setActiveCategory(e.target.value); setCurrentIndex(0); }}
+                  className="border border-border rounded-lg px-2.5 py-1 text-xs font-semibold text-foreground bg-background cursor-pointer max-w-xs"
                 >
-                  {cat}
-                </button>
-              ))}
-            </div>
-            <div className="relative w-full sm:w-64">
-              <input
-                type="text"
-                placeholder="Search products..."
-                value={searchQuery}
-                onChange={(e) => { setSearchQuery(e.target.value); setCurrentIndex(0); }}
-                className="w-full bg-background border border-border rounded-lg pl-3 pr-4 py-1.5 text-sm focus:outline-none focus:border-[#176B87]"
-              />
-            </div>
+                  <option value={activeMain}>All {activeMain}</option>
+                  {getScopedCategoryOptions(activeMain, categoryTree).map((optName) => (
+                    <option key={`pm-opt-${activeMain}-${optName}`} value={optName}>
+                      {optName}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
           </div>
 
           {loading && products.length === 0 ? (
             <div className="flex-1 flex items-center justify-center">
               <LoadingState message="Loading products..." />
             </div>
-          ) : products.length === 0 ? (
+          ) : displayedProducts.length === 0 ? (
             <div className="flex-1 flex items-center justify-center">
               <EmptyState
                 icon={<FiPackage className="w-12 h-12 text-muted-foreground/30 mx-auto" />}
@@ -178,7 +227,14 @@ export function ProductListModal({ isOpen, onClose, category, availableCategorie
 
                         <div className="p-3 flex flex-col flex-1">
                           <div className="font-bold text-sm text-foreground leading-tight line-clamp-2">{p.product_name}</div>
-                          <div className="text-[10px] font-mono text-muted-foreground uppercase mt-1">{p.brand || 'No Brand'}</div>
+                          <div className="flex items-center gap-1.5 flex-wrap mt-1">
+                            {p.category && (
+                              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${getMainCategoryBadgeMeta(p, categoryTree).badgeClass}`}>
+                                {p.category}
+                              </span>
+                            )}
+                            <span className="text-[10px] font-mono text-muted-foreground uppercase">{p.brand || 'No Brand'}</span>
+                          </div>
 
                           <p className="text-xs text-muted-foreground line-clamp-2 mt-2 flex-1">{p.description || 'No description available.'}</p>
 
@@ -216,7 +272,7 @@ export function ProductListModal({ isOpen, onClose, category, availableCategorie
 
                 <button
                   onClick={handleNext}
-                  disabled={currentIndex + itemsPerPage >= products.length}
+                  disabled={currentIndex + itemsPerPage >= displayedProducts.length}
                   className="p-2 shrink-0 rounded-full hover:bg-muted disabled:opacity-30 disabled:cursor-not-allowed text-[#176B87]"
                 >
                   <FiChevronRight className="w-6 h-6" />
@@ -450,6 +506,26 @@ function ProductDetailModal({ product, onClose, onBuyProduct }) {
                     {product.stock_quantity > 0 ? `${product.stock_quantity} available` : 'Out of Stock'}
                   </span>
                 </div>
+                {(() => {
+                  const meas = formatProductMeasurements(product);
+                  if (!meas.hasAny) return null;
+                  return (
+                    <>
+                      {meas.dimensionsSummary && (
+                        <div className="flex justify-between items-center py-1 border-t border-border/50">
+                          <span className="text-muted-foreground font-medium">Dimensions (L×W×H)</span>
+                          <span className="font-mono font-semibold text-foreground text-right">{meas.dimensionsSummary}</span>
+                        </div>
+                      )}
+                      {meas.weightLabel && (
+                        <div className="flex justify-between items-center py-1 border-t border-border/50">
+                          <span className="text-muted-foreground font-medium">Weight</span>
+                          <span className="font-mono font-semibold text-foreground text-right">{meas.weightLabel}</span>
+                        </div>
+                      )}
+                    </>
+                  );
+                })()}
               </div>
             </div>
 

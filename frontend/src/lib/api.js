@@ -52,7 +52,7 @@ export const ENDPOINT_MODULE_MAP = {
     '/employee/me/verify-attendance-pin',
     '/employee/me/cancel-attendance-verification',
   ],
-  products: ['/products', '/categories'],
+  products: ['/products', '/categories', '/public/categories', '/public/products'],
   sales: ['/sales'],
   transactions: ['/transactions'],
   installments: ['/installments', '/payment-schedules', '/statements'],
@@ -420,8 +420,34 @@ export const api = {
     getRecent: (options = {}) => request('/dashboard/recent', options),
   },
 
-  // ─── Products ───
+  // ─── Products & Categories ───
   products: {
+    getPublicCategories: (params = {}, options = {}) => {
+      const qs = new URLSearchParams(cleanParams(params)).toString();
+      return request(`/public/categories${qs ? `?${qs}` : ''}`, options);
+    },
+    getCategories: (params = {}, options = {}) => {
+      const qs = new URLSearchParams(cleanParams(params)).toString();
+      return request(`/categories${qs ? `?${qs}` : ''}`, options);
+    },
+    createCategory: (data) =>
+      request('/categories', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+    updateCategory: (id, data) =>
+      request(`/categories/${id}`, {
+        method: 'PUT',
+        body: JSON.stringify(data),
+      }),
+    toggleCategoryStatus: (id) =>
+      request(`/categories/${id}/toggle-status`, {
+        method: 'PATCH',
+      }),
+    deleteCategory: (id) =>
+      request(`/categories/${id}`, {
+        method: 'DELETE',
+      }),
     getPublicProducts: (params = {}, options = {}) => {
       const qs = new URLSearchParams(cleanParams(params)).toString();
       return request(`/public/products${qs ? `?${qs}` : ''}`, options);

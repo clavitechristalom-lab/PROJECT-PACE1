@@ -5,15 +5,67 @@ namespace App\Http\Controllers;
 use Illuminate\Http\Request;
 use App\Models\Product;
 use App\Models\SystemLog;
+use App\Services\CategoryFramework;
 use Illuminate\Support\Facades\Cache;
 
 class ProductController extends Controller
 {
+    private static function resolveSkuDomain(?string $category): string
+    {
+        $resolved = CategoryFramework::resolveHierarchy($category);
+        return $resolved['main_category'] ?: ($resolved['sku_prefix'] ?: 'PRD');
+    }
+
+    private static function findDuplicateDomainProduct(string $code, string $category, ?int $ignoreProductId = null): ?Product
+    {
+        $targetDomain = self::resolveSkuDomain($category);
+        $query = Product::whereRaw('LOWER(product_code) = ?', [strtolower(trim($code))]);
+        if ($ignoreProductId !== null) {
+            $query->where('product_id', '!=', $ignoreProductId);
+        }
+
+        foreach ($query->get() as $existing) {
+            if (self::resolveSkuDomain($existing->category) === $targetDomain) {
+                return $existing;
+            }
+        }
+
+        return null;
+    }
+
+    private static function nextSkuForDomain(string $categoryOrDomain): string
+    {
+        $targetDomain = self::resolveSkuDomain($categoryOrDomain);
+        $usedNumbers = [];
+
+        foreach (Product::select('product_code', 'category')->get() as $item) {
+            if (self::resolveSkuDomain($item->category) !== $targetDomain) {
+                continue;
+            }
+            $raw = trim((string) $item->product_code);
+            if (preg_match('/^(\d+)$/', $raw, $m)) {
+                $usedNumbers[(int) $m[1]] = true;
+            }
+        }
+
+        $next = 1;
+        while (isset($usedNumbers[$next])) {
+            $next++;
+        }
+
+        return str_pad((string) $next, 3, '0', STR_PAD_LEFT);
+    }
+
     public function indexPublic(Request $request)
     {
         $query = Product::where('status', 'Active');
-        if ($request->filled('category')) {
-            $query->where('category', $request->query('category'));
+        if ($request->filled('category') && $request->query('category') !== 'All') {
+            $matching = CategoryFramework::matchingCategories($request->query('category'));
+            if (!empty($matching)) {
+                $query->whereIn('category', $matching);
+            } else {
+                $query->where('category', $request->query('category'));
+            }
         }
         $products = $query->limit(12)->get();
         return response()->json(['products' => $products]);
@@ -87,7 +139,12 @@ class ProductController extends Controller
             if ($request->query('category') === 'Sale Items') {
                 $query->whereNotNull('discount_price');
             } else {
-                $query->where('category', $request->query('category'));
+                $matching = CategoryFramework::matchingCategories($request->query('category'));
+                if (!empty($matching)) {
+                    $query->whereIn('category', $matching);
+                } else {
+                    $query->where('category', $request->query('category'));
+                }
             }
         }
 
@@ -149,6 +206,10 @@ class ProductController extends Controller
         $res = [
             'products' => $products,
             'total' => $products->count(),
+            'next_skus' => [
+                'Furniture' => self::nextSkuForDomain('Furniture'),
+                'Appliances' => self::nextSkuForDomain('Appliances'),
+            ],
         ];
 
         if (isset($cacheKey)) {
@@ -177,7 +238,7 @@ class ProductController extends Controller
 
         $validated = $request->validate([
             'branch_id' => 'nullable|exists:branch_profiles,id',
-            'product_code' => 'nullable|string|unique:products,product_code',
+            'product_code' => 'nullable|string|max:255',
             'product_name' => 'required|string|max:255',
             'category' => 'required|string|max:255',
             'brand' => 'nullable|string|max:255',
@@ -188,6 +249,12 @@ class ProductController extends Controller
             'stock_quantity' => 'required|integer|min:0',
             'reorder_level' => 'nullable|integer|min:0',
             'unit' => 'nullable|string|max:50',
+            'length' => 'nullable|numeric|min:0',
+            'width' => 'nullable|numeric|min:0',
+            'height' => 'nullable|numeric|min:0',
+            'dimension_unit' => 'nullable|string|in:cm,mm,m,in,ft',
+            'weight' => 'nullable|numeric|min:0',
+            'weight_unit' => 'nullable|string|in:kg,g,lbs',
             'status' => 'required|string|in:Active,Inactive',
             'image_1' => 'nullable|image|mimes:jpeg,png,jpg,webp|max:5120',
             'image_2' => 'nullable|image|mimes:jpeg,png,jpg,webp|max:5120',
@@ -195,31 +262,27 @@ class ProductController extends Controller
             'image_4' => 'nullable|image|mimes:jpeg,png,jpg,webp|max:5120',
         ]);
 
-        if (empty($validated['product_code'])) {
-            $catPrefix = 'PRD';
-            if (strcasecmp($validated['category'], 'Appliances') === 0) {
-                $catPrefix = 'APP';
-            } elseif (strcasecmp($validated['category'], 'Furniture') === 0) {
-                $catPrefix = 'FUR';
-            } else {
-                $catPrefix = strtoupper(substr(preg_replace('/[^A-Za-z0-9]/', '', $validated['category']), 0, 3));
-                if (empty($catPrefix)) $catPrefix = 'PRD';
-            }
+        $validated['category'] = CategoryFramework::canonicalName($validated['category']);
 
-            $count = Product::where('product_code', 'like', $catPrefix . '-%')->count() + 1;
-            $newCode = $catPrefix . '-' . str_pad($count, 3, '0', STR_PAD_LEFT);
-            
-            while (Product::where('product_code', $newCode)->exists()) {
-                $count++;
-                $newCode = $catPrefix . '-' . str_pad($count, 3, '0', STR_PAD_LEFT);
+        if (empty($validated['product_code'])) {
+            $validated['product_code'] = self::nextSkuForDomain($validated['category']);
+        } else {
+            $validated['product_code'] = trim($validated['product_code']);
+            if (self::findDuplicateDomainProduct($validated['product_code'], $validated['category'])) {
+                $domainLabel = self::resolveSkuDomain($validated['category']);
+                $msg = "The product code has already been taken in {$domainLabel}.";
+                return response()->json([
+                    'message' => $msg,
+                    'errors' => ['product_code' => [$msg]],
+                ], 422);
             }
-            
-            $validated['product_code'] = $newCode;
         }
 
         $validated['cost_price'] = $validated['cost_price'] ?? 0;
         $validated['reorder_level'] = $validated['reorder_level'] ?? 0;
         $validated['unit'] = $validated['unit'] ?? 'unit';
+        $validated['dimension_unit'] = $validated['dimension_unit'] ?? 'cm';
+        $validated['weight_unit'] = $validated['weight_unit'] ?? 'kg';
 
         if ($user && in_array($user->role, ['Store Administrator', 'Store Admin'])) {
             $employee = \App\Models\Employee::where('employee_id', $user->employee_id)->first();
@@ -311,7 +374,7 @@ class ProductController extends Controller
 
         $validated = $request->validate([
             'branch_id' => 'nullable|exists:branch_profiles,id',
-            'product_code' => "required|string|unique:products,product_code,{$id},product_id",
+            'product_code' => 'required|string|max:255',
             'product_name' => 'required|string|max:255',
             'category' => 'required|string|max:255',
             'brand' => 'nullable|string|max:255',
@@ -322,6 +385,12 @@ class ProductController extends Controller
             'stock_quantity' => 'required|integer|min:0',
             'reorder_level' => 'nullable|integer|min:0',
             'unit' => 'nullable|string|max:50',
+            'length' => 'nullable|numeric|min:0',
+            'width' => 'nullable|numeric|min:0',
+            'height' => 'nullable|numeric|min:0',
+            'dimension_unit' => 'nullable|string|in:cm,mm,m,in,ft',
+            'weight' => 'nullable|numeric|min:0',
+            'weight_unit' => 'nullable|string|in:kg,g,lbs',
             'status' => 'required|string|in:Active,Inactive',
             'image_1' => 'nullable|image|mimes:jpeg,png,jpg,webp|max:5120',
             'image_2' => 'nullable|image|mimes:jpeg,png,jpg,webp|max:5120',
@@ -335,6 +404,21 @@ class ProductController extends Controller
             if (empty($validated['branch_id']) || $validated['branch_id'] === 'all') {
                 $validated['branch_id'] = null;
             }
+        }
+
+        $validated['category'] = CategoryFramework::canonicalName($validated['category']);
+        $validated['product_code'] = trim($validated['product_code']);
+        $validated['unit'] = $validated['unit'] ?? 'unit';
+        $validated['dimension_unit'] = $validated['dimension_unit'] ?? 'cm';
+        $validated['weight_unit'] = $validated['weight_unit'] ?? 'kg';
+
+        if (self::findDuplicateDomainProduct($validated['product_code'], $validated['category'], (int) $id)) {
+            $domainLabel = self::resolveSkuDomain($validated['category']);
+            $msg = "The product code has already been taken in {$domainLabel}.";
+            return response()->json([
+                'message' => $msg,
+                'errors' => ['product_code' => [$msg]],
+            ], 422);
         }
 
         $product->update($validated);

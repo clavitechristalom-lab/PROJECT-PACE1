@@ -1,21 +1,42 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { 
   FiSearch, FiFilter, FiPackage, FiShoppingBag, FiCheck, FiX, 
   FiChevronLeft, FiChevronRight, FiMaximize2, FiMinimize2, FiLayers 
 } from 'react-icons/fi';
 import { TbCurrencyPeso } from 'react-icons/tb';
 import { api } from '../../../lib/api';
-import { fmt } from '../../../lib/utils';
+import { fmt, formatProductMeasurements } from '../../../lib/utils';
 import { Spinner, Badge } from '../../ui';
 import { useRealtimeSync, fastDeepEqual } from '../../../lib/realtimeSync';
+import {
+  MASTER_CATEGORY_FRAMEWORK,
+  MAIN_CATEGORIES,
+  resolveCategoryHierarchy,
+  matchesCategoryFilter,
+  formatCategoryBreadcrumbs,
+  getMainCategoryBadgeMeta,
+  getScopedCategoryOptions,
+} from '../../../lib/categories';
 
 export default function StoreCatalogView({ onBuyProduct, availableCategories = [] }) {
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
+  const [categoryTree, setCategoryTree] = useState(MASTER_CATEGORY_FRAMEWORK);
+  const [selectedMain, setSelectedMain] = useState('All');
   const [activeCategory, setActiveCategory] = useState('All');
   const [selectedProduct, setSelectedProduct] = useState(null);
   const inFlightRef = useRef(false);
+
+  useEffect(() => {
+    api.products.getCategories()
+      .then((res) => {
+        if (Array.isArray(res?.tree) && res.tree.length > 0) {
+          setCategoryTree(prev => (fastDeepEqual(prev, res.tree) ? prev : res.tree));
+        }
+      })
+      .catch(() => {});
+  }, []);
 
   const loadProducts = useCallback(async (silent = false, signal) => {
     if (inFlightRef.current && silent) return;
@@ -47,11 +68,21 @@ export default function StoreCatalogView({ onBuyProduct, availableCategories = [
     loadProducts(true, signal);
   }, [loadProducts], { module: 'products' });
 
-  // Extract all categories dynamically if not provided
-  const categories = ['All', ...new Set([
-    ...availableCategories,
-    ...products.map(p => p.category).filter(Boolean)
-  ])];
+  const customExtraCategories = useMemo(() => {
+    const extras = new Set();
+    [...availableCategories, ...products.map((p) => p.category)].forEach((raw) => {
+      const cat = String(raw || '').trim();
+      if (!cat) return;
+      if (resolveCategoryHierarchy(cat, categoryTree).level === 'custom') {
+        extras.add(cat);
+      }
+    });
+    return Array.from(extras).sort();
+  }, [availableCategories, products, categoryTree]);
+
+  const displayedProducts = useMemo(() => {
+    return products.filter((p) => matchesCategoryFilter(p, activeCategory, categoryTree));
+  }, [products, activeCategory, categoryTree]);
 
   return (
     <div className="space-y-6 animate-[fadeIn_0.3s_ease]">
@@ -63,33 +94,65 @@ export default function StoreCatalogView({ onBuyProduct, availableCategories = [
               Product List
             </span>
             <span className="text-xs text-muted-foreground font-semibold">
-              {products.length} Products Available
+              {displayedProducts.length} Products Available
             </span>
           </div>
           <h1 className="text-2xl sm:text-3xl font-extrabold text-foreground tracking-tight">
             Product List & Merchandise
           </h1>
           <p className="text-xs sm:text-sm text-muted-foreground">
-            Explore premium furniture, home appliances, and installment-ready pieces available at Z-Lics Iligan.
+            Explore furniture and appliances (including home entertainment, audio systems &amp; consumer electronics) available at Z-Lics Iligan.
           </p>
         </div>
       </div>
 
-      {/* Category Filter Pills */}
-      <div className="flex items-center gap-2 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-        {categories.map((cat) => (
-          <button
-            key={cat}
-            onClick={() => setActiveCategory(cat)}
-            className={`px-4 py-2 rounded-2xl text-xs font-bold transition-all shrink-0 cursor-pointer ${
-              activeCategory === cat
-                ? 'bg-blue-600 text-white shadow-md shadow-blue-600/25 scale-102'
-                : 'bg-card border border-border text-muted-foreground hover:text-foreground hover:bg-muted'
-            }`}
-          >
-            {cat}
-          </button>
-        ))}
+      {/* Category Filter Toolbar: Main Domains + Inline Scoped Categories */}
+      <div className="space-y-2.5">
+        <div className="flex items-center gap-2 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          {['All', ...MAIN_CATEGORIES, 'Sale Items', ...customExtraCategories].map((mainCat) => {
+            const isActive = selectedMain === mainCat;
+            const meta = mainCat !== 'All' && mainCat !== 'Sale Items' ? getMainCategoryBadgeMeta(mainCat, categoryTree) : null;
+            return (
+              <button
+                key={`catalog-main-${mainCat}`}
+                onClick={() => {
+                  setSelectedMain(mainCat);
+                  setActiveCategory(mainCat);
+                }}
+                className={`px-4 py-2 rounded-2xl text-xs font-bold transition-all shrink-0 cursor-pointer ${
+                  isActive
+                    ? (meta?.pillActiveClass || 'bg-blue-600 text-white shadow-md shadow-blue-600/25 scale-102')
+                    : 'bg-card border border-border text-muted-foreground hover:text-foreground hover:bg-muted'
+                }`}
+              >
+                {mainCat === 'All' ? 'All Categories' : mainCat}
+              </button>
+            );
+          })}
+        </div>
+
+        {selectedMain !== 'All' && selectedMain !== 'Sale Items' && getScopedCategoryOptions(selectedMain, categoryTree).length > 0 && (
+          <div className="flex items-center gap-2 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+            {getScopedCategoryOptions(selectedMain, categoryTree).map((optName) => {
+              const isSubActive = activeCategory === optName;
+              const meta = getMainCategoryBadgeMeta(selectedMain, categoryTree);
+              return (
+                <button
+                  key={`cat-opt-${selectedMain}-${optName}`}
+                  type="button"
+                  onClick={() => setActiveCategory(isSubActive ? selectedMain : optName)}
+                  className={`px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-all shrink-0 cursor-pointer border ${
+                    isSubActive
+                      ? (meta?.pillActiveClass ? `${meta.pillActiveClass} border-transparent` : 'bg-blue-600 text-white border-transparent shadow-xs')
+                      : 'bg-card border-border text-muted-foreground hover:text-foreground hover:bg-muted'
+                  }`}
+                >
+                  {optName}
+                </button>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       {/* Product Grid */}
@@ -100,7 +163,7 @@ export default function StoreCatalogView({ onBuyProduct, availableCategories = [
             <p className="text-xs text-muted-foreground font-semibold animate-pulse">Loading store showroom...</p>
           </div>
         </div>
-      ) : products.length === 0 ? (
+      ) : displayedProducts.length === 0 ? (
         <div className="rounded-[2.5rem] p-12 text-center bg-card border border-dashed border-border space-y-3">
           <div className="w-14 h-14 rounded-2xl bg-muted flex items-center justify-center text-muted-foreground mx-auto">
             <FiPackage className="w-7 h-7" />
@@ -111,7 +174,7 @@ export default function StoreCatalogView({ onBuyProduct, availableCategories = [
           </p>
           {(searchQuery || activeCategory !== 'All') && (
             <button
-              onClick={() => { setSearchQuery(''); setActiveCategory('All'); }}
+              onClick={() => { setSearchQuery(''); setSelectedMain('All'); setActiveCategory('All'); }}
               className="px-4 py-2 text-xs font-bold rounded-xl bg-blue-600 text-white hover:bg-blue-700 transition-colors cursor-pointer"
             >
               Clear Filters
@@ -120,7 +183,7 @@ export default function StoreCatalogView({ onBuyProduct, availableCategories = [
         </div>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-5">
-          {products.map((p) => {
+          {displayedProducts.map((p) => {
             const price = Number(p.discount_price || p.unit_price || p.price || 0);
             const originalPrice = p.discount_price ? Number(p.unit_price || p.price || 0) : null;
             const inStock = Number(p.stock_quantity ?? 1) > 0;
@@ -224,6 +287,7 @@ export default function StoreCatalogView({ onBuyProduct, availableCategories = [
       {selectedProduct && (
         <ProductDetailViewer
           product={selectedProduct}
+          categoryTree={categoryTree}
           onClose={() => setSelectedProduct(null)}
           onBuyProduct={(prod) => {
             setSelectedProduct(null);
@@ -235,7 +299,7 @@ export default function StoreCatalogView({ onBuyProduct, availableCategories = [
   );
 }
 
-function ProductDetailViewer({ product, onClose, onBuyProduct }) {
+function ProductDetailViewer({ product, categoryTree = MASTER_CATEGORY_FRAMEWORK, onClose, onBuyProduct }) {
   const images = [product.image_url, product.image_url_2, product.image_url_3, product.image_url_4]
     .filter(Boolean)
     .map(url => (url.includes('/storage/') ? url.substring(url.indexOf('/storage/')) : url));
@@ -252,9 +316,9 @@ function ProductDetailViewer({ product, onClose, onBuyProduct }) {
         
         {/* Header */}
         <div className="px-6 py-4 border-b border-border flex items-center justify-between shrink-0 bg-slate-50 dark:bg-slate-900/60">
-          <div className="flex items-center gap-2">
-            <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-blue-100 text-blue-800 dark:bg-blue-950/60 dark:text-blue-300">
-              {product.category || 'General'}
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className={`px-2.5 py-0.5 rounded-full text-xs font-bold ${getMainCategoryBadgeMeta(product, categoryTree).badgeClass}`}>
+              {formatCategoryBreadcrumbs(product, categoryTree)}
             </span>
             <span className="text-xs font-mono font-bold text-muted-foreground">
               {product.product_code || ''}
@@ -349,6 +413,38 @@ function ProductDetailViewer({ product, onClose, onBuyProduct }) {
                   {Number(product.stock_quantity ?? 1) > 0 ? `${product.stock_quantity} in stock` : 'Out of Stock'}
                 </p>
               </div>
+              {(() => {
+                const meas = formatProductMeasurements(product);
+                if (!meas.hasAny) return null;
+                return (
+                  <>
+                    {meas.lengthLabel && (
+                      <div>
+                        <span className="text-[10px] font-bold uppercase text-muted-foreground">Length</span>
+                        <p className="font-mono font-semibold text-foreground mt-0.5">{meas.lengthLabel}</p>
+                      </div>
+                    )}
+                    {meas.widthLabel && (
+                      <div>
+                        <span className="text-[10px] font-bold uppercase text-muted-foreground">Width</span>
+                        <p className="font-mono font-semibold text-foreground mt-0.5">{meas.widthLabel}</p>
+                      </div>
+                    )}
+                    {meas.heightLabel && (
+                      <div>
+                        <span className="text-[10px] font-bold uppercase text-muted-foreground">Height</span>
+                        <p className="font-mono font-semibold text-foreground mt-0.5">{meas.heightLabel}</p>
+                      </div>
+                    )}
+                    {meas.weightLabel && (
+                      <div>
+                        <span className="text-[10px] font-bold uppercase text-muted-foreground">Weight</span>
+                        <p className="font-mono font-semibold text-foreground mt-0.5">{meas.weightLabel}</p>
+                      </div>
+                    )}
+                  </>
+                );
+              })()}
             </div>
           </div>
         </div>

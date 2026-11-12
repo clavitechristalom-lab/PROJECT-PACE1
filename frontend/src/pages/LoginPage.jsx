@@ -13,6 +13,12 @@ import { useAuth } from '../context/AuthContext'
 import { useTheme } from '../context/ThemeContext'
 import { Spinner, Pagination } from '../components/ui'
 import { api, STORAGE_BASE } from '../lib/api'
+import {
+  MASTER_CATEGORY_FRAMEWORK,
+  getMainCategoryBadgeMeta,
+  getScopedCategoryOptions,
+  matchesCategoryFilter,
+} from '../lib/categories'
 import heroImg from '../assets/furniture-hero.png'
 import zliczLogo from '../assets/zlicz-logo.png'
 
@@ -98,6 +104,9 @@ export default function LoginPage() {
 
   const [appliances, setAppliances] = useState([])
   const [furniture, setFurniture] = useState([])
+  const [publicCategoryTree, setPublicCategoryTree] = useState(MASTER_CATEGORY_FRAMEWORK)
+  const [applianceSubCategory, setApplianceSubCategory] = useState('Appliances')
+  const [furnitureSubCategory, setFurnitureSubCategory] = useState('Furniture')
   const [loadingProducts, setLoadingProducts] = useState(true)
 
   const [sysSettings, setSysSettings] = useState(null)
@@ -119,26 +128,35 @@ export default function LoginPage() {
   // Products pagination
   const [appliancePage, setAppliancePage] = useState(1)
   const appliancePageSize = 8
-  const paginatedAppliances = useMemo(() => {
-    const start = (appliancePage - 1) * appliancePageSize
-    return appliances.slice(start, start + appliancePageSize)
-  }, [appliances, appliancePage, appliancePageSize])
-
   const [furniturePage, setFurniturePage] = useState(1)
   const furniturePageSize = 8
-  const paginatedFurniture = useMemo(() => {
-    const start = (furniturePage - 1) * furniturePageSize
-    return furniture.slice(start, start + furniturePageSize)
-  }, [furniture, furniturePage, furniturePageSize])
+
+  const activePublicCategoryTree = useMemo(() => {
+    return (publicCategoryTree || []).map((domain) => ({
+      ...domain,
+      groups: (domain.groups || [])
+        .filter((grp) => grp?.is_active !== false)
+        .map((grp) => ({
+          ...grp,
+          subcategories: (grp.subcategories || []).filter((sub) => (typeof sub === 'string' ? true : sub?.is_active !== false)),
+        })),
+    }))
+  }, [publicCategoryTree])
 
   useEffect(() => {
     const fetchPublicData = async () => {
       try {
-        const appRes = await api.products.getPublicProducts({ category: 'Appliances' })
+        const [appRes, furnRes, catRes, sRes] = await Promise.all([
+          api.products.getPublicProducts({ category: 'Appliances' }),
+          api.products.getPublicProducts({ category: 'Furniture' }),
+          api.products.getPublicCategories().catch(() => null),
+          api.system.getPublicSettings().catch(() => null),
+        ])
         setAppliances(appRes.products || [])
-        const furnRes = await api.products.getPublicProducts({ category: 'Furniture' })
         setFurniture(furnRes.products || [])
-        const sRes = await api.system.getPublicSettings()
+        if (Array.isArray(catRes?.tree) && catRes.tree.length > 0) {
+          setPublicCategoryTree(catRes.tree)
+        }
         if (sRes) setSysSettings(sRes)
       } catch (err) {
         console.error('Failed to load public data', err)
@@ -179,9 +197,10 @@ export default function LoginPage() {
     const raw = window.location.hash || ''
     const hashClean = raw.replace(/^#\/?/, '').toLowerCase()
     const pathClean = (location.pathname || '').replace(/^\//, '').toLowerCase()
-    const target = ['home', 'appliances', 'furniture', 'about', 'support'].includes(pathClean)
+    const rawTarget = ['home', 'appliances', 'furniture', 'electronics', 'about', 'support'].includes(pathClean)
       ? pathClean
-      : (['home', 'appliances', 'furniture', 'about', 'support'].includes(hashClean) ? hashClean : null)
+      : (['home', 'appliances', 'furniture', 'electronics', 'about', 'support'].includes(hashClean) ? hashClean : null)
+    const target = rawTarget === 'electronics' ? 'appliances' : rawTarget
 
     if (target) {
       const timer = setTimeout(() => {
@@ -777,199 +796,210 @@ export default function LoginPage() {
         <div className="services-bar">
           <a href="#appliances" onClick={(e) => handleNavClick(e, 'appliances')} className="service hover:bg-white/5 transition-colors cursor-pointer">
             <div className="service-icon">
-              <FiTv />
+              <FiHome />
             </div>
             <div>
               <h2>Home Appliances</h2>
-              <p>Smart essentials that make everyday living effortless.</p>
+              <p>Major, kitchen, climate, and floor care home essentials.</p>
               {sysSettings?.total_appliances > 0 && <span className="text-[10px] font-bold text-[#58B947] mt-1.5 block uppercase tracking-wider">{sysSettings.total_appliances} Products Available</span>}
             </div>
           </a>
           <a href="#furniture" onClick={(e) => handleNavClick(e, 'furniture')} className="service hover:bg-white/5 transition-colors cursor-pointer">
             <div className="service-icon">
-              <FiHome />
+              <FiPackage />
             </div>
             <div>
-              <h2>Living Room</h2>
-              <p>Comfortable furniture designed for gathering and relaxing.</p>
+              <h2>Furniture</h2>
+              <p>Living room, bedroom, dining, home office, outdoor &amp; accent pieces.</p>
               {sysSettings?.total_furniture > 0 && <span className="text-[10px] font-bold text-[#58B947] mt-1.5 block uppercase tracking-wider">{sysSettings.total_furniture} Products Available</span>}
+            </div>
+          </a>
+          <a href="#appliances" onClick={(e) => handleNavClick(e, 'appliances')} className="service hover:bg-white/5 transition-colors cursor-pointer">
+            <div className="service-icon">
+              <FiTv />
+            </div>
+            <div>
+              <h2>Electronics &amp; Audio-Visual</h2>
+              <p>Displays, projection systems, audio theater, and AV hardware under Appliances.</p>
+              {sysSettings?.total_electronics > 0 && <span className="text-[10px] font-bold text-[#58B947] mt-1.5 block uppercase tracking-wider">{sysSettings.total_electronics} Products Available</span>}
             </div>
           </a>
           <a href="#furniture" onClick={(e) => handleNavClick(e, 'furniture')} className="service hover:bg-white/5 transition-colors cursor-pointer">
             <div className="service-icon">
-              <FiMoon />
+              <FiHeadphones />
             </div>
             <div>
-              <h2>Bedroom</h2>
-              <p>Restful pieces created for calm, beautifully layered spaces.</p>
-              {sysSettings?.total_furniture > 0 && <span className="text-[10px] font-bold text-[#58B947] mt-1.5 block uppercase tracking-wider">{sysSettings.total_furniture} Products Available</span>}
-            </div>
-          </a>
-          <a href="#furniture" onClick={(e) => handleNavClick(e, 'furniture')} className="service hover:bg-white/5 transition-colors cursor-pointer">
-            <div className="service-icon">
-              <FiCoffee />
-            </div>
-            <div>
-              <h2>Dining & Decor</h2>
-              <p>Finishing touches that bring warmth and character home.</p>
-              {sysSettings?.total_furniture > 0 && <span className="text-[10px] font-bold text-[#58B947] mt-1.5 block uppercase tracking-wider">{sysSettings.total_furniture} Products Available</span>}
+              <h2>Audio &amp; Living Collections</h2>
+              <p>Curated home comfort, entertainment, and accent collections.</p>
+              {sysSettings?.total_products > 0 && <span className="text-[10px] font-bold text-[#58B947] mt-1.5 block uppercase tracking-wider">{sysSettings.total_products} Total Catalog Items</span>}
             </div>
           </a>
         </div>
       </div>
 
       <main className="relative z-10 w-full bg-[#f5f3ed] dark:bg-[#0b131e] text-gray-900 dark:text-slate-100 transition-colors duration-300">
-        {/* Appliances Section */}
-        <section id="appliances" className="px-4 md:px-16 py-16 bg-white dark:bg-[#0f172a] border-t border-gray-200 dark:border-slate-800 transition-colors duration-300">
-          <div className="max-w-6xl mx-auto">
-            <div className="flex items-center justify-between mb-8">
-              <div>
-                <h2 className="text-2xl md:text-3xl font-bold text-gray-900 dark:text-white">Appliances</h2>
-                <p className="text-xs sm:text-sm text-gray-500 dark:text-slate-400 mt-1">Energy-efficient and dependable appliances for your everyday home</p>
-              </div>
-            </div>
-
-            {loadingProducts ? (
-              <div className="flex justify-center py-12"><Spinner className="w-8 h-8 text-gray-900 dark:text-white" /></div>
-            ) : appliances.length > 0 ? (
-              <>
-                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
-                  {paginatedAppliances.map(product => (
-                    <div key={product.product_id || product.id} className="rounded-2xl overflow-hidden border bg-white dark:bg-slate-800/80 border-gray-200 dark:border-slate-700 shadow-sm transition-all hover:-translate-y-1 hover:shadow-lg group cursor-pointer">
-                      <div className="h-48 bg-gray-100 dark:bg-slate-700/50 overflow-hidden relative">
-                        {product.image_url ? (
-                          <img
-                            src={product.image_url.includes('/storage/') ? `${STORAGE_BASE}${product.image_url.substring(product.image_url.indexOf('/storage/'))}` : (product.image_url.startsWith('http') ? product.image_url : `${STORAGE_BASE}${product.image_url.startsWith('/') ? '' : '/storage/'}${product.image_url}`)}
-                            alt={product.product_name}
-                            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                            onError={e => { e.target.style.display = 'none'; e.target.nextSibling.style.display = 'flex'; }}
-                          />
-                        ) : null}
-                        <div className={`w-full h-full flex items-center justify-center text-gray-300 dark:text-slate-500 font-medium bg-gradient-to-br from-gray-50 to-gray-100 dark:from-slate-800 dark:to-slate-700 ${product.image_url ? 'hidden' : 'flex'}`}>
-                          <FiImage className="w-12 h-12 opacity-30" />
-                        </div>
-                        {product.discount_price && Number(product.discount_price) < Number(product.unit_price) && (
-                          <span className="absolute top-2 left-2 bg-red-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full">SALE</span>
-                        )}
-                      </div>
-                      <div className="p-5">
-                        {product.brand && <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400 dark:text-slate-400 mb-1">{product.brand}</p>}
-                        <h3 className="font-bold mb-1 text-gray-900 dark:text-white leading-tight" title={product.product_name}>{product.product_name}</h3>
-                        {product.description && <p className="text-xs text-gray-400 dark:text-slate-400 mb-2 line-clamp-2">{product.description}</p>}
-                        <div className="flex items-center justify-between mt-2">
-                          <div>
-                            {product.discount_price && Number(product.discount_price) < Number(product.unit_price) ? (
-                              <>
-                                <p className="text-[#58B947] font-bold text-base">₱{Number(product.discount_price).toLocaleString()}</p>
-                                <p className="text-gray-400 dark:text-slate-500 text-xs line-through">₱{Number(product.unit_price).toLocaleString()}</p>
-                              </>
-                            ) : (
-                              <p className="text-[#58B947] font-bold text-base">₱{Number(product.unit_price).toLocaleString()}</p>
-                            )}
-                          </div>
-                          {product.stock_quantity !== undefined && (
-                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${product.stock_quantity > 0 ? 'bg-green-100 text-green-700 dark:bg-green-950/60 dark:text-green-400' : 'bg-red-100 text-red-500 dark:bg-red-950/60 dark:text-red-400'}`}>
-                              {product.stock_quantity > 0 ? `${product.stock_quantity} in stock` : 'Out of stock'}
-                            </span>
-                          )}
-                        </div>
-                      </div>
+        {/* Shared Showcase Renderer helper via inline sections */}
+        {[
+          {
+            id: 'appliances',
+            title: 'Appliances',
+            subtitle: 'Major & small home appliances, climate comfort, floor care, displays, and audio-visual systems',
+            items: appliances,
+            activeCategory: applianceSubCategory,
+            setActiveCategory: setApplianceSubCategory,
+            page: appliancePage,
+            setPage: setAppliancePage,
+            pageSize: appliancePageSize,
+            emptyText: 'No appliances available at the moment.',
+            sectionBg: 'bg-white dark:bg-[#0f172a]',
+          },
+          {
+            id: 'furniture',
+            title: 'Furniture',
+            subtitle: 'Living room, bedroom, dining, home office, outdoor & patio, and entryway furnishings',
+            items: furniture,
+            activeCategory: furnitureSubCategory,
+            setActiveCategory: setFurnitureSubCategory,
+            page: furniturePage,
+            setPage: setFurniturePage,
+            pageSize: furniturePageSize,
+            emptyText: 'No furniture available at the moment.',
+            sectionBg: 'bg-[#f5f3ed] dark:bg-[#0b131e]',
+          },
+        ].map((sec) => {
+          const categoryOptions = getScopedCategoryOptions(sec.title, activePublicCategoryTree)
+          const filteredItems = sec.activeCategory === sec.title
+            ? sec.items
+            : sec.items.filter((product) => matchesCategoryFilter(product, sec.activeCategory, activePublicCategoryTree))
+          const start = (sec.page - 1) * sec.pageSize
+          const pageItems = filteredItems.slice(start, start + sec.pageSize)
+          return (
+            <section key={sec.id} id={sec.id} className={`px-4 md:px-16 py-16 ${sec.sectionBg} border-t border-gray-200 dark:border-slate-800 transition-colors duration-300`}>
+              <div className="max-w-6xl mx-auto">
+                <div className="mb-6">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h2 className="text-2xl md:text-3xl font-bold text-gray-900 dark:text-white">{sec.title}</h2>
+                      <p className="text-xs sm:text-sm text-gray-500 dark:text-slate-400 mt-1">{sec.subtitle}</p>
                     </div>
-                  ))}
+                  </div>
+
+                  {categoryOptions.length > 0 && (
+                    <div className="mt-5 flex flex-wrap items-center gap-2">
+                      {[sec.title, ...categoryOptions].map((catName) => {
+                        const isAll = catName === sec.title
+                        const isActive = sec.activeCategory === catName
+                        const count = isAll
+                          ? sec.items.length
+                          : sec.items.filter((p) => matchesCategoryFilter(p, catName, activePublicCategoryTree)).length
+                        return (
+                          <button
+                            key={`${sec.id}-cat-pill-${catName}`}
+                            type="button"
+                            onClick={() => {
+                              sec.setActiveCategory(catName)
+                              sec.setPage(1)
+                            }}
+                            className={`px-3.5 py-1.5 rounded-full text-xs font-semibold border transition-all cursor-pointer flex items-center gap-1.5 ${
+                              isActive
+                                ? 'bg-[#58B947] border-[#58B947] text-white shadow-sm'
+                                : 'bg-white/80 dark:bg-slate-800/80 border-gray-200 dark:border-slate-700 text-gray-700 dark:text-slate-300 hover:border-[#58B947]/60 hover:text-gray-900 dark:hover:text-white'
+                            }`}
+                          >
+                            <span>{isAll ? `All ${sec.title}` : catName}</span>
+                            {count > 0 && (
+                              <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-bold ${
+                                isActive ? 'bg-white/20 text-white' : 'bg-gray-100 dark:bg-slate-700 text-gray-600 dark:text-slate-300'
+                              }`}>
+                                {count}
+                              </span>
+                            )}
+                          </button>
+                        )
+                      })}
+                    </div>
+                  )}
                 </div>
 
-                {appliances.length > appliancePageSize && (
-                  <div className="mt-8">
-                    <Pagination
-                      page={appliancePage}
-                      total={appliances.length}
-                      pageSize={appliancePageSize}
-                      onChange={setAppliancePage}
-                    />
-                  </div>
-                )}
-              </>
-            ) : (
-              <p className="text-center py-10 text-gray-500 dark:text-slate-400">No appliances available at the moment.</p>
-            )}
-          </div>
-        </section>
-
-        {/* Furniture Section */}
-        <section id="furniture" className="px-4 md:px-16 py-16 bg-[#f5f3ed] dark:bg-[#0b131e] border-t border-gray-200 dark:border-slate-800 transition-colors duration-300">
-          <div className="max-w-6xl mx-auto">
-            <div className="flex items-center justify-between mb-8">
-              <div>
-                <h2 className="text-2xl md:text-3xl font-bold text-gray-900 dark:text-white">Furniture</h2>
-                <p className="text-xs sm:text-sm text-gray-500 dark:text-slate-400 mt-1">Comfortable, elegant, and stylish furniture crafted to elevate your home</p>
-              </div>
-            </div>
-
-            {loadingProducts ? (
-              <div className="flex justify-center py-12"><Spinner className="w-8 h-8 text-gray-900 dark:text-white" /></div>
-            ) : furniture.length > 0 ? (
-              <>
-                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
-                  {paginatedFurniture.map(product => (
-                    <div key={product.product_id || product.id} className="rounded-2xl overflow-hidden border bg-white dark:bg-slate-800/80 border-gray-200 dark:border-slate-700 shadow-sm transition-all hover:-translate-y-1 hover:shadow-lg group cursor-pointer">
-                      <div className="h-48 bg-gray-100 dark:bg-slate-700/50 overflow-hidden relative">
-                        {product.image_url ? (
-                          <img
-                            src={product.image_url.includes('/storage/') ? `${STORAGE_BASE}${product.image_url.substring(product.image_url.indexOf('/storage/'))}` : (product.image_url.startsWith('http') ? product.image_url : `${STORAGE_BASE}${product.image_url.startsWith('/') ? '' : '/storage/'}${product.image_url}`)}
-                            alt={product.product_name}
-                            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                            onError={e => { e.target.style.display = 'none'; e.target.nextSibling.style.display = 'flex'; }}
-                          />
-                        ) : null}
-                        <div className={`w-full h-full flex items-center justify-center text-gray-300 dark:text-slate-500 font-medium bg-gradient-to-br from-gray-50 to-gray-100 dark:from-slate-800 dark:to-slate-700 ${product.image_url ? 'hidden' : 'flex'}`}>
-                          <FiImage className="w-12 h-12 opacity-30" />
-                        </div>
-                        {product.discount_price && Number(product.discount_price) < Number(product.unit_price) && (
-                          <span className="absolute top-2 left-2 bg-red-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full">SALE</span>
-                        )}
-                      </div>
-                      <div className="p-5">
-                        {product.brand && <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400 dark:text-slate-400 mb-1">{product.brand}</p>}
-                        <h3 className="font-bold mb-1 text-gray-900 dark:text-white leading-tight" title={product.product_name}>{product.product_name}</h3>
-                        {product.description && <p className="text-xs text-gray-400 dark:text-slate-400 mb-2 line-clamp-2">{product.description}</p>}
-                        <div className="flex items-center justify-between mt-2">
-                          <div>
-                            {product.discount_price && Number(product.discount_price) < Number(product.unit_price) ? (
-                              <>
-                                <p className="text-[#58B947] font-bold text-base">₱{Number(product.discount_price).toLocaleString()}</p>
-                                <p className="text-gray-400 dark:text-slate-500 text-xs line-through">₱{Number(product.unit_price).toLocaleString()}</p>
-                              </>
-                            ) : (
-                              <p className="text-[#58B947] font-bold text-base">₱{Number(product.unit_price).toLocaleString()}</p>
-                            )}
+                {loadingProducts ? (
+                  <div className="flex justify-center py-12"><Spinner className="w-8 h-8 text-gray-900 dark:text-white" /></div>
+                ) : filteredItems.length > 0 ? (
+                  <>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
+                      {pageItems.map(product => {
+                        const catMeta = getMainCategoryBadgeMeta(product)
+                        return (
+                          <div key={product.product_id || product.id} className="rounded-2xl overflow-hidden border bg-white dark:bg-slate-800/80 border-gray-200 dark:border-slate-700 shadow-sm transition-all hover:-translate-y-1 hover:shadow-lg group cursor-pointer">
+                            <div className="h-48 bg-gray-100 dark:bg-slate-700/50 overflow-hidden relative">
+                              {product.image_url ? (
+                                <img
+                                  src={product.image_url.includes('/storage/') ? `${STORAGE_BASE}${product.image_url.substring(product.image_url.indexOf('/storage/'))}` : (product.image_url.startsWith('http') ? product.image_url : `${STORAGE_BASE}${product.image_url.startsWith('/') ? '' : '/storage/'}${product.image_url}`)}
+                                  alt={product.product_name}
+                                  className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                                  onError={e => { e.target.style.display = 'none'; e.target.nextSibling.style.display = 'flex'; }}
+                                />
+                              ) : null}
+                              <div className={`w-full h-full flex items-center justify-center text-gray-300 dark:text-slate-500 font-medium bg-gradient-to-br from-gray-50 to-gray-100 dark:from-slate-800 dark:to-slate-700 ${product.image_url ? 'hidden' : 'flex'}`}>
+                                <FiImage className="w-12 h-12 opacity-30" />
+                              </div>
+                              {product.discount_price && Number(product.discount_price) < Number(product.unit_price) && (
+                                <span className="absolute top-2 left-2 bg-red-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full">SALE</span>
+                              )}
+                              {product.category && (
+                                <span className={`absolute bottom-2 left-2 text-[10px] font-bold px-2 py-0.5 rounded-full shadow-xs ${catMeta.badgeClass}`}>
+                                  {product.category}
+                                </span>
+                              )}
+                            </div>
+                            <div className="p-5">
+                              {product.brand && <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400 dark:text-slate-400 mb-1">{product.brand}</p>}
+                              <h3 className="font-bold mb-1 text-gray-900 dark:text-white leading-tight" title={product.product_name}>{product.product_name}</h3>
+                              {product.description && <p className="text-xs text-gray-400 dark:text-slate-400 mb-2 line-clamp-2">{product.description}</p>}
+                              <div className="flex items-center justify-between mt-2">
+                                <div>
+                                  {product.discount_price && Number(product.discount_price) < Number(product.unit_price) ? (
+                                    <>
+                                      <p className="text-[#58B947] font-bold text-base">₱{Number(product.discount_price).toLocaleString()}</p>
+                                      <p className="text-gray-400 dark:text-slate-500 text-xs line-through">₱{Number(product.unit_price).toLocaleString()}</p>
+                                    </>
+                                  ) : (
+                                    <p className="text-[#58B947] font-bold text-base">₱{Number(product.unit_price).toLocaleString()}</p>
+                                  )}
+                                </div>
+                                {product.stock_quantity !== undefined && (
+                                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${product.stock_quantity > 0 ? 'bg-green-100 text-green-700 dark:bg-green-950/60 dark:text-green-400' : 'bg-red-100 text-red-500 dark:bg-red-950/60 dark:text-red-400'}`}>
+                                    {product.stock_quantity > 0 ? `${product.stock_quantity} in stock` : 'Out of stock'}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
                           </div>
-                          {product.stock_quantity !== undefined && (
-                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${product.stock_quantity > 0 ? 'bg-green-100 text-green-700 dark:bg-green-950/60 dark:text-green-400' : 'bg-red-100 text-red-500 dark:bg-red-950/60 dark:text-red-400'}`}>
-                              {product.stock_quantity > 0 ? `${product.stock_quantity} in stock` : 'Out of stock'}
-                            </span>
-                          )}
-                        </div>
-                      </div>
+                        )
+                      })}
                     </div>
-                  ))}
-                </div>
 
-                {furniture.length > furniturePageSize && (
-                  <div className="mt-8">
-                    <Pagination
-                      page={furniturePage}
-                      total={furniture.length}
-                      pageSize={furniturePageSize}
-                      onChange={setFurniturePage}
-                    />
-                  </div>
+                    {filteredItems.length > sec.pageSize && (
+                      <div className="mt-8">
+                        <Pagination
+                          page={sec.page}
+                          total={filteredItems.length}
+                          pageSize={sec.pageSize}
+                          onChange={sec.setPage}
+                        />
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <p className="text-center py-10 text-gray-500 dark:text-slate-400">
+                    {sec.activeCategory !== sec.title
+                      ? `No ${sec.activeCategory} products available at the moment.`
+                      : sec.emptyText}
+                  </p>
                 )}
-              </>
-            ) : (
-              <p className="text-center py-10 text-gray-500 dark:text-slate-400">No furniture available at the moment.</p>
-            )}
-          </div>
-        </section>
+              </div>
+            </section>
+          )
+        })}
 
         {/* About Section */}
         <section id="about" className="px-4 md:px-16 py-20 bg-white dark:bg-[#0f172a] border-t border-gray-200 dark:border-slate-800 transition-colors duration-300">

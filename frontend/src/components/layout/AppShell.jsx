@@ -22,6 +22,7 @@ import { TbCurrencyPeso } from 'react-icons/tb'
 const icons = {
   dashboard: <FiHome className="w-4 h-4 flex-shrink-0" />,
   products: <FiPackage className="w-4 h-4 flex-shrink-0" />,
+  categories: <FiLayers className="w-4 h-4 flex-shrink-0" />,
   customers: <FiUser className="w-4 h-4 flex-shrink-0" />,
   sales: <FiShoppingCart className="w-4 h-4 flex-shrink-0" />,
   installment: <FiCreditCard className="w-4 h-4 flex-shrink-0" />,
@@ -41,6 +42,30 @@ const icons = {
   notifications: <FiBell className="w-4 h-4 flex-shrink-0" />,
   support: <FiMessageSquare className="w-4 h-4 flex-shrink-0" />,
   storage: <FiHardDrive className="w-4 h-4 flex-shrink-0" />,
+}
+
+function isNavPathActive(itemPath, location, subPaths = []) {
+  if (!itemPath || !location) return false
+  const currentFull = location.pathname + (location.search || '')
+  if (itemPath.includes('?')) {
+    return currentFull === itemPath
+  }
+  if (location.search && location.search.length > 0) {
+    const sp = new URLSearchParams(location.search)
+    if (itemPath === '/products' && sp.get('view') === 'categories') {
+      return false
+    }
+    if (itemPath !== '/products') {
+      return false
+    }
+  }
+  if (itemPath === '/dashboard') {
+    return location.pathname === '/' || location.pathname === '/dashboard'
+  }
+  if (location.pathname === itemPath) return true
+  if (itemPath !== '/' && location.pathname.startsWith(`${itemPath}/`)) return true
+  if (subPaths?.some(sp => location.pathname === sp || location.pathname.startsWith(`${sp}/`))) return true
+  return false
 }
 
 function navByRole(role, onOpenConfig, pendingLettersCount = 0) {
@@ -69,6 +94,7 @@ function navByRole(role, onOpenConfig, pendingLettersCount = 0) {
     icon: icons.sales,
     items: [
       { label: 'Products / Inventory', path: '/products', icon: icons.products },
+      { label: 'Category Products', path: '/products?view=categories', icon: icons.categories },
       { label: 'Customers', path: '/customers', icon: icons.customers },
       { label: 'Sales Transactions', path: '/sales', icon: icons.sales },
       { label: 'Transaction History', path: '/transactions', icon: icons.history },
@@ -151,8 +177,12 @@ function navByRole(role, onOpenConfig, pendingLettersCount = 0) {
 
 function SidebarGroup({ group, collapsed }) {
   const location = useLocation()
-  const isActive = group.items.some(i => location.pathname === i.path || location.pathname.startsWith(`${i.path}/`))
+  const isActive = group.items.some(i => isNavPathActive(i.path, location))
   const [open, setOpen] = useState(isActive)
+
+  useEffect(() => {
+    if (isActive) setOpen(true)
+  }, [isActive])
 
   return (
     <div>
@@ -173,26 +203,25 @@ function SidebarGroup({ group, collapsed }) {
       </button>
       {(open || collapsed) && (
         <div className={collapsed ? '' : 'ml-3 border-l border-blue-500/25 pl-2 space-y-0.5 mt-0.5'}>
-          {group.items.map(item => (
-            <NavLink
-              key={item.path}
-              to={item.path}
-              title={collapsed ? item.label : undefined}
-              className={({ isActive }) =>
-                `flex items-center gap-2.5 px-3 py-2 text-xs rounded-xl transition-all cursor-pointer ${location.pathname === item.path
-                  ? 'bg-gradient-to-r from-blue-600 via-blue-600 to-indigo-700 text-white font-bold shadow-md shadow-blue-950/40 border border-blue-400/30'
-                  : 'text-slate-700 dark:text-blue-100/70 hover:bg-blue-500/10 hover:text-blue-950 dark:hover:text-white'
-                }`
-              }
-            >
-              {({ isActive }) => (
-                <>
-                  <span className={`flex-shrink-0 ${isActive ? 'text-white' : 'text-blue-700 dark:text-blue-400'}`}>{item.icon}</span>
-                  {!collapsed && <span className="truncate">{item.label}</span>}
-                </>
-              )}
-            </NavLink>
-          ))}
+          {group.items.map(item => {
+            const active = isNavPathActive(item.path, location)
+            return (
+              <NavLink
+                key={item.path}
+                to={item.path}
+                title={collapsed ? item.label : undefined}
+                className={() =>
+                  `flex items-center gap-2.5 px-3 py-2 text-xs rounded-xl transition-all cursor-pointer ${active
+                    ? 'bg-gradient-to-r from-blue-600 via-blue-600 to-indigo-700 text-white font-bold shadow-md shadow-blue-950/40 border border-blue-400/30'
+                    : 'text-slate-700 dark:text-blue-100/70 hover:bg-blue-500/10 hover:text-blue-950 dark:hover:text-white'
+                  }`
+                }
+              >
+                <span className={`flex-shrink-0 ${active ? 'text-white' : 'text-blue-700 dark:text-blue-400'}`}>{item.icon}</span>
+                {!collapsed && <span className="truncate">{item.label}</span>}
+              </NavLink>
+            )
+          })}
         </div>
       )}
     </div>
@@ -230,8 +259,9 @@ function getCollapsedRailItems(role, onOpenConfig, pendingLettersCount = 0) {
     // 2. Business Management / Sales
     { label: 'Sales Transactions', path: '/sales', icon: <FiShoppingCart className="w-5 h-5" /> },
 
-    // 3. Products / Inventory
+    // 3. Products / Inventory & Category Products
     { label: 'Products / Inventory', path: '/products', icon: <FiPackage className="w-5 h-5" /> },
+    { label: 'Category Products', path: '/products?view=categories', icon: <FiLayers className="w-5 h-5" /> },
 
     // 4. Customers
     { label: 'Customers', path: '/customers', icon: <FiUser className="w-5 h-5" /> },
@@ -245,16 +275,10 @@ function getCollapsedRailItems(role, onOpenConfig, pendingLettersCount = 0) {
     // 8. Payment Schedule
     { label: 'Payment Schedule', path: '/payment-schedule', icon: <FiCalendar className="w-5 h-5" /> },
 
-    // 9. Calendar / Schedule Details
-    { label: 'Schedule Calendar', path: '/payment-schedule', icon: <FiCalendar className="w-5 h-5" /> },
-
-    // 10. Payments (Peso)
+    // 9. Payments (Peso)
     { label: 'Payments', path: '/payments', icon: <TbCurrencyPeso className="w-5 h-5 stroke-[2.2]" /> },
 
-    // 11. Finance / Collections (Peso)
-    { label: 'Finance & Collections', path: '/payments', icon: <TbCurrencyPeso className="w-5 h-5 stroke-[2.2]" /> },
-
-    // 12. Employees & QR Badges
+    // 10. Employees & QR Badges
     { label: 'Employees & QR Badges', path: '/employees', icon: <FiUsers className="w-5 h-5" /> },
   ]
 
@@ -316,8 +340,8 @@ function SidebarStoreAdminProfile({ user, collapsed = false, onNavigate }) {
         <NavLink
           to="/store-admin/profile"
           onClick={() => onNavigate?.()}
-          title={`Store Admin Profile — ${displayName}`}
-          aria-label="Store Admin Profile"
+          title={`Employee Profile — ${displayName}`}
+          aria-label="Employee Profile"
           className={({ isActive }) => `relative w-11 h-11 rounded-[14px] font-bold text-xs flex items-center justify-center shadow-md transition-all cursor-pointer active:scale-95 group overflow-visible ${
             isActive
               ? 'bg-gradient-to-br from-blue-600 to-indigo-700 text-white ring-2 ring-blue-400/70 shadow-blue-600/35'
@@ -330,7 +354,7 @@ function SidebarStoreAdminProfile({ user, collapsed = false, onNavigate }) {
             <span>{avatarLetter}</span>
           )}
           <span className="pointer-events-none absolute left-14 z-50 whitespace-nowrap rounded-lg bg-slate-900 dark:bg-slate-800 px-2.5 py-1 text-xs font-semibold text-white shadow-xl opacity-0 transition-opacity group-hover:opacity-100 hidden md:block">
-            Store Admin Profile
+            Employee Profile
           </span>
         </NavLink>
       </div>
@@ -366,7 +390,7 @@ function SidebarStoreAdminProfile({ user, collapsed = false, onNavigate }) {
                 {displayName}
               </div>
               <div className={`text-[10px] font-semibold truncate leading-tight mt-0.5 ${isActive ? 'text-blue-100' : 'text-blue-700 dark:text-blue-300'}`}>
-                Store Admin Profile{branchName ? ` • ${branchName}` : ''}
+                Employee Profile{branchName ? ` • ${branchName}` : ''}
               </div>
             </div>
             <FiUser className={`w-3.5 h-3.5 shrink-0 ${isActive ? 'text-white' : 'text-blue-600 dark:text-blue-400 opacity-75 group-hover:opacity-100'}`} />
@@ -411,26 +435,7 @@ function Sidebar({ collapsed, settings, mobileOpen, onCloseMobile, onOpenConfig 
 
   const isItemActive = (item) => {
     if (item.action) return false
-    if (!item.path) return false
-    const currentFull = location.pathname + (location.search || '')
-    
-    // If the item specifies a query param, require an exact match of path + query
-    if (item.path.includes('?')) {
-      return currentFull === item.path
-    }
-
-    // If the current route has query params, items without query params are not active
-    if (location.search && location.search.length > 0) {
-      return false
-    }
-
-    if (item.path === '/dashboard') {
-      return location.pathname === '/' || location.pathname === '/dashboard'
-    }
-    if (location.pathname === item.path) return true
-    if (item.path !== '/' && location.pathname.startsWith(`${item.path}/`)) return true
-    if (item.subPaths && item.subPaths.some(sp => location.pathname === sp || location.pathname.startsWith(`${sp}/`))) return true
-    return false
+    return isNavPathActive(item.path, location, item.subPaths)
   }
 
   return (
@@ -544,7 +549,7 @@ function Sidebar({ collapsed, settings, mobileOpen, onCloseMobile, onOpenConfig 
               }}
             />
           </div>
-          <div className="flex-1 overflow-y-auto overflow-x-hidden py-3 px-2 flex flex-col items-center gap-2.5 border-r border-blue-500/15 dark:border-blue-500/20 [scrollbar-width:thin] [scrollbar-color:rgba(59,130,246,0.25)_transparent] [&::-webkit-scrollbar]:w-1 [&::-webkit-scrollbar-thumb]:bg-blue-500/25 [&::-webkit-scrollbar-thumb]:rounded-full">
+          <div className="flex-1 overflow-y-auto overflow-x-hidden py-3 px-2 flex flex-col items-center gap-2 border-r border-blue-500/15 dark:border-blue-500/20 [scrollbar-width:thin] [scrollbar-color:rgba(59,130,246,0.25)_transparent] [&::-webkit-scrollbar]:w-1 [&::-webkit-scrollbar-thumb]:bg-blue-500/25 [&::-webkit-scrollbar-thumb]:rounded-full">
             {railItems.map((item, idx) => {
               const active = isItemActive(item)
 
@@ -1138,7 +1143,7 @@ const ROUTE_TITLES = {
   '/attendance': 'Attendance Records',
   '/attendance/qr': 'QR Attendance',
   '/store-admin/attendance/scanner': 'QR Attendance Terminal',
-  '/store-admin/profile': 'Store Admin Profile',
+  '/store-admin/profile': 'Employee Profile',
   '/profile': 'My Profile',
   '/qr-monitoring': 'QR Attendance Monitoring',
   '/admin/qr-monitoring': 'QR Attendance Monitoring',
@@ -1175,11 +1180,16 @@ export default function AppShell() {
   const cancelledVerifIdsRef = useRef(new Set())
   const location = useLocation()
   const navigate = useNavigate()
-  const pageTitle = ROUTE_TITLES[location.pathname] || 'Z-LICZ'
+  const productsSearch = location.pathname === '/products' ? new URLSearchParams(location.search) : null
+  const pageTitle = productsSearch?.get('view') === 'categories'
+    ? 'Category Products'
+    : productsSearch?.get('category')
+      ? `${productsSearch.get('category')} Products`
+      : (ROUTE_TITLES[location.pathname] || 'Z-LICZ')
 
   useEffect(() => {
     setMobileMenuOpen(false)
-  }, [location.pathname])
+  }, [location.pathname, location.search])
 
   const handleToggle = () => {
     setCollapsed(c => !c)

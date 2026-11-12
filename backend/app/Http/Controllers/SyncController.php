@@ -120,6 +120,13 @@ class SyncController extends Controller
                             'products' => DB::selectOne("
                                 SELECT (SELECT COALESCE(MAX(product_id), 0) FROM products) as pr_max
                             "),
+                            'categories' => \Illuminate\Support\Facades\Schema::hasTable('categories')
+                                ? DB::selectOne("
+                                    SELECT
+                                        (SELECT COALESCE(MAX(id), 0) FROM categories) as cat_max,
+                                        (SELECT COALESCE(MAX(product_id), 0) FROM products) as pr_max
+                                ")
+                                : DB::selectOne("SELECT (SELECT COALESCE(MAX(product_id), 0) FROM products) as pr_max"),
                             'sales' => DB::selectOne("
                                 SELECT
                                     (SELECT COALESCE(MAX(sale_id), 0) FROM sale_transactions) as s_max,

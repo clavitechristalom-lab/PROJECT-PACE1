@@ -5,6 +5,7 @@ use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\ProductController;
+use App\Http\Controllers\CategoryController;
 use App\Http\Controllers\CustomerController;
 use App\Http\Controllers\CustomerDashboardController;
 use App\Http\Controllers\SaleController;
@@ -49,6 +50,7 @@ Route::post('/forgot-password/reset-password', [AuthController::class, 'resetPas
 Route::post('/reset-password', [AuthController::class, 'resetPassword'])->middleware('throttle:60,1');
 Route::post('/reset_password', [AuthController::class, 'resetPassword'])->middleware('throttle:60,1');
 Route::get('/public/products', [ProductController::class, 'indexPublic']);
+Route::get('/public/categories', [CategoryController::class, 'index']);
 Route::get('/public/settings', [SystemController::class, 'settings']);
 Route::post('/public/support-messages', [\App\Http\Controllers\SupportMessageController::class, 'storePublic']);
 
@@ -95,7 +97,12 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/dashboard/charts', [DashboardController::class, 'charts']);
     Route::get('/dashboard/recent', [DashboardController::class, 'recent']);
 
-    // ─── Products / Inventory ───────────────────────────────────────────────────
+    // ─── Products / Inventory & Categories ──────────────────────────────────────
+    Route::get('/categories', [CategoryController::class, 'index']);
+    Route::post('/categories', [CategoryController::class, 'store']);
+    Route::put('/categories/{id}', [CategoryController::class, 'update']);
+    Route::patch('/categories/{id}/toggle-status', [CategoryController::class, 'toggleStatus']);
+    Route::delete('/categories/{id}', [CategoryController::class, 'destroy']);
     Route::get('/products', [ProductController::class, 'index']);
     Route::get('/products/{id}', [ProductController::class, 'show']);
     Route::post('/products', [ProductController::class, 'store']);

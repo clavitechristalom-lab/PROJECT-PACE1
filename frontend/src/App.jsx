@@ -160,7 +160,7 @@ function RoutePersistenceTracker() {
   const location = useLocation()
 
   useEffect(() => {
-    const publicSections = ['/', '/login', '/home', '/appliances', '/furniture', '/about', '/support']
+    const publicSections = ['/', '/login', '/home', '/appliances', '/furniture', '/electronics', '/about', '/support']
     if (location.pathname && !publicSections.includes(location.pathname)) {
       const fullPath = location.pathname + location.search
       sessionStorage.setItem('pace_last_path', fullPath)
@@ -289,6 +289,14 @@ function AppRoutes() {
           />
           <Route
             path="/furniture"
+            element={
+              <PublicRoute>
+                <LoginPage />
+              </PublicRoute>
+            }
+          />
+          <Route
+            path="/electronics"
             element={
               <PublicRoute>
                 <LoginPage />

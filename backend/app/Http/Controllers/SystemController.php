@@ -15,6 +15,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use App\Services\NotificationService;
+use App\Services\CategoryFramework;
 use App\Models\Setting;
 use App\Models\BranchProfile;
 use Illuminate\Support\Facades\Cache;
@@ -1065,11 +1066,16 @@ class SystemController extends Controller
         ];
 
         $dynamic = [
-            'total_products'   => \App\Models\Product::count(),
-            'total_customers'  => \App\Models\Customer::count(),
-            'total_branches'   => \App\Models\BranchProfile::count(),
-            'total_appliances' => \App\Models\Product::where('category', 'Appliances')->count(),
-            'total_furniture'  => \App\Models\Product::where('category', 'Furniture')->count(),
+            'total_products'    => \App\Models\Product::count(),
+            'total_customers'   => \App\Models\Customer::count(),
+            'total_branches'    => \App\Models\BranchProfile::count(),
+            'total_appliances'  => \App\Models\Product::whereIn('category', CategoryFramework::matchingCategories('Appliances'))->count(),
+            'total_furniture'   => \App\Models\Product::whereIn('category', CategoryFramework::matchingCategories('Furniture'))->count(),
+            'total_electronics' => \App\Models\Product::whereIn('category', array_unique(array_merge(
+                CategoryFramework::matchingCategories('Home Entertainment & Display'),
+                CategoryFramework::matchingCategories('Audio Systems'),
+                CategoryFramework::matchingCategories('Media & Mounting Accessories')
+            )))->count(),
         ];
 
         $merged = array_merge($defaults, $settings, $dynamic);

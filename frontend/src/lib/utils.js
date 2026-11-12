@@ -37,3 +37,51 @@ export function exportCSV(filename, headers, rows) {
 
 export { fastDeepEqual, setIfChanged } from './diff'
 
+export const PRODUCT_UNIT_OPTIONS = ['unit', 'pcs', 'set', 'box', 'pair']
+export const DIMENSION_UNITS = ['cm', 'mm', 'm', 'in', 'ft']
+export const WEIGHT_UNITS = ['kg', 'g', 'lbs']
+
+function trimDecimal(val) {
+  if (val === null || val === undefined || val === '') return null
+  const num = Number(val)
+  if (!Number.isFinite(num)) return null
+  return Number.isInteger(num) ? String(num) : String(parseFloat(num.toFixed(2)))
+}
+
+export function formatProductMeasurements(product) {
+  if (!product) {
+    return { hasAny: false, lengthLabel: null, widthLabel: null, heightLabel: null, weightLabel: null, dimensionsSummary: '', summary: '' }
+  }
+  const dimUnit = product.dimension_unit || 'cm'
+  const weightUnit = product.weight_unit || 'kg'
+  const l = trimDecimal(product.length)
+  const w = trimDecimal(product.width)
+  const h = trimDecimal(product.height)
+  const wt = trimDecimal(product.weight)
+
+  const lengthLabel = l ? `${l} ${dimUnit}` : null
+  const widthLabel = w ? `${w} ${dimUnit}` : null
+  const heightLabel = h ? `${h} ${dimUnit}` : null
+  const weightLabel = wt ? `${wt} ${weightUnit}` : null
+
+  const dimParts = [
+    l ? `L ${l}` : null,
+    w ? `W ${w}` : null,
+    h ? `H ${h}` : null,
+  ].filter(Boolean)
+
+  const dimensionsSummary = dimParts.length > 0 ? `${dimParts.join(' × ')} ${dimUnit}` : ''
+  const summaryParts = [dimensionsSummary || null, weightLabel].filter(Boolean)
+  const summary = summaryParts.join(' · ')
+
+  return {
+    hasAny: summaryParts.length > 0,
+    lengthLabel,
+    widthLabel,
+    heightLabel,
+    weightLabel,
+    dimensionsSummary,
+    summary,
+  }
+}
+

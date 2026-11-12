@@ -615,7 +615,7 @@ export default function ProfileModal() {
   const isEmployee = (user?.role || '').trim().toLowerCase() === 'employee'
   const isStoreAdminRole = user?.role === 'Store Administrator' || user?.role === 'Store Admin'
   const pageTitle = isStoreAdminRole
-    ? 'Store Admin Profile'
+    ? 'Employee Profile'
     : 'My Profile'
   const branchLabel =
     employee?.branch?.name ||
