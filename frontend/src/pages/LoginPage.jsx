@@ -32,6 +32,7 @@ export default function LoginPage() {
   const [activeTab, setActiveTab] = useState('login')
   const [serviceModal, setServiceModal] = useState(null) // 'warranty' | 'installment' | 'maintenance' | null
   const [isContactModalOpen, setIsContactModalOpen] = useState(false)
+  const [branchModalType, setBranchModalType] = useState(null) // 'locations' | 'call' | null
   const [contactForm, setContactForm] = useState({ name: '', email: '', topic: 'General Inquiry', message: '' })
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
@@ -116,6 +117,10 @@ export default function LoginPage() {
   const companyPhone = sysSettings?.phone || ''
   const companyWebLinks = sysSettings?.web_links || ''
   const companyLogo = sysSettings?.logo || ''
+  const branchLocations = useMemo(
+    () => (Array.isArray(sysSettings?.branches) ? sysSettings.branches : []),
+    [sysSettings]
+  )
 
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
 
@@ -215,7 +220,7 @@ export default function LoginPage() {
 
   useEffect(() => {
     if (sysSettings) {
-      document.title = companyName ? `${companyName} Appliances and Furniture` : 'Z-LICZ Operations'
+      document.title = companyName ? (companyName.includes('Furniture') ? companyName : `${companyName} Furniture & Appliances Trading`) : 'Z-LICZ Furniture & Appliances Trading'
       if (companyLogo) {
         let link = document.querySelector("link[rel~='icon']")
         if (!link) {
@@ -900,17 +905,15 @@ export default function LoginPage() {
                               sec.setActiveCategory(catName)
                               sec.setPage(1)
                             }}
-                            className={`px-3.5 py-1.5 rounded-full text-xs font-semibold border transition-all cursor-pointer flex items-center gap-1.5 ${
-                              isActive
-                                ? 'bg-[#58B947] border-[#58B947] text-white shadow-sm'
-                                : 'bg-white/80 dark:bg-slate-800/80 border-gray-200 dark:border-slate-700 text-gray-700 dark:text-slate-300 hover:border-[#58B947]/60 hover:text-gray-900 dark:hover:text-white'
-                            }`}
+                            className={`px-3.5 py-1.5 rounded-full text-xs font-semibold border transition-all cursor-pointer flex items-center gap-1.5 ${isActive
+                              ? 'bg-[#58B947] border-[#58B947] text-white shadow-sm'
+                              : 'bg-white/80 dark:bg-slate-800/80 border-gray-200 dark:border-slate-700 text-gray-700 dark:text-slate-300 hover:border-[#58B947]/60 hover:text-gray-900 dark:hover:text-white'
+                              }`}
                           >
                             <span>{isAll ? `All ${sec.title}` : catName}</span>
                             {count > 0 && (
-                              <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-bold ${
-                                isActive ? 'bg-white/20 text-white' : 'bg-gray-100 dark:bg-slate-700 text-gray-600 dark:text-slate-300'
-                              }`}>
+                              <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-bold ${isActive ? 'bg-white/20 text-white' : 'bg-gray-100 dark:bg-slate-700 text-gray-600 dark:text-slate-300'
+                                }`}>
                                 {count}
                               </span>
                             )}
@@ -1012,23 +1015,97 @@ export default function LoginPage() {
               </p>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              {companyAddress && (
-                <div className="rounded-2xl border border-gray-100 dark:border-slate-700 bg-gray-50 dark:bg-slate-800/60 p-7 flex flex-col gap-4 shadow-sm hover:shadow-md transition-shadow">
-                  <div className="w-12 h-12 rounded-xl bg-[#58B947]/10 flex items-center justify-center">
-                    <FiMapPin className="w-6 h-6 text-[#58B947]" />
+              {(companyAddress || branchLocations.length > 0) && (
+                <button
+                  type="button"
+                  onClick={() => setBranchModalType('locations')}
+                  className="rounded-2xl border border-gray-100 dark:border-slate-700 bg-gray-50 dark:bg-slate-800/60 p-7 flex flex-col gap-3 shadow-sm hover:shadow-md hover:border-[#58B947]/50 dark:hover:border-[#58B947]/50 transition-all text-left cursor-pointer group"
+                >
+                  <div className="flex items-center justify-between gap-2 w-full">
+                    <div className="w-12 h-12 rounded-xl bg-[#58B947]/10 flex items-center justify-center group-hover:scale-105 transition-transform">
+                      <FiMapPin className="w-6 h-6 text-[#58B947]" />
+                    </div>
+                    {branchLocations.length > 0 && (
+                      <span className="text-[11px] font-bold px-2.5 py-1 rounded-full bg-[#58B947]/10 text-[#58B947] border border-[#58B947]/20">
+                        {branchLocations.length} {branchLocations.length === 1 ? 'Branch' : 'Branches'}
+                      </span>
+                    )}
                   </div>
                   <h3 className="font-bold text-gray-900 dark:text-white text-base">Our Location</h3>
-                  <p className="text-gray-500 dark:text-slate-400 text-sm leading-relaxed">{companyAddress}</p>
-                </div>
+                  {companyAddress && (
+                    <p className="text-gray-500 dark:text-slate-400 text-sm leading-relaxed">{companyAddress}</p>
+                  )}
+                  <p className="text-xs text-gray-500 dark:text-slate-400 flex items-center gap-1.5">
+                    <FiClock className="w-3.5 h-3.5 text-[#58B947] shrink-0" />
+                    <span>Open on Monday to Saturday, 8:00 AM – 5:00 PM</span>
+                  </p>
+                  {branchLocations.length > 0 && (
+                    <div className="space-y-1.5 pt-2 border-t border-gray-200/70 dark:border-slate-700/70 w-full">
+                      {branchLocations.slice(0, 3).map((b) => (
+                        <div key={b.id} className="flex items-center justify-between gap-2 text-xs text-gray-600 dark:text-slate-300">
+                          <span className="font-semibold truncate">{b.name}</span>
+                          <span className="text-gray-400 dark:text-slate-400 truncate max-w-[55%] text-right">{b.location}</span>
+                        </div>
+                      ))}
+                      {branchLocations.length > 3 && (
+                        <div className="text-[11px] text-gray-400 dark:text-slate-400 font-medium">
+                          +{branchLocations.length - 3} more branch{branchLocations.length - 3 === 1 ? '' : 'es'}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  <span className="mt-auto pt-2 inline-flex items-center gap-1.5 text-xs font-bold text-[#58B947] group-hover:gap-2 transition-all">
+                    <span>View Locations by Branch</span>
+                    <FiArrowRight className="w-3.5 h-3.5" />
+                  </span>
+                </button>
               )}
-              {companyPhone && (
-                <div className="rounded-2xl border border-gray-100 dark:border-slate-700 bg-gray-50 dark:bg-slate-800/60 p-7 flex flex-col gap-4 shadow-sm hover:shadow-md transition-shadow">
-                  <div className="w-12 h-12 rounded-xl bg-[#58B947]/10 flex items-center justify-center">
-                    <FiPhone className="w-6 h-6 text-[#58B947]" />
+              {(companyPhone || branchLocations.length > 0) && (
+                <button
+                  type="button"
+                  onClick={() => setBranchModalType('call')}
+                  className="rounded-2xl border border-gray-100 dark:border-slate-700 bg-gray-50 dark:bg-slate-800/60 p-7 flex flex-col gap-3 shadow-sm hover:shadow-md hover:border-[#58B947]/50 dark:hover:border-[#58B947]/50 transition-all text-left cursor-pointer group"
+                >
+                  <div className="flex items-center justify-between gap-2 w-full">
+                    <div className="w-12 h-12 rounded-xl bg-[#58B947]/10 flex items-center justify-center group-hover:scale-105 transition-transform">
+                      <FiPhone className="w-6 h-6 text-[#58B947]" />
+                    </div>
+                    {branchLocations.length > 0 && (
+                      <span className="text-[11px] font-bold px-2.5 py-1 rounded-full bg-[#58B947]/10 text-[#58B947] border border-[#58B947]/20">
+                        {branchLocations.length} {branchLocations.length === 1 ? 'Branch' : 'Branches'}
+                      </span>
+                    )}
                   </div>
                   <h3 className="font-bold text-gray-900 dark:text-white text-base">Call Us</h3>
-                  <a href={`tel:${companyPhone}`} className="text-[#58B947] font-semibold text-sm hover:underline">{companyPhone}</a>
-                </div>
+                  {companyPhone && (
+                    <span className="text-[#58B947] font-semibold text-sm">{companyPhone}</span>
+                  )}
+                  <p className="text-xs text-gray-500 dark:text-slate-400 flex items-center gap-1.5">
+                    <FiClock className="w-3.5 h-3.5 text-[#58B947] shrink-0" />
+                    <span>We accept calls 24/7</span>
+                  </p>
+                  {branchLocations.length > 0 && (
+                    <div className="space-y-1.5 pt-2 border-t border-gray-200/70 dark:border-slate-700/70 w-full">
+                      {branchLocations.slice(0, 3).map((b) => (
+                        <div key={b.id} className="flex items-center justify-between gap-2 text-xs text-gray-600 dark:text-slate-300">
+                          <span className="font-semibold truncate">{b.name}</span>
+                          <span className="text-[#58B947] font-semibold truncate max-w-[55%] text-right">
+                            {b.contact_number || 'No hotline'}
+                          </span>
+                        </div>
+                      ))}
+                      {branchLocations.length > 3 && (
+                        <div className="text-[11px] text-gray-400 dark:text-slate-400 font-medium">
+                          +{branchLocations.length - 3} more branch{branchLocations.length - 3 === 1 ? '' : 'es'}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  <span className="mt-auto pt-2 inline-flex items-center gap-1.5 text-xs font-bold text-[#58B947] group-hover:gap-2 transition-all">
+                    <span>View Hotlines by Branch</span>
+                    <FiArrowRight className="w-3.5 h-3.5" />
+                  </span>
+                </button>
               )}
               {companyEmail && (
                 <button
@@ -1174,7 +1251,7 @@ export default function LoginPage() {
                       Maintenance
                     </h3>
                     <p className="text-gray-600 dark:text-slate-300 text-sm mt-1.5 leading-relaxed">
-                      Professional preventive servicing, deep cleaning, and on-site repairs to prolong the lifespan of your appliances and home furniture.
+                      Professional preventive servicing, deep cleaning, and on-site to prolong the lifespan of your appliances and home furniture.
                     </p>
                   </div>
                   <ul className="space-y-2 pt-3 border-t border-gray-100 dark:border-slate-700/60 text-xs text-gray-600 dark:text-slate-300">
@@ -1216,57 +1293,191 @@ export default function LoginPage() {
         </section>
 
         {/* Footer */}
-        <footer className="bg-[#0f1f3d] text-white px-4 md:px-16 py-12">
+        <footer className="bg-[#0f1f3d] text-white px-4 md:px-16 pt-14 pb-8 border-t border-white/10">
           <div className="max-w-6xl mx-auto">
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-10 mb-10">
-              <div className="md:col-span-2">
-                <div className="flex items-center gap-3 mb-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-12 gap-10 mb-12">
+              {/* Brand & Overview */}
+              <div className="lg:col-span-4 space-y-4">
+                <div className="flex items-center gap-3">
                   {companyLogo ? (
-                    <img src={getLogoUrl(companyLogo)} alt={companyName} style={{ height: '36px', width: 'auto', objectFit: 'contain' }} />
+                    <img src={getLogoUrl(companyLogo)} alt={companyName} style={{ height: '40px', width: 'auto', objectFit: 'contain' }} />
                   ) : (
-                    <div className="w-9 h-9 rounded-xl bg-white flex items-center justify-center text-blue-600 font-black text-xl shadow-md shrink-0">Z</div>
+                    <div className="w-10 h-10 rounded-xl bg-white flex items-center justify-center text-blue-600 font-black text-xl shadow-md shrink-0">Z</div>
                   )}
-                  <span className="text-xl font-extrabold tracking-tight">{companyName || 'Z-LICZ'}</span>
+                  <div>
+                    <span className="text-lg font-extrabold tracking-tight block leading-tight">{companyName || 'Z-LICZ Furniture & Appliances Trading'}</span>
+                    <span className="text-[11px] uppercase tracking-widest text-[#58B947] font-bold">Furniture &amp; Home Appliances</span>
+                  </div>
                 </div>
-                <p className="text-sm text-white/50 leading-relaxed max-w-sm">
-                  Your trusted destination for premium home appliances and furniture. Elevate every corner of your home.
+                <p className="text-sm text-white/65 leading-relaxed">
+                  Your trusted retail and installment partner for quality living, bedroom, dining, and office furniture alongside energy-efficient major and small home appliances.
                 </p>
-                {companyAddress && (
-                  <p className="text-xs text-white/40 mt-4 flex items-center gap-1.5">
-                    <FiMapPin className="w-3 h-3 flex-shrink-0" /> {companyAddress}
+                <div className="space-y-2 pt-1 text-xs text-white/60">
+                  {companyAddress && (
+                    <p className="flex items-start gap-2">
+                      <FiMapPin className="w-3.5 h-3.5 text-[#58B947] shrink-0 mt-0.5" />
+                      <span><strong className="text-white/85">Main Office:</strong> {companyAddress}</span>
+                    </p>
+                  )}
+                  <p className="flex items-start gap-2">
+                    <FiClock className="w-3.5 h-3.5 text-[#58B947] shrink-0 mt-0.5" />
+                    <span><strong className="text-white/85">Store Hours:</strong> Mon – Sat, 8:00 AM – 5:00 PM</span>
+                  </p>
+                  <p className="flex items-start gap-2">
+                    <FiHeadphones className="w-3.5 h-3.5 text-[#58B947] shrink-0 mt-0.5" />
+                    <span><strong className="text-white/85">Phone Inquiries:</strong> We accept calls 24/7</span>
+                  </p>
+                </div>
+              </div>
+
+              {/* Quick Links & Services */}
+              <div className="lg:col-span-2">
+                <h4 className="font-bold text-xs mb-4 text-white/90 uppercase tracking-widest">Quick Links</h4>
+                <ul className="space-y-2.5 text-sm text-white/60">
+                  <li><a href="#home" onClick={(e) => handleNavClick(e, 'home')} className="hover:text-white transition-colors flex items-center gap-2 cursor-pointer"><FiHome className="w-3.5 h-3.5 text-[#58B947]" /> Home</a></li>
+                  <li><a href="#appliances" onClick={(e) => handleNavClick(e, 'appliances')} className="hover:text-white transition-colors flex items-center gap-2 cursor-pointer"><FiPackage className="w-3.5 h-3.5 text-[#58B947]" /> Appliances</a></li>
+                  <li><a href="#furniture" onClick={(e) => handleNavClick(e, 'furniture')} className="hover:text-white transition-colors flex items-center gap-2 cursor-pointer"><FiPackage className="w-3.5 h-3.5 text-[#58B947]" /> Furniture</a></li>
+                  <li><a href="#about" onClick={(e) => handleNavClick(e, 'about')} className="hover:text-white transition-colors flex items-center gap-2 cursor-pointer"><FiUsers className="w-3.5 h-3.5 text-[#58B947]" /> About Us</a></li>
+                  <li><a href="#support" onClick={(e) => handleNavClick(e, 'support')} className="hover:text-white transition-colors flex items-center gap-2 cursor-pointer"><FiShield className="w-3.5 h-3.5 text-[#58B947]" /> Support</a></li>
+                </ul>
+
+                <h4 className="font-bold text-xs mt-6 mb-3 text-white/90 uppercase tracking-widest">Customer Care</h4>
+                <ul className="space-y-2 text-xs text-white/60">
+                  <li>
+                    <button type="button" onClick={() => setServiceModal('warranty')} className="hover:text-white transition-colors flex items-center gap-2 cursor-pointer">
+                      <FiShield className="w-3.5 h-3.5 text-blue-400" /> Warranty Policy
+                    </button>
+                  </li>
+                  <li>
+                    <button type="button" onClick={() => setServiceModal('installment')} className="hover:text-white transition-colors flex items-center gap-2 cursor-pointer">
+                      <FiCreditCard className="w-3.5 h-3.5 text-purple-400" /> Installment Plans
+                    </button>
+                  </li>
+                  <li>
+                    <button type="button" onClick={() => setServiceModal('maintenance')} className="hover:text-white transition-colors flex items-center gap-2 cursor-pointer">
+                      <FiTool className="w-3.5 h-3.5 text-orange-400" /> Servicing
+                    </button>
+                  </li>
+                </ul>
+              </div>
+
+              {/* Branch Locations */}
+              <div className="lg:col-span-3">
+                <h4 className="font-bold text-xs text-white/90 uppercase tracking-widest mb-4">Store Branches</h4>
+                {branchLocations.length > 0 ? (
+                  <div className="space-y-2.5">
+                    {branchLocations.slice(0, 4).map((b) => (
+                      <div key={b.id} className="rounded-xl bg-white/5 border border-white/10 p-3 space-y-1">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-xs font-bold text-white truncate">{b.name}</span>
+                          <span className="text-[10px] font-bold uppercase px-1.5 py-0.5 rounded bg-[#58B947]/20 text-[#58B947]">
+                            {b.status || 'Open'}
+                          </span>
+                        </div>
+                        {b.location && (
+                          <p className="text-[11px] text-white/55 flex items-start gap-1.5 leading-snug">
+                            <FiMapPin className="w-3 h-3 text-[#58B947] shrink-0 mt-0.5" />
+                            <span>{b.location}</span>
+                          </p>
+                        )}
+                        {b.contact_number && (
+                          <a href={`tel:${b.contact_number}`} className="text-[11px] text-white/70 hover:text-[#58B947] flex items-center gap-1.5 transition-colors">
+                            <FiPhone className="w-3 h-3 text-[#58B947] shrink-0" />
+                            <span>{b.contact_number}</span>
+                          </a>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-xs text-white/50 leading-relaxed">
+                    Visit our main showroom Monday to Saturday, 8:00 AM to 5:00 PM.
                   </p>
                 )}
               </div>
-              <div>
-                <h4 className="font-bold text-sm mb-4 text-white/80 uppercase tracking-widest">Quick Links</h4>
-                <ul className="space-y-2 text-sm text-white/50">
-                  <li><a href="#home" onClick={(e) => handleNavClick(e, 'home')} className="hover:text-white transition-colors flex items-center gap-2 cursor-pointer"><FiHome className="w-3 h-3" /> Home</a></li>
-                  <li><a href="#appliances" onClick={(e) => handleNavClick(e, 'appliances')} className="hover:text-white transition-colors flex items-center gap-2 cursor-pointer"><FiPackage className="w-3 h-3" /> Appliances</a></li>
-                  <li><a href="#furniture" onClick={(e) => handleNavClick(e, 'furniture')} className="hover:text-white transition-colors flex items-center gap-2 cursor-pointer"><FiPackage className="w-3 h-3" /> Furniture</a></li>
-                  <li><a href="#about" onClick={(e) => handleNavClick(e, 'about')} className="hover:text-white transition-colors flex items-center gap-2 cursor-pointer"><FiUsers className="w-3 h-3" /> About Us</a></li>
-                  <li><a href="#support" onClick={(e) => handleNavClick(e, 'support')} className="hover:text-white transition-colors flex items-center gap-2 cursor-pointer"><FiShield className="w-3 h-3" /> Support</a></li>
+
+              {/* Contact & Account Access */}
+              <div className="lg:col-span-3 space-y-4">
+                <h4 className="font-bold text-xs text-white/90 uppercase tracking-widest">Contact &amp; Access</h4>
+                <ul className="space-y-2.5 text-sm text-white/65">
+                  {companyPhone && (
+                    <li>
+                      <a href={`tel:${companyPhone}`} className="hover:text-white transition-colors flex items-center gap-2">
+                        <FiPhone className="w-3.5 h-3.5 text-[#58B947] shrink-0" />
+                        <span>{companyPhone} <span className="text-[11px] text-[#58B947] font-semibold">(24/7)</span></span>
+                      </a>
+                    </li>
+                  )}
+                  {companyEmail && (
+                    <li>
+                      <a href={`mailto:${companyEmail}`} className="hover:text-white transition-colors flex items-center gap-2 break-all">
+                        <FiMail className="w-3.5 h-3.5 text-[#58B947] shrink-0" />
+                        <span>{companyEmail}</span>
+                      </a>
+                    </li>
+                  )}
+                  {companyWebLinks && (
+                    <li>
+                      <a href={companyWebLinks} target="_blank" rel="noreferrer" className="hover:text-white transition-colors flex items-center gap-2">
+                        <FiGlobe className="w-3.5 h-3.5 text-[#58B947] shrink-0" />
+                        <span>Official Website</span>
+                      </a>
+                    </li>
+                  )}
+                  {!companyPhone && !companyEmail && !companyWebLinks && (
+                    <li className="text-white/40 text-xs italic">Contact details not configured</li>
+                  )}
                 </ul>
-              </div>
-              <div>
-                <h4 className="font-bold text-sm mb-4 text-white/80 uppercase tracking-widest">Contact</h4>
-                <ul className="space-y-2 text-sm text-white/50">
-                  {companyPhone && <li><a href={`tel:${companyPhone}`} className="hover:text-white transition-colors flex items-center gap-2"><FiPhone className="w-3 h-3" /> {companyPhone}</a></li>}
-                  {companyEmail && <li><a href={`mailto:${companyEmail}`} className="hover:text-white transition-colors flex items-center gap-2"><FiMail className="w-3 h-3" /> {companyEmail}</a></li>}
-                  {companyWebLinks && <li><a href={companyWebLinks} target="_blank" rel="noreferrer" className="hover:text-white transition-colors flex items-center gap-2"><FiGlobe className="w-3 h-3" /> Website</a></li>}
-                  {!companyPhone && !companyEmail && !companyWebLinks && <li className="text-white/30 text-xs italic">Contact details not configured</li>}
-                </ul>
-                <div className="mt-6">
+
+                <div className="pt-2 flex flex-wrap gap-2">
                   <button
+                    type="button"
                     onClick={() => { setError(''); setActiveTab('login'); setIsLoginModalOpen(true); }}
-                    className="text-xs font-bold bg-blue-600 hover:bg-blue-500 px-4 py-2 rounded-lg transition-colors flex items-center gap-2"
+                    className="text-xs font-bold bg-blue-600 hover:bg-blue-500 px-4 py-2.5 rounded-xl transition-colors flex items-center gap-1.5 cursor-pointer shadow-sm"
                   >
                     <FiLogIn className="w-3.5 h-3.5" /> Sign In
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setError(''); setActiveTab('signup'); setIsLoginModalOpen(true); }}
+                    className="text-xs font-bold bg-[#58B947] hover:bg-[#4da83d] px-4 py-2.5 rounded-xl transition-colors flex items-center gap-1.5 cursor-pointer shadow-sm"
+                  >
+                    <FiUserPlus className="w-3.5 h-3.5" /> Register
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setIsContactModalOpen(true)}
+                    className="text-xs font-bold bg-white/10 hover:bg-white/15 border border-white/15 px-3.5 py-2.5 rounded-xl transition-colors flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <FiMail className="w-3.5 h-3.5" /> Message Us
                   </button>
                 </div>
               </div>
             </div>
-            <div className="border-t border-white/10 pt-6 flex flex-col sm:flex-row justify-between items-center gap-3 text-xs text-white/30">
-              <span>© {new Date().getFullYear()} {companyName || 'Z-LICZ'}. All rights reserved.</span>
+
+            {/* Service Highlights Strip */}
+            <div className="border-t border-white/10 pt-6 pb-5 grid grid-cols-2 md:grid-cols-4 gap-3 text-xs text-white/65">
+              <div className="flex items-center gap-2">
+                <FiCheckCircle className="w-4 h-4 text-[#58B947] shrink-0" />
+                <span>100% Authentic Products</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <FiCreditCard className="w-4 h-4 text-[#58B947] shrink-0" />
+                <span>Flexible 3–24 Mo. Installments</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <FiShield className="w-4 h-4 text-[#58B947] shrink-0" />
+                <span>Official Manufacturer Warranty</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <FiHeadphones className="w-4 h-4 text-[#58B947] shrink-0" />
+                <span>24/7 Phone Inquiry Support</span>
+              </div>
+            </div>
+
+            {/* Copyright Bottom Bar */}
+            <div className="border-t border-white/10 pt-5 flex flex-col sm:flex-row justify-between items-center gap-3 text-xs text-white/40">
+              <span>© {new Date().getFullYear()} {companyName || 'Z-LICZ Furniture & Appliances Trading'}. All rights reserved.</span>
               <span>Powered by Z-LICZ Management System</span>
             </div>
           </div>
@@ -2349,7 +2560,7 @@ export default function LoginPage() {
                   <h3 className="font-extrabold text-base sm:text-lg text-gray-900 dark:text-white">
                     {serviceModal === 'warranty' && 'Warranty Support & Claims Policy'}
                     {serviceModal === 'installment' && 'Flexible Installment & Financing Plans'}
-                    {serviceModal === 'maintenance' && 'Maintenance & Professional Repair Services'}
+                    {serviceModal === 'maintenance' && 'Maintenance & Services'}
                   </h3>
                   <p className="text-xs text-gray-500 dark:text-slate-400">
                     Z-LICZ Furniture & Appliances Trading • Official Customer Guide
@@ -2364,43 +2575,6 @@ export default function LoginPage() {
                 aria-label="Close modal"
               >
                 <FiX className="w-5 h-5" />
-              </button>
-            </div>
-
-            {/* Quick Switch Tabs */}
-            <div className="px-6 py-2.5 bg-gray-100/70 dark:bg-slate-900/40 border-b border-gray-100 dark:border-slate-800/80 flex items-center gap-2 overflow-x-auto shrink-0">
-              <button
-                type="button"
-                onClick={() => setServiceModal('warranty')}
-                className={`px-3.5 py-1.5 rounded-xl text-xs font-bold flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap ${serviceModal === 'warranty'
-                  ? 'bg-blue-600 text-white shadow-sm shadow-blue-500/30'
-                  : 'text-gray-600 dark:text-slate-300 hover:bg-gray-200/80 dark:hover:bg-slate-800'
-                  }`}
-              >
-                <FiShield className="w-3.5 h-3.5" />
-                <span>Warranty Support</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setServiceModal('installment')}
-                className={`px-3.5 py-1.5 rounded-xl text-xs font-bold flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap ${serviceModal === 'installment'
-                  ? 'bg-purple-600 text-white shadow-sm shadow-purple-500/30'
-                  : 'text-gray-600 dark:text-slate-300 hover:bg-gray-200/80 dark:hover:bg-slate-800'
-                  }`}
-              >
-                <FiCreditCard className="w-3.5 h-3.5" />
-                <span>Installment Plans</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setServiceModal('maintenance')}
-                className={`px-3.5 py-1.5 rounded-xl text-xs font-bold flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap ${serviceModal === 'maintenance'
-                  ? 'bg-orange-600 text-white shadow-sm shadow-orange-500/30'
-                  : 'text-gray-600 dark:text-slate-300 hover:bg-gray-200/80 dark:hover:bg-slate-800'
-                  }`}
-              >
-                <FiTool className="w-3.5 h-3.5" />
-                <span>Maintenance</span>
               </button>
             </div>
 
@@ -2463,7 +2637,7 @@ export default function LoginPage() {
                         <h6 className="font-bold text-gray-900 dark:text-white text-sm">Microwaves, Fans & Kitchenware</h6>
                         <ul className="text-xs space-y-1.5 text-gray-500 dark:text-slate-400">
                           <li>• 7-Day immediate unit replacement for factory defects</li>
-                          <li>• 6 to 12 Months full service repair coverage</li>
+                          <li>• 6 to 12 Months full service coverage</li>
                           <li>• Rapid 48-hour diagnostic turnaround at any branch</li>
                         </ul>
                       </div>
@@ -2492,7 +2666,7 @@ export default function LoginPage() {
                         <li>• Normal cosmetic wear, scratches, fabric tears, and accidental stains</li>
                         <li>• Damage from severe power surges without certified surge protectors</li>
                         <li>• Liquid spills, flooding, insect/pest infestation, or improper installation</li>
-                        <li>• Repairs or disassembly performed by unauthorized 3rd-party technicians</li>
+                        <li>• Disassembly performed by unauthorized 3rd-party technicians</li>
                       </ul>
                     </div>
                   </div>
@@ -2521,7 +2695,7 @@ export default function LoginPage() {
                       <div className="p-3 rounded-lg bg-white dark:bg-slate-800 border border-gray-200/70 dark:border-slate-700/70">
                         <span className="w-6 h-6 rounded-full bg-blue-600 text-white font-bold flex items-center justify-center text-[11px] mb-2">4</span>
                         <h6 className="font-bold text-gray-900 dark:text-white mb-1">Fast Resolution</h6>
-                        <p className="text-gray-500 dark:text-slate-400">Authorized genuine repair or replacement completed within 3 to 7 business days.</p>
+                        <p className="text-gray-500 dark:text-slate-400">Authorized genuine replacement completed within 3 to 7 business days.</p>
                       </div>
                     </div>
                   </div>
@@ -2650,14 +2824,14 @@ export default function LoginPage() {
                   {/* Overview Banner */}
                   <div className="p-5 rounded-2xl bg-orange-50/60 dark:bg-orange-950/40 border border-orange-200/60 dark:border-orange-900/50">
                     <div className="flex flex-wrap items-center justify-between gap-3 mb-2">
-                      <h4 className="font-bold text-gray-900 dark:text-white text-base">Expert Maintenance & On-Site Repair Care</h4>
+                      <h4 className="font-bold text-gray-900 dark:text-white text-base">Expert Maintenance & On-Site Care</h4>
                       <div className="flex items-center gap-2">
                         <span className="text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-orange-600 text-white">TESDA-Certified Techs</span>
                         <span className="text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-emerald-600 text-white">30-Day Service Guarantee</span>
                       </div>
                     </div>
                     <p className="text-gray-600 dark:text-slate-300 text-xs sm:text-sm leading-relaxed">
-                      Protect your investments and prolong product lifespans. Our factory-trained technical staff performs scheduled maintenance, deep cleaning, electrical safety audits, and fast on-site home repairs using authentic spare parts.
+                      Protect your investments and prolong product lifespans. Our factory-trained technical staff performs scheduled maintenance, deep cleaning, electrical safety audits, and fast on-site home using authentic spare parts.
                     </p>
                   </div>
 
@@ -2680,7 +2854,7 @@ export default function LoginPage() {
 
                       <div className="p-4 rounded-xl bg-gray-50 dark:bg-slate-800/60 border border-gray-200 dark:border-slate-700/70 space-y-2">
                         <span className="text-xs font-bold text-orange-600 dark:text-orange-400">Refrigerators</span>
-                        <h6 className="font-bold text-gray-900 dark:text-white text-sm">Inverter Tune-up & Repair</h6>
+                        <h6 className="font-bold text-gray-900 dark:text-white text-sm">Inverter Tune-up</h6>
                         <ul className="text-xs space-y-1 text-gray-500 dark:text-slate-400">
                           <li>• Compressor diagnostic</li>
                           <li>• Gasket door seal replacement</li>
@@ -2735,7 +2909,7 @@ export default function LoginPage() {
                           <span>30-Day Service Guarantee</span>
                         </div>
                         <p className="text-gray-500 dark:text-slate-400">
-                          Every repair job and replacement component is backed by our full 30-day labor and parts warranty.
+                          replacement component is backed by our full 30-day labor and parts warranty.
                         </p>
                       </div>
 
@@ -2793,6 +2967,232 @@ export default function LoginPage() {
                   <span>Create Account</span>
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Branch Directory Modal (Locations & Call Us by Branch) */}
+      {branchModalType && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 md:p-6 bg-black/60 backdrop-blur-md overflow-y-auto animate-[fadeIn_0.15s_ease]">
+          <div
+            className="fixed inset-0 cursor-pointer"
+            onClick={() => setBranchModalType(null)}
+            aria-label="Close modal overlay"
+          />
+
+          <div className="relative w-full max-w-3xl bg-white dark:bg-[#121c29] text-gray-900 dark:text-white rounded-3xl shadow-2xl border border-gray-200 dark:border-white/10 overflow-hidden my-auto max-h-[90vh] flex flex-col z-10 animate-[slideUp_0.2s_ease]">
+            {/* Modal Header */}
+            <div className="px-6 py-5 border-b border-gray-100 dark:border-slate-800 flex items-center justify-between gap-4 bg-gray-50/80 dark:bg-slate-900/60 shrink-0">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-[#58B947]/15 text-[#58B947] flex items-center justify-center shrink-0">
+                  {branchModalType === 'call' ? (
+                    <FiPhone className="w-5 h-5" />
+                  ) : (
+                    <FiMapPin className="w-5 h-5" />
+                  )}
+                </div>
+                <div>
+                  <h3 className="font-extrabold text-base sm:text-lg text-gray-900 dark:text-white">
+                    {branchModalType === 'call' ? 'Call Us by Branch' : 'Our Locations by Branch'}
+                  </h3>
+                  <p className="text-xs text-gray-500 dark:text-slate-400">
+                    {branchModalType === 'call'
+                      ? 'We accept calls 24/7 — direct store contact numbers by branch'
+                      : 'Open on Monday to Saturday • Time: 8:00 AM to 5:00 PM'}
+                  </p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setBranchModalType(null)}
+                className="w-9 h-9 rounded-full flex items-center justify-center text-gray-400 hover:text-gray-700 dark:hover:text-white hover:bg-gray-200 dark:hover:bg-slate-800 transition-colors cursor-pointer shrink-0"
+                aria-label="Close modal"
+              >
+                <FiX className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-6 overflow-y-auto space-y-5 flex-1">
+              <div className="px-4 py-3 rounded-2xl bg-slate-100/80 dark:bg-slate-800/70 border border-gray-200/80 dark:border-slate-700/70 flex items-center gap-2.5 text-xs font-semibold text-gray-700 dark:text-slate-200">
+                <FiClock className="w-4 h-4 text-[#58B947] shrink-0" />
+                <span>
+                  {branchModalType === 'call'
+                    ? 'We accept calls 24/7 — reach out anytime for inquiries, orders, or support.'
+                    : 'Open on Monday to Saturday, 8:00 AM to 5:00 PM.'}
+                </span>
+              </div>
+              {branchModalType === 'locations' && companyAddress && (
+                <div className="p-4 rounded-2xl bg-[#58B947]/10 border border-[#58B947]/25 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div className="flex items-start gap-3">
+                    <div className="w-9 h-9 rounded-xl bg-[#58B947]/20 text-[#58B947] flex items-center justify-center shrink-0 mt-0.5">
+                      <FiHome className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <span className="text-[11px] font-bold uppercase tracking-wider text-[#58B947] block">
+                        Main Office / Primary Address
+                      </span>
+                      <p className="text-sm font-semibold text-gray-900 dark:text-white mt-0.5">
+                        {companyAddress}
+                      </p>
+                    </div>
+                  </div>
+                  <a
+                    href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${companyName || 'Z-LICZ'} ${companyAddress}`)}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center gap-1.5 text-xs font-bold text-[#58B947] hover:underline shrink-0"
+                  >
+                    <FiMapPin className="w-3.5 h-3.5" /> View on Map
+                  </a>
+                </div>
+              )}
+
+              {branchModalType === 'call' && companyPhone && (
+                <div className="p-4 rounded-2xl bg-[#58B947]/10 border border-[#58B947]/25 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div className="flex items-start gap-3">
+                    <div className="w-9 h-9 rounded-xl bg-[#58B947]/20 text-[#58B947] flex items-center justify-center shrink-0 mt-0.5">
+                      <FiPhone className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <span className="text-[11px] font-bold uppercase tracking-wider text-[#58B947] block">
+                        Main Office Hotline
+                      </span>
+                      <p className="text-sm font-semibold text-gray-900 dark:text-white mt-0.5">
+                        {companyPhone}
+                      </p>
+                    </div>
+                  </div>
+                  <a
+                    href={`tel:${companyPhone}`}
+                    className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-[#58B947] hover:bg-[#4da83d] text-white text-xs font-bold transition-colors shrink-0"
+                  >
+                    <FiPhone className="w-3.5 h-3.5" /> Call Main Office
+                  </a>
+                </div>
+              )}
+
+              {branchLocations.length > 0 ? (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  {branchLocations.map((branch) => {
+                    const isOpen = (branch.status || 'open').toLowerCase() === 'open'
+                    const mapQuery = encodeURIComponent(
+                      [branch.name, branch.location].filter(Boolean).join(' ')
+                    )
+                    return (
+                      <div
+                        key={branch.id}
+                        className="rounded-2xl border border-gray-200 dark:border-slate-700/80 bg-gray-50/80 dark:bg-slate-800/60 p-4 flex flex-col justify-between gap-4 hover:border-[#58B947]/50 transition-colors"
+                      >
+                        <div className="space-y-3">
+                          <div className="flex items-start gap-3">
+                            {branch.image_url ? (
+                              <img
+                                src={getLogoUrl(branch.image_url)}
+                                alt={branch.name}
+                                className="w-12 h-12 rounded-xl object-cover border border-gray-200 dark:border-slate-700 shrink-0"
+                              />
+                            ) : (
+                              <div
+                                className="w-12 h-12 rounded-xl flex items-center justify-center text-white font-bold text-base shrink-0 shadow-sm"
+                                style={{ backgroundColor: branch.color || '#58B947' }}
+                              >
+                                {branchModalType === 'call' ? (
+                                  <FiPhone className="w-5 h-5" />
+                                ) : (
+                                  <FiMapPin className="w-5 h-5" />
+                                )}
+                              </div>
+                            )}
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-center justify-between gap-2">
+                                <h4 className="font-bold text-sm text-gray-900 dark:text-white truncate">
+                                  {branch.name}
+                                </h4>
+                                <span
+                                  className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full shrink-0 ${isOpen
+                                    ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/70 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800/60'
+                                    : 'bg-gray-200 text-gray-600 dark:bg-slate-700 dark:text-slate-300'
+                                    }`}
+                                >
+                                  {branch.status || 'Open'}
+                                </span>
+                              </div>
+                              {branchModalType === 'call' ? (
+                                <>
+                                  <p className="text-sm font-bold text-[#58B947] mt-1 flex items-center gap-1.5">
+                                    <FiPhone className="w-3.5 h-3.5 shrink-0" />
+                                    <span>{branch.contact_number || 'No hotline listed'}</span>
+                                  </p>
+                                  {branch.location && (
+                                    <p className="text-[11px] text-gray-500 dark:text-slate-400 mt-1 flex items-start gap-1.5">
+                                      <FiMapPin className="w-3 h-3 shrink-0 mt-0.5" />
+                                      <span>{branch.location}</span>
+                                    </p>
+                                  )}
+                                </>
+                              ) : (
+                                <p className="text-xs text-gray-600 dark:text-slate-300 mt-1 flex items-start gap-1.5 leading-relaxed">
+                                  <FiMapPin className="w-3.5 h-3.5 text-[#58B947] shrink-0 mt-0.5" />
+                                  <span>{branch.location || 'Location not specified'}</span>
+                                </p>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="pt-3 border-t border-gray-200/80 dark:border-slate-700/70 flex items-center justify-end gap-2 text-xs">
+                          {branchModalType === 'call' ? (
+                            branch.contact_number ? (
+                              <a
+                                href={`tel:${branch.contact_number}`}
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#58B947] hover:bg-[#4da83d] text-white font-bold transition-colors shrink-0"
+                              >
+                                <FiPhone className="w-3.5 h-3.5" />
+                                <span>Call Branch</span>
+                              </a>
+                            ) : (
+                              <span className="text-gray-400 dark:text-slate-500 italic">Unavailable</span>
+                            )
+                          ) : (
+                            branch.location ? (
+                              <a
+                                href={`https://www.google.com/maps/search/?api=1&query=${mapQuery}`}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="inline-flex items-center gap-1 font-bold text-[#58B947] hover:underline shrink-0"
+                              >
+                                <span>Directions</span>
+                                <FiArrowRight className="w-3 h-3" />
+                              </a>
+                            ) : null
+                          )}
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              ) : (
+                <div className="text-center py-8 text-sm text-gray-500 dark:text-slate-400">
+                  No individual branch details have been configured yet.
+                </div>
+              )}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="px-6 py-4 border-t border-gray-100 dark:border-slate-800 bg-gray-50/80 dark:bg-slate-900/60 flex items-center justify-between gap-3 shrink-0">
+              <span className="text-xs text-gray-500 dark:text-slate-400">
+                {companyName || 'Z-LICZ'} Store Directory
+              </span>
+              <button
+                type="button"
+                onClick={() => setBranchModalType(null)}
+                className="px-5 py-2 rounded-xl bg-[#58B947] hover:bg-[#4da83d] text-white text-xs font-bold transition-colors cursor-pointer"
+              >
+                Close
+              </button>
             </div>
           </div>
         </div>

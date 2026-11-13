@@ -15,7 +15,10 @@ import {
   validateBiometricFrame,
   loadTemplateImage,
   extractBiometricFaceDescriptor,
-  compareBiometricDescriptors
+  compareBiometricDescriptors,
+  computeEyeAperture,
+  createBlinkDetector,
+  computeImageSharpness
 } from '../../lib/faceBiometrics'
 
 // Web Audio API synthesizer for biometric audio feedback
@@ -107,6 +110,9 @@ export default function FaceRecognitionEnrollment({
   const [isSaving, setIsSaving] = useState(false)
   const [cameraActive, setCameraActive] = useState(false)
   const [mismatchError, setMismatchError] = useState(null)
+  const [livenessPrompt, setLivenessPrompt] = useState('I-align imong nawong sa viewfinder...')
+  const [isLiveVerified, setIsLiveVerified] = useState(false)
+  const [isStaticSuspect, setIsStaticSuspect] = useState(false)
 
   // 5 Granular Facial Geometry Features
   const [granularFeatures, setGranularFeatures] = useState({
@@ -150,6 +156,9 @@ export default function FaceRecognitionEnrollment({
   const progressRef = useRef(0)
   const registeredDescriptorRef = useRef(null)
   const lastSoundTimeRef = useRef(0)
+  const blinkDetectorRef = useRef(null)
+  const bestSharpnessRef = useRef(0)
+  const bestSnapshotRef = useRef(null)
 
   // Track latest validation state for interval checks
   const latestValidationRef = useRef(validationState)
@@ -275,7 +284,7 @@ export default function FaceRecognitionEnrollment({
     }
   }, [currentBiometricImage, saveToBackend, onSuccess])
 
-  // Start camera and 10-second enrollment loop
+  // Start camera and blink-verified liveness enrollment loop
   const startCameraAndScanning = useCallback(async () => {
     stopCamera()
     setCameraError('')
@@ -284,6 +293,12 @@ export default function FaceRecognitionEnrollment({
     setCapturedSnapshot(null)
     setCapturedBlob(null)
     setMismatchError(null)
+    setIsLiveVerified(false)
+    setIsStaticSuspect(false)
+    setLivenessPrompt('I-align imong nawong sa viewfinder...')
+    blinkDetectorRef.current = createBlinkDetector()
+    bestSharpnessRef.current = 0
+    bestSnapshotRef.current = null
     setStep('scanning')
 
     if (!navigator?.mediaDevices?.getUserMedia) {
@@ -310,7 +325,7 @@ export default function FaceRecognitionEnrollment({
       }
 
       // ──────────────────────────────────────────────────────────
-      // 1. REAL-TIME GRANULAR BIOMETRIC FRAME & LIVENESS LOOP (80ms)
+      // REAL-TIME BIOMETRIC FRAME & LIVE BLINK VALIDATION LOOP (80ms)
       // ──────────────────────────────────────────────────────────
       validationLoopRef.current = setInterval(async () => {
         const video = videoRef.current
@@ -333,7 +348,31 @@ export default function FaceRecognitionEnrollment({
             }))
             setLandmarks(result.landmarks || [])
 
-            // Extract live granular structural geometry for base face registration
+            // Measure dynamic eye aperture for genuine human blink tracking
+            const aperture = computeEyeAperture(video, result.faceBounds)
+            const blinkRes = blinkDetectorRef.current
+              ? blinkDetectorRef.current.update(aperture, result.isFaceDetected)
+              : { blinkVerified: false, prompt: 'Align your face...', isStaticSuspect: false }
+
+            setLivenessPrompt(blinkRes.prompt)
+            setIsStaticSuspect(Boolean(blinkRes.isStaticSuspect))
+
+            // Anti-spoofing alert: reject static photo or screen presentation attacks
+            if (blinkRes.isStaticSuspect) {
+              setMismatchError('Photo / Screen detected! Real live blink required.')
+              progressRef.current = 0
+              setScanProgress(0)
+              const now = Date.now()
+              if (now - lastSoundTimeRef.current > 2000) {
+                playBiometricSound('warning')
+                lastSoundTimeRef.current = now
+              }
+              return
+            } else if (mismatchError) {
+              setMismatchError(null)
+            }
+
+            // Extract structural facial geometry
             const liveDesc = extractBiometricFaceDescriptor(video, result.faceBounds)
             if (liveDesc?.geometry) {
               setGranularFeatures({
@@ -343,65 +382,54 @@ export default function FaceRecognitionEnrollment({
                 eyebrows: { score: 95, matched: true, name: 'Eyebrows', detail: 'Arch / Spacing' },
                 mouth: { score: 97, matched: true, name: 'Mouth / Lips', detail: 'Proportions' }
               })
-              setMismatchError(null)
+            }
+
+            // Progressive Liveness Pacing
+            if (!blinkRes.blinkVerified) {
+              // Pre-blink: calibrate lighting and wait for mandatory blink (cap at 45%)
+              const nextP = Math.min(45, progressRef.current + 5)
+              progressRef.current = nextP
+              setScanProgress(nextP)
+            } else {
+              // Post-blink: genuine live human confirmed!
+              setIsLiveVerified(true)
+
+              // Track sharpest frame right after blink for pristine database enrollment
+              const sharpness = computeImageSharpness(video)
+              if (sharpness >= bestSharpnessRef.current) {
+                bestSharpnessRef.current = sharpness
+                bestSnapshotRef.current = captureFrame()
+              }
+
+              // Advance rapidly to 100% on confirmed live human
+              const nextP = Math.min(100, Math.max(50, progressRef.current + 18))
+              progressRef.current = nextP
+              setScanProgress(nextP)
+
+              if (Math.round(nextP) % 20 === 0 && nextP < 98) {
+                playBiometricSound('tick')
+              }
+
+              // 100% Enrollment Completion
+              if (nextP >= 100) {
+                if (validationLoopRef.current) {
+                  clearInterval(validationLoopRef.current)
+                  validationLoopRef.current = null
+                }
+                const finalSnapshot = bestSnapshotRef.current || captureFrame()
+                stopCamera()
+                completeEnrollmentFlow(finalSnapshot, null)
+              }
             }
           } else {
-            // Face lost or misaligned: trigger immediate auto-reset
-            if (progressRef.current > 15) {
+            // Face lost: reset calibration
+            if (progressRef.current > 10 && !isLiveVerified) {
               progressRef.current = 0
               setScanProgress(0)
-              setMismatchError('Face mismatch! Not the registered Face ID. Restarting...')
-              const now = Date.now()
-              if (now - lastSoundTimeRef.current > 1800) {
-                playBiometricSound('warning')
-                lastSoundTimeRef.current = now
-              }
             }
           }
         } catch (e) {
           console.warn('Biometric frame analysis error:', e)
-        }
-      }, 80)
-
-      // ──────────────────────────────────────────────────────────
-      // 2. 10-SECOND LIVENESS COUNTDOWN & PROGRESS TRACKER (80ms ticks)
-      // ──────────────────────────────────────────────────────────
-      scanIntervalRef.current = setInterval(() => {
-        const isValid = latestValidationRef.current?.isValid
-
-        if (!isValid) {
-          // If lighting fails or face is missing, immediately halt progress
-          if (progressRef.current > 0) {
-            progressRef.current = 0
-            setScanProgress(0)
-          }
-          return
-        }
-
-        // Fast Progress Pacing (no 10-second countdown wait)
-        const increment = 25
-        const nextProgress = Math.min(100, progressRef.current + increment)
-        progressRef.current = nextProgress
-        setScanProgress(nextProgress)
-
-        if (Math.round(nextProgress) % 18 === 0 && nextProgress < 98) {
-          playBiometricSound('tick')
-        }
-
-        // 5. FULLY AUTOMATED SUCCESS FLOW ON 100%:
-        if (nextProgress >= 100) {
-          clearInterval(scanIntervalRef.current)
-          scanIntervalRef.current = null
-          if (validationLoopRef.current) {
-            clearInterval(validationLoopRef.current)
-            validationLoopRef.current = null
-          }
-
-          const snapshot = captureFrame()
-          stopCamera()
-
-          // Automatically complete and register Face ID with zero manual clicks
-          completeEnrollmentFlow(snapshot, null)
         }
       }, 80)
 
@@ -625,8 +653,28 @@ export default function FaceRecognitionEnrollment({
             {/* 4 Corner Targeting HUD Brackets */}
             <div className="absolute top-3 left-3 w-5 h-5 border-t-2 border-l-2 border-emerald-400 drop-shadow-[0_0_6px_#34d399] rounded-tl-sm pointer-events-none z-20" />
             <div className="absolute top-3 right-3 w-5 h-5 border-t-2 border-r-2 border-emerald-400 drop-shadow-[0_0_6px_#34d399] rounded-tr-sm pointer-events-none z-20" />
-            <div className="absolute bottom-3 left-3 w-5 h-5 border-b-2 border-l-2 border-emerald-400 drop-shadow-[0_0_6px_#34d399] rounded-bl-sm pointer-events-none z-20" />
-            <div className="absolute bottom-3 right-3 w-5 h-5 border-b-2 border-r-2 border-emerald-400 drop-shadow-[0_0_6px_#34d399] rounded-br-sm pointer-events-none z-20" />
+            <div className="absolute bottom-3 left-3 w-5 h-5 border-b-2 border-l-2 border-emerald-400 drop-shadow-[0_0_6px_#34d399] rounded-tl-sm pointer-events-none z-20" />
+            <div className="absolute bottom-3 right-3 w-5 h-5 border-b-2 border-r-2 border-emerald-400 drop-shadow-[0_0_6px_#34d399] rounded-tr-sm pointer-events-none z-20" />
+
+            {/* Top Status Pill: Live Blink & Liveness State */}
+            <div className="absolute top-3.5 left-1/2 -translate-x-1/2 z-20 pointer-events-none max-w-[90%]">
+              {isLiveVerified ? (
+                <div className="flex items-center gap-1.5 px-3.5 py-1 rounded-full bg-emerald-950/95 border border-emerald-400 text-emerald-300 text-[11px] font-bold shadow-[0_0_15px_rgba(16,185,129,0.6)]">
+                  <FiCheckCircle className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>Live Face Verified · Enrolling...</span>
+                </div>
+              ) : isStaticSuspect ? (
+                <div className="flex items-center gap-1.5 px-3.5 py-1 rounded-full bg-rose-950/95 border border-rose-500 text-rose-300 text-[11px] font-bold shadow-[0_0_15px_rgba(244,63,94,0.6)] animate-pulse">
+                  <FiAlertTriangle className="w-3.5 h-3.5 text-rose-400" />
+                  <span>Photo / Screen Dili Madawat · Real Blink Required!</span>
+                </div>
+              ) : (
+                <div className="flex items-center gap-1.5 px-3.5 py-1 rounded-full bg-emerald-950/90 border border-emerald-500/70 text-emerald-300 text-[11px] font-semibold backdrop-blur-md shadow-[0_0_15px_rgba(16,185,129,0.4)]">
+                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping inline-block" />
+                  <span>{livenessPrompt}</span>
+                </div>
+              )}
+            </div>
 
             {/* Glowing Oval Face Shape Contour & Landmark Tracking Overlay */}
             <svg

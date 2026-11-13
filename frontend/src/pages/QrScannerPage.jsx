@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { Html5Qrcode } from 'html5-qrcode'
 import {
   FiCamera, FiShield, FiUser, FiCheckCircle, FiAlertCircle,
@@ -47,6 +48,7 @@ const playSound = (type) => {
 
 export default function QrScannerPage() {
   const { user } = useAuth()
+  const navigate = useNavigate()
   const isStoreAdmin = user && (user.role === 'Store Administrator' || user.role === 'Store Admin')
   const userBranch = user?.employee?.branch?.name || (typeof user?.employee?.branch === 'string' ? user.employee.branch : '') || 'Assigned Branch'
 
@@ -213,13 +215,60 @@ export default function QrScannerPage() {
         device_info: `${navigator.platform} (${navigator.userAgent})`,
       })
 
-      if (res.success && res.employee) {
+      if (res.success && (res.status === 'SUCCESS' || res.action)) {
+        playSound('success')
+        const actionName = (res.action || '').replace('ATTENDANCE_', '')
+        setPunchResult({
+          ...res,
+          action: actionName,
+          time: res.time || new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          date: res.date || new Date().toLocaleDateString(),
+        })
+        setStep('result')
+        triggerDataSync('attendance')
+        showToast(res.message || `Attendance Recorded: ${res.employee?.name || 'Employee'}`, 'success')
+      } else if (res.success && res.employee) {
         setIdentifiedEmp(res.employee)
         setAvailableActions(res.available_actions || [])
         setStep('pin')
         setPin('')
         setPinError('')
         showToast(`Employee Identified: ${res.employee.name}`, 'success')
+
+        const isSelf = (user?.employee_id && String(user.employee_id) === String(res.employee.employee_id))
+          || (user?.employee?.employee_id && String(user.employee.employee_id) === String(res.employee.employee_id))
+          || (user?.user_id && String(user.user_id) === String(res.employee.user_id))
+          || (user?.role && (user.role.includes('Store Admin') || user.role.includes('Store Administrator')) && (res.employee?.position?.includes('Manager') || res.employee?.position?.includes('Store Admin') || String(user.branch_id) === String(res.employee?.branch_id)))
+
+        if (isSelf && res.scan_log_id) {
+          sessionStorage.setItem('pace_attendance_station_state', JSON.stringify({
+            stationStep: 'waiting',
+            punchResult: { ...res, log_id: res.scan_log_id },
+            scannedQrToken: decodedText,
+            identifiedEmployee: res.employee
+          }))
+
+          window.dispatchEvent(new CustomEvent('pace:trigger-face-auth', {
+            detail: {
+              id: res.scan_log_id,
+              scan_log_id: res.scan_log_id,
+              employee_id: res.employee.employee_id,
+              employee: res.employee,
+              employee_name: res.employee.name,
+              employee_code: res.employee.employee_code,
+              face_biometric_image: user?.face_biometric_image || res.employee?.face_biometric_image,
+              face_biometric_base64: user?.face_biometric_base64 || res.employee?.face_biometric_base64,
+              has_registered_face: !!(user?.face_biometric_image || res.employee?.face_biometric_image),
+              scanned_by: {
+                user_id: user?.user_id,
+                employee: user?.employee || { first_name: 'Store', last_name: 'Admin' }
+              }
+            }
+          }))
+
+          navigate('/store-admin/profile')
+        }
+        window.dispatchEvent(new CustomEvent('pace:verifications-sync'))
       } else {
         playSound('error')
         setError(res.message || 'QR code verification failed.')

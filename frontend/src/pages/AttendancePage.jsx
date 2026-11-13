@@ -151,9 +151,29 @@ export default function AttendancePage({ branchFilter: propBranchFilter, embedde
   const [scanLogsStatusFilter, setScanLogsStatusFilter] = useState('All')
   const [scanLogsActionFilter, setScanLogsActionFilter] = useState('All')
 
-  // QR + PIN Attendance Station State
-  const [stationStep, setStationStep] = useState('scan') // 'scan' | 'pin' | 'result'
-  const [cameraActive, setCameraActive] = useState(true)
+  // QR + PIN Attendance Station State (Persisted in sessionStorage so navigation to profile preserves WAITING FOR EMPLOYEE)
+  const [stationStep, setStationStep] = useState(() => {
+    try {
+      const saved = sessionStorage.getItem('pace_attendance_station_state')
+      if (saved) {
+        const parsed = JSON.parse(saved)
+        if (parsed.stationStep === 'waiting' && parsed.punchResult?.log_id) {
+          return 'waiting'
+        }
+      }
+    } catch (_) {}
+    return 'scan'
+  })
+  const [cameraActive, setCameraActive] = useState(() => {
+    try {
+      const saved = sessionStorage.getItem('pace_attendance_station_state')
+      if (saved) {
+        const parsed = JSON.parse(saved)
+        if (parsed.stationStep === 'waiting') return false
+      }
+    } catch (_) {}
+    return true
+  })
   const [cameraError, setCameraError] = useState('')
   const [cameras, setCameras] = useState([])
   const [selectedCameraId, setSelectedCameraId] = useState('')
@@ -161,10 +181,32 @@ export default function AttendancePage({ branchFilter: propBranchFilter, embedde
   const [showPin, setShowPin] = useState(false)
 
   // Identified Employee from Step 1
-  const [identifiedEmployee, setIdentifiedEmployee] = useState(null)
+  const [identifiedEmployee, setIdentifiedEmployee] = useState(() => {
+    try {
+      const saved = sessionStorage.getItem('pace_attendance_station_state')
+      if (saved) {
+        const parsed = JSON.parse(saved)
+        if (parsed.stationStep === 'waiting' && parsed.identifiedEmployee) {
+          return parsed.identifiedEmployee
+        }
+      }
+    } catch (_) {}
+    return null
+  })
   const [availableActions, setAvailableActions] = useState([])
   const [selectedAction, setSelectedAction] = useState('')
-  const [scannedQrToken, setScannedQrToken] = useState('')
+  const [scannedQrToken, setScannedQrToken] = useState(() => {
+    try {
+      const saved = sessionStorage.getItem('pace_attendance_station_state')
+      if (saved) {
+        const parsed = JSON.parse(saved)
+        if (parsed.stationStep === 'waiting' && parsed.scannedQrToken) {
+          return parsed.scannedQrToken
+        }
+      }
+    } catch (_) {}
+    return ''
+  })
   const [verifyingQr, setVerifyingQr] = useState(false)
 
   // PIN Pad state for Step 2
@@ -174,7 +216,18 @@ export default function AttendancePage({ branchFilter: propBranchFilter, embedde
   const [isLockedOut, setIsLockedOut] = useState(false)
 
   // Result state for Step 3
-  const [punchResult, setPunchResult] = useState(null)
+  const [punchResult, setPunchResult] = useState(() => {
+    try {
+      const saved = sessionStorage.getItem('pace_attendance_station_state')
+      if (saved) {
+        const parsed = JSON.parse(saved)
+        if (parsed.stationStep === 'waiting' && parsed.punchResult) {
+          return parsed.punchResult
+        }
+      }
+    } catch (_) {}
+    return null
+  })
   const [countdown, setCountdown] = useState(8)
   const countdownTimerRef = useRef(null)
 
@@ -334,12 +387,30 @@ export default function AttendancePage({ branchFilter: propBranchFilter, embedde
     if (tabParam) {
       setActiveTab(tabParam)
       if (tabParam === 'punch') {
-        setStationStep('scan')
-        setPunchResult(null)
-        setScannedQrToken('')
-        setIdentifiedEmployee(null)
-        setCameraActive(true)
-        isProcessingScan.current = false
+        let restoredWaiting = false
+        try {
+          const saved = sessionStorage.getItem('pace_attendance_station_state')
+          if (saved) {
+            const parsed = JSON.parse(saved)
+            if (parsed.stationStep === 'waiting' && parsed.punchResult?.log_id) {
+              setStationStep('waiting')
+              setPunchResult(parsed.punchResult)
+              setScannedQrToken(parsed.scannedQrToken || '')
+              setIdentifiedEmployee(parsed.identifiedEmployee || null)
+              setCameraActive(false)
+              restoredWaiting = true
+            }
+          }
+        } catch (_) {}
+
+        if (!restoredWaiting) {
+          setStationStep('scan')
+          setPunchResult(null)
+          setScannedQrToken('')
+          setIdentifiedEmployee(null)
+          setCameraActive(true)
+          isProcessingScan.current = false
+        }
       }
     } else if (idParam || searchParam || dateParam || dateFromParam || dateToParam) {
       setActiveTab('log')
@@ -506,13 +577,65 @@ export default function AttendancePage({ branchFilter: propBranchFilter, embedde
         device_info: `${navigator.platform} (${navigator.userAgent})`,
       })
 
-      if (res.success && res.status === 'PENDING') {
+      if (res.success && (res.status === 'SUCCESS' || res.action)) {
+        playTone('success')
+        const actionName = (res.action || '').replace('ATTENDANCE_', '')
+        setPunchResult({
+          ...res,
+          action: actionName,
+          time: res.time || new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          date: res.date || new Date().toLocaleDateString(),
+          message: res.message || `✓ ${actionName.replace('_', ' ')} SUCCESSFUL`,
+        })
+        await stopCamera()
+        setStationStep('result')
+        startAutoResetCountdown()
+        triggerDataSync('attendance')
+        showToast(res.message || `Attendance Recorded: ${res.employee?.name || 'Employee'}`, 'success')
+      } else if (res.success && res.status === 'PENDING') {
+        const fullPunchResult = { ...res, log_id: res.scan_log_id }
         setScannedQrToken(token)
         setIdentifiedEmployee(res.employee)
-        setPunchResult({ ...res, log_id: res.scan_log_id }) // Store log_id
+        setPunchResult(fullPunchResult) // Store log_id
         await stopCamera()
         setStationStep('waiting') // Move to polling state
         showToast(`Employee Identified: ${res.employee.name}`, 'success')
+
+        // Automatically trigger ATTENDANCE AUTHORIZATION modal for Store Admin / current user if scanned
+        const isSelf = (user?.employee_id && String(user.employee_id) === String(res.employee?.employee_id))
+          || (user?.employee?.employee_id && String(user.employee.employee_id) === String(res.employee?.employee_id))
+          || (user?.user_id && String(user.user_id) === String(res.employee?.user_id))
+          || (user?.role && (user.role.includes('Store Admin') || user.role.includes('Store Administrator')) && (res.employee?.position?.includes('Manager') || res.employee?.position?.includes('Store Admin') || String(user.branch_id) === String(res.employee?.branch_id)))
+
+        if (isSelf) {
+          sessionStorage.setItem('pace_attendance_station_state', JSON.stringify({
+            stationStep: 'waiting',
+            punchResult: fullPunchResult,
+            scannedQrToken: token,
+            identifiedEmployee: res.employee
+          }))
+
+          window.dispatchEvent(new CustomEvent('pace:trigger-face-auth', {
+            detail: {
+              id: res.scan_log_id,
+              scan_log_id: res.scan_log_id,
+              employee_id: res.employee.employee_id,
+              employee: res.employee,
+              employee_name: res.employee.name,
+              employee_code: res.employee.employee_code,
+              face_biometric_image: user?.face_biometric_image || res.employee?.face_biometric_image,
+              face_biometric_base64: user?.face_biometric_base64 || res.employee?.face_biometric_base64,
+              has_registered_face: !!(user?.face_biometric_image || res.employee?.face_biometric_image),
+              scanned_by: {
+                user_id: user?.user_id,
+                employee: user?.employee || { first_name: 'Store', last_name: 'Admin' }
+              }
+            }
+          }))
+
+          navigate('/store-admin/profile')
+        }
+        window.dispatchEvent(new CustomEvent('pace:verifications-sync'))
       } else {
         playTone('error')
         showToast(res.message || 'Invalid or inactive QR code', 'error')
@@ -532,6 +655,20 @@ export default function AttendancePage({ branchFilter: propBranchFilter, embedde
     }
   }
 
+  // Keep station state synced in sessionStorage whenever waiting so unmounting/navigating doesn't lose it
+  useEffect(() => {
+    if (stationStep === 'waiting' && punchResult?.log_id) {
+      sessionStorage.setItem('pace_attendance_station_state', JSON.stringify({
+        stationStep: 'waiting',
+        punchResult,
+        scannedQrToken,
+        identifiedEmployee
+      }))
+    } else if (stationStep === 'scan' || stationStep === 'result') {
+      sessionStorage.removeItem('pace_attendance_station_state')
+    }
+  }, [stationStep, punchResult, scannedQrToken, identifiedEmployee])
+
   // --- Poll Backend while waiting for Employee PIN (1.2s non-overlapping cycle) ---
   useEffect(() => {
     let interval
@@ -544,18 +681,25 @@ export default function AttendancePage({ branchFilter: propBranchFilter, embedde
           const res = await api.attendance.checkVerification(punchResult.log_id)
           if (!res) return
           if (res.status === 'SUCCESS') {
+            sessionStorage.removeItem('pace_attendance_station_state')
             clearInterval(interval)
             playTone('success')
-            setPunchResult({
-              ...punchResult,
-              action: res.action.replace('ATTENDANCE_', ''),
+            const actionName = (res.action || '').replace('ATTENDANCE_', '')
+            setPunchResult(prev => ({
+              ...(prev || {}),
+              ...res,
+              action: actionName,
+              verification_type: res.verification_type || prev?.verification_type || 'FACE_RECOGNITION',
+              face_verified: true,
               time: res.time || new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-              date: new Date().toLocaleDateString(),
-              message: `ATTENDANCE SUCCESS`,
-            })
+              date: res.date || new Date().toLocaleDateString(),
+              message: res.message || `✓ ${actionName.replace('_', ' ')} SUCCESSFUL`,
+            }))
             setStationStep('result')
+            startAutoResetCountdown()
             triggerDataSync('attendance')
           } else if (res.status === 'FAILED') {
+            sessionStorage.removeItem('pace_attendance_station_state')
             clearInterval(interval)
             playTone('error')
             const reason = res.log?.failure_reason || 'Employee verification failed or rejected.'
@@ -575,6 +719,7 @@ export default function AttendancePage({ branchFilter: propBranchFilter, embedde
   }, [stationStep, punchResult?.log_id])
 
   const handleCancelWaiting = async () => {
+    sessionStorage.removeItem('pace_attendance_station_state')
     const logId = punchResult?.log_id
     if (logId) {
       try {
@@ -624,13 +769,66 @@ export default function AttendancePage({ branchFilter: propBranchFilter, embedde
 
       const res = await api.attendance.scanImage(formData)
 
-      if (res.success && res.status === 'PENDING') {
-        setScannedQrToken(res.qr_token || 'IMAGE_SCANNED')
+      if (res.success && (res.status === 'SUCCESS' || res.action)) {
+        playTone('success')
+        const actionName = (res.action || '').replace('ATTENDANCE_', '')
+        setPunchResult({
+          ...res,
+          action: actionName,
+          time: res.time || new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          date: res.date || new Date().toLocaleDateString(),
+          message: res.message || `✓ ${actionName.replace('_', ' ')} SUCCESSFUL`,
+        })
+        await stopCamera()
+        setStationStep('result')
+        startAutoResetCountdown()
+        triggerDataSync('attendance')
+        showToast(res.message || `Attendance Recorded: ${res.employee?.name || 'Employee'}`, 'success')
+      } else if (res.success && res.status === 'PENDING') {
+        const fullPunchResult = { ...res, log_id: res.scan_log_id }
+        const scanToken = res.qr_token || 'IMAGE_SCANNED'
+        setScannedQrToken(scanToken)
         setIdentifiedEmployee(res.employee)
-        setPunchResult({ ...res, log_id: res.scan_log_id }) // Store log_id
+        setPunchResult(fullPunchResult) // Store log_id
         await stopCamera()
         setStationStep('waiting') // Move to polling state
         showToast(`Employee Identified: ${res.employee.name}`, 'success')
+
+        // Automatically trigger ATTENDANCE AUTHORIZATION modal for Store Admin / current user if scanned
+        const isSelf = (user?.employee_id && String(user.employee_id) === String(res.employee?.employee_id))
+          || (user?.employee?.employee_id && String(user.employee.employee_id) === String(res.employee?.employee_id))
+          || (user?.user_id && String(user.user_id) === String(res.employee?.user_id))
+          || (user?.role && (user.role.includes('Store Admin') || user.role.includes('Store Administrator')) && (res.employee?.position?.includes('Manager') || res.employee?.position?.includes('Store Admin') || String(user.branch_id) === String(res.employee?.branch_id)))
+
+        if (isSelf) {
+          sessionStorage.setItem('pace_attendance_station_state', JSON.stringify({
+            stationStep: 'waiting',
+            punchResult: fullPunchResult,
+            scannedQrToken: scanToken,
+            identifiedEmployee: res.employee
+          }))
+
+          window.dispatchEvent(new CustomEvent('pace:trigger-face-auth', {
+            detail: {
+              id: res.scan_log_id,
+              scan_log_id: res.scan_log_id,
+              employee_id: res.employee.employee_id,
+              employee: res.employee,
+              employee_name: res.employee.name,
+              employee_code: res.employee.employee_code,
+              face_biometric_image: user?.face_biometric_image || res.employee?.face_biometric_image,
+              face_biometric_base64: user?.face_biometric_base64 || res.employee?.face_biometric_base64,
+              has_registered_face: !!(user?.face_biometric_image || res.employee?.face_biometric_image),
+              scanned_by: {
+                user_id: user?.user_id,
+                employee: user?.employee || { first_name: 'Store', last_name: 'Admin' }
+              }
+            }
+          }))
+
+          navigate('/store-admin/profile')
+        }
+        window.dispatchEvent(new CustomEvent('pace:verifications-sync'))
       } else {
         playTone('error')
         showToast(res.message || 'Invalid or inactive QR code', 'error')
@@ -725,6 +923,7 @@ export default function AttendancePage({ branchFilter: propBranchFilter, embedde
   }
 
   const resetStation = () => {
+    sessionStorage.removeItem('pace_attendance_station_state')
     if (countdownTimerRef.current) clearInterval(countdownTimerRef.current)
     setStationStep('scan')
     setIdentifiedEmployee(null)
@@ -1084,9 +1283,68 @@ export default function AttendancePage({ branchFilter: propBranchFilter, embedde
                   WAITING FOR EMPLOYEE
                 </h2>
                 <p className="text-xs text-muted-foreground mt-1">
-                  Employee {punchResult.employee?.name} must enter their PIN on their own device to complete the attendance.
+                  Employee <span className="font-bold text-foreground">{punchResult.employee?.name}</span> ({punchResult.employee?.employee_code}) can authorize on their device, or verify on this terminal:
                 </p>
               </div>
+
+              {/* Quick Biometric Authorization Trigger */}
+              <div className="pt-1">
+                <Btn
+                  variant="primary"
+                  size="md"
+                  className="w-full flex items-center justify-center gap-2 font-bold"
+                  onClick={() => {
+                    window.dispatchEvent(new CustomEvent('pace:trigger-face-auth', {
+                      detail: {
+                        id: punchResult.scan_log_id || punchResult.log_id,
+                        scan_log_id: punchResult.scan_log_id || punchResult.log_id,
+                        employee_id: punchResult.employee?.employee_id,
+                        employee: punchResult.employee,
+                        employee_name: punchResult.employee?.name,
+                        employee_code: punchResult.employee?.employee_code,
+                        face_biometric_image: punchResult.employee?.face_biometric_image || user?.face_biometric_image,
+                        face_biometric_base64: punchResult.employee?.face_biometric_base64 || user?.face_biometric_base64,
+                        has_registered_face: !!(punchResult.employee?.face_biometric_image || user?.face_biometric_image),
+                        scanned_by: {
+                          user_id: user?.user_id,
+                          employee: user?.employee || { first_name: 'Store', last_name: 'Admin' }
+                        }
+                      }
+                    }))
+                  }}
+                  icon={<FiCheckCircle className="w-4 h-4 text-emerald-400" />}
+                >
+                  Open Attendance Authorization (Face ID)
+                </Btn>
+              </div>
+
+              {/* On-Terminal PIN Entry Form */}
+              <form onSubmit={handleVerifyPin} className="space-y-3 pt-3 border-t border-border">
+                <p className="text-xs font-semibold text-foreground">
+                  Or enter PIN on this terminal:
+                </p>
+                <div className="flex gap-2 justify-center max-w-xs mx-auto">
+                  <input
+                    type="password"
+                    maxLength={6}
+                    value={enteredPin}
+                    onChange={e => {
+                      setEnteredPin(e.target.value.replace(/\D/g, ''))
+                      setPinError('')
+                    }}
+                    placeholder="••••"
+                    className="flex-1 px-4 py-2 text-center text-lg font-mono tracking-widest rounded-xl border border-border bg-card text-foreground outline-none focus:ring-2 focus:ring-primary shadow-xs"
+                    disabled={verifyingPin}
+                    autoFocus
+                  />
+                  <Btn type="submit" variant="primary" disabled={verifyingPin || enteredPin.length < 4} icon={<FiCheckCircle />}>
+                    {verifyingPin ? 'Verifying...' : 'Verify PIN'}
+                  </Btn>
+                </div>
+                {pinError && (
+                  <p className="text-xs text-destructive font-medium">{pinError}</p>
+                )}
+              </form>
 
               <div className="pt-2">
                 <Btn variant="outline" size="lg" className="w-full" onClick={handleCancelWaiting} icon={<FiCamera />}>
@@ -1147,7 +1405,11 @@ export default function AttendancePage({ branchFilter: propBranchFilter, embedde
                 </div>
                 <div className="flex justify-between py-1">
                   <span className="text-muted-foreground">Verification Method:</span>
-                  <span className="font-bold text-foreground">QR + PIN</span>
+                  <span className="font-bold text-foreground">
+                    {punchResult.verification_type === 'FACE_RECOGNITION' || punchResult.face_verified
+                      ? 'QR + Biometric Face ID'
+                      : 'QR + PIN'}
+                  </span>
                 </div>
               </div>
 

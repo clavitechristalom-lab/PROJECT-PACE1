@@ -308,6 +308,279 @@ export async function validateBiometricFrame(video) {
 }
 
 /**
+ * Computes dynamic eye aperture (openness) using vertical contrast and pupil gradient.
+ * Real human eyes display high gradient when open, which drops significantly upon eyelid closure.
+ */
+export function computeEyeAperture(video, faceBounds) {
+  if (!video || !faceBounds) return 0.5
+  const sampleW = 160
+  const sampleH = 120
+  const { ctx } = getSampleContext(sampleW, sampleH) || {}
+  if (!ctx) return 0.5
+
+  const rawCx = 1 - (faceBounds.cx ?? 0.5)
+  const rawCy = faceBounds.cy ?? 0.5
+  const w = (faceBounds.width ?? 0.44) * sampleW
+  const h = (faceBounds.height ?? 0.65) * sampleH
+  const cx = rawCx * sampleW
+  const cy = rawCy * sampleH
+
+  const eyeLevelY = Math.round(cy - h * 0.12)
+  const eyeDistX = Math.round(w * 0.20)
+  const leftEyeX = Math.round(cx - eyeDistX)
+  const rightEyeX = Math.round(cx + eyeDistX)
+
+  const eyeBoxW = Math.max(6, Math.round(w * 0.18))
+  const eyeBoxH = Math.max(4, Math.round(h * 0.12))
+
+  try {
+    ctx.drawImage(video, 0, 0, sampleW, sampleH)
+    const imgData = ctx.getImageData(0, 0, sampleW, sampleH)
+    const data = imgData.data
+
+    const measureBox = (centerX, centerY) => {
+      let sumGradY = 0
+      let minLum = 255
+      let maxLum = 0
+      let count = 0
+
+      const startX = Math.max(1, centerX - Math.floor(eyeBoxW / 2))
+      const endX = Math.min(sampleW - 2, centerX + Math.floor(eyeBoxW / 2))
+      const startY = Math.max(1, centerY - Math.floor(eyeBoxH / 2))
+      const endY = Math.min(sampleH - 2, centerY + Math.floor(eyeBoxH / 2))
+
+      for (let y = startY; y <= endY; y++) {
+        for (let x = startX; x <= endX; x++) {
+          const idx = (y * sampleW + x) * 4
+          const lum = 0.299 * data[idx] + 0.587 * data[idx + 1] + 0.114 * data[idx + 2]
+
+          const upIdx = ((y - 1) * sampleW + x) * 4
+          const downIdx = ((y + 1) * sampleW + x) * 4
+          const upLum = 0.299 * data[upIdx] + 0.587 * data[upIdx + 1] + 0.114 * data[upIdx + 2]
+          const downLum = 0.299 * data[downIdx] + 0.587 * data[downIdx + 1] + 0.114 * data[downIdx + 2]
+
+          sumGradY += Math.abs(downLum - upLum)
+          if (lum < minLum) minLum = lum
+          if (lum > maxLum) maxLum = lum
+          count++
+        }
+      }
+
+      if (count === 0) return 0.5
+      const avgGradY = sumGradY / count
+      const contrast = maxLum - minLum
+      // Open eye has sharp vertical contrast at eyelash/pupil margin; closed eye is uniform skin
+      const score = (avgGradY * 0.045 + contrast * 0.012)
+      return Math.max(0.05, Math.min(1.0, score))
+    }
+
+    const leftScore = measureBox(leftEyeX, eyeLevelY)
+    const rightScore = measureBox(rightEyeX, eyeLevelY)
+    return (leftScore + rightScore) / 2
+  } catch (_) {
+    return 0.5
+  }
+}
+
+/**
+ * Creates an active, real-time Blink Detector state machine for presentation attack protection.
+ * Prevents static photos, printed paper, and phone screen images from passing liveness verification.
+ */
+export function createBlinkDetector() {
+  let state = 'WAITING_FOR_OPEN' // 'WAITING_FOR_OPEN' | 'WAITING_FOR_BLINK' | 'BLINKING' | 'VERIFIED'
+  let openBaseline = 0
+  let openFrames = 0
+  let blinkStartTime = 0
+  let blinkVerified = false
+  let verifiedTimestamp = 0
+  let history = []
+  let staticSuspectCount = 0
+
+  return {
+    reset() {
+      state = 'WAITING_FOR_OPEN'
+      openBaseline = 0
+      openFrames = 0
+      blinkStartTime = 0
+      blinkVerified = false
+      verifiedTimestamp = 0
+      history = []
+      staticSuspectCount = 0
+    },
+
+    isVerified() {
+      return blinkVerified
+    },
+
+    getState() {
+      return {
+        state,
+        blinkVerified,
+        verifiedTimestamp,
+        isStaticSuspect: staticSuspectCount > 25
+      }
+    },
+
+    update(aperture, isFaceCentered) {
+      if (!isFaceCentered || aperture === null || aperture === undefined) {
+        if (!blinkVerified) {
+          openFrames = Math.max(0, openFrames - 1)
+        }
+        return {
+          blinkVerified,
+          state,
+          prompt: 'I-align imong nawong sa oval frame',
+          instruction: 'align',
+          aperture: 0,
+          isStaticSuspect: false
+        }
+      }
+
+      const now = Date.now()
+      history.push(aperture)
+      if (history.length > 20) history.shift()
+
+      // Anti-Spoofing: static photos maintain near-zero variance across frames
+      let isStaticSuspect = false
+      if (history.length >= 15) {
+        const mean = history.reduce((a, b) => a + b, 0) / history.length
+        const variance = history.reduce((a, b) => a + (b - mean) ** 2, 0) / history.length
+        const stdDev = Math.sqrt(variance)
+        if (stdDev < 0.012 && !blinkVerified) {
+          staticSuspectCount++
+        } else {
+          staticSuspectCount = Math.max(0, staticSuspectCount - 1)
+        }
+        isStaticSuspect = staticSuspectCount > 25
+      }
+
+      // 1. Establish personalized baseline openness with eyes open
+      if (state === 'WAITING_FOR_OPEN') {
+        if (aperture >= 0.32) {
+          openFrames++
+          openBaseline = openBaseline ? openBaseline * 0.7 + aperture * 0.3 : aperture
+          if (openFrames >= 4) {
+            state = 'WAITING_FOR_BLINK'
+          }
+        } else {
+          openFrames = 0
+        }
+        return {
+          blinkVerified: false,
+          state,
+          prompt: '👁️ Palihog og PIYONG (Please blink your eyes)',
+          instruction: 'blink_prompt',
+          aperture,
+          openBaseline,
+          isStaticSuspect
+        }
+      }
+
+      // 2. Waiting for blink closure
+      if (state === 'WAITING_FOR_BLINK') {
+        const relativeDrop = openBaseline > 0 ? (openBaseline - aperture) / openBaseline : 0
+        const isClosed = aperture < 0.28 || relativeDrop >= 0.30
+
+        if (isClosed) {
+          state = 'BLINKING'
+          blinkStartTime = now
+        }
+        return {
+          blinkVerified: false,
+          state,
+          prompt: isStaticSuspect
+            ? '⚠️ Photo/Screen dili madawat. Palihog og piyong (Real blink required)!'
+            : '👁️ Palihog og PIYONG sa mata (Please blink now)',
+          instruction: 'blink_prompt',
+          aperture,
+          openBaseline,
+          isStaticSuspect
+        }
+      }
+
+      // 3. Blinking in progress, waiting for eyes to reopen
+      if (state === 'BLINKING') {
+        const duration = now - blinkStartTime
+        const isReopened = aperture >= openBaseline * 0.65 || aperture >= 0.32
+
+        if (isReopened && duration >= 75 && duration <= 600) {
+          state = 'VERIFIED'
+          blinkVerified = true
+          verifiedTimestamp = now
+          return {
+            blinkVerified: true,
+            state,
+            prompt: '✅ Live Face Verified! Matching identity...',
+            instruction: 'verified',
+            aperture,
+            openBaseline,
+            isStaticSuspect: false
+          }
+        } else if (duration > 600) {
+          state = 'WAITING_FOR_OPEN'
+          openFrames = 0
+        }
+        return {
+          blinkVerified: false,
+          state,
+          prompt: 'Ablihi ang mata (Open eyes)',
+          instruction: 'reopen_prompt',
+          aperture,
+          openBaseline,
+          isStaticSuspect: false
+        }
+      }
+
+      // 4. Verification completed
+      return {
+        blinkVerified: true,
+        state: 'VERIFIED',
+        prompt: '✅ Live Face Verified! Matching identity...',
+        instruction: 'verified',
+        aperture,
+        openBaseline,
+        isStaticSuspect: false
+      }
+    }
+  }
+}
+
+/**
+ * Computes image sharpness/focus quality via high-frequency gradient variance
+ */
+export function computeImageSharpness(source) {
+  if (!source) return 0
+  const sampleW = 80
+  const sampleH = 60
+  const { ctx } = getSampleContext(sampleW, sampleH) || {}
+  if (!ctx) return 0
+
+  try {
+    ctx.drawImage(source, 0, 0, sampleW, sampleH)
+    const imgData = ctx.getImageData(0, 0, sampleW, sampleH)
+    const d = imgData.data
+    let sumVar = 0
+    let count = 0
+
+    for (let y = 1; y < sampleH - 1; y += 2) {
+      for (let x = 1; x < sampleW - 1; x += 2) {
+        const idx = (y * sampleW + x) * 4
+        const c = 0.299 * d[idx] + 0.587 * d[idx + 1] + 0.114 * d[idx + 2]
+        const r = 0.299 * d[idx + 4] + 0.587 * d[idx + 5] + 0.114 * d[idx + 6]
+        const b = 0.299 * d[idx + sampleW * 4] + 0.587 * d[idx + sampleW * 4 + 1] + 0.114 * d[idx + sampleW * 4 + 2]
+        const gx = r - c
+        const gy = b - c
+        sumVar += (gx * gx + gy * gy)
+        count++
+      }
+    }
+    return count > 0 ? Math.round(sumVar / count) : 0
+  } catch (_) {
+    return 0
+  }
+}
+
+/**
  * Loads an image (URL or dataURI) into an HTMLImageElement safely
  */
 export function loadTemplateImage(src) {

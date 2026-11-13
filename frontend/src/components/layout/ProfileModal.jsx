@@ -307,6 +307,47 @@ export default function ProfileModal() {
     }
   }, [isVisible, isEditing, activeTab, isCustomer, loadProfile], { module: 'profile', enabled: isVisible })
 
+  // Active poller & listener for attendance verification while in Employee Profile
+  useEffect(() => {
+    if (!isVisible || !user) return
+    let isMounted = true
+    let inFlight = false
+
+    const checkPendingVerifications = async () => {
+      if (inFlight || !isMounted) return
+      inFlight = true
+      try {
+        const res = await api.attendance.pendingVerifications()
+        if (res?.pending && res.pending.length > 0 && isMounted) {
+          const activeReq = res.pending[0]
+          // Close Display My QR modal if currently open
+          setShowDisplayQrModal(false)
+          // Trigger global face attendance authorization in AppShell
+          window.dispatchEvent(new CustomEvent('pace:trigger-face-auth', {
+            detail: activeReq
+          }))
+          window.dispatchEvent(new CustomEvent('pace:verifications-sync'))
+        }
+      } catch (_) {}
+      finally {
+        inFlight = false
+      }
+    }
+
+    const interval = setInterval(checkPendingVerifications, 1200)
+
+    const handleFaceAuthTrigger = () => {
+      setShowDisplayQrModal(false)
+    }
+    window.addEventListener('pace:trigger-face-auth', handleFaceAuthTrigger)
+
+    return () => {
+      isMounted = false
+      clearInterval(interval)
+      window.removeEventListener('pace:trigger-face-auth', handleFaceAuthTrigger)
+    }
+  }, [isVisible, user])
+
   const handleConfirmVerify = async () => {
     setVerificationLoading(true)
     setVerificationError('')

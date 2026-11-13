@@ -543,6 +543,12 @@ class AttendanceController extends Controller
             ], 423);
         }
 
+        // Cancel any stale pending logs (>5 mins) for this employee
+        AttendanceScanLog::where('employee_id', $employee->employee_id)
+            ->where('status', 'PENDING')
+            ->where('created_at', '<', now()->subMinutes(5))
+            ->update(['status' => 'CANCELLED', 'failure_reason' => 'Superseded by new scan']);
+
         // Log successful initial QR token scan and set as PENDING_VERIFICATION
         $log = AttendanceScanLog::create([
             'employee_id' => $employee->employee_id,
@@ -564,9 +570,9 @@ class AttendanceController extends Controller
             \App\Services\NotificationService::sendToUser($employee->user->user_id, [
                 'type' => 'attendance_verification',
                 'title' => 'Attendance Verification Request',
-                'message' => "Store Admin {$storeAdminName} is requesting your PIN to authorize their attendance.",
+                'message' => "Store Admin {$storeAdminName} is requesting your attendance authorization.",
                 'module' => 'Attendance',
-                'related_id' => $log->scan_id ?? $log->id, // Use whatever primary key it generates
+                'related_id' => $log->scan_id ?? $log->id,
                 'related_type' => 'App\Models\AttendanceScanLog',
                 'action_url' => '/dashboard',
                 'priority' => 'high',
@@ -584,17 +590,21 @@ class AttendanceController extends Controller
             $action = 'TIME_OUT';
         }
 
+        $branchName = $employee->branch_name ?? (is_object($employee->branch) ? $employee->branch->name : ((string)$employee->branch ?: $storeAdminBranch));
+
         return response()->json([
             'success' => true,
             'status' => 'PENDING',
-            'scan_log_id' => $log->scan_id ?? $log->id, // AttendanceScanLog primary key
+            'scan_log_id' => $log->scan_id ?? $log->id,
             'employee' => [
                 'employee_id' => $employee->employee_id,
                 'employee_code' => $employee->employee_code,
                 'name' => "{$employee->first_name} {$employee->last_name}",
                 'department' => $employee->department,
-                'branch' => $employee->branch_name ?? (is_object($employee->branch) ? $employee->branch->name : ((string)$employee->branch ?: $storeAdminBranch)),
+                'position' => $employee->position,
+                'branch' => $branchName,
             ],
+            'branch' => $branchName,
             'available_actions' => [$action],
             'message' => 'Waiting for Employee verification...',
         ]);
@@ -645,8 +655,21 @@ class AttendanceController extends Controller
             ], 423);
         }
 
+        $isSelfScan = ($user && $user->employee_id && (int)$user->employee_id === (int)$employee->employee_id);
+        $empPosition = strtolower(trim((string)$employee->position));
+        $isManager = str_contains($empPosition, 'manager')
+            || str_contains($empPosition, 'store admin')
+            || str_contains($empPosition, 'administrator')
+            || ($employee->user && in_array($employee->user->role, ['Store Administrator', 'Store Admin', 'Administrator', 'Super Admin']));
+
         if (empty($employee->attendance_pin)) {
-            return response()->json(['success' => false, 'message' => 'Your secure Attendance PIN has not been set. Please update it in your profile settings.'], 422);
+            // Auto-initialize PIN if manager or standard PIN format (4 to 6 digits)
+            if ($isSelfScan || $isManager || (strlen($pin) >= 4 && strlen($pin) <= 6)) {
+                $employee->attendance_pin = \Illuminate\Support\Facades\Hash::make($pin);
+                $employee->save();
+            } else {
+                return response()->json(['success' => false, 'message' => 'Your secure Attendance PIN has not been set. Please update it in your profile settings.'], 422);
+            }
         }
 
         // Find the pending scan log
@@ -671,8 +694,11 @@ class AttendanceController extends Controller
             ]);
         }
 
-        // Verify PIN
-        if (!\Illuminate\Support\Facades\Hash::check($pin, $employee->attendance_pin)) {
+        // Verify PIN (matches employee attendance PIN or user password)
+        $pinMatches = \Illuminate\Support\Facades\Hash::check($pin, $employee->attendance_pin)
+            || ($isSelfScan && \Illuminate\Support\Facades\Hash::check($pin, $user->password));
+
+        if (!$pinMatches) {
             $employee->pin_failed_attempts = ($employee->pin_failed_attempts ?? 0) + 1;
             if ($employee->pin_failed_attempts >= 5) {
                 $employee->pin_locked_until = now()->addMinutes(15);
@@ -1066,11 +1092,19 @@ class AttendanceController extends Controller
             }
 
             if (empty($employee->attendance_pin)) {
-                return response()->json(['success' => false, 'message' => 'Your secure Attendance PIN has not been set. Please update it in your profile settings.'], 422);
+                if (strlen($validated['pin']) >= 4 && strlen($validated['pin']) <= 6) {
+                    $employee->attendance_pin = \Illuminate\Support\Facades\Hash::make($validated['pin']);
+                    $employee->save();
+                } else {
+                    return response()->json(['success' => false, 'message' => 'Your secure Attendance PIN has not been set. Please update it in your profile settings.'], 422);
+                }
             }
 
             // Verify PIN
-            if (!\Illuminate\Support\Facades\Hash::check($validated['pin'], $employee->attendance_pin)) {
+            $pinValid = \Illuminate\Support\Facades\Hash::check($validated['pin'], $employee->attendance_pin)
+                || \Illuminate\Support\Facades\Hash::check($validated['pin'], $user->password);
+
+            if (!$pinValid) {
                 $employee->pin_failed_attempts = ($employee->pin_failed_attempts ?? 0) + 1;
                 if ($employee->pin_failed_attempts >= 5) {
                     $employee->pin_locked_until = now()->addMinutes(15);

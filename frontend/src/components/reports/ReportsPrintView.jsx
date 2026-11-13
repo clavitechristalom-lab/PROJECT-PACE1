@@ -766,7 +766,7 @@ export default function ReportsPrintView({
         <div className="max-w-md">
           <p className="font-bold text-slate-800 uppercase text-[9px] mb-1">System Verification Note</p>
           <p className="leading-relaxed">
-            System-generated report from {companyName} Operations Portal. All lists reflect live database records as of {generatedAt}.
+            System-generated report from {companyName || 'Z-LICZ Furniture & Appliances Trading'}. All lists reflect live database records as of {generatedAt}.
           </p>
         </div>
         <div className="pt-4 min-w-[220px]">

@@ -1246,7 +1246,9 @@ export default function AppShell() {
     if (pRes.pending && pRes.pending.length > 0) {
       const activePending = pRes.pending.filter(item => !cancelledVerifIdsRef.current.has(item.id))
       if (activePending.length > 0) {
-        setPendingVerification(prev => (!prev || prev.id !== activePending[0].id ? activePending[0] : prev))
+        const item = activePending[0]
+        setAuthVerificationMode(item.has_registered_face ? 'face' : 'pin')
+        setPendingVerification(prev => (!prev || prev.id !== item.id ? item : prev))
       } else {
         setPendingVerification(null)
       }
@@ -1313,6 +1315,12 @@ export default function AppShell() {
   useEffect(() => {
     settingsLoadedRef.current = false
     loadData({ includeSettings: true })
+
+    if (!user) return
+    const interval = setInterval(() => {
+      loadPendingVerificationsOnly()
+    }, 2500)
+    return () => clearInterval(interval)
   }, [user])
 
   useEffect(() => {
@@ -1465,7 +1473,7 @@ export default function AppShell() {
               const reqId = pendingVerification?.id
               if (reqId) cancelledVerifIdsRef.current.add(reqId)
               setPendingVerification(null)
-              navigate('/attendance?tab=punch')
+              navigate(user?.role === 'Employee' ? '/employee/attendance' : '/attendance?tab=punch')
             }}
             onCancel={() => {
               const reqId = pendingVerification?.id
@@ -1477,7 +1485,7 @@ export default function AppShell() {
                 }).catch(() => { })
               }
               setPendingVerification(null)
-              navigate('/attendance?tab=punch')
+              navigate(user?.role === 'Employee' ? '/employee/attendance' : '/attendance?tab=punch')
             }}
             onAuthorize={async (payload) => {
               const reqId = pendingVerification?.id
@@ -1495,12 +1503,16 @@ export default function AppShell() {
               } catch (err) {
                 console.error('Attendance approval error:', err)
               }
-              setPendingVerification(null)
+              setTimeout(() => {
+                setPendingVerification(null)
+                navigate(user?.role === 'Employee' ? '/employee/attendance' : '/attendance?tab=punch')
+              }, 400)
             }}
             onSuccess={() => {
               const reqId = pendingVerification?.id
               if (reqId) cancelledVerifIdsRef.current.add(reqId)
               setPendingVerification(null)
+              navigate(user?.role === 'Employee' ? '/employee/attendance' : '/attendance?tab=punch')
             }}
             onSwitchToPin={() => setAuthVerificationMode('pin')}
           />
@@ -1511,6 +1523,7 @@ export default function AppShell() {
               const reqId = pendingVerification?.id
               if (reqId) cancelledVerifIdsRef.current.add(reqId)
               setPendingVerification(null)
+              navigate(user?.role === 'Employee' ? '/employee/attendance' : '/attendance?tab=punch')
             }}
             onCancel={() => {
               const reqId = pendingVerification?.id
@@ -1522,12 +1535,13 @@ export default function AppShell() {
                 }).catch(() => { })
               }
               setPendingVerification(null)
-              navigate('/attendance?tab=punch')
+              navigate(user?.role === 'Employee' ? '/employee/attendance' : '/attendance?tab=punch')
             }}
             onSuccess={() => {
               const reqId = pendingVerification?.id
               if (reqId) cancelledVerifIdsRef.current.add(reqId)
               setPendingVerification(null)
+              navigate(user?.role === 'Employee' ? '/employee/attendance' : '/attendance?tab=punch')
             }}
             onSwitchToFace={() => setAuthVerificationMode('face')}
           />

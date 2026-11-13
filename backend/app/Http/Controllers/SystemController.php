@@ -1065,10 +1065,15 @@ class SystemController extends Controller
             'logo'              => '',
         ];
 
+        $branches = \App\Models\BranchProfile::query()
+            ->orderBy('id')
+            ->get(['id', 'name', 'location', 'contact_number', 'status', 'color', 'image_url']);
+
         $dynamic = [
             'total_products'    => \App\Models\Product::count(),
             'total_customers'   => \App\Models\Customer::count(),
-            'total_branches'    => \App\Models\BranchProfile::count(),
+            'total_branches'    => $branches->count(),
+            'branches'          => $branches,
             'total_appliances'  => \App\Models\Product::whereIn('category', CategoryFramework::matchingCategories('Appliances'))->count(),
             'total_furniture'   => \App\Models\Product::whereIn('category', CategoryFramework::matchingCategories('Furniture'))->count(),
             'total_electronics' => \App\Models\Product::whereIn('category', array_unique(array_merge(
