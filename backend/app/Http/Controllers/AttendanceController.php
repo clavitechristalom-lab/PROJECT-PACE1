@@ -592,6 +592,21 @@ class AttendanceController extends Controller
 
         $branchName = $employee->branch_name ?? (is_object($employee->branch) ? $employee->branch->name : ((string)$employee->branch ?: $storeAdminBranch));
 
+        $empUser = $employee->user;
+        $faceBiometricUrl = null;
+        $faceBiometricBase64 = null;
+        if ($empUser && $empUser->face_biometric_image) {
+            $faceBiometricUrl = str_starts_with($empUser->face_biometric_image, 'http')
+                ? $empUser->face_biometric_image
+                : url(Storage::url($empUser->face_biometric_image));
+
+            if (Storage::disk('public')->exists($empUser->face_biometric_image)) {
+                $raw = Storage::disk('public')->get($empUser->face_biometric_image);
+                $mime = Storage::disk('public')->mimeType($empUser->face_biometric_image) ?: 'image/jpeg';
+                $faceBiometricBase64 = 'data:' . $mime . ';base64,' . base64_encode($raw);
+            }
+        }
+
         return response()->json([
             'success' => true,
             'status' => 'PENDING',
@@ -603,10 +618,16 @@ class AttendanceController extends Controller
                 'department' => $employee->department,
                 'position' => $employee->position,
                 'branch' => $branchName,
+                'face_biometric_image' => $faceBiometricUrl,
+                'face_biometric_base64' => $faceBiometricBase64,
+                'has_registered_face' => !empty($faceBiometricUrl),
             ],
             'branch' => $branchName,
             'available_actions' => [$action],
             'message' => 'Waiting for Employee verification...',
+            'face_biometric_image' => $faceBiometricUrl,
+            'face_biometric_base64' => $faceBiometricBase64,
+            'has_registered_face' => !empty($faceBiometricUrl),
         ]);
     }
 
@@ -1009,17 +1030,26 @@ class AttendanceController extends Controller
             return response()->json(['success' => false, 'message' => 'Unauthorized'], 401);
         }
 
-        $employee = $user->employee;
+        $targetUser = $user;
+        $employeeId = $request->query('employee_id');
+        if ($employeeId && in_array($user->role, ['Store Administrator', 'Store Admin', 'Admin', 'Super Admin', 'Human Resources'])) {
+            $foundEmployee = Employee::with('user')->find($employeeId);
+            if ($foundEmployee && $foundEmployee->user) {
+                $targetUser = $foundEmployee->user;
+            }
+        }
+
+        $employee = $targetUser->employee;
         $faceBiometricUrl = null;
         $faceBiometricBase64 = null;
-        if ($user->face_biometric_image) {
-            $faceBiometricUrl = str_starts_with($user->face_biometric_image, 'http')
-                ? $user->face_biometric_image
-                : url(Storage::url($user->face_biometric_image));
+        if ($targetUser->face_biometric_image) {
+            $faceBiometricUrl = str_starts_with($targetUser->face_biometric_image, 'http')
+                ? $targetUser->face_biometric_image
+                : url(Storage::url($targetUser->face_biometric_image));
 
-            if (Storage::disk('public')->exists($user->face_biometric_image)) {
-                $raw = Storage::disk('public')->get($user->face_biometric_image);
-                $mime = Storage::disk('public')->mimeType($user->face_biometric_image) ?: 'image/jpeg';
+            if (Storage::disk('public')->exists($targetUser->face_biometric_image)) {
+                $raw = Storage::disk('public')->get($targetUser->face_biometric_image);
+                $mime = Storage::disk('public')->mimeType($targetUser->face_biometric_image) ?: 'image/jpeg';
                 $faceBiometricBase64 = 'data:' . $mime . ';base64,' . base64_encode($raw);
             }
         }
@@ -1028,7 +1058,7 @@ class AttendanceController extends Controller
             'success' => true,
             'employee_id' => $employee ? $employee->employee_id : null,
             'employee_code' => $employee ? $employee->employee_code : 'EMP-016',
-            'name' => $employee ? trim("{$employee->first_name} {$employee->last_name}") : $user->name,
+            'name' => $employee ? trim("{$employee->first_name} {$employee->last_name}") : $targetUser->name,
             'face_biometric_image' => $faceBiometricUrl,
             'face_biometric_base64' => $faceBiometricBase64,
             'has_registered_face' => !empty($faceBiometricUrl),
@@ -1038,7 +1068,7 @@ class AttendanceController extends Controller
     public function approveVerification(Request $request)
     {
         $user = $request->user();
-        if (!$user || !$user->employee) {
+        if (!$user) {
             return response()->json(['success' => false, 'message' => 'Unauthorized'], 403);
         }
 
@@ -1052,22 +1082,37 @@ class AttendanceController extends Controller
         ]);
 
         $targetEmployeeId = $user->employee_id ?: ($user->employee ? $user->employee->employee_id : null);
-        $log = AttendanceScanLog::where('id', $validated['scan_log_id'])
-            ->where('employee_id', $targetEmployeeId)
-            ->where('status', 'PENDING')
-            ->first();
+        $isStoreAdmin = in_array($user->role, ['Store Administrator', 'Store Admin', 'Admin', 'Super Admin']);
+
+        $query = AttendanceScanLog::with('employee.user')->where('id', $validated['scan_log_id'])
+            ->where('status', 'PENDING');
+
+        if ($isStoreAdmin) {
+            $query->where(function ($q) use ($targetEmployeeId, $user) {
+                if ($targetEmployeeId) {
+                    $q->where('employee_id', $targetEmployeeId);
+                }
+                $q->orWhere('scanned_by', $user->user_id);
+            });
+        } else {
+            $query->where('employee_id', $targetEmployeeId);
+        }
+
+        $log = $query->first();
 
         if (!$log) {
             return response()->json(['success' => false, 'message' => 'Pending request not found or expired.'], 404);
         }
 
-        $employee = $user->employee;
+        $employee = $log->employee ?: $user->employee;
+        $empUser = ($employee && $employee->user) ? $employee->user : $user;
         $isFace = $request->boolean('face_verified') || $request->input('verification_type') === 'FACE_RECOGNITION';
 
         if ($isFace) {
             // Strict Face ID match check: If explicitly marked false or face not registered, reject
             $isFaceMatched = $request->has('face_matched') ? $request->boolean('face_matched') : true;
-            if (!$isFaceMatched || empty($user->face_biometric_image)) {
+            $faceBiometricImage = $empUser ? $empUser->face_biometric_image : null;
+            if (!$isFaceMatched || empty($faceBiometricImage)) {
                 $log->update(['status' => 'FAILED', 'action_type' => 'FACE_VERIFICATION_FAILED', 'failure_reason' => 'Face does not match registered Face ID. Access denied.']);
                 return response()->json([
                     'success' => false,
@@ -1100,9 +1145,8 @@ class AttendanceController extends Controller
                 }
             }
 
-            // Verify PIN
-            $pinValid = \Illuminate\Support\Facades\Hash::check($validated['pin'], $employee->attendance_pin)
-                || \Illuminate\Support\Facades\Hash::check($validated['pin'], $user->password);
+            $pinValid = ($employee->attendance_pin && \Illuminate\Support\Facades\Hash::check($validated['pin'], $employee->attendance_pin))
+                || ($empUser && $empUser->password && \Illuminate\Support\Facades\Hash::check($validated['pin'], $empUser->password));
 
             if (!$pinValid) {
                 $employee->pin_failed_attempts = ($employee->pin_failed_attempts ?? 0) + 1;
@@ -1141,7 +1185,7 @@ class AttendanceController extends Controller
             $action = 'TIME_OUT';
         }
 
-        $methodLabel = $isFace ? 'QR + Face Recognition (Authorized by Employee)' : 'QR + PIN (Authorized by Employee)';
+        $methodLabel = $isFace ? 'QR + Face Recognition' : 'QR + PIN';
         $scanStatus = $isFace ? 'QR_FACE_VERIFIED' : 'QR_PIN_VERIFIED';
 
         if ($action === 'TIME_IN') {

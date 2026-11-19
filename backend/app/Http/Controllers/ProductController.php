@@ -67,7 +67,12 @@ class ProductController extends Controller
                 $query->where('category', $request->query('category'));
             }
         }
-        $products = $query->limit(12)->get();
+        $query->orderBy('product_name');
+        if ($request->filled('limit') && is_numeric($request->query('limit'))) {
+            $limit = max(1, min(500, (int) $request->query('limit')));
+            $query->limit($limit);
+        }
+        $products = $query->get();
         return response()->json(['products' => $products]);
     }
 

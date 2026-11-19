@@ -1077,6 +1077,7 @@ class SystemController extends Controller
             'total_appliances'  => \App\Models\Product::whereIn('category', CategoryFramework::matchingCategories('Appliances'))->count(),
             'total_furniture'   => \App\Models\Product::whereIn('category', CategoryFramework::matchingCategories('Furniture'))->count(),
             'total_electronics' => \App\Models\Product::whereIn('category', array_unique(array_merge(
+                CategoryFramework::matchingCategories('Home Entertainment & Audio Systems'),
                 CategoryFramework::matchingCategories('Home Entertainment & Display'),
                 CategoryFramework::matchingCategories('Audio Systems'),
                 CategoryFramework::matchingCategories('Media & Mounting Accessories')
@@ -1317,7 +1318,8 @@ class SystemController extends Controller
 
     public function storage(Request $request)
     {
-        $overview = \App\Services\StorageService::getStorageOverview();
+        $force = $request->boolean('refresh', false) || $request->has('force');
+        $overview = \App\Services\StorageService::getStorageOverview($force);
         
         return response()->json(array_merge([
             'total' => $overview['disk']['total'],
@@ -1360,7 +1362,7 @@ class SystemController extends Controller
             'priority' => 'normal',
         ]);
 
-        $overview = \App\Services\StorageService::getStorageOverview();
+        $overview = \App\Services\StorageService::getStorageOverview(true);
 
         return response()->json([
             'success' => true,

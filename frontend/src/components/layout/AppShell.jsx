@@ -6,8 +6,9 @@ import {
   FiBarChart2, FiSettings, FiShield, FiDatabase, FiActivity,
   FiSun, FiMoon, FiSearch, FiLogOut, FiMenu, FiChevronDown,
   FiCheckCircle, FiX, FiBell, FiCamera, FiLayers, FiMessageSquare, FiHardDrive,
-  FiShoppingBag
+  FiGitBranch
 } from 'react-icons/fi'
+import { LuBuilding2 } from 'react-icons/lu'
 import { useAuth } from '../../context/AuthContext'
 import { NotificationBell, showToast, Spinner } from '../ui'
 import { api } from '../../lib/api'
@@ -34,6 +35,8 @@ const icons = {
   qr: <FiCamera className="w-4 h-4 flex-shrink-0" />,
   reports: <FiBarChart2 className="w-4 h-4 flex-shrink-0" />,
   users: <FiShield className="w-4 h-4 flex-shrink-0" />,
+  shield: <FiShield className="w-4 h-4 flex-shrink-0" />,
+  branches: <LuBuilding2 className="w-4 h-4 flex-shrink-0" />,
   logs: <FiFileText className="w-4 h-4 flex-shrink-0" />,
   backup: <FiDatabase className="w-4 h-4 flex-shrink-0" />,
   settings: <FiSettings className="w-4 h-4 flex-shrink-0" />,
@@ -126,7 +129,7 @@ function navByRole(role, onOpenConfig, pendingLettersCount = 0) {
     icon: icons.settings,
     items: [
       { label: 'Admin Interface', path: '/admin-dashboard', icon: icons.shield },
-      { label: 'Branches', path: '/branches', icon: icons.products },
+      { label: 'Branches', path: '/branches', icon: icons.branches },
       { label: 'Users', path: '/users', icon: icons.users },
     ],
   }
@@ -235,14 +238,13 @@ function getCollapsedRailItems(role, onOpenConfig, pendingLettersCount = 0) {
       { label: 'My Attendance QR', path: '/employee/attendance', icon: <FiClock className="w-5 h-5" /> },
       { label: 'My Payslips', path: '/employee/payslips', icon: <FiFileText className="w-5 h-5" /> },
       { label: 'Create Excuse / Leave Letter', path: '/employee/excuse-letter', icon: <FiFileText className="w-5 h-5" /> },
-      { label: 'Notifications', path: '/employee/notifications', icon: <FiBell className="w-5 h-5" /> },
     ]
   }
 
   if (role === 'Customer') {
     return [
       { label: 'My Dashboard', path: '/customer/dashboard', icon: <FiHome className="w-5 h-5" /> },
-      { label: 'Product List', path: '/customer/dashboard?tab=products', icon: <FiShoppingBag className="w-5 h-5" /> },
+      { label: 'Product List', path: '/customer/dashboard?tab=products', icon: <LuBuilding2 className="w-5 h-5" /> },
       { label: 'Installments', path: '/customer/dashboard?tab=installments', icon: <FiCreditCard className="w-5 h-5" /> },
       { label: 'Statements', path: '/customer/dashboard?tab=statements', icon: <FiFileText className="w-5 h-5" /> },
       { label: 'Payment Schedule', path: '/customer/dashboard?tab=schedule', icon: <FiCalendar className="w-5 h-5" /> },
@@ -307,13 +309,22 @@ function getCollapsedRailItems(role, onOpenConfig, pendingLettersCount = 0) {
   // 17. Customer Support (Chat)
   items.push({ label: 'Customer Support', path: '/admin/support', icon: <FiMessageSquare className="w-5 h-5" /> })
 
-  // 18. System Management (Gear)
+  // 18. System Management (Admin Interface, Branches, Users)
   if (isAdmin) {
     items.push({
-      label: 'System Management',
+      label: 'Admin Interface',
       path: '/admin-dashboard',
       icon: <FiSettings className="w-5 h-5" />,
-      subPaths: ['/branches', '/users']
+    })
+    items.push({
+      label: 'Branches',
+      path: '/branches',
+      icon: <LuBuilding2 className="w-5 h-5" />,
+    })
+    items.push({
+      label: 'Users',
+      path: '/users',
+      icon: <FiShield className="w-5 h-5" />,
     })
   }
 
@@ -863,8 +874,8 @@ function Header({
             }}
             onFocus={() => setSearchOpen(true)}
             onKeyDown={handleSearchKeyDown}
-            placeholder="Search records across system (Ctrl+K)..."
-            className={`w-full h-9 pl-9 pr-16 text-xs rounded-xl border transition-all focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-500 ${
+            placeholder="Search records across system..."
+            className={`w-full h-9 pl-9 pr-8 text-xs rounded-xl border transition-all focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-500 ${
               isHeaderDark
                 ? 'border-blue-500/25 bg-[#071328] text-slate-50 placeholder:text-blue-300/40'
                 : 'border-slate-300/80 bg-white/75 text-slate-900 placeholder:text-slate-500'
@@ -882,8 +893,8 @@ function Header({
               <FiSearch className="w-4 h-4" />
             )}
           </div>
-          <div className="absolute right-2.5 top-2 flex items-center gap-1">
-            {searchQuery && (
+          {searchQuery && (
+            <div className="absolute right-2.5 top-2 flex items-center gap-1">
               <button
                 type="button"
                 onClick={() => { setSearchQuery(''); setSearchResults([]); setGroupedResults({}); }}
@@ -892,15 +903,8 @@ function Header({
               >
                 <FiX className="w-3.5 h-3.5" />
               </button>
-            )}
-            <kbd className={`hidden lg:inline-block px-1.5 py-0.5 text-[10px] font-mono border rounded shadow-2xs ${
-              isHeaderDark
-                ? 'text-blue-300 bg-blue-900/40 border-blue-500/25'
-                : 'text-blue-700 bg-blue-100/60 border-blue-500/25'
-            }`}>
-              Ctrl+K
-            </kbd>
-          </div>
+            </div>
+          )}
         </div>
 
         {/* Global Search Dropdown Modal */}
@@ -1093,16 +1097,6 @@ function Header({
                     <span>Profile Information</span>
                   </button>
                 )}
-                <button
-                  onClick={() => {
-                    window.dispatchEvent(new CustomEvent('open:notifications'))
-                    setUserOpen(false)
-                  }}
-                  className="w-full text-left px-3 py-2 text-xs text-foreground hover:bg-blue-500/10 rounded-xl cursor-pointer flex items-center gap-2 font-medium transition-colors"
-                >
-                  <FiBell className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
-                  <span>Notifications</span>
-                </button>
                 {(user?.role === 'Administrator' || isStoreAdm) && (
                   <button
                     onClick={() => { onOpenConfig?.(); setUserOpen(false) }}
@@ -1149,6 +1143,8 @@ const ROUTE_TITLES = {
   '/admin/qr-monitoring': 'QR Attendance Monitoring',
   '/reports': 'Reports',
   '/notifications': 'Notification Center',
+  '/admin-dashboard': 'Admin Interface',
+  '/branches': 'Branches Management',
   '/users': 'User Management',
   '/system-logs': 'System Logs',
   '/backups': 'Backup & Restore',

@@ -109,10 +109,8 @@ export default function FaceRecognitionEnrollment({
   const [capturedBlob, setCapturedBlob] = useState(null)
   const [isSaving, setIsSaving] = useState(false)
   const [cameraActive, setCameraActive] = useState(false)
-  const [mismatchError, setMismatchError] = useState(null)
   const [livenessPrompt, setLivenessPrompt] = useState('I-align imong nawong sa viewfinder...')
   const [isLiveVerified, setIsLiveVerified] = useState(false)
-  const [isStaticSuspect, setIsStaticSuspect] = useState(false)
 
   // 5 Granular Facial Geometry Features
   const [granularFeatures, setGranularFeatures] = useState({
@@ -292,9 +290,7 @@ export default function FaceRecognitionEnrollment({
     progressRef.current = 0
     setCapturedSnapshot(null)
     setCapturedBlob(null)
-    setMismatchError(null)
     setIsLiveVerified(false)
-    setIsStaticSuspect(false)
     setLivenessPrompt('I-align imong nawong sa viewfinder...')
     blinkDetectorRef.current = createBlinkDetector()
     bestSharpnessRef.current = 0
@@ -348,28 +344,13 @@ export default function FaceRecognitionEnrollment({
             }))
             setLandmarks(result.landmarks || [])
 
-            // Measure dynamic eye aperture for genuine human blink tracking
-            const aperture = computeEyeAperture(video, result.faceBounds)
-            const blinkRes = blinkDetectorRef.current
-              ? blinkDetectorRef.current.update(aperture, result.isFaceDetected)
-              : { blinkVerified: false, prompt: 'Align your face...', isStaticSuspect: false }
-
-            setLivenessPrompt(blinkRes.prompt)
-            setIsStaticSuspect(Boolean(blinkRes.isStaticSuspect))
-
-            // Anti-spoofing alert: reject static photo or screen presentation attacks
-            if (blinkRes.isStaticSuspect) {
-              setMismatchError('Photo / Screen detected! Real live blink required.')
-              progressRef.current = 0
-              setScanProgress(0)
-              const now = Date.now()
-              if (now - lastSoundTimeRef.current > 2000) {
-                playBiometricSound('warning')
-                lastSoundTimeRef.current = now
-              }
-              return
-            } else if (mismatchError) {
-              setMismatchError(null)
+            // Guidance prompt for enrollment
+            if (!result.isFaceCentered) {
+              setLivenessPrompt('I-align imong nawong sa tunga sa oval...')
+            } else if (!result.isAdequateLighting) {
+              setLivenessPrompt(result.lightingQuality === 'too_dark' ? 'Paduol sa suga (ngitngit ra)...' : 'Klaroha ang hayag...')
+            } else {
+              setLivenessPrompt('Pabilin nga mag-atubang... nagkuha sa face template')
             }
 
             // Extract structural facial geometry
@@ -384,48 +365,37 @@ export default function FaceRecognitionEnrollment({
               })
             }
 
-            // Progressive Liveness Pacing
-            if (!blinkRes.blinkVerified) {
-              // Pre-blink: calibrate lighting and wait for mandatory blink (cap at 45%)
-              const nextP = Math.min(45, progressRef.current + 5)
-              progressRef.current = nextP
-              setScanProgress(nextP)
-            } else {
-              // Post-blink: genuine live human confirmed!
-              setIsLiveVerified(true)
+            // Continuously track sharpest frame for pristine database enrollment
+            const sharpness = computeImageSharpness(video)
+            if (sharpness >= bestSharpnessRef.current) {
+              bestSharpnessRef.current = sharpness
+              bestSnapshotRef.current = captureFrame()
+            }
 
-              // Track sharpest frame right after blink for pristine database enrollment
-              const sharpness = computeImageSharpness(video)
-              if (sharpness >= bestSharpnessRef.current) {
-                bestSharpnessRef.current = sharpness
-                bestSnapshotRef.current = captureFrame()
+            // Smooth steady progression during enrollment
+            const nextP = Math.min(100, progressRef.current + 8)
+            progressRef.current = nextP
+            setScanProgress(nextP)
+
+            if (Math.round(nextP) % 20 === 0 && nextP < 98) {
+              playBiometricSound('tick')
+            }
+
+            // 100% Enrollment Completion
+            if (nextP >= 100) {
+              if (validationLoopRef.current) {
+                clearInterval(validationLoopRef.current)
+                validationLoopRef.current = null
               }
-
-              // Advance rapidly to 100% on confirmed live human
-              const nextP = Math.min(100, Math.max(50, progressRef.current + 18))
-              progressRef.current = nextP
-              setScanProgress(nextP)
-
-              if (Math.round(nextP) % 20 === 0 && nextP < 98) {
-                playBiometricSound('tick')
-              }
-
-              // 100% Enrollment Completion
-              if (nextP >= 100) {
-                if (validationLoopRef.current) {
-                  clearInterval(validationLoopRef.current)
-                  validationLoopRef.current = null
-                }
-                const finalSnapshot = bestSnapshotRef.current || captureFrame()
-                stopCamera()
-                completeEnrollmentFlow(finalSnapshot, null)
-              }
+              const finalSnapshot = bestSnapshotRef.current || captureFrame()
+              stopCamera()
+              completeEnrollmentFlow(finalSnapshot, null)
             }
           } else {
-            // Face lost: reset calibration
-            if (progressRef.current > 10 && !isLiveVerified) {
-              progressRef.current = 0
-              setScanProgress(0)
+            // Face lost: softly decrement calibration
+            if (progressRef.current > 5) {
+              progressRef.current = Math.max(0, progressRef.current - 10)
+              setScanProgress(progressRef.current)
             }
           }
         } catch (e) {
@@ -656,24 +626,12 @@ export default function FaceRecognitionEnrollment({
             <div className="absolute bottom-3 left-3 w-5 h-5 border-b-2 border-l-2 border-emerald-400 drop-shadow-[0_0_6px_#34d399] rounded-tl-sm pointer-events-none z-20" />
             <div className="absolute bottom-3 right-3 w-5 h-5 border-b-2 border-r-2 border-emerald-400 drop-shadow-[0_0_6px_#34d399] rounded-tr-sm pointer-events-none z-20" />
 
-            {/* Top Status Pill: Live Blink & Liveness State */}
+            {/* Top Status Pill: Enrollment Guidance */}
             <div className="absolute top-3.5 left-1/2 -translate-x-1/2 z-20 pointer-events-none max-w-[90%]">
-              {isLiveVerified ? (
-                <div className="flex items-center gap-1.5 px-3.5 py-1 rounded-full bg-emerald-950/95 border border-emerald-400 text-emerald-300 text-[11px] font-bold shadow-[0_0_15px_rgba(16,185,129,0.6)]">
-                  <FiCheckCircle className="w-3.5 h-3.5 text-emerald-400" />
-                  <span>Live Face Verified · Enrolling...</span>
-                </div>
-              ) : isStaticSuspect ? (
-                <div className="flex items-center gap-1.5 px-3.5 py-1 rounded-full bg-rose-950/95 border border-rose-500 text-rose-300 text-[11px] font-bold shadow-[0_0_15px_rgba(244,63,94,0.6)] animate-pulse">
-                  <FiAlertTriangle className="w-3.5 h-3.5 text-rose-400" />
-                  <span>Photo / Screen Dili Madawat · Real Blink Required!</span>
-                </div>
-              ) : (
-                <div className="flex items-center gap-1.5 px-3.5 py-1 rounded-full bg-emerald-950/90 border border-emerald-500/70 text-emerald-300 text-[11px] font-semibold backdrop-blur-md shadow-[0_0_15px_rgba(16,185,129,0.4)]">
-                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping inline-block" />
-                  <span>{livenessPrompt}</span>
-                </div>
-              )}
+              <div className="flex items-center gap-1.5 px-3.5 py-1 rounded-full bg-emerald-950/90 border border-emerald-500/70 text-emerald-300 text-[11px] font-semibold backdrop-blur-md shadow-[0_0_15px_rgba(16,185,129,0.4)]">
+                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping inline-block" />
+                <span>{livenessPrompt}</span>
+              </div>
             </div>
 
             {/* Glowing Oval Face Shape Contour & Landmark Tracking Overlay */}
@@ -760,28 +718,8 @@ export default function FaceRecognitionEnrollment({
             </div>
           </div>
 
-          {/* 4. AUTOMATIC MISMATCH / AUTO-RESET LOOP ALERT */}
-          {mismatchError && (
-            <div className="p-3.5 rounded-2xl bg-rose-950/90 border border-rose-500/80 text-rose-200 text-xs flex items-start gap-3 shadow-[0_0_20px_rgba(244,63,94,0.35)] animate-in fade-in duration-200">
-              <FiAlertCircle className="w-5 h-5 text-rose-400 shrink-0 mt-0.5 animate-pulse" />
-              <div className="flex-1 leading-snug text-left">
-                <p className="font-bold text-rose-200 text-sm">Face Mismatch Detected</p>
-                <p className="mt-0.5 text-xs text-rose-300/90 font-medium">
-                  {mismatchError}
-                </p>
-                <div className="mt-1 flex items-center gap-2 text-[10px] text-rose-300/80">
-                  <span>State: FALSE</span>
-                  <span>•</span>
-                  <span>Progress Reset to 0%</span>
-                  <span>•</span>
-                  <span className="text-rose-200 font-semibold animate-pulse">Auto-Restarting Scan Loop...</span>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* 2. STRICT LIGHTING & LIVENESS WARNING */}
-          {!mismatchError && !isScanningValid && (
+          {/* 2. STRICT LIGHTING & ALIGNMENT WARNING */}
+          {!isScanningValid && (
             <div className="p-3 rounded-2xl bg-amber-950/70 border border-amber-500/40 text-amber-200 text-xs flex items-start gap-2.5 animate-in fade-in duration-200 text-left">
               <FiAlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5 animate-pulse" />
               <div className="leading-snug">

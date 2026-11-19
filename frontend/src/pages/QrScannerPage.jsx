@@ -256,9 +256,9 @@ export default function QrScannerPage() {
               employee: res.employee,
               employee_name: res.employee.name,
               employee_code: res.employee.employee_code,
-              face_biometric_image: user?.face_biometric_image || res.employee?.face_biometric_image,
-              face_biometric_base64: user?.face_biometric_base64 || res.employee?.face_biometric_base64,
-              has_registered_face: !!(user?.face_biometric_image || res.employee?.face_biometric_image),
+              face_biometric_image: res.employee?.face_biometric_image || res.face_biometric_image || (res.employee?.employee_id === user?.employee?.employee_id ? user?.face_biometric_image : null),
+              face_biometric_base64: res.employee?.face_biometric_base64 || res.face_biometric_base64 || (res.employee?.employee_id === user?.employee?.employee_id ? user?.face_biometric_base64 : null),
+              has_registered_face: !!(res.employee?.face_biometric_image || res.face_biometric_image || (res.employee?.employee_id === user?.employee?.employee_id ? user?.face_biometric_image : null)),
               scanned_by: {
                 user_id: user?.user_id,
                 employee: user?.employee || { first_name: 'Store', last_name: 'Admin' }

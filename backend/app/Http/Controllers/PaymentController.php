@@ -441,17 +441,27 @@ class PaymentController extends Controller
         ]);
 
         return DB::transaction(function () use ($validated, $request, $user) {
-            $inst = InstallmentAccount::with(['customer', 'paymentSchedules', 'sale'])->lockForUpdate()->findOrFail($validated['installment_id']);
+            $inst = InstallmentAccount::with(['customer', 'paymentSchedules', 'sale'])->lockForUpdate()->find($validated['installment_id']);
+            if (!$inst) {
+                return response()->json(['message' => 'Selected installment account was not found or has been removed.'], 404);
+            }
 
             // Security authorization check for Store Administrator
             if ($user && in_array($user->role, ['Store Administrator', 'Store Admin'])) {
-                $userBranch = $user->employee ? $user->employee->branch_id : null;
-                $accBranch = 'Main Branch';
-                if ($inst->sale && $inst->sale->processedBy && $inst->sale->processedBy->employee) {
-                    $accBranch = $inst->sale->processedBy->employee->branch_id ?: null;
-                }
-                if ($userBranch !== $accBranch) {
-                    return response()->json(['message' => 'Unauthorized: Cannot record payments for an account belonging to another branch.'], 403);
+                $userBranch = $user->employee ? $user->employee->branch_id : ($user->branch_id ?? null);
+                if ($userBranch) {
+                    $accBranch = null;
+                    if ($inst->sale && !empty($inst->sale->branch_id)) {
+                        $accBranch = $inst->sale->branch_id;
+                    } elseif ($inst->customer && !empty($inst->customer->branch_id)) {
+                        $accBranch = $inst->customer->branch_id;
+                    } elseif ($inst->sale && $inst->sale->processedBy && $inst->sale->processedBy->employee) {
+                        $accBranch = $inst->sale->processedBy->employee->branch_id ?: null;
+                    }
+
+                    if ($accBranch !== null && (string)$userBranch !== (string)$accBranch) {
+                        return response()->json(['message' => 'Unauthorized: Cannot record payments for an account belonging to another branch.'], 403);
+                    }
                 }
             }
 

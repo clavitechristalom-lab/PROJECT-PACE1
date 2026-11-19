@@ -194,11 +194,13 @@ export default function ReportsPrintView({
             className="text-2xl font-bold tracking-tight mt-0.5 font-serif"
             style={{ color: '#1e3a5f' }}
           >
-            Reports &amp; Analytics Center — Detailed Report
+            {hidePayroll && filters.branch && filters.branch !== 'All'
+              ? `${filters.branch} — Branch Operational & Analytics Report`
+              : 'Reports & Analytics Center — Detailed Report'}
           </h1>
           <p className="text-[11px] text-slate-600 mt-0.5">
             {hidePayroll
-              ? 'Comprehensive Branch Operational, Workforce, Sales, Inventory & Receivables List'
+              ? `Comprehensive Operational, Workforce, Sales, Inventory & Receivables List for ${filters.branch && filters.branch !== 'All' ? filters.branch : 'Assigned Branch'}`
               : 'Comprehensive Operational, Workforce, Payroll, Sales, Inventory & Receivables List'}
           </p>
           {companySub && (
@@ -229,7 +231,7 @@ export default function ReportsPrintView({
                 Scope / Filters
               </td>
               <td className="px-2.5 py-1 border border-slate-300 text-slate-800">
-                Branch: <strong>{filters.branch || 'All'}</strong> • Dept: <strong>{filters.department || 'All'}</strong> • Status: <strong>{filters.status || 'All'}</strong>
+                Branch: <strong>{filters.branch || 'All'}</strong>{hidePayroll ? ' (Store Branch Only)' : ''} • Dept: <strong>{filters.department || 'All'}</strong> • Status: <strong>{filters.status || 'All'}</strong>
               </td>
             </tr>
             <tr>
@@ -425,7 +427,7 @@ export default function ReportsPrintView({
                   <td className="py-1 px-1.5 text-right font-mono border-r border-slate-200">{Number(a.regular_hours || 0).toFixed(2)}h</td>
                   <td className="py-1 px-1.5 text-right font-mono border-r border-slate-200">{Number(a.overtime_hours || 0).toFixed(2)}h</td>
                   <td className="py-1 px-1.5 text-right font-mono font-bold border-r border-slate-200">{Number(a.total_hours || 0).toFixed(2)}h</td>
-                  <td className="py-1 px-1.5 border-r border-slate-200">{a.verification_method || '—'}</td>
+                  <td className="py-1 px-1.5 border-r border-slate-200">{String(a.verification_method || '—').replace(/\s*\(Authorized by Employee\)/gi, '').trim()}</td>
                   <td className="py-1 px-1.5 text-center font-semibold">{a.status || '—'}</td>
                 </tr>
               ))

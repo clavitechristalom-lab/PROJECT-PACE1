@@ -39,12 +39,13 @@ class StorageService
         $health = 'optimal';
         $healthWarnings = [];
 
-        if ($disk['percentage'] >= 90) {
+        $freeGB = $disk['free_bytes'] / (1024 * 1024 * 1024);
+        if ($freeGB < 5 || $disk['percentage'] >= 95) {
             $health = 'critical';
-            $healthWarnings[] = "Host disk is critically full ({$disk['percentage']}% used). Free up space immediately.";
-        } elseif ($disk['percentage'] >= 80) {
+            $healthWarnings[] = "Host disk partition ({$disk['partition_name']}) is critically low on space ({$disk['free_formatted']} remaining, {$disk['percentage']}% used). Free up space immediately.";
+        } elseif ($freeGB < 15 || $disk['percentage'] >= 90) {
             $health = 'warning';
-            $healthWarnings[] = "Host disk is nearing capacity ({$disk['percentage']}% used).";
+            $healthWarnings[] = "Host disk partition ({$disk['partition_name']}) is nearing capacity ({$disk['free_formatted']} remaining, {$disk['percentage']}% used).";
         }
 
         if ($logs['file_size_bytes'] > 100 * 1024 * 1024) { // > 100 MB logs
@@ -74,7 +75,7 @@ class StorageService
                 'status' => $health,
                 'warnings' => $healthWarnings,
                 'recommendation' => empty($healthWarnings) 
-                    ? 'Storage health is optimal. No action required.' 
+                    ? "Server storage health is optimal. Host partition {$disk['partition_name']} has {$disk['free_formatted']} free space available." 
                     : implode(' ', $healthWarnings),
             ],
             'server_environment' => [
@@ -82,6 +83,7 @@ class StorageService
                 'os' => PHP_OS_FAMILY . ' (' . php_uname('s') . ' ' . php_uname('r') . ')',
                 'server_software' => $_SERVER['SERVER_SOFTWARE'] ?? 'PHP CLI / Built-in Server',
                 'base_path' => base_path(),
+                'partition' => $disk['partition_name'] ?? 'System Disk',
                 'timestamp' => now()->toIso8601String(),
             ]
         ];
@@ -93,20 +95,40 @@ class StorageService
     public static function getDiskSpace(): array
     {
         $path = base_path();
-        $total = @disk_total_space($path);
-        $free = @disk_free_space($path);
+        $driveLetter = strtoupper(substr($path, 0, 2));
+        $rootPath = $driveLetter ? ($driveLetter . DIRECTORY_SEPARATOR) : $path;
+
+        $total = @disk_total_space($rootPath);
+        $free = @disk_free_space($rootPath);
 
         if ($total === false || $total <= 0) {
-            // Fallback to checking root drive if specific path is inaccessible
-            $root = substr($path, 0, 3);
-            $total = @disk_total_space($root) ?: 0;
-            $free = @disk_free_space($root) ?: 0;
+            $total = @disk_total_space($path) ?: 0;
+            $free = @disk_free_space($path) ?: 0;
         }
 
         $used = max(0, $total - $free);
         $percentage = $total > 0 ? round(($used / $total) * 100, 1) : 0;
+        $freePercentage = $total > 0 ? round(($free / $total) * 100, 1) : 0;
+
+        $label = 'Local Disk';
+        if (PHP_OS_FAMILY === 'Windows' && $driveLetter) {
+            try {
+                $output = @shell_exec('vol ' . $driveLetter);
+                if ($output && preg_match('/Volume in drive [A-Z] is (.+)/i', $output, $m)) {
+                    $trimmed = trim($m[1]);
+                    if (!empty($trimmed)) {
+                        $label = $trimmed;
+                    }
+                }
+            } catch (\Throwable $e) {}
+        }
+
+        $partitionName = $driveLetter ? "{$label} ({$driveLetter})" : ($label ?: 'Server Partition');
 
         return [
+            'drive' => $driveLetter ?: 'Root',
+            'label' => $label,
+            'partition_name' => $partitionName,
             'total' => (float)$total,
             'used' => (float)$used,
             'free' => (float)$free,
@@ -114,6 +136,7 @@ class StorageService
             'used_bytes' => (float)$used,
             'free_bytes' => (float)$free,
             'percentage' => $percentage,
+            'free_percentage' => $freePercentage,
             'total_formatted' => self::formatBytes($total),
             'used_formatted' => self::formatBytes($used),
             'free_formatted' => self::formatBytes($free),
@@ -178,76 +201,222 @@ class StorageService
     }
 
     /**
-     * Inspect live uploads and media folder storage.
+     * Inspect live uploads and media folder storage, scanning all real files dynamically.
      */
     public static function getUploadsStorage(): array
     {
         $publicStorage = storage_path('app/public');
-        $stats = self::scanDirectory($publicStorage);
+        
+        $knownMeta = [
+            'products' => [
+                'label' => 'Products Catalog',
+                'description' => 'E-commerce item showcase photos',
+                'color' => 'emerald',
+            ],
+            'payments' => [
+                'label' => 'Payment Proofs & Receipts',
+                'description' => 'Customer deposit slips & GCash/bank transaction proofs',
+                'color' => 'blue',
+            ],
+            'proofs' => [
+                'label' => 'Installment Application Requirements',
+                'description' => 'Customer valid IDs, proof of billing, and proof of income',
+                'color' => 'purple',
+            ],
+            'branches' => [
+                'label' => 'Branch Storefronts',
+                'description' => 'Branch showroom, store facade, and location photos',
+                'color' => 'indigo',
+            ],
+            'profiles' => [
+                'label' => 'Staff & User Profiles',
+                'description' => 'Customer and employee profile avatars',
+                'color' => 'amber',
+            ],
+            'face_biometrics' => [
+                'label' => 'Face Biometrics Data',
+                'description' => 'Biometric facial training images for attendance scanner',
+                'color' => 'cyan',
+            ],
+            'company' => [
+                'label' => 'Company Branding & Logos',
+                'description' => 'Official Z-LICZ logos, brand assets, and stamps',
+                'color' => 'rose',
+            ],
+            'carousel' => [
+                'label' => 'Carousel Banners',
+                'description' => 'Homepage promotional banner slides',
+                'color' => 'violet',
+            ],
+            'qrcodes' => [
+                'label' => 'QR Badges',
+                'description' => 'Permanent attendance and staff QR codes',
+                'color' => 'sky',
+            ],
+        ];
 
-        // Scan subcategories
-        $subfolders = ['proofs', 'products', 'carousel', 'profile_photos', 'qrcodes', 'branches'];
         $categories = [];
+        $allFiles = [];
+        $totalBytes = 0;
+        $totalFiles = 0;
 
-        foreach ($subfolders as $folder) {
-            $folderPath = $publicStorage . DIRECTORY_SEPARATOR . $folder;
-            if (File::isDirectory($folderPath)) {
-                $fStats = self::scanDirectory($folderPath);
-                $categories[$folder] = [
-                    'size_bytes' => $fStats['bytes'],
-                    'size_formatted' => self::formatBytes($fStats['bytes']),
-                    'files_count' => $fStats['count'],
+        if (File::isDirectory($publicStorage)) {
+            $directories = File::directories($publicStorage);
+            foreach ($directories as $dirPath) {
+                $folder = basename($dirPath);
+                $files = File::allFiles($dirPath);
+                $catBytes = 0;
+                $catFileList = [];
+
+                foreach ($files as $file) {
+                    if ($file->getFilename() === '.gitignore') continue;
+                    $size = $file->getSize();
+                    $catBytes += $size;
+                    $ext = strtolower($file->getExtension());
+                    $isImg = in_array($ext, ['png', 'jpg', 'jpeg', 'webp', 'gif', 'svg']);
+                    $relPath = str_replace('\\', '/', substr($file->getPathname(), strlen($publicStorage) + 1));
+                    $meta = $knownMeta[$folder] ?? null;
+                    $catLabel = $meta ? $meta['label'] : ucwords(str_replace(['_', '-'], ' ', $folder));
+
+                    $fileItem = [
+                        'name' => $file->getFilename(),
+                        'folder' => $folder,
+                        'category_label' => $catLabel,
+                        'relative_path' => $relPath,
+                        'url' => '/storage/' . $relPath,
+                        'size_bytes' => $size,
+                        'size_formatted' => self::formatBytes($size),
+                        'extension' => $ext,
+                        'is_image' => $isImg,
+                        'modified_at' => date('Y-m-d H:i:s', $file->getMTime()),
+                        'timestamp' => $file->getMTime(),
+                    ];
+
+                    $catFileList[] = $fileItem;
+                    $allFiles[] = $fileItem;
+                }
+
+                usort($catFileList, fn($a, $b) => $b['timestamp'] <=> $a['timestamp']);
+
+                $meta = $knownMeta[$folder] ?? [
+                    'label' => ucwords(str_replace(['_', '-'], ' ', $folder)),
+                    'description' => "Uploaded files stored under {$folder}",
+                    'color' => 'slate',
                 ];
-            } else {
+
                 $categories[$folder] = [
-                    'size_bytes' => 0,
-                    'size_formatted' => '0 B',
-                    'files_count' => 0,
+                    'folder' => $folder,
+                    'label' => $meta['label'],
+                    'description' => $meta['description'],
+                    'color' => $meta['color'],
+                    'size_bytes' => $catBytes,
+                    'size_formatted' => self::formatBytes($catBytes),
+                    'files_count' => count($catFileList),
+                    'files' => $catFileList,
                 ];
+
+                $totalBytes += $catBytes;
+                $totalFiles += count($catFileList);
+            }
+
+            // Also check files directly in root public storage
+            $rootFiles = File::files($publicStorage);
+            $rootList = [];
+            $rootBytes = 0;
+            foreach ($rootFiles as $file) {
+                if ($file->getFilename() === '.gitignore') continue;
+                $size = $file->getSize();
+                $rootBytes += $size;
+                $ext = strtolower($file->getExtension());
+                $relPath = $file->getFilename();
+                $item = [
+                    'name' => $file->getFilename(),
+                    'folder' => 'root',
+                    'category_label' => 'Root Storage',
+                    'relative_path' => $relPath,
+                    'url' => '/storage/' . $relPath,
+                    'size_bytes' => $size,
+                    'size_formatted' => self::formatBytes($size),
+                    'extension' => $ext,
+                    'is_image' => in_array($ext, ['png', 'jpg', 'jpeg', 'webp', 'gif', 'svg']),
+                    'modified_at' => date('Y-m-d H:i:s', $file->getMTime()),
+                    'timestamp' => $file->getMTime(),
+                ];
+                $rootList[] = $item;
+                $allFiles[] = $item;
+            }
+
+            if (!empty($rootList)) {
+                $categories['root'] = [
+                    'folder' => 'root',
+                    'label' => 'Root Storage Files',
+                    'description' => 'Files directly under public storage root',
+                    'color' => 'slate',
+                    'size_bytes' => $rootBytes,
+                    'size_formatted' => self::formatBytes($rootBytes),
+                    'files_count' => count($rootList),
+                    'files' => $rootList,
+                ];
+                $totalBytes += $rootBytes;
+                $totalFiles += count($rootList);
             }
         }
 
+        // Sort all files across all folders by newest modified first
+        usort($allFiles, fn($a, $b) => $b['timestamp'] <=> $a['timestamp']);
+
         return [
             'path' => 'storage/app/public',
-            'size_bytes' => $stats['bytes'],
-            'size_formatted' => self::formatBytes($stats['bytes']),
-            'files_count' => $stats['count'],
-            'file_count' => $stats['count'],
+            'size_bytes' => $totalBytes,
+            'size_formatted' => self::formatBytes($totalBytes),
+            'files_count' => $totalFiles,
+            'file_count' => $totalFiles,
             'categories' => $categories,
+            'files' => $allFiles,
         ];
     }
 
     /**
-     * Inspect database backup storage directory.
+     * Inspect database backup storage directory across all system backup locations.
      */
     public static function getBackupsStorage(): array
     {
-        $backupPath = storage_path('app/backups');
-        $stats = self::scanDirectory($backupPath);
+        $backupDirs = [
+            storage_path('app/backups'),
+            storage_path('app/db-backups'),
+            storage_path('app/private/backups'),
+        ];
 
-        // List individual backup files
         $backupFiles = [];
-        if (File::isDirectory($backupPath)) {
-            $files = File::files($backupPath);
-            foreach ($files as $file) {
-                $size = $file->getSize();
-                $backupFiles[] = [
-                    'filename' => $file->getFilename(),
-                    'size_bytes' => $size,
-                    'size_formatted' => self::formatBytes($size),
-                    'created_at' => date('Y-m-d H:i:s', $file->getMTime()),
-                ];
+        $totalBytes = 0;
+
+        foreach ($backupDirs as $bDir) {
+            if (File::isDirectory($bDir)) {
+                $files = File::files($bDir);
+                foreach ($files as $file) {
+                    if ($file->getFilename() === '.gitignore') continue;
+                    $size = $file->getSize();
+                    $totalBytes += $size;
+                    $backupFiles[] = [
+                        'filename' => $file->getFilename(),
+                        'path' => str_replace('\\', '/', substr($file->getPathname(), strlen(base_path()) + 1)),
+                        'size_bytes' => $size,
+                        'size_formatted' => self::formatBytes($size),
+                        'created_at' => date('Y-m-d H:i:s', $file->getMTime()),
+                        'timestamp' => $file->getMTime(),
+                    ];
+                }
             }
-            // Sort by latest created
-            usort($backupFiles, fn($a, $b) => strcmp($b['created_at'], $a['created_at']));
         }
+
+        usort($backupFiles, fn($a, $b) => $b['timestamp'] <=> $a['timestamp']);
 
         return [
             'path' => 'storage/app/backups',
-            'size_bytes' => $stats['bytes'],
-            'size_formatted' => self::formatBytes($stats['bytes']),
-            'files_count' => $stats['count'],
-            'file_count' => $stats['count'],
+            'size_bytes' => $totalBytes,
+            'size_formatted' => self::formatBytes($totalBytes),
+            'files_count' => count($backupFiles),
+            'file_count' => count($backupFiles),
             'files' => $backupFiles,
         ];
     }

@@ -759,7 +759,12 @@ export const api = {
       }),
     checkVerification: (id) => request(`/attendance/check-verification/${id}`),
     pendingVerifications: () => request('/employee/me/pending-verifications'),
-    getMyFaceTemplate: () => request('/employee/me/face-template'),
+    getMyFaceTemplate: (params) => {
+      const qs = params && Object.keys(cleanParams(params)).length
+        ? `?${new URLSearchParams(cleanParams(params)).toString()}`
+        : '';
+      return request(`/employee/me/face-template${qs}`);
+    },
     updateMyPin: (data) =>
       request('/employee/me/pin', {
         method: 'PUT',
@@ -920,8 +925,14 @@ export const api = {
       const qs = new URLSearchParams(cleanParams(params)).toString();
       return request(`/reports/sales${qs ? `?${qs}` : ''}`, options);
     },
-    getInventory: (options = {}) => request('/reports/inventory', options),
-    getInstallments: (options = {}) => request('/reports/installments', options),
+    getInventory: (params = {}, options = {}) => {
+      const qs = new URLSearchParams(cleanParams(params)).toString();
+      return request(`/reports/inventory${qs ? `?${qs}` : ''}`, options);
+    },
+    getInstallments: (params = {}, options = {}) => {
+      const qs = new URLSearchParams(cleanParams(params)).toString();
+      return request(`/reports/installments${qs ? `?${qs}` : ''}`, options);
+    },
     getPayroll: (params = {}, options = {}) => {
       const qs = new URLSearchParams(cleanParams(params)).toString();
       return request(`/reports/payroll${qs ? `?${qs}` : ''}`, options);
@@ -977,7 +988,10 @@ export const api = {
       return request(`/notifications${qs ? `?${qs}` : ''}`, options);
     },
     getSettings: (options = {}) => request('/settings', options),
-    getStorage: (options = {}) => request('/system/storage', options),
+    getStorage: (options = {}) => {
+      const qs = options?.refresh ? '?refresh=1' : '';
+      return request(`/system/storage${qs}`, options);
+    },
     cleanStorage: (action = 'cache') =>
       request('/system/storage/clean', {
         method: 'POST',

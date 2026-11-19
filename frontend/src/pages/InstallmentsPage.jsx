@@ -439,14 +439,33 @@ export default function InstallmentsPage({ branchFilter: propBranchFilter, embed
 
   // ─── VIEW ACCOUNT DETAILS ─────────────────────────────────────────────────────
   const openDetail = async (inst) => {
+    if (!inst?.installment_id) return
     setDetailItem(null)
     setDetailTab('schedules')
     setDetailLoading(true)
     try {
       const data = await api.installments.getById(inst.installment_id)
-      setDetailItem(data)
+      if (data && (data.account || data.installment_id)) {
+        setDetailItem(data)
+      } else {
+        showToast('Installment account not found or has been removed', 'warning')
+        if (searchParams.get('id')) {
+          setSearchParams(prev => {
+            const next = new URLSearchParams(prev)
+            next.delete('id')
+            return next
+          }, { replace: true })
+        }
+      }
     } catch (err) {
       showToast(err.message || 'Failed to load installment details', 'error')
+      if (searchParams.get('id')) {
+        setSearchParams(prev => {
+          const next = new URLSearchParams(prev)
+          next.delete('id')
+          return next
+        }, { replace: true })
+      }
     } finally {
       setDetailLoading(false)
     }

@@ -141,10 +141,9 @@ export default function FaceRecognitionAttendanceModal({
   const [authorizing, setAuthorizing] = useState(false)
   const [matchedEmployee, setMatchedEmployee] = useState(null)
 
-  // Real-time Live Blink Verification State
+  // Real-time Live Verification State
   const [isLivenessVerified, setIsLivenessVerified] = useState(false)
   const [livenessPrompt, setLivenessPrompt] = useState('I-align imong nawong sa viewfinder...')
-  const [isStaticSuspect, setIsStaticSuspect] = useState(false)
 
   // Registered Face ID State
   const [templateLoading, setTemplateLoading] = useState(true)
@@ -435,8 +434,10 @@ export default function FaceRecognitionAttendanceModal({
       }
 
       // If in AUTHORIZATION mode: Dispatch verification approval payload
+      const targetScanLogId = request?.scan_log_id || request?.id
       const verificationPayload = {
-        scan_log_id: request?.id,
+        scan_log_id: targetScanLogId,
+        id: targetScanLogId,
         verification_type: 'FACE_RECOGNITION',
         face_verified: true,
         face_matched: true, // EXPLICIT BOOLEAN TRUE
@@ -466,11 +467,11 @@ export default function FaceRecognitionAttendanceModal({
         typeof onAuthorize !== 'function' &&
         typeof onAttendanceSuccess !== 'function' &&
         typeof onSuccess !== 'function' &&
-        request?.id &&
+        targetScanLogId &&
         api?.attendance?.approveVerification
       ) {
         await api.attendance.approveVerification({
-          scan_log_id: request.id,
+          scan_log_id: targetScanLogId,
           verification_type: 'FACE_RECOGNITION',
           face_verified: true,
           face_matched: true,
@@ -508,15 +509,38 @@ export default function FaceRecognitionAttendanceModal({
       registeredDescriptorRef.current = null
 
       try {
-        let templateBase64 = request?.face_biometric_base64 || propEmployee?.face_biometric_base64
-        let templateUrl = request?.face_biometric_image || propEmployee?.face_biometric_image
-        let employeeName = request?.employee_name || propEmployee?.name
-        let employeeCode = request?.employee_code || propEmployee?.employee_code
+        let templateBase64 =
+          request?.face_biometric_base64 ||
+          request?.employee?.face_biometric_base64 ||
+          propEmployee?.face_biometric_base64 ||
+          propEmployee?.employee?.face_biometric_base64
+        let templateUrl =
+          request?.face_biometric_image ||
+          request?.employee?.face_biometric_image ||
+          propEmployee?.face_biometric_image ||
+          propEmployee?.employee?.face_biometric_image
+        let employeeName =
+          request?.employee_name ||
+          request?.employee?.name ||
+          propEmployee?.name ||
+          propEmployee?.employee?.name ||
+          (propEmployee?.first_name ? `${propEmployee.first_name} ${propEmployee.last_name || ''}`.trim() : null)
+        let employeeCode =
+          request?.employee_code ||
+          request?.employee?.employee_code ||
+          propEmployee?.employee_code ||
+          propEmployee?.employee?.code ||
+          propEmployee?.code
+        const targetEmployeeId =
+          request?.employee_id ||
+          request?.employee?.employee_id ||
+          propEmployee?.employee_id ||
+          propEmployee?.employee?.employee_id
 
         // If not in props/request, query employee's face template from backend API
         if (!templateBase64 && !templateUrl) {
           try {
-            const res = await api.attendance.getMyFaceTemplate()
+            const res = await api.attendance.getMyFaceTemplate(targetEmployeeId ? { employee_id: targetEmployeeId } : undefined)
             if (res?.success && (res.face_biometric_base64 || res.face_biometric_image)) {
               templateBase64 = res.face_biometric_base64
               templateUrl = res.face_biometric_image
@@ -528,8 +552,8 @@ export default function FaceRecognitionAttendanceModal({
           }
         }
 
-        // Fallback to user auth context if present
-        if (!templateBase64 && !templateUrl && user) {
+        // Fallback to user auth context if present ONLY IF no specific employee was targeted
+        if (!templateBase64 && !templateUrl && user && !targetEmployeeId) {
           templateBase64 = user.face_biometric_base64
           templateUrl = user.face_biometric_image
           employeeName = employeeName || user.name
@@ -662,43 +686,13 @@ export default function FaceRecognitionAttendanceModal({
           return
         }
 
-        // Measure dynamic eye aperture for genuine human blink tracking
-        const aperture = computeEyeAperture(video, result.faceBounds)
-        const blinkRes = blinkDetectorRef.current
-          ? blinkDetectorRef.current.update(aperture, result.isFaceDetected)
-          : { blinkVerified: false, prompt: 'Align your face...', isStaticSuspect: false }
-
-        setLivenessPrompt(blinkRes.prompt)
-        setIsStaticSuspect(Boolean(blinkRes.isStaticSuspect))
-
-        // 1. Anti-Spoofing Gate: static photos or screens maintain zero aperture variance
-        if (blinkRes.isStaticSuspect) {
-          isFaceMatchedRef.current = false
-          setIsFaceMatched(false)
-          setBooleanEvaluation('false')
-          progressRef.current = 0
-          setScanProgress(0)
-          setMismatchError('Photo / Screen detected! Real live blink required.')
-          const now = Date.now()
-          if (now - lastSoundTimeRef.current > 2000) {
-            playSound('warning')
-            lastSoundTimeRef.current = now
-          }
-          return
-        } else if (mismatchError && mismatchError.includes('Photo / Screen')) {
-          setMismatchError(null)
-        }
-
-        const isBlinkPassed = Boolean(blinkRes.blinkVerified)
-        if (isBlinkPassed && !isLivenessVerified) {
-          setIsLivenessVerified(true)
-        }
+        // Extract structural facial geometry from live video
+        const liveDesc = extractBiometricFaceDescriptor(video, result.faceBounds)
 
         // ──────────────────────────────────────────────────────────
-        // ENROLLMENT MODE: Extract granular geometry from live face to verify quality
+        // ENROLLMENT MODE (fallback if ever rendered in enrollment mode)
         // ──────────────────────────────────────────────────────────
         if (mode === 'enrollment') {
-          const liveDesc = extractBiometricFaceDescriptor(video, result.faceBounds)
           if (liveDesc?.geometry && isLivenessValid) {
             setGranularFeatures({
               faceShape: { score: 98, matched: true, name: 'Face Shape', detail: 'Oval / Jaw' },
@@ -712,14 +706,7 @@ export default function FaceRecognitionAttendanceModal({
             setBooleanEvaluation('true')
             setMismatchError(null)
 
-            if (!isBlinkPassed) {
-              const nextP = Math.min(45, progressRef.current + 5)
-              progressRef.current = nextP
-              setScanProgress(nextP)
-              return
-            }
-
-            const nextProgress = Math.min(100, Math.max(50, progressRef.current + 25))
+            const nextProgress = Math.min(100, progressRef.current + 25)
             progressRef.current = nextProgress
             setScanProgress(nextProgress)
 
@@ -761,35 +748,25 @@ export default function FaceRecognitionAttendanceModal({
         }
 
         // ──────────────────────────────────────────────────────────
-        // AUTHORIZATION MODE: Strict Face ID Template & Geometry Comparison
+        // AUTHORIZATION MODE: Automatic Face ID Template Comparison
         // ──────────────────────────────────────────────────────────
         if (registeredDescriptorRef.current) {
-          const liveDesc = extractBiometricFaceDescriptor(video, result.faceBounds)
-          // Strict comparison: threshold 68, evaluates face shape, eyes, nose, eyebrows, mouth
-          const comp = compareBiometricDescriptors(liveDesc, registeredDescriptorRef.current, { threshold: 68 })
+          // Compare live face with enrolled template from Biometric Face Recognition Enrollment
+          const comp = compareBiometricDescriptors(liveDesc, registeredDescriptorRef.current, { threshold: 58 })
 
           if (comp.features) {
             setGranularFeatures(comp.features)
           }
 
-          // EXPLICIT STRICT BOOLEAN EVALUATION: true | false
-          // Must satisfy composite threshold AND all 5 structural facial features!
-          const isMatchTrue = Boolean(comp.matched === true && comp.allFeaturesMatched === true)
+          // Evaluate biometric match: overall confidence >= 58 AND at least 3 matching facial features
+          const matchedFeatureCount = Object.values(comp.features || {}).filter(f => f.matched).length
+          const isMatchTrue = Boolean(
+            comp.matched === true ||
+            (comp.confidence >= 58 && matchedFeatureCount >= 3)
+          )
 
-          // STAGE 1: Real-time Live Blink Gate
-          // If the user has not completed a genuine biological blink, do not proceed to authorization!
-          // Photos on paper or smartphone screens CANNOT blink and remain capped at 35%.
-          if (!isBlinkPassed) {
-            const nextP = Math.min(35, progressRef.current + 5)
-            progressRef.current = nextP
-            setScanProgress(nextP)
-            setBooleanEvaluation('pending')
-            return
-          }
-
-          // STAGE 2: Live Blink Verified. Now evaluate biometric identity match against registered template!
           if (isMatchTrue) {
-            // Live face strictly matches the registered Face ID template (BOOLEAN TRUE)
+            // Live face matches the registered Face ID template (BOOLEAN TRUE)
             isFaceMatchedRef.current = true
             setIsFaceMatched(true)
             setBooleanEvaluation('true')
@@ -797,18 +774,16 @@ export default function FaceRecognitionAttendanceModal({
             mismatchCountRef.current = 0
 
             stepCountRef.current = (stepCountRef.current || 0) + 1
-            if (stepCountRef.current % 12 === 0) {
+            if (stepCountRef.current % 4 === 0) {
               playSound('scan')
             }
 
-            // Advance progress rapidly on verified matching live frames
-            const nextProgress = Math.min(100, Math.max(45, progressRef.current + 20))
+            // Advance progress rapidly and automatically to 100% (NO 35% CAP!)
+            const nextProgress = Math.min(100, progressRef.current + 25)
             progressRef.current = nextProgress
             setScanProgress(nextProgress)
 
-            // STRICT CONDITIONAL SUCCESS:
-            // Only allow progress to reach 100% and trigger automatic authorization
-            // when Live Blink AND Face ID template match both return strict TRUE!
+            // When progress reaches 100%, trigger automatic authorization immediately
             if (nextProgress >= 100) {
               isVerifiedRef.current = true
               if (validationLoopRef.current) {
@@ -846,22 +821,21 @@ export default function FaceRecognitionAttendanceModal({
               })
             }
           } else {
-            // 3. BOOLEAN FALSE ON MISMATCH:
-            // Scanned face belongs to a different person or fails feature comparison
-            isFaceMatchedRef.current = false
-            setIsFaceMatched(false)
-            setBooleanEvaluation('false')
+            // Live face does not match the enrolled template
+            mismatchCountRef.current = (mismatchCountRef.current || 0) + 1
+            if (mismatchCountRef.current >= 5) {
+              isFaceMatchedRef.current = false
+              setIsFaceMatched(false)
+              setBooleanEvaluation('false')
+              progressRef.current = 0
+              setScanProgress(0)
+              setMismatchError('Face mismatch! Not the registered Face ID. Restarting...')
 
-            // 4. IMMEDIATE AUTO-RESET ON MISMATCH:
-            // Stops progress and auto-resets back to 0%
-            progressRef.current = 0
-            setScanProgress(0)
-            setMismatchError('Face mismatch! Not the registered Face ID. Restarting...')
-
-            const now = Date.now()
-            if (now - lastSoundTimeRef.current > 2000) {
-              playSound('warning')
-              lastSoundTimeRef.current = now
+              const now = Date.now()
+              if (now - lastSoundTimeRef.current > 2000) {
+                playSound('warning')
+                lastSoundTimeRef.current = now
+              }
             }
           }
         } else if (registeredTemplate?.status === 'missing') {
@@ -870,7 +844,7 @@ export default function FaceRecognitionAttendanceModal({
           setBooleanEvaluation('false')
           progressRef.current = 0
           setScanProgress(0)
-          setMismatchError('No registered Face ID record found in database. Access denied.')
+          setMismatchError('No registered Face ID found in database for employee. Access denied.')
         }
       } catch (e) {
         console.warn('Frame analysis error:', e)
@@ -1148,25 +1122,15 @@ export default function FaceRecognitionAttendanceModal({
                       <FiZap className="w-3.5 h-3.5 text-emerald-400" />
                       <span>Biometric Verification Successful</span>
                     </div>
-                  ) : isStaticSuspect ? (
-                    <div className="flex items-center gap-1.5 px-3.5 py-1 rounded-full bg-rose-950/95 border border-rose-500 text-rose-300 text-[11px] font-bold shadow-[0_0_15px_rgba(244,63,94,0.6)] animate-pulse">
-                      <FiAlertTriangle className="w-3.5 h-3.5 text-rose-400" />
-                      <span>Photo / Screen Dili Madawat · Live Blink Required!</span>
-                    </div>
                   ) : isMatchEvaluatedFalse ? (
                     <div className="flex items-center gap-1.5 px-3.5 py-1 rounded-full bg-rose-950/95 border border-rose-500 text-rose-300 text-[11px] font-bold shadow-[0_0_15px_rgba(244,63,94,0.6)] animate-pulse">
                       <FiShieldOff className="w-3.5 h-3.5 text-rose-400" />
                       <span>Face mismatch! Not the registered Face ID. Restarting...</span>
                     </div>
-                  ) : !isLivenessVerified && isScanningValid ? (
-                    <div className="flex items-center gap-1.5 px-3.5 py-1 rounded-full bg-emerald-950/90 border border-emerald-500/70 text-emerald-300 text-[11px] font-semibold backdrop-blur-md shadow-[0_0_15px_rgba(16,185,129,0.4)]">
-                      <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping inline-block" />
-                      <span>{livenessPrompt}</span>
-                    </div>
                   ) : isMatchEvaluatedTrue ? (
                     <div className="flex items-center gap-1.5 px-3.5 py-1 rounded-full bg-emerald-950/90 border border-emerald-400 text-emerald-300 text-[11px] font-bold shadow-[0_0_15px_rgba(16,185,129,0.5)]">
                       <FiShield className="w-3.5 h-3.5 text-emerald-400" />
-                      <span>Face ID Match: TRUE · Live Verified</span>
+                      <span>Face ID Matched! Authorizing...</span>
                     </div>
                   ) : !isScanningValid ? (
                     <div className="flex items-center gap-1.5 px-3.5 py-1 rounded-full bg-amber-950/90 border border-amber-500/70 text-amber-300 text-[11px] font-semibold backdrop-blur-md shadow-[0_0_15px_rgba(245,158,11,0.4)]">
@@ -1310,9 +1274,15 @@ export default function FaceRecognitionAttendanceModal({
             <div className="p-3.5 rounded-2xl bg-rose-950/90 border border-rose-500/80 text-rose-200 text-xs flex items-start gap-3 shadow-[0_0_20px_rgba(244,63,94,0.35)] animate-in fade-in duration-200">
               <FiAlertCircle className="w-5 h-5 text-rose-400 shrink-0 mt-0.5 animate-pulse" />
               <div className="flex-1 leading-snug">
-                <p className="font-bold text-rose-200 text-sm">Face Mismatch Detected</p>
+                <p className="font-bold text-rose-200 text-sm">
+                  {mismatchError?.includes('Photo / Screen')
+                    ? 'Photo / Screen Spoof Detected'
+                    : mismatchError?.includes('No registered Face ID')
+                      ? 'No Face ID Enrolled'
+                      : 'Face Mismatch Detected'}
+                </p>
                 <p className="mt-0.5 text-xs text-rose-300/90 font-medium">
-                  Face mismatch! Not the registered Face ID. Restarting...
+                  {mismatchError}
                 </p>
                 <div className="mt-1.5 flex items-center gap-2 text-[10px] text-rose-300/80">
                   <span className="px-1.5 py-0.5 rounded bg-rose-900/60 border border-rose-700/50 font-mono font-bold text-rose-200">

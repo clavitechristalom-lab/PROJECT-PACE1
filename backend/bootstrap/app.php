@@ -24,4 +24,20 @@ return Application::configure(basePath: dirname(__DIR__))
                 'error' => 'not_found'
             ], 404);
         });
+        $exceptions->render(function (\Symfony\Component\HttpKernel\Exception\NotFoundHttpException $e, \Illuminate\Http\Request $request) {
+            if ($request->is('api/*') || $request->wantsJson()) {
+                $prev = $e->getPrevious();
+                if ($prev instanceof \Illuminate\Database\Eloquent\ModelNotFoundException) {
+                    $modelName = class_basename($prev->getModel());
+                    return response()->json([
+                        'message' => "The requested {$modelName} was not found or has been removed.",
+                        'error' => 'not_found'
+                    ], 404);
+                }
+                return response()->json([
+                    'message' => $e->getMessage() ?: 'The requested resource was not found.',
+                    'error' => 'not_found'
+                ], 404);
+            }
+        });
     })->create();

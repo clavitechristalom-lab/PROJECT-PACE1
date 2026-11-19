@@ -18,33 +18,82 @@ use App\Services\NotificationService;
 class ReportController extends Controller
 {
     /**
+     * Resolve the branch ID and branch name for a Store Administrator.
+     * Returns [$branchId, $branchName] or [null, null] for other roles.
+     */
+    private function resolveStoreAdminBranch($user): array
+    {
+        if (!$user || !in_array($user->role, ['Store Administrator', 'Store Admin'])) {
+            return [null, null];
+        }
+
+        $branchId = null;
+        $branchName = null;
+
+        if ($user->employee) {
+            $branchId = $user->employee->branch_id;
+            $branchName = $user->employee->branch_name ?? (is_object($user->employee->branch) ? $user->employee->branch->name : (string)$user->employee->branch);
+        } elseif ($user->employee_id) {
+            $emp = Employee::with('branch')->find($user->employee_id);
+            if ($emp) {
+                $branchId = $emp->branch_id;
+                $branchName = $emp->branch_name ?? (is_object($emp->branch) ? $emp->branch->name : (string)$emp->branch);
+            }
+        }
+
+        if (!$branchId && !empty($user->branch_id)) {
+            $branchId = $user->branch_id;
+        }
+
+        if ($branchId && empty($branchName)) {
+            $branchName = \App\Models\BranchProfile::getNameById($branchId);
+        }
+
+        return [$branchId, $branchName];
+    }
+
+    /**
      * Employee Report: Total, Active, Inactive, by Department, Branch, Position.
      */
     public function employees(Request $request)
     {
         $user = $request->user();
+        [$saBranchId, $saBranchName] = $this->resolveStoreAdminBranch($user);
+
         $fp = SyncController::computeFingerprint('employees');
         $cacheKey = 'pace_rep_emp_' . md5(json_encode([
             'u' => $user ? $user->user_id : 0,
             'r' => $user ? $user->role : '',
-            'b' => $request->query('branch_id', ''),
+            'b' => $saBranchId ?: $request->query('branch_id', $request->query('branch', '')),
             'd' => $request->query('department', ''),
             'p' => $request->query('position', ''),
             'st' => $request->query('status', ''),
             's' => $request->query('search', ''),
         ])) . '_' . $fp;
 
-        $payload = Cache::remember($cacheKey, 2, function () use ($request, $user) {
+        $payload = Cache::remember($cacheKey, 2, function () use ($request, $user, $saBranchId, $saBranchName) {
             $query = Employee::query();
 
             // Role scoping
             if ($user && $user->role === 'Employee') {
                 $query->where('employee_id', $user->employee_id);
+            } elseif ($saBranchId) {
+                $query->where(function ($q) use ($saBranchId, $saBranchName) {
+                    $q->where('branch_id', $saBranchId);
+                    if ($saBranchName) {
+                        $q->orWhere('branch', $saBranchName);
+                    }
+                });
             } elseif ($user && in_array($user->role, ['Store Administrator', 'Store Admin'])) {
-                $branchId = $user->employee ? $user->employee->branch_id : -1;
-                $query->where('branch_id', $branchId);
+                $query->where('employee_id', -1); // Unassigned store admin gets empty list
             } elseif ($request->filled('branch_id') && $request->query('branch_id') !== 'All') {
-                $query->where('branch_id', $request->query('branch_id'));
+                $bId = $request->query('branch_id');
+                $query->where('branch_id', $bId);
+            } elseif ($request->filled('branch') && $request->query('branch') !== 'All') {
+                $b = $request->query('branch');
+                $query->where(function ($q) use ($b) {
+                    $q->where('branch_id', $b)->orWhere('branch', $b);
+                });
             }
 
             if ($request->filled('department') && $request->query('department') !== 'All') {
@@ -127,11 +176,12 @@ class ReportController extends Controller
     public function attendance(Request $request)
     {
         $user = $request->user();
+        [$saBranchId, $saBranchName] = $this->resolveStoreAdminBranch($user);
         $fp = SyncController::computeFingerprint('attendance');
         $cacheKey = 'pace_rep_att_' . md5(json_encode([
             'u' => $user ? $user->user_id : 0,
             'r' => $user ? $user->role : '',
-            'b' => $request->query('branch', ''),
+            'b' => $saBranchId ?: $request->query('branch', ''),
             'df' => $request->query('date_from', ''),
             'dt' => $request->query('date_to', ''),
             'd' => $request->query('department', ''),
@@ -139,21 +189,29 @@ class ReportController extends Controller
             'e' => $request->query('employee_id', ''),
         ])) . '_' . $fp;
 
-        $payload = Cache::remember($cacheKey, 2, function () use ($request, $user) {
+        $payload = Cache::remember($cacheKey, 2, function () use ($request, $user, $saBranchId, $saBranchName) {
             $query = Attendance::with('employee.branch');
 
             // Role scoping
             if ($user && $user->role === 'Employee') {
                 $query->where('employee_id', $user->employee_id);
-            } elseif ($user && in_array($user->role, ['Store Administrator', 'Store Admin'])) {
-                $branch = $user->employee ? $user->employee->branch_id : null;
-                $query->whereHas('employee', function ($eq) use ($branch) {
-                    $eq->where('branch_id', $branch);
+            } elseif ($saBranchId) {
+                $query->whereHas('employee', function ($eq) use ($saBranchId, $saBranchName) {
+                    $eq->where(function ($bq) use ($saBranchId, $saBranchName) {
+                        $bq->where('branch_id', $saBranchId);
+                        if ($saBranchName) {
+                            $bq->orWhere('branch', $saBranchName);
+                        }
+                    });
                 });
+            } elseif ($user && in_array($user->role, ['Store Administrator', 'Store Admin'])) {
+                $query->where('attendance_id', -1);
             } elseif ($request->filled('branch') && $request->query('branch') !== 'All') {
                 $branch = $request->query('branch');
                 $query->whereHas('employee', function ($eq) use ($branch) {
-                    $eq->where('branch_id', $branch);
+                    $eq->where(function ($bq) use ($branch) {
+                        $bq->where('branch_id', $branch)->orWhere('branch', $branch);
+                    });
                 });
             }
 
@@ -337,25 +395,29 @@ class ReportController extends Controller
     public function sales(Request $request)
     {
         $user = $request->user();
+        [$saBranchId, $saBranchName] = $this->resolveStoreAdminBranch($user);
+        $filterBranch = $saBranchId ?: $request->query('branch_id', $request->query('branch'));
+
         $dateFrom = $request->query('date_from');
         $dateTo = $request->query('date_to');
         $fp = SyncController::computeFingerprint('sales');
         $cacheKey = 'pace_rep_sales_' . md5(json_encode([
             'u' => $user ? $user->user_id : 0,
             'r' => $user ? $user->role : '',
-            'b' => $request->query('branch_id', ''),
+            'b' => $filterBranch ?: '',
             'df' => $dateFrom ?: '',
             'dt' => $dateTo ?: '',
         ])) . '_' . $fp;
 
-        $payload = Cache::remember($cacheKey, 2, function () use ($request, $user, $dateFrom, $dateTo) {
+        $payload = Cache::remember($cacheKey, 2, function () use ($request, $user, $saBranchId, $filterBranch, $dateFrom, $dateTo) {
             $query = SaleTransaction::with('customer');
 
-            if ($user && in_array($user->role, ['Store Administrator', 'Store Admin'])) {
-                $branchId = $user->employee ? $user->employee->branch_id : -1;
-                $query->where('branch_id', $branchId);
-            } elseif ($request->filled('branch_id') && $request->query('branch_id') !== 'All') {
-                $query->where('branch_id', $request->query('branch_id'));
+            if ($saBranchId) {
+                $query->where('branch_id', $saBranchId);
+            } elseif ($user && in_array($user->role, ['Store Administrator', 'Store Admin'])) {
+                $query->where('sale_id', -1);
+            } elseif ($filterBranch && $filterBranch !== 'All') {
+                $query->where('branch_id', $filterBranch);
             }
 
             if ($dateFrom) {
@@ -372,9 +434,16 @@ class ReportController extends Controller
             $installSales = (float)$sales->where('payment_method', 'Installment')->sum('total_amount');
             $avgTransaction = $sales->count() > 0 ? $totalSales / $sales->count() : 0;
 
-            $trend = DB::table('sale_transactions')
-                ->selectRaw("DATE_FORMAT(sale_date, '%b') as month, MONTH(sale_date) as month_num, SUM(total_amount) as sales, COUNT(sale_id) as transactions")
-                ->groupBy('month', 'month_num')
+            $trendQuery = DB::table('sale_transactions')
+                ->selectRaw("DATE_FORMAT(sale_date, '%b') as month, MONTH(sale_date) as month_num, SUM(total_amount) as sales, COUNT(sale_id) as transactions");
+
+            if ($saBranchId) {
+                $trendQuery->where('branch_id', $saBranchId);
+            } elseif ($filterBranch && $filterBranch !== 'All') {
+                $trendQuery->where('branch_id', $filterBranch);
+            }
+
+            $trend = $trendQuery->groupBy('month', 'month_num')
                 ->orderBy('month_num')
                 ->get();
 
@@ -406,11 +475,38 @@ class ReportController extends Controller
     /**
      * Inventory Valuation Report
      */
-    public function inventory()
+    public function inventory(Request $request)
     {
+        $user = $request->user();
+        [$saBranchId, $saBranchName] = $this->resolveStoreAdminBranch($user);
+        $filterBranch = $saBranchId ?: $request->query('branch_id', $request->query('branch'));
+
         $fp = SyncController::computeFingerprint('products');
-        $payload = Cache::remember("pace_rep_inv_{$fp}", 2, function () {
-            $products = Product::all();
+        $cacheKey = 'pace_rep_inv_' . md5(json_encode([
+            'u' => $user ? $user->user_id : 0,
+            'r' => $user ? $user->role : '',
+            'b' => $filterBranch ?: 'All',
+        ])) . '_' . $fp;
+
+        $payload = Cache::remember($cacheKey, 2, function () use ($user, $saBranchId, $filterBranch) {
+            $query = Product::query();
+
+            if ($saBranchId) {
+                $query->where('branch_id', $saBranchId);
+            } elseif ($user && in_array($user->role, ['Store Administrator', 'Store Admin'])) {
+                $query->where('product_id', -1);
+            } elseif ($filterBranch && $filterBranch !== 'All') {
+                $query->where(function ($q) use ($filterBranch) {
+                    $q->where('branch_id', $filterBranch);
+                    if (!is_numeric($filterBranch)) {
+                        $q->orWhereHas('branch', function ($bq) use ($filterBranch) {
+                            $bq->where('name', $filterBranch);
+                        });
+                    }
+                });
+            }
+
+            $products = $query->get();
 
             $lowStock = $products->filter(fn($p) => $p->stock_quantity === 1)->count();
             $outOfStock = $products->where('stock_quantity', '<=', 0)->count();
@@ -431,11 +527,50 @@ class ReportController extends Controller
     /**
      * Installments Monitoring Report
      */
-    public function installments()
+    public function installments(Request $request)
     {
+        $user = $request->user();
+        [$saBranchId, $saBranchName] = $this->resolveStoreAdminBranch($user);
+        $filterBranch = $saBranchId ?: $request->query('branch_id', $request->query('branch'));
+
         $fp = SyncController::computeFingerprint('installments');
-        $payload = Cache::remember("pace_rep_inst_{$fp}", 2, function () {
-            $accounts = InstallmentAccount::with(['customer', 'payments'])->get();
+        $cacheKey = 'pace_rep_inst_' . md5(json_encode([
+            'u' => $user ? $user->user_id : 0,
+            'r' => $user ? $user->role : '',
+            'b' => $filterBranch ?: 'All',
+        ])) . '_' . $fp;
+
+        $payload = Cache::remember($cacheKey, 2, function () use ($user, $saBranchId, $filterBranch) {
+            $query = InstallmentAccount::with([
+                'customer',
+                'payments',
+                'sale'
+            ]);
+
+            if ($saBranchId) {
+                $query->where(function ($q) use ($saBranchId) {
+                    $q->whereHas('customer', function ($cq) use ($saBranchId) {
+                        $cq->where('branch_id', $saBranchId);
+                    })->orWhereHas('sale', function ($sq) use ($saBranchId) {
+                        $sq->where('branch_id', $saBranchId);
+                    });
+                });
+            } elseif ($user && in_array($user->role, ['Store Administrator', 'Store Admin'])) {
+                $query->where('installment_id', -1);
+            } elseif ($filterBranch && $filterBranch !== 'All') {
+                $query->where(function ($q) use ($filterBranch) {
+                    $q->whereHas('customer', function ($cq) use ($filterBranch) {
+                        $cq->where('branch_id', $filterBranch);
+                        if (!is_numeric($filterBranch)) {
+                            $cq->orWhere('branch', $filterBranch);
+                        }
+                    })->orWhereHas('sale', function ($sq) use ($filterBranch) {
+                        $sq->where('branch_id', $filterBranch);
+                    });
+                });
+            }
+
+            $accounts = $query->get();
 
             $active = $accounts->where('status', 'Active')->count();
             $overdue = $accounts->where('status', 'Overdue')->count();
@@ -597,7 +732,7 @@ class ReportController extends Controller
                 'active_employees' => Employee::where('branch_id', $branchId)->where('status', 'Active')->count(),
             ];
         } else if ($validated['report_type'] === 'Product / Inventory Report') {
-            $products = Product::all();
+            $products = Product::where('branch_id', $branchId)->get();
             $content['inventory_summary'] = [
                 'total_products' => $products->count(),
                 'in_stock' => $products->where('stock_quantity', '>', 0)->count(),

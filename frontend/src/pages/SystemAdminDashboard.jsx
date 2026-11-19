@@ -201,7 +201,11 @@ export default function SystemAdminDashboard() {
     return users.filter(u => {
       const matchSearch = (u.username || '').toLowerCase().includes(userSearch.toLowerCase()) || 
                           (u.email || '').toLowerCase().includes(userSearch.toLowerCase())
-      const matchRole = userRoleFilter === 'All' || u.role === userRoleFilter
+      const matchRole = userRoleFilter === 'All' || (
+        userRoleFilter === 'Store Administrator' || userRoleFilter === 'Store Admin'
+          ? (u.role === 'Store Administrator' || u.role === 'Store Admin')
+          : u.role === userRoleFilter
+      )
       const matchStatus = userStatusFilter === 'All' || 
                           (userStatusFilter === 'Active' ? u.is_active : !u.is_active)
       return matchSearch && matchRole && matchStatus
@@ -301,6 +305,7 @@ export default function SystemAdminDashboard() {
             <option value="Administrator">Administrator</option>
             <option value="Store Administrator">Store Administrator</option>
             <option value="Employee">Employee</option>
+            <option value="Customer">Customer</option>
           </select>
           <select value={userStatusFilter} onChange={(e) => setUserStatusFilter(e.target.value)} className="bg-card border border-border rounded-xl px-4 py-2 text-sm">
             <option value="All">All Status</option>

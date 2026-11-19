@@ -8,7 +8,7 @@ import {
 import { api } from '../lib/api'
 import { useRealtimeSync, triggerDataSync } from '../lib/realtimeSync'
 import {
-  Card, StatCard, Badge, StatusBadge, SearchBar,
+  Card, StatCard, Badge, StatusBadge, SearchBar, TabBar,
   Table, TR, TD, TableSkeleton, EmptyState, Btn, Modal, showToast, PageHeader, Pagination, showLoading, closeLoading
 } from '../components/ui'
 import { useAuth } from '../context/AuthContext'
@@ -25,14 +25,31 @@ export default function QrRequestsPage() {
     under_review: 0,
     approved: 0,
     rejected: 0,
+    active: 0,
+    history: 0,
   })
+
+  // View Tab ('active' | 'history' | 'all')
+  const [activeTab, setActiveTab] = useState('active')
+  const [employeeHistory, setEmployeeHistory] = useState([])
 
   // Filters
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState('All')
   const [roleFilter, setRoleFilter] = useState('All')
+  const [branchFilter, setBranchFilter] = useState('All')
+  const [branches, setBranches] = useState([])
   const [page, setPage] = useState(1)
   const [pagination, setPagination] = useState({ current_page: 1, last_page: 1, total: 0, per_page: 15 })
+
+  useEffect(() => {
+    api.branches.getAll()
+      .then(res => {
+        const list = res?.branches || res?.data || (Array.isArray(res) ? res : [])
+        setBranches(list)
+      })
+      .catch(() => {})
+  }, [])
 
   // Review Modal State
   const [selectedRequest, setSelectedRequest] = useState(null)
@@ -62,10 +79,11 @@ export default function QrRequestsPage() {
   const loadData = async (silent = false) => {
     if (!silent) setLoading(true)
     try {
-      const params = { page }
+      const params = { page, view: activeTab }
       if (search) params.search = search
       if (statusFilter !== 'All') params.status = statusFilter
       if (roleFilter !== 'All') params.role = roleFilter
+      if (branchFilter !== 'All') params.branch = branchFilter
 
       const res = await api.qrRequests.getAll(params)
 
@@ -86,11 +104,11 @@ export default function QrRequestsPage() {
 
   useEffect(() => {
     loadData()
-  }, [page, statusFilter, roleFilter])
+  }, [page, activeTab, statusFilter, roleFilter, branchFilter])
 
   useRealtimeSync(() => {
     loadData(true)
-  }, [page, statusFilter, roleFilter, search], { module: 'qr_requests' })
+  }, [page, activeTab, statusFilter, roleFilter, branchFilter, search], { module: 'qr_requests' })
 
   const handleSearchSubmit = (e) => {
     e?.preventDefault()
@@ -101,6 +119,7 @@ export default function QrRequestsPage() {
   const openReviewModal = async (reqItem) => {
     setSelectedRequest(reqItem)
     setReviewModalOpen(true)
+    setEmployeeHistory([])
     setChecklist({
       identity_verified: reqItem.status === 'APPROVED',
       employee_info_verified: reqItem.status === 'APPROVED',
@@ -110,6 +129,19 @@ export default function QrRequestsPage() {
       account_active: reqItem.status === 'APPROVED',
       attendance_authorized: reqItem.status === 'APPROVED',
     })
+
+    // Fetch full request details & previous history
+    try {
+      const res = await api.qrRequests.getById(reqItem.request_id)
+      if (res.success && res.request) {
+        setSelectedRequest(prev => ({ ...prev, ...res.request }))
+        if (res.history) {
+          setEmployeeHistory(res.history)
+        }
+      }
+    } catch (e) {
+      console.warn('Could not fetch request details:', e)
+    }
 
     // Automatically mark under review if pending
     if (reqItem.status === 'PENDING') {
@@ -266,6 +298,36 @@ export default function QrRequestsPage() {
         />
       </div>
 
+      {/* View Tabs */}
+      <TabBar
+        tabs={[
+          {
+            id: 'active',
+            label: 'Active Requests',
+            icon: <FiClock className="w-3.5 h-3.5 text-amber-500" />,
+            badge: (summary.active ?? ((summary.pending || 0) + (summary.under_review || 0))) || undefined,
+          },
+          {
+            id: 'history',
+            label: 'Request History',
+            icon: <FiCheckCircle className="w-3.5 h-3.5 text-emerald-500" />,
+            badge: (summary.history ?? ((summary.approved || 0) + (summary.rejected || 0))) || undefined,
+          },
+          {
+            id: 'all',
+            label: 'All Submissions',
+            icon: <FiLayers className="w-3.5 h-3.5 text-primary" />,
+            badge: summary.total || undefined,
+          },
+        ]}
+        activeTab={activeTab}
+        onChange={tab => {
+          setActiveTab(tab)
+          setStatusFilter('All')
+          setPage(1)
+        }}
+      />
+
       {/* Filter & Search Bar */}
       <Card noPad className="p-3.5 border border-border">
         <div className="flex flex-col sm:flex-row gap-3 items-center justify-between">
@@ -291,15 +353,42 @@ export default function QrRequestsPage() {
 
           <div className="flex gap-2 w-full sm:w-auto flex-wrap">
             <select
+              value={branchFilter}
+              onChange={e => { setBranchFilter(e.target.value); setPage(1); }}
+              className="border border-border rounded-xl px-3 py-2 text-xs font-semibold text-foreground bg-card cursor-pointer outline-none"
+            >
+              <option value="All">All Branches</option>
+              {branches.map(b => (
+                <option key={b.id || b.name} value={b.name}>{b.name}</option>
+              ))}
+            </select>
+
+            <select
               value={statusFilter}
               onChange={e => { setStatusFilter(e.target.value); setPage(1); }}
               className="border border-border rounded-xl px-3 py-2 text-xs font-semibold text-foreground bg-card cursor-pointer outline-none"
             >
-              <option value="All">All Statuses</option>
-              <option value="PENDING">PENDING</option>
-              <option value="UNDER_REVIEW">UNDER REVIEW</option>
-              <option value="APPROVED">APPROVED</option>
-              <option value="REJECTED">REJECTED</option>
+              {activeTab === 'active' ? (
+                <>
+                  <option value="All">All Active Statuses</option>
+                  <option value="PENDING">PENDING</option>
+                  <option value="UNDER_REVIEW">UNDER REVIEW</option>
+                </>
+              ) : activeTab === 'history' ? (
+                <>
+                  <option value="All">All History Statuses</option>
+                  <option value="APPROVED">APPROVED</option>
+                  <option value="REJECTED">REJECTED</option>
+                </>
+              ) : (
+                <>
+                  <option value="All">All Statuses</option>
+                  <option value="PENDING">PENDING</option>
+                  <option value="UNDER_REVIEW">UNDER REVIEW</option>
+                  <option value="APPROVED">APPROVED</option>
+                  <option value="REJECTED">REJECTED</option>
+                </>
+              )}
             </select>
 
             <select
@@ -328,67 +417,128 @@ export default function QrRequestsPage() {
         ) : (
           <>
             <div className="overflow-x-auto">
-              <table className="w-full text-xs min-w-[800px]">
-                <thead>
-                  <tr className="border-b border-border bg-muted/50 text-muted-foreground uppercase font-semibold text-[11px]">
-                    <th className="py-3 px-4 text-left">Request ID</th>
-                    <th className="py-3 px-4 text-left">Employee ID</th>
-                    <th className="py-3 px-4 text-left">Name</th>
-                    <th className="py-3 px-4 text-left">Role</th>
-                    <th className="py-3 px-4 text-left">Position</th>
-                    <th className="py-3 px-4 text-left">Department</th>
-                    <th className="py-3 px-4 text-left">Branch</th>
-                    <th className="py-3 px-4 text-left">Request Date</th>
-                    <th className="py-3 px-4 text-center">Status</th>
-                    <th className="py-3 px-4 text-center">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-border">
-                  {requests.map((r, i) => (
-                    <tr key={r.request_id || i} className={`hover:bg-muted/40 transition-colors ${i % 2 === 1 ? 'bg-muted/10' : ''}`}>
-                      <td className="py-3 px-4 font-mono font-bold text-primary">{r.request_code}</td>
-                      <td className="py-3 px-4 font-mono text-foreground font-semibold">{r.employee_id}</td>
-                      <td className="py-3 px-4 font-semibold text-foreground">{r.name}</td>
-                      <td className="py-3 px-4">
-                        <Badge
-                          variant={r.role === 'Store Administrator' || r.role === 'Store Admin' ? 'info' : 'neutral'}
-                          text={r.role}
-                        />
-                      </td>
-                      <td className="py-3 px-4 text-foreground">{r.position}</td>
-                      <td className="py-3 px-4 text-muted-foreground">{r.department}</td>
-                      <td className="py-3 px-4 font-medium text-foreground">{r.branch}</td>
-                      <td className="py-3 px-4 text-muted-foreground font-mono whitespace-nowrap">
-                        {r.request_date} {r.request_time}
-                      </td>
-                      <td className="py-3 px-4 text-center">
-                        <Badge
-                          variant={
-                            r.status === 'APPROVED'
-                              ? 'success'
-                              : r.status === 'REJECTED'
-                              ? 'danger'
-                              : r.status === 'UNDER_REVIEW'
-                              ? 'info'
-                              : 'warning'
-                          }
-                        >
-                          {r.status === 'UNDER_REVIEW' ? 'UNDER REVIEW' : r.status}
-                        </Badge>
-                      </td>
-                      <td className="py-3 px-4 text-center">
-                        <Btn
-                          variant={r.status === 'APPROVED' ? 'outline' : 'primary'}
-                          size="xs"
-                          onClick={() => openReviewModal(r)}
-                        >
-                          {r.status === 'APPROVED' ? 'View Details' : 'Review'}
-                        </Btn>
-                      </td>
+              {activeTab === 'history' ? (
+                <table className="w-full text-xs min-w-[850px]">
+                  <thead>
+                    <tr className="border-b border-border bg-muted/50 text-muted-foreground uppercase font-semibold text-[11px]">
+                      <th className="py-3 px-4 text-left">Request ID</th>
+                      <th className="py-3 px-4 text-left">Employee ID</th>
+                      <th className="py-3 px-4 text-left">Name</th>
+                      <th className="py-3 px-4 text-left">Position & Role</th>
+                      <th className="py-3 px-4 text-left">Branch</th>
+                      <th className="py-3 px-4 text-left">Submitted Date</th>
+                      <th className="py-3 px-4 text-left">Resolved Date</th>
+                      <th className="py-3 px-4 text-left">Auditor / Decision By</th>
+                      <th className="py-3 px-4 text-center">Status</th>
+                      <th className="py-3 px-4 text-center">Actions</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody className="divide-y divide-border">
+                    {requests.map((r, i) => (
+                      <tr key={r.request_id || i} className={`hover:bg-muted/40 transition-colors ${i % 2 === 1 ? 'bg-muted/10' : ''}`}>
+                        <td className="py-3 px-4 font-mono font-bold text-primary">{r.request_code}</td>
+                        <td className="py-3 px-4 font-mono text-foreground font-semibold">{r.employee_id}</td>
+                        <td className="py-3 px-4 font-semibold text-foreground">{r.name}</td>
+                        <td className="py-3 px-4">
+                          <div className="font-semibold text-foreground">{r.position}</div>
+                          <div className="text-[10px] text-muted-foreground">{r.role}</div>
+                        </td>
+                        <td className="py-3 px-4 font-medium text-foreground">{r.branch}</td>
+                        <td className="py-3 px-4 text-muted-foreground font-mono whitespace-nowrap">
+                          {r.request_date} {r.request_time}
+                        </td>
+                        <td className="py-3 px-4 text-foreground font-mono whitespace-nowrap font-medium">
+                          {r.processed_at || r.approved_at || r.rejected_at || '—'}
+                        </td>
+                        <td className="py-3 px-4 text-muted-foreground whitespace-nowrap">
+                          <span className="inline-flex items-center gap-1 font-semibold text-foreground">
+                            <FiShield className="w-3 h-3 text-primary" />
+                            {r.processed_by || r.approved_by || r.rejected_by || 'Administrator'}
+                          </span>
+                        </td>
+                        <td className="py-3 px-4 text-center">
+                          <Badge
+                            variant={r.status === 'APPROVED' ? 'success' : 'danger'}
+                          >
+                            {r.status}
+                          </Badge>
+                        </td>
+                        <td className="py-3 px-4 text-center">
+                          <Btn
+                            variant="outline"
+                            size="xs"
+                            onClick={() => openReviewModal(r)}
+                          >
+                            Audit Details
+                          </Btn>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              ) : (
+                <table className="w-full text-xs min-w-[800px]">
+                  <thead>
+                    <tr className="border-b border-border bg-muted/50 text-muted-foreground uppercase font-semibold text-[11px]">
+                      <th className="py-3 px-4 text-left">Request ID</th>
+                      <th className="py-3 px-4 text-left">Employee ID</th>
+                      <th className="py-3 px-4 text-left">Name</th>
+                      <th className="py-3 px-4 text-left">Role</th>
+                      <th className="py-3 px-4 text-left">Position</th>
+                      <th className="py-3 px-4 text-left">Department</th>
+                      <th className="py-3 px-4 text-left">Branch</th>
+                      <th className="py-3 px-4 text-left">Request Date</th>
+                      <th className="py-3 px-4 text-center">Status</th>
+                      <th className="py-3 px-4 text-center">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border">
+                    {requests.map((r, i) => (
+                      <tr key={r.request_id || i} className={`hover:bg-muted/40 transition-colors ${i % 2 === 1 ? 'bg-muted/10' : ''}`}>
+                        <td className="py-3 px-4 font-mono font-bold text-primary">{r.request_code}</td>
+                        <td className="py-3 px-4 font-mono text-foreground font-semibold">{r.employee_id}</td>
+                        <td className="py-3 px-4 font-semibold text-foreground">{r.name}</td>
+                        <td className="py-3 px-4">
+                          <Badge
+                            variant={r.role === 'Store Administrator' || r.role === 'Store Admin' ? 'info' : 'neutral'}
+                            text={r.role}
+                          />
+                        </td>
+                        <td className="py-3 px-4 text-foreground">{r.position}</td>
+                        <td className="py-3 px-4 text-muted-foreground">{r.department}</td>
+                        <td className="py-3 px-4 font-medium text-foreground">{r.branch}</td>
+                        <td className="py-3 px-4 text-muted-foreground font-mono whitespace-nowrap">
+                          {r.request_date} {r.request_time}
+                        </td>
+                        <td className="py-3 px-4 text-center">
+                          <Badge
+                            variant={
+                              r.status === 'APPROVED'
+                                ? 'success'
+                                : r.status === 'REJECTED'
+                                ? 'danger'
+                                : r.status === 'UNDER_REVIEW'
+                                ? 'info'
+                                : 'warning'
+                            }
+                          >
+                            {r.status === 'UNDER_REVIEW' ? 'UNDER REVIEW' : r.status}
+                          </Badge>
+                        </td>
+                        <td className="py-3 px-4 text-center">
+                          <Btn
+                            variant={r.status === 'APPROVED' ? 'outline' : 'primary'}
+                            size="xs"
+                            onClick={() => openReviewModal(r)}
+                          >
+                            {r.status === 'APPROVED' ? 'View Details' : 'Review'}
+                          </Btn>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
             </div>
             {pagination.total > pagination.per_page && (
               <Pagination
@@ -517,6 +667,125 @@ export default function QrRequestsPage() {
                 <div className="text-xs pt-1 border-t border-border">
                   <span className="text-[10px] text-muted-foreground uppercase font-bold block">Address</span>
                   <span className="text-foreground">{selectedRequest.address}</span>
+                </div>
+              )}
+            </div>
+
+            {/* Audit Trail & Decision History */}
+            <div className="p-4 rounded-2xl bg-card border border-border space-y-3">
+              <span className="text-[11px] uppercase tracking-wider font-bold text-muted-foreground flex items-center gap-1.5">
+                <FiClock className="text-primary" /> Audit Trail & Lifecycle History
+              </span>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+                <div className="p-3 rounded-xl bg-muted/30 border border-border space-y-1">
+                  <div className="flex items-center gap-1.5 text-muted-foreground font-semibold text-[10px] uppercase">
+                    <FiClock className="w-3.5 h-3.5 text-primary" /> Submitted
+                  </div>
+                  <div className="font-mono font-medium text-foreground text-[11px]">
+                    {selectedRequest.request_date || '—'}
+                  </div>
+                  <div className="text-[10px] text-muted-foreground">Initial Submission</div>
+                </div>
+
+                <div className="p-3 rounded-xl bg-muted/30 border border-border space-y-1">
+                  <div className="flex items-center gap-1.5 text-muted-foreground font-semibold text-[10px] uppercase">
+                    <FiShield className="w-3.5 h-3.5 text-indigo-500" /> Reviewed
+                  </div>
+                  <div className="font-mono font-medium text-foreground text-[11px]">
+                    {selectedRequest.reviewed_at || 'In progress'}
+                  </div>
+                  <div className="text-[10px] text-muted-foreground">
+                    By: {selectedRequest.reviewed_by || (selectedRequest.reviewed_at ? 'Administrator' : 'Awaiting Review')}
+                  </div>
+                </div>
+
+                <div className={`p-3 rounded-xl border space-y-1 ${
+                  selectedRequest.status === 'APPROVED'
+                    ? 'bg-emerald-500/10 border-emerald-500/30'
+                    : selectedRequest.status === 'REJECTED'
+                    ? 'bg-rose-500/10 border-rose-500/30'
+                    : 'bg-muted/30 border-border'
+                }`}>
+                  <div className="flex items-center gap-1.5 text-muted-foreground font-semibold text-[10px] uppercase">
+                    {selectedRequest.status === 'APPROVED' ? (
+                      <FiCheckCircle className="w-3.5 h-3.5 text-emerald-500" />
+                    ) : selectedRequest.status === 'REJECTED' ? (
+                      <FiXCircle className="w-3.5 h-3.5 text-rose-500" />
+                    ) : (
+                      <FiClock className="w-3.5 h-3.5 text-amber-500" />
+                    )}
+                    Resolution
+                  </div>
+                  <div className="font-mono font-medium text-foreground text-[11px]">
+                    {selectedRequest.approved_at || selectedRequest.rejected_at || 'Pending Decision'}
+                  </div>
+                  <div className="text-[10px] text-muted-foreground">
+                    {selectedRequest.status === 'APPROVED'
+                      ? `Approved by: ${selectedRequest.approved_by || 'Administrator'}`
+                      : selectedRequest.status === 'REJECTED'
+                      ? `Rejected by: ${selectedRequest.rejected_by || 'Administrator'}`
+                      : 'Pending final approval'}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Previous Requests History by this Employee */}
+            <div className="p-4 rounded-2xl bg-card border border-border space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] uppercase tracking-wider font-bold text-muted-foreground flex items-center gap-1.5">
+                  <FiLayers className="text-primary" /> Past Submissions History ({employeeHistory.length})
+                </span>
+                <span className="text-[11px] text-muted-foreground">
+                  History records for {selectedRequest.name}
+                </span>
+              </div>
+
+              {employeeHistory && employeeHistory.length > 0 ? (
+                <div className="overflow-x-auto rounded-xl border border-border">
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="bg-muted/50 border-b border-border text-muted-foreground uppercase text-[10px]">
+                        <th className="py-2.5 px-3 text-left">Code</th>
+                        <th className="py-2.5 px-3 text-left">Submitted Date</th>
+                        <th className="py-2.5 px-3 text-left">Resolved Date</th>
+                        <th className="py-2.5 px-3 text-left">Auditor</th>
+                        <th className="py-2.5 px-3 text-center">Status</th>
+                        <th className="py-2.5 px-3 text-left">Notes / Remarks</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-border">
+                      {employeeHistory.map((h, idx) => (
+                        <tr key={h.request_id || idx} className="hover:bg-muted/30">
+                          <td className="py-2.5 px-3 font-mono font-bold text-primary">{h.request_code}</td>
+                          <td className="py-2.5 px-3 text-muted-foreground font-mono">{h.request_date} {h.request_time}</td>
+                          <td className="py-2.5 px-3 text-foreground font-mono">{h.processed_at || '—'}</td>
+                          <td className="py-2.5 px-3 text-muted-foreground">{h.processed_by || 'Administrator'}</td>
+                          <td className="py-2.5 px-3 text-center">
+                            <Badge
+                              variant={h.status === 'APPROVED' ? 'success' : h.status === 'REJECTED' ? 'danger' : 'warning'}
+                            >
+                              {h.status}
+                            </Badge>
+                          </td>
+                          <td className="py-2.5 px-3 text-muted-foreground text-[11px]">
+                            {h.rejection_reason ? (
+                              <span className="text-rose-500 font-medium">Reason: {h.rejection_reason}</span>
+                            ) : h.status === 'APPROVED' ? (
+                              <span className="text-emerald-600 dark:text-emerald-400 font-medium">QR badge issued</span>
+                            ) : (
+                              '—'
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <div className="p-3 rounded-xl bg-muted/20 border border-border text-center text-xs text-muted-foreground">
+                  No previous QR requests found for this employee (First-time applicant).
                 </div>
               )}
             </div>

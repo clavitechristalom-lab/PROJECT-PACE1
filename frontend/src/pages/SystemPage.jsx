@@ -51,6 +51,7 @@ export default function SystemPage({ defaultTab = 'users' }) {
   }
   const [userForm, setUserForm] = useState(initialUserForm)
   const [userSearch, setUserSearch] = useState('')
+  const [userRoleFilter, setUserRoleFilter] = useState('All')
   const [employeesList, setEmployeesList] = useState([])
   const [customersList, setCustomersList] = useState([])
   const [registrationOptions, setRegistrationOptions] = useState({ branches: [] })
@@ -505,8 +506,39 @@ export default function SystemPage({ defaultTab = 'users' }) {
   const logPageSize = 15
 
   const filteredUsers = useMemo(() => {
-    return filterBySearch(users, userSearch, ['username', 'role'])
-  }, [users, userSearch])
+    let list = users
+    if (userRoleFilter && userRoleFilter !== 'All') {
+      if (userRoleFilter === 'Store Administrator' || userRoleFilter === 'Store Admin') {
+        list = list.filter(u => u.role === 'Store Administrator' || u.role === 'Store Admin')
+      } else {
+        list = list.filter(u => u.role === userRoleFilter)
+      }
+    }
+    if (userSearch.trim()) {
+      const q = userSearch.toLowerCase().trim()
+      list = list.filter(u => {
+        const username = (u.username || '').toLowerCase()
+        const role = (u.role || '').toLowerCase()
+        const empName = u.employee ? trimName(u.employee).toLowerCase() : ''
+        const empCode = (u.employee?.employee_code || '').toLowerCase()
+        const cusName = u.customer ? trimName(u.customer).toLowerCase() : ''
+        const cusCode = (u.customer?.customer_code || '').toLowerCase()
+        const email = (u.email || u.employee?.email || u.customer?.email || '').toLowerCase()
+        const branch = (getUserBranchName(u, registrationOptions) || '').toLowerCase()
+        return (
+          username.includes(q) ||
+          role.includes(q) ||
+          empName.includes(q) ||
+          empCode.includes(q) ||
+          cusName.includes(q) ||
+          cusCode.includes(q) ||
+          email.includes(q) ||
+          branch.includes(q)
+        )
+      })
+    }
+    return list
+  }, [users, userSearch, userRoleFilter, registrationOptions])
 
   const paginatedUsers = useMemo(() => {
     const start = (userPage - 1) * userPageSize
@@ -522,10 +554,10 @@ export default function SystemPage({ defaultTab = 'users' }) {
     return filteredLogs.slice(start, start + logPageSize)
   }, [filteredLogs, logPage, logPageSize])
 
-  // Reset page when search changes
+  // Reset page when search or role filter changes
   useEffect(() => {
     setUserPage(1)
-  }, [userSearch])
+  }, [userSearch, userRoleFilter])
 
   useEffect(() => {
     setLogPage(1)
@@ -558,29 +590,46 @@ export default function SystemPage({ defaultTab = 'users' }) {
       {activeTab === 'users' && (
         <div className="space-y-4">
           <Card noPad className="p-3.5 border border-border flex flex-col sm:flex-row justify-between items-center gap-3">
-            <div className="w-full sm:w-80 relative">
-              <FiSearch className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
-              <input
-                type="text"
-                value={userSearch}
-                onChange={e => setUserSearch(e.target.value)}
-                placeholder="Search user, username, role..."
-                className="w-full pl-9 pr-8 py-2 text-xs border border-border rounded-xl bg-card text-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all placeholder:text-muted-foreground/70"
-              />
-              {userSearch && (
-                <button
-                  type="button"
-                  onClick={() => setUserSearch('')}
-                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground cursor-pointer"
+            <div className="flex flex-col sm:flex-row items-center gap-2.5 w-full sm:w-auto flex-1">
+              <div className="w-full sm:w-80 relative">
+                <FiSearch className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
+                <input
+                  type="text"
+                  value={userSearch}
+                  onChange={e => setUserSearch(e.target.value)}
+                  placeholder="Search user, username, role..."
+                  className="w-full pl-9 pr-8 py-2 text-xs border border-border rounded-xl bg-card text-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all placeholder:text-muted-foreground/70"
+                />
+                {userSearch && (
+                  <button
+                    type="button"
+                    onClick={() => setUserSearch('')}
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground cursor-pointer"
+                  >
+                    <FiX className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
+
+              <div className="w-full sm:w-auto">
+                <select
+                  value={userRoleFilter}
+                  onChange={e => { setUserRoleFilter(e.target.value); setUserPage(1); }}
+                  className="w-full sm:w-auto border border-border rounded-xl px-3 py-2 text-xs font-semibold text-foreground bg-card cursor-pointer outline-none focus:ring-2 focus:ring-primary/20 transition-all shadow-xs"
                 >
-                  <FiX className="w-3.5 h-3.5" />
-                </button>
-              )}
+                  <option value="All">All Roles ({users.length})</option>
+                  <option value="Administrator">Administrator ({users.filter(u => u.role === 'Administrator').length})</option>
+                  <option value="Store Administrator">Store Administrator ({users.filter(u => u.role === 'Store Administrator' || u.role === 'Store Admin').length})</option>
+                  <option value="Employee">Employee ({users.filter(u => u.role === 'Employee').length})</option>
+                  <option value="Customer">Customer ({users.filter(u => u.role === 'Customer').length})</option>
+                </select>
+              </div>
             </div>
+
             <div className="flex gap-2 w-full sm:w-auto justify-end">
               <button
                 onClick={() => { setEditUser(null); setUserForm(initialUserForm); setUserFormStep(1); setUserModal(true) }}
-                className="flex items-center gap-1.5 px-4 py-2 bg-primary hover:bg-primary/90 text-primary-foreground font-bold text-xs rounded-xl shadow-xs transition-all cursor-pointer"
+                className="flex items-center gap-1.5 px-4 py-2 bg-primary hover:bg-primary/90 text-primary-foreground font-bold text-xs rounded-xl shadow-xs transition-all cursor-pointer whitespace-nowrap"
               >
                 <FiPlus className="w-4 h-4" />
                 <span>Add User Account</span>
@@ -595,6 +644,7 @@ export default function SystemPage({ defaultTab = 'users' }) {
               <EmptyState
                 icon={<FiUsers className="w-12 h-12 text-muted-foreground/30 mx-auto" />}
                 title="No user accounts found"
+                description={userSearch || userRoleFilter !== 'All' ? 'Try adjusting your search query or role filter.' : 'User accounts registered in the system will appear here.'}
               />
             ) : (
               <div className="overflow-x-auto">
@@ -632,7 +682,7 @@ export default function SystemPage({ defaultTab = 'users' }) {
                           <td className="py-3 px-4">
                             <Badge
                               text={u.role}
-                              variant={u.role === 'Administrator' ? 'info' : u.role === 'Store Administrator' ? 'purple' : 'neutral'}
+                              variant={u.role === 'Administrator' ? 'info' : (u.role === 'Store Administrator' || u.role === 'Store Admin') ? 'purple' : u.role === 'Customer' ? 'emerald' : 'neutral'}
                             />
                           </td>
                           <td className="py-3 px-4">

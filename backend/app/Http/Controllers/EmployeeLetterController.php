@@ -336,7 +336,7 @@ class EmployeeLetterController extends Controller
     public function update(Request $request, $id)
     {
         $user = $request->user();
-        if (!$user || !in_array($user->role, ['Administrator', 'Store Administrator'])) {
+        if (!$user || !in_array($user->role, ['Administrator', 'Store Administrator', 'Store Admin'])) {
             return response()->json(['error' => 'Unauthorized to review excuse letters.'], 403);
         }
 
@@ -351,16 +351,25 @@ class EmployeeLetterController extends Controller
         $prevStatus = $letter->status;
         $newStatus = $validated['status'];
 
+        $adminRemarks = $validated['admin_remarks'] ?? $request->input('admin_remarks', $letter->admin_remarks ?? null);
+
         $rawLeaveType = $request->input('leave_type', $letter->leave_type ?? 'without_pay');
         $canonicalLeaveType = in_array(strtolower(trim($rawLeaveType)), ['with_pay', 'leave with pay', 'paid'], true)
             ? 'with_pay'
             : 'without_pay';
+
+        // STRICT POLICY: Only System Administrator can choose between 'with_pay' and 'without_pay'.
+        // If the reviewer is a Store Administrator, it is ALWAYS enforced as 'without_pay'.
+        if ($user->role !== 'Administrator') {
+            $canonicalLeaveType = 'without_pay';
+        }
+
         $leaveTypeLabel = $canonicalLeaveType === 'with_pay' ? 'Leave with Pay' : 'Leave without Pay';
 
         $letter->update([
             'status' => $newStatus,
             'leave_type' => $canonicalLeaveType,
-            'admin_remarks' => $validated['admin_remarks'] ?? $letter->admin_remarks,
+            'admin_remarks' => $adminRemarks,
             'reviewed_by' => $user->user_id,
             'reviewed_at' => Carbon::now(),
             'is_read' => true,
@@ -394,7 +403,7 @@ class EmployeeLetterController extends Controller
                             'leave_type' => $canonicalLeaveType,
                             'total_hours' => 0.00,
                             'overtime_hours' => 0.00,
-                            'remarks' => "Excused Leave ({$letter->category} - {$leaveTypeLabel}): " . ($validated['admin_remarks'] ?: ($letter->reason ?: 'Approved Excuse Letter')),
+                            'remarks' => "Excused Leave ({$letter->category} - {$leaveTypeLabel}): " . ($adminRemarks ?: ($letter->reason ?: 'Approved Excuse Letter')),
                             'verified_by_name' => $reviewerName,
                         ]
                     );

@@ -42,17 +42,39 @@ export default function ReportsPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
 
+  // Available options
+  const [periods, setPeriods] = useState([])
+  const [branchesList, setBranchesList] = useState([])
+
+  // Resolve Store Admin assigned branch name robustly
+  const userBranchName = useMemo(() => {
+    if (!user) return ''
+    if (user?.employee?.branch?.name) return user.employee.branch.name
+    if (typeof user?.employee?.branch === 'string' && user.employee.branch) return user.employee.branch
+    if (user?.employee?.branch_name) return user.employee.branch_name
+    if (user?.branch_name) return user.branch_name
+    if (user?.branch?.name) return user.branch.name
+    if (user?.employee?.branch_id && branchesList.length > 0) {
+      const match = branchesList.find(b => String(b.id) === String(user.employee.branch_id))
+      if (match?.name) return match.name
+    }
+    return ''
+  }, [user, branchesList])
+
   // Reusable Filter States
-  const [branch, setBranch] = useState(isStoreAdmin ? (user?.employee?.branch?.name || (typeof user?.employee?.branch === 'string' ? user.employee.branch : '')) : 'All')
+  const [branch, setBranch] = useState(isStoreAdmin ? (userBranchName || 'Assigned Branch') : 'All')
   const [department, setDepartment] = useState('All')
   const [status, setStatus] = useState('All')
   const [startDate, setStartDate] = useState('')
   const [endDate, setEndDate] = useState('')
   const [periodId, setPeriodId] = useState('All')
 
-  // Available options
-  const [periods, setPeriods] = useState([])
-  const [branchesList, setBranchesList] = useState([])
+  // Keep branch locked to user branch when Store Admin
+  useEffect(() => {
+    if (isStoreAdmin && userBranchName && branch !== userBranchName) {
+      setBranch(userBranchName)
+    }
+  }, [isStoreAdmin, userBranchName, branch])
 
   useEffect(() => {
     api.branches.getAll()
@@ -82,7 +104,7 @@ export default function ReportsPage() {
   }, [isStoreAdmin, activeTab])
 
   const loadAllReportsForPrint = async (overrides = {}) => {
-    const bName = overrides.branch ?? branch
+    const activeBranchName = isStoreAdmin ? (userBranchName || branch) : (overrides.branch ?? branch)
     const deptVal = overrides.department ?? department
     const statVal = overrides.status ?? status
     const dfVal = overrides.startDate ?? startDate
@@ -90,9 +112,11 @@ export default function ReportsPage() {
     const pidVal = overrides.periodId ?? periodId
 
     const branchObj = branchesList.find(
-      item => item.name === bName || String(item.id) === String(bName)
+      item => item.name === activeBranchName || String(item.id) === String(activeBranchName)
     )
-    const resolvedBranchId = bName !== 'All' && branchObj?.id ? branchObj.id : undefined
+    const resolvedBranchId = activeBranchName !== 'All'
+      ? (branchObj?.id || user?.employee?.branch_id || undefined)
+      : undefined
     const deptParam = deptVal !== 'All' ? deptVal : undefined
     const dateFromParam = dfVal || undefined
     const dateToParam = dtVal || undefined
@@ -103,14 +127,14 @@ export default function ReportsPage() {
     const payStatus = ['Draft', 'Approved', 'Paid'].includes(statVal) ? statVal : undefined
 
     const [empRes, attRes, payRes, salesRes, invRes, instRes] = await Promise.allSettled([
-      api.reports.getEmployees({ branch_id: resolvedBranchId, department: deptParam, status: empStatus }),
-      api.reports.getAttendance({ branch: resolvedBranchId, department: deptParam, status: attStatus, date_from: dateFromParam, date_to: dateToParam }),
+      api.reports.getEmployees({ branch_id: resolvedBranchId, branch: activeBranchName !== 'All' ? activeBranchName : undefined, department: deptParam, status: empStatus }),
+      api.reports.getAttendance({ branch: resolvedBranchId || (activeBranchName !== 'All' ? activeBranchName : undefined), department: deptParam, status: attStatus, date_from: dateFromParam, date_to: dateToParam }),
       isStoreAdmin
         ? Promise.resolve(null)
-        : api.reports.getPayroll({ branch_id: resolvedBranchId, department: deptParam, status: payStatus, period_id: periodParam }),
-      api.reports.getSales({ branch_id: resolvedBranchId, date_from: dateFromParam, date_to: dateToParam }),
-      api.reports.getInventory(),
-      api.reports.getInstallments(),
+        : api.reports.getPayroll({ branch_id: resolvedBranchId, branch: activeBranchName !== 'All' ? activeBranchName : undefined, department: deptParam, status: payStatus, period_id: periodParam }),
+      api.reports.getSales({ branch_id: resolvedBranchId, branch: activeBranchName !== 'All' ? activeBranchName : undefined, date_from: dateFromParam, date_to: dateToParam }),
+      api.reports.getInventory({ branch_id: resolvedBranchId, branch: activeBranchName !== 'All' ? activeBranchName : undefined }),
+      api.reports.getInstallments({ branch_id: resolvedBranchId, branch: activeBranchName !== 'All' ? activeBranchName : undefined }),
     ])
 
     const next = {
@@ -134,8 +158,17 @@ export default function ReportsPage() {
     }
     try {
       let data = null
+      const activeBranchName = isStoreAdmin ? (userBranchName || branch) : branch
+      const branchObj = branchesList.find(
+        item => item.name === activeBranchName || String(item.id) === String(activeBranchName)
+      )
+      const resolvedBranchId = activeBranchName !== 'All'
+        ? (branchObj?.id || user?.employee?.branch_id || undefined)
+        : undefined
+
       const params = {
-        branch: branch !== 'All' ? branch : undefined,
+        branch: activeBranchName !== 'All' ? activeBranchName : undefined,
+        branch_id: resolvedBranchId,
         department: department !== 'All' ? department : undefined,
         status: status !== 'All' ? status : undefined,
         date_from: startDate || undefined,
@@ -152,9 +185,9 @@ export default function ReportsPage() {
       } else if (safeTab === 'sales') {
         data = await api.reports.getSales(params)
       } else if (safeTab === 'inventory') {
-        data = await api.reports.getInventory()
+        data = await api.reports.getInventory(params)
       } else if (safeTab === 'installments') {
-        data = await api.reports.getInstallments()
+        data = await api.reports.getInstallments(params)
       }
 
       setReportData(data)
@@ -325,7 +358,10 @@ export default function ReportsPage() {
 
     try {
       await loadAllReportsForPrint()
-      document.title = `Z-LICZ_Reports_Analytics_${todayStr}`
+      const branchSuffix = isStoreAdmin && (userBranchName || branch) && (userBranchName || branch) !== 'All'
+        ? `_${(userBranchName || branch).replace(/[^a-zA-Z0-9]/g, '_')}`
+        : ''
+      document.title = `Z-LICZ_Reports_Analytics${branchSuffix}_${todayStr}`
       await new Promise(resolve => setTimeout(resolve, 150))
       window.addEventListener('afterprint', restoreTitle)
       window.print()
@@ -353,7 +389,7 @@ export default function ReportsPage() {
         title="Reports & Analytics Center"
         subtitle={
           isStoreAdmin 
-            ? `Store Branch Reports (${user?.employee?.branch?.name || (typeof user?.employee?.branch === 'string' ? user.employee.branch : 'Assigned Branch')})` 
+            ? `Store Branch Reports (${userBranchName || branch || 'Assigned Branch'})` 
             : isEmployee 
               ? 'Personal Attendance & Payroll Records' 
               : 'Organization-wide analytics and filtered database summaries'
@@ -402,17 +438,25 @@ export default function ReportsPage() {
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5">
           {/* Branch Filter */}
           <div>
-            <label className="text-[10px] uppercase font-bold text-muted-foreground block mb-1">Branch</label>
+            <label className="text-[10px] uppercase font-bold text-muted-foreground block mb-1">
+              Branch {isStoreAdmin && <span className="text-[9px] text-primary font-normal lowercase">(locked)</span>}
+            </label>
             <select
-              value={branch}
+              value={isStoreAdmin ? (userBranchName || branch) : branch}
               disabled={isStoreAdmin}
               onChange={e => setBranch(e.target.value)}
-              className="w-full border border-border rounded-xl px-2.5 py-1.5 text-xs font-semibold bg-card text-foreground cursor-pointer disabled:opacity-70"
+              className="w-full border border-border rounded-xl px-2.5 py-1.5 text-xs font-semibold bg-card text-foreground cursor-pointer disabled:opacity-80 disabled:bg-muted/50"
             >
-              <option value="All">All Branches</option>
-              {branchesList.map(b => (
-                <option key={b.id || b.name} value={b.name}>{b.name}</option>
-              ))}
+              {isStoreAdmin ? (
+                <option value={userBranchName || branch || 'Branch'}>{userBranchName || branch || 'Assigned Branch'}</option>
+              ) : (
+                <>
+                  <option value="All">All Branches</option>
+                  {branchesList.map(b => (
+                    <option key={b.id || b.name} value={b.name}>{b.name}</option>
+                  ))}
+                </>
+              )}
             </select>
           </div>
 
@@ -883,7 +927,7 @@ export default function ReportsPage() {
           [activeTab]: printReportsData[activeTab] || reportData,
         }}
         filters={{
-          branch,
+          branch: isStoreAdmin ? (userBranchName || branch) : branch,
           department,
           status,
           startDate,

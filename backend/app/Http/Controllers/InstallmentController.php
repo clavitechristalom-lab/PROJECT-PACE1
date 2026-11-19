@@ -686,7 +686,7 @@ class InstallmentController extends Controller
         $user = $request->user();
         $today = date('Y-m-d');
 
-        $account = InstallmentAccount::with([
+        $relations = [
             'customer',
             'sale.processedBy.employee',
             'sale.items.product',
@@ -694,7 +694,40 @@ class InstallmentController extends Controller
                 $q->orderBy('installment_no');
             },
             'payments.receivedBy.employee'
-        ])->findOrFail($id);
+        ];
+
+        $account = InstallmentAccount::with($relations)->find($id);
+
+        // Fallback 1: check if ID is actually a sale_id
+        if (!$account && is_numeric($id)) {
+            $account = InstallmentAccount::with($relations)->where('sale_id', $id)->first();
+        }
+
+        // Fallback 2: check if ID matches account_no
+        if (!$account) {
+            $account = InstallmentAccount::with($relations)->where('account_no', $id)->first();
+        }
+
+        // Fallback 3: check if ID was referenced in notifications (e.g., replaced or migrated account)
+        if (!$account && is_numeric($id)) {
+            $notification = \App\Models\Notification::where('related_type', 'App\\Models\\InstallmentAccount')
+                ->where('related_id', (string)$id)
+                ->first();
+            if ($notification) {
+                $notifText = $notification->message ?? '';
+                if (preg_match('/ACC-\d{4}-\d+/', $notifText, $matches)) {
+                    $account = InstallmentAccount::with($relations)->where('account_no', $matches[0])->first();
+                }
+            }
+        }
+
+        if (!$account) {
+            return response()->json([
+                'success' => false,
+                'message' => "Installment account #{$id} was not found or has been removed.",
+                'account' => null,
+            ], 404);
+        }
 
         // Security check for Customer
         if ($user && $user->role === 'Customer') {
@@ -865,7 +898,19 @@ class InstallmentController extends Controller
     public function update(Request $request, $id)
     {
         $user = $request->user();
-        $account = InstallmentAccount::with('customer')->findOrFail($id);
+        $account = InstallmentAccount::with('customer')->find($id);
+        if (!$account && is_numeric($id)) {
+            $account = InstallmentAccount::with('customer')->where('sale_id', $id)->first();
+        }
+        if (!$account) {
+            $account = InstallmentAccount::with('customer')->where('account_no', $id)->first();
+        }
+        if (!$account) {
+            return response()->json([
+                'success' => false,
+                'message' => "Installment account #{$id} was not found or has been removed."
+            ], 404);
+        }
 
         $validated = $request->validate([
             'status' => 'nullable|string|in:Active,Pending,Overdue,Completed,Cancelled,Defaulted,Repossessed',
@@ -942,7 +987,19 @@ class InstallmentController extends Controller
             return response()->json(['message' => 'Unauthorized. Only administrators can delete installments.'], 403);
         }
 
-        $account = InstallmentAccount::with(['sale', 'payments', 'paymentSchedules'])->findOrFail($id);
+        $account = InstallmentAccount::with(['sale', 'payments', 'paymentSchedules'])->find($id);
+        if (!$account && is_numeric($id)) {
+            $account = InstallmentAccount::with(['sale', 'payments', 'paymentSchedules'])->where('sale_id', $id)->first();
+        }
+        if (!$account) {
+            $account = InstallmentAccount::with(['sale', 'payments', 'paymentSchedules'])->where('account_no', $id)->first();
+        }
+        if (!$account) {
+            return response()->json([
+                'success' => false,
+                'message' => "Installment account #{$id} was not found or has been removed."
+            ], 404);
+        }
 
         return DB::transaction(function () use ($account, $user, $request) {
             $accountNo = $account->account_no;

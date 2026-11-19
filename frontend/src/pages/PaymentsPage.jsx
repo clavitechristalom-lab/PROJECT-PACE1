@@ -4,7 +4,8 @@ import {
   FiCreditCard, FiTrendingUp, FiSmartphone,
   FiEye, FiPlus, FiPrinter, FiSearch, FiCalendar,
   FiCheckCircle, FiX, FiAlertTriangle, FiFileText, FiFilter, FiTrash2,
-  FiClock, FiImage
+  FiClock, FiImage, FiUser, FiDollarSign, FiShield, FiCheck, FiLayers,
+  FiMapPin, FiPhone, FiMail, FiPackage, FiChevronDown, FiChevronUp, FiTag
 } from 'react-icons/fi'
 import {
   Btn, Badge, StatusBadge, Input, Select, Textarea, Modal,
@@ -88,14 +89,36 @@ export default function PaymentsPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
 
+  // Resolve Store Admin assigned branch name robustly
+  const userBranchName = useMemo(() => {
+    if (!user) return ''
+    if (user?.employee?.branch?.name) return user.employee.branch.name
+    if (typeof user?.employee?.branch === 'string' && user.employee.branch) return user.employee.branch
+    if (user?.employee?.branch_name) return user.employee.branch_name
+    if (user?.branch_name) return user.branch_name
+    if (user?.branch?.name) return user.branch.name
+    if (user?.employee?.branch_id && branches.length > 0) {
+      const match = branches.find(b => String(b.id || b.branch_id) === String(user.employee.branch_id))
+      if (match?.name) return match.name
+    }
+    return ''
+  }, [user, branches])
+
   // Filters
   const [search, setSearch] = useState('')
   const [methodFilter, setMethodFilter] = useState('All')
-  const [branchFilter, setBranchFilter] = useState(isStoreAdmin ? (user?.employee?.branch?.name || (typeof user?.employee?.branch === 'string' ? user.employee.branch : '')) : 'All')
+  const [branchFilter, setBranchFilter] = useState(isStoreAdmin ? (userBranchName || 'Assigned Branch') : 'All')
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
   const [page, setPage] = useState(1)
   const pageSize = 10
+
+  // Keep branchFilter synced for Store Admin
+  useEffect(() => {
+    if (isStoreAdmin && userBranchName && branchFilter !== userBranchName) {
+      setBranchFilter(userBranchName)
+    }
+  }, [isStoreAdmin, userBranchName, branchFilter])
 
   // Modals & Printing
   const [newPayModal, setNewPayModal] = useState(false)
@@ -106,13 +129,21 @@ export default function PaymentsPage() {
   const [printReceiptData, setPrintReceiptData] = useState(null)
   const [settings, setSettings] = useState(null)
 
-  // New Payment Form State
+  // New Payment Form State (Detailed Customer Payment)
   const [selectedInstId, setSelectedInstId] = useState('')
   const [payAmount, setPayAmount] = useState('')
   const [payMethod, setPayMethod] = useState('Cash')
   const [payRef, setPayRef] = useState('')
   const [payDate, setPayDate] = useState(new Date().toISOString().slice(0, 10))
   const [payNotes, setPayNotes] = useState('')
+  const [cashTendered, setCashTendered] = useState('')
+  const [bankName, setBankName] = useState('BDO')
+  const [senderName, setSenderName] = useState('')
+  const [chequeNo, setChequeNo] = useState('')
+  const [chequeBank, setChequeBank] = useState('')
+  const [chequeDate, setChequeDate] = useState('')
+  const [instSearchQuery, setInstSearchQuery] = useState('')
+  const [showAccountHistory, setShowAccountHistory] = useState(false)
 
   const inFlightRef = useRef(false)
   const isMountedRef = useRef(true)
@@ -137,19 +168,22 @@ export default function PaymentsPage() {
       const needStatic = branches.length === 0 || !settings
       const needInstallments = installments.length === 0 || newPayModal || !silent
 
+      const activeBranch = isStoreAdmin ? (userBranchName || branchFilter) : branchFilter
+      const resolvedBranch = activeBranch !== 'All' ? activeBranch : undefined
+
       const promises = [
         api.payments.getAll({
           search: search || undefined,
           payment_method: methodFilter !== 'All' ? methodFilter : undefined,
-          branch: branchFilter !== 'All' ? branchFilter : undefined,
+          branch: resolvedBranch,
           date_from: dateFrom || undefined,
           date_to: dateTo || undefined,
         }, reqOpts),
-        api.payments.getMonitoring({ branch: branchFilter !== 'All' ? branchFilter : undefined }, reqOpts).catch(() => null),
+        api.payments.getMonitoring({ branch: resolvedBranch }, reqOpts).catch(() => null),
       ]
 
       if (needInstallments) {
-        promises.push(api.installments.getAll({ status: 'Active', branch: branchFilter !== 'All' ? branchFilter : undefined }, reqOpts).catch(() => ({ installments: [] })))
+        promises.push(api.installments.getAll({ status: 'Active', branch: resolvedBranch }, reqOpts).catch(() => ({ installments: [] })))
       }
 
       if (needStatic) {
@@ -238,14 +272,16 @@ export default function PaymentsPage() {
     setSelectedInstId(instId)
     const inst = installments.find(i => i.installment_id === parseInt(instId))
     if (inst) {
-      setPayAmount((inst.next_amount_due || inst.installment_amount || '').toString())
+      const defaultAmount = inst.next_amount_due > 0 ? inst.next_amount_due : (inst.installment_amount || inst.balance || '')
+      setPayAmount(defaultAmount ? defaultAmount.toString() : '')
+      setCashTendered('')
     }
   }
 
   const handleRecordPayment = async (e) => {
     e.preventDefault()
     if (!selectedInstId) {
-      showToast('Please select an installment', 'error')
+      showToast('Please select an active installment account', 'error')
       return
     }
     const val = parseFloat(payAmount)
@@ -254,30 +290,81 @@ export default function PaymentsPage() {
       return
     }
 
+    const selectedInst = installments.find(i => i.installment_id === parseInt(selectedInstId))
+    if (selectedInst && val > (Number(selectedInst.balance) + 0.01)) {
+      showToast(`Payment amount (₱${val.toFixed(2)}) exceeds outstanding balance of ₱${Number(selectedInst.balance).toFixed(2)}`, 'error')
+      return
+    }
+
+    // Prepare method-specific references and notes
+    let finalRef = payRef.trim()
+    const noteParts = []
+    if (payNotes.trim()) noteParts.push(payNotes.trim())
+
+    if (payMethod === 'Cash') {
+      if (cashTendered && parseFloat(cashTendered) > 0) {
+        const change = Math.max(0, parseFloat(cashTendered) - val)
+        noteParts.push(`Cash Tendered: ₱${parseFloat(cashTendered).toFixed(2)} | Sukli/Change: ₱${change.toFixed(2)}`)
+      }
+    } else if (payMethod === 'GCash' || payMethod === 'Maya') {
+      if (senderName.trim()) noteParts.push(`Sender/Account: ${senderName.trim()}`)
+      if (!finalRef) {
+        showToast(`Please enter the ${payMethod} Reference Number`, 'error')
+        return
+      }
+    } else if (payMethod === 'Bank Transfer') {
+      if (bankName) noteParts.push(`Bank: ${bankName}`)
+      if (senderName.trim()) noteParts.push(`Remitter: ${senderName.trim()}`)
+      if (!finalRef) {
+        showToast('Please enter Bank Transaction / Reference Number', 'error')
+        return
+      }
+    } else if (payMethod === 'Cheque') {
+      finalRef = chequeNo.trim() || finalRef
+      if (!finalRef) {
+        showToast('Please enter the Cheque Number', 'error')
+        return
+      }
+      if (chequeBank.trim()) noteParts.push(`Issuing Bank: ${chequeBank.trim()}`)
+      if (chequeDate) noteParts.push(`Cheque Date: ${chequeDate}`)
+    }
+
+    const combinedNotes = noteParts.filter(Boolean).join(' | ')
+
     setSaving(true)
-    showLoading('Recording payment...')
+    showLoading('Recording customer payment...')
     try {
       const res = await api.payments.create({
         installment_id: parseInt(selectedInstId),
         amount: val,
         payment_method: payMethod,
-        reference_no: payRef,
+        reference_no: finalRef || null,
         payment_date: payDate,
-        notes: payNotes,
+        notes: combinedNotes || null,
         user_id: user?.user_id || 1,
       })
 
-      showToast(res.message || 'Payment recorded successfully', 'success')
+      showToast(res.message || 'Customer payment recorded successfully!', 'success')
       setNewPayModal(false)
       setSelectedInstId('')
       setPayAmount('')
       setPayRef('')
       setPayNotes('')
+      setCashTendered('')
+      setSenderName('')
+      setChequeNo('')
+      setChequeBank('')
+      setChequeDate('')
+      setInstSearchQuery('')
+
       if (res.payment) {
         setPayments(prev => [res.payment, ...prev])
-      } else {
-        triggerDataSync('payments')
+        // Automatically open official receipt so Store Admin can inspect or print immediately
+        setViewReceipt(res.payment)
       }
+      triggerDataSync('payments')
+      triggerDataSync('installments')
+      loadData(true)
     } catch (err) {
       showToast(err.message || 'Failed to record payment', 'error')
     } finally {
@@ -464,7 +551,7 @@ export default function PaymentsPage() {
         title="Payment Collections & Receipts"
         subtitle={
           isStoreAdmin 
-            ? `Store Branch Collections (${user?.employee?.branch?.name || (typeof user?.employee?.branch === 'string' ? user.employee.branch : 'Assigned Branch')})` 
+            ? `Store Branch Collections (${userBranchName || branchFilter || 'Assigned Branch'})` 
             : 'Track official payment receipts, cash vs digital collection breakdown, and installments paid'
         }
         action={
@@ -486,13 +573,15 @@ export default function PaymentsPage() {
               {exporting ? <FiAlertTriangle className="w-4 h-4 animate-spin" /> : <FiDownload className="w-4 h-4" />}
               <span>{exporting ? 'Exporting...' : 'Export CSV'}</span>
             </button>
-            <button
-              onClick={() => setNewPayModal(true)}
-              className="flex items-center gap-2 px-4 py-2 bg-primary hover:bg-primary/90 text-primary-foreground font-semibold text-xs rounded-xl shadow-xs transition-all cursor-pointer"
-            >
-              <FiPlus className="w-4 h-4" />
-              <span>Record Payment</span>
-            </button>
+            {isStoreAdmin && (
+              <button
+                onClick={() => setNewPayModal(true)}
+                className="flex items-center gap-2 px-4 py-2 bg-primary hover:bg-primary/90 text-primary-foreground font-semibold text-xs rounded-xl shadow-xs transition-all cursor-pointer"
+              >
+                <FiPlus className="w-4 h-4" />
+                <span>Record Payment</span>
+              </button>
+            )}
           </div>
         }
       />
@@ -545,15 +634,21 @@ export default function PaymentsPage() {
 
           <div>
             <select
-              value={branchFilter}
+              value={isStoreAdmin ? (userBranchName || branchFilter) : branchFilter}
               disabled={isStoreAdmin}
               onChange={e => setBranchFilter(e.target.value)}
-              className="w-full border border-border rounded-xl px-3 py-2 text-xs font-semibold bg-card text-foreground cursor-pointer disabled:opacity-70"
+              className="w-full border border-border rounded-xl px-3 py-2 text-xs font-semibold bg-card text-foreground cursor-pointer disabled:opacity-70 disabled:bg-muted/50"
             >
-              <option value="All">All Branches</option>
-              {branches.map(b => (
-                <option key={b.branch_id} value={b.name}>{b.name}</option>
-              ))}
+              {isStoreAdmin ? (
+                <option value={userBranchName || branchFilter || 'Branch'}>{userBranchName || branchFilter || 'Assigned Branch'}</option>
+              ) : (
+                <>
+                  <option value="All">All Branches</option>
+                  {branches.map(b => (
+                    <option key={b.branch_id || b.id || b.name} value={b.name}>{b.name}</option>
+                  ))}
+                </>
+              )}
             </select>
           </div>
 
@@ -770,117 +865,622 @@ export default function PaymentsPage() {
         </Modal>
       )}
 
-      {/* NEW PAYMENT MODAL */}
-      {newPayModal && (
-        <Modal
-          isOpen={true}
-          onClose={() => setNewPayModal(false)}
-          title="Record Customer Payment"
-          size="lg"
-        >
-          <form onSubmit={handleRecordPayment} className="space-y-4 text-xs">
-            <div>
-              <label className="block font-bold text-muted-foreground mb-1">Select Installment *</label>
-              <select
-                value={selectedInstId}
-                onChange={e => handleInstSelect(e.target.value)}
-                required
-                className="w-full border border-border rounded-xl px-3 py-2 text-xs bg-card text-foreground font-semibold cursor-pointer"
-              >
-                <option value="">-- Choose Active Account --</option>
-                {installments.map(inst => (
-                  <option key={inst.installment_id} value={inst.installment_id}>
-                    {inst.account_no} — {inst.customer_name} (Balance: {fmt(inst.balance)})
-                  </option>
-                ))}
-              </select>
-            </div>
+      {/* NEW PAYMENT MODAL (DETAILED CUSTOMER PAYMENT) */}
+      {newPayModal && (() => {
+        const selectedInst = installments.find(i => i.installment_id === parseInt(selectedInstId))
+        const accountPayments = selectedInst ? payments.filter(p => p.installment_id === selectedInst.installment_id) : []
+        const currentBal = selectedInst ? Number(selectedInst.balance) || 0 : 0
+        const inputAmount = parseFloat(payAmount) || 0
+        const balanceAfter = Math.max(0, currentBal - inputAmount)
+        const isFullPayment = currentBal > 0 && inputAmount >= currentBal
+        const isOverpayment = currentBal > 0 && inputAmount > currentBal
+        const monthlyDue = selectedInst ? (selectedInst.installment_amount || selectedInst.next_amount_due || 0) : 0
+        const progressPct = selectedInst && selectedInst.total_payable > 0
+          ? Math.min(100, Math.round(((selectedInst.paid || 0) / selectedInst.total_payable) * 100))
+          : 0
+        const cashTenderedVal = parseFloat(cashTendered) || 0
+        const changeDue = payMethod === 'Cash' && cashTenderedVal > inputAmount
+          ? cashTenderedVal - inputAmount
+          : 0
 
-            <div>
-              <label className="block font-bold text-muted-foreground mb-1">Payment Amount (PHP) *</label>
-              <input
-                type="number"
-                step="0.01"
-                min="1"
-                value={payAmount}
-                onChange={e => setPayAmount(e.target.value)}
-                placeholder="0.00"
-                required
-                className="w-full border border-border rounded-xl px-3 py-2 text-sm font-mono font-bold bg-card text-foreground"
-              />
-            </div>
+        const filteredAccounts = installments.filter(inst => {
+          if (!instSearchQuery.trim()) return true
+          const q = instSearchQuery.toLowerCase()
+          return (
+            (inst.account_no && inst.account_no.toLowerCase().includes(q)) ||
+            (inst.customer_name && inst.customer_name.toLowerCase().includes(q)) ||
+            (inst.customer_phone && inst.customer_phone.toLowerCase().includes(q)) ||
+            (inst.product_name && inst.product_name.toLowerCase().includes(q))
+          )
+        })
 
-            <div className="grid grid-cols-2 gap-2.5">
-              <div>
-                <label className="block font-bold text-muted-foreground mb-1">Payment Method</label>
-                <select
-                  value={payMethod}
-                  onChange={e => setPayMethod(e.target.value)}
-                  className="w-full border border-border rounded-xl px-3 py-2 text-xs bg-card text-foreground font-semibold cursor-pointer"
+        return (
+          <Modal
+            isOpen={true}
+            onClose={() => setNewPayModal(false)}
+            title="Record Customer Payment"
+            size="xl"
+          >
+            <form onSubmit={handleRecordPayment} className="space-y-4 text-xs">
+              {/* 1. Account Selector Header */}
+              {!selectedInst ? (
+                <div className="p-4 rounded-2xl bg-muted/30 border border-border space-y-3">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                    <label className="font-bold text-foreground text-xs uppercase tracking-wider flex items-center gap-1.5">
+                      <FiSearch className="text-primary" /> Select Active Customer Installment Account *
+                    </label>
+                    <span className="text-[11px] text-muted-foreground font-mono">
+                      {filteredAccounts.length} Available Accounts
+                    </span>
+                  </div>
+
+                  <div className="relative">
+                    <FiSearch className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
+                    <input
+                      type="text"
+                      value={instSearchQuery}
+                      onChange={e => setInstSearchQuery(e.target.value)}
+                      placeholder="Search by customer name, account #, phone, or product..."
+                      className="w-full pl-9 pr-3 py-2 rounded-xl border border-border bg-card text-foreground text-xs focus:outline-none focus:ring-2 focus:ring-primary/20"
+                    />
+                  </div>
+
+                  <div className="max-h-56 overflow-y-auto space-y-2 pr-1">
+                    {filteredAccounts.length === 0 ? (
+                      <div className="p-4 text-center text-muted-foreground text-xs rounded-xl bg-card border border-border">
+                        No active installment accounts match your search.
+                      </div>
+                    ) : (
+                      filteredAccounts.map(inst => (
+                        <div
+                          key={inst.installment_id}
+                          onClick={() => handleInstSelect(inst.installment_id)}
+                          className="p-3 rounded-xl bg-card hover:bg-primary/5 hover:border-primary border border-border flex items-center justify-between gap-3 cursor-pointer transition-all shadow-2xs group"
+                        >
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="font-mono font-bold text-primary text-xs">{inst.account_no}</span>
+                              <span className="font-bold text-foreground truncate">{inst.customer_name}</span>
+                              <Badge
+                                variant={inst.days_overdue > 0 ? 'danger' : 'success'}
+                              >
+                                {inst.days_overdue > 0 ? `Overdue (${inst.days_overdue}d)` : 'Active'}
+                              </Badge>
+                            </div>
+                            <div className="flex items-center gap-3 text-[11px] text-muted-foreground mt-0.5">
+                              <span className="truncate flex items-center gap-1">
+                                <FiPackage className="w-3 h-3 text-muted-foreground shrink-0" />
+                                {inst.product_name}
+                              </span>
+                              {inst.customer_phone && (
+                                <span className="font-mono hidden sm:inline">📞 {inst.customer_phone}</span>
+                              )}
+                            </div>
+                          </div>
+                          <div className="text-right shrink-0">
+                            <div className="text-[10px] text-muted-foreground uppercase font-bold">Outstanding Balance</div>
+                            <div className="font-mono font-bold text-rose-600 dark:text-rose-400 text-xs">
+                              {fmt(inst.balance)}
+                            </div>
+                            <div className="text-[10px] text-muted-foreground font-mono">
+                              Due: {fmt(inst.next_amount_due || inst.installment_amount)}
+                            </div>
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+              ) : (
+                /* Selected Account Header Banner */
+                <div className="p-3.5 rounded-2xl bg-primary/10 border border-primary/20 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <div className="w-10 h-10 rounded-xl bg-primary text-primary-foreground flex items-center justify-center font-bold text-base shrink-0">
+                      <FiUser />
+                    </div>
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-mono font-bold text-primary text-xs">{selectedInst.account_no}</span>
+                        <h4 className="font-bold text-foreground text-sm truncate">{selectedInst.customer_name}</h4>
+                        <Badge variant={selectedInst.days_overdue > 0 ? 'danger' : 'success'}>
+                          {selectedInst.days_overdue > 0 ? `Overdue (${selectedInst.days_overdue}d)` : selectedInst.status || 'Active'}
+                        </Badge>
+                      </div>
+                      <p className="text-[11px] text-muted-foreground truncate">
+                        {selectedInst.product_name} • {selectedInst.branch || 'Assigned Branch'}
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => { setSelectedInstId(''); setInstSearchQuery(''); }}
+                    className="px-3 py-1.5 rounded-xl border border-primary/30 text-primary hover:bg-primary/20 font-bold text-xs cursor-pointer shrink-0 transition-colors"
+                  >
+                    Change Account
+                  </button>
+                </div>
+              )}
+
+              {/* 2. Detailed Customer & Contract Card */}
+              {selectedInst && (
+                <>
+                  <div className="p-4 rounded-2xl bg-card border border-border space-y-3">
+                    <div className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider flex items-center gap-1.5">
+                      <FiLayers className="text-primary" /> Customer Profile & Contract Specification
+                    </div>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+                      <div>
+                        <span className="text-[10px] text-muted-foreground uppercase font-bold block">Contact Phone</span>
+                        <span className="font-mono text-foreground font-medium">{selectedInst.customer_phone || '—'}</span>
+                      </div>
+                      <div>
+                        <span className="text-[10px] text-muted-foreground uppercase font-bold block">Email Address</span>
+                        <span className="text-foreground font-medium truncate block">{selectedInst.customer_email || '—'}</span>
+                      </div>
+                      <div>
+                        <span className="text-[10px] text-muted-foreground uppercase font-bold block">Invoice Reference</span>
+                        <span className="font-mono text-foreground font-semibold">{selectedInst.invoice_no || '—'}</span>
+                      </div>
+                      <div>
+                        <span className="text-[10px] text-muted-foreground uppercase font-bold block">Payment Term</span>
+                        <span className="text-foreground font-medium">
+                          {selectedInst.number_of_installments || 12} Months ({selectedInst.frequency || 'Monthly'})
+                        </span>
+                      </div>
+                    </div>
+                    {selectedInst.customer_address && (
+                      <div className="text-xs pt-2 border-t border-border flex items-center gap-1.5 text-muted-foreground">
+                        <FiMapPin className="text-primary shrink-0 w-3.5 h-3.5" />
+                        <span className="truncate">{selectedInst.customer_address}</span>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* 3. Financial Metrics & Balance Breakdown */}
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 text-center">
+                    <div className="p-3 rounded-xl bg-card border border-border">
+                      <div className="text-[10px] uppercase font-bold text-muted-foreground">Contract Price</div>
+                      <div className="font-mono font-bold text-foreground text-sm">{fmt(selectedInst.total_payable)}</div>
+                      <div className="text-[10px] text-muted-foreground">Total Financed</div>
+                    </div>
+
+                    <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20">
+                      <div className="text-[10px] uppercase font-bold text-emerald-600 dark:text-emerald-400">Total Paid</div>
+                      <div className="font-mono font-bold text-emerald-600 dark:text-emerald-400 text-sm">{fmt(selectedInst.paid)}</div>
+                      <div className="text-[10px] text-emerald-600 dark:text-emerald-400 font-semibold">{progressPct}% Repaid</div>
+                    </div>
+
+                    <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/20">
+                      <div className="text-[10px] uppercase font-bold text-rose-600 dark:text-rose-400">Remaining Balance</div>
+                      <div className="font-mono font-bold text-rose-600 dark:text-rose-400 text-sm">{fmt(selectedInst.balance)}</div>
+                      <div className="text-[10px] text-rose-600 dark:text-rose-400">Outstanding</div>
+                    </div>
+
+                    <div className="p-3 rounded-xl bg-blue-500/10 border border-blue-500/20">
+                      <div className="text-[10px] uppercase font-bold text-blue-600 dark:text-blue-400">Monthly Amortization</div>
+                      <div className="font-mono font-bold text-blue-600 dark:text-blue-400 text-sm">
+                        {fmt(selectedInst.installment_amount || selectedInst.next_amount_due)}
+                      </div>
+                      <div className="text-[10px] text-blue-600 dark:text-blue-400">
+                        {selectedInst.next_due_date ? `Due: ${fmtDate(selectedInst.next_due_date)}` : 'Per Installment'}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Progress Bar */}
+                  <div className="w-full bg-muted/60 h-2 rounded-full overflow-hidden">
+                    <div
+                      className="bg-emerald-500 h-full rounded-full transition-all duration-300"
+                      style={{ width: `${progressPct}%` }}
+                    />
+                  </div>
+
+                  {/* 4. Quick Amount Presets */}
+                  <div className="p-3 rounded-xl bg-muted/30 border border-border space-y-2">
+                    <div className="flex items-center justify-between text-[11px]">
+                      <span className="font-bold text-muted-foreground uppercase tracking-wider flex items-center gap-1">
+                        <FiTag className="text-primary" /> Quick-Pay Amount Presets
+                      </span>
+                      <span className="text-muted-foreground">Click to automatically populate payment amount</span>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {selectedInst.next_amount_due > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => setPayAmount(selectedInst.next_amount_due.toString())}
+                          className={`px-3 py-1.5 rounded-lg font-mono font-semibold text-xs border transition-all cursor-pointer ${
+                            parseFloat(payAmount) === Number(selectedInst.next_amount_due)
+                              ? 'bg-primary text-primary-foreground border-primary shadow-xs'
+                              : 'bg-card text-foreground border-border hover:bg-muted'
+                          }`}
+                        >
+                          Next Due: {fmt(selectedInst.next_amount_due)}
+                        </button>
+                      )}
+                      {monthlyDue > 0 && Number(selectedInst.next_amount_due) !== Number(monthlyDue) && (
+                        <button
+                          type="button"
+                          onClick={() => setPayAmount(monthlyDue.toString())}
+                          className={`px-3 py-1.5 rounded-lg font-mono font-semibold text-xs border transition-all cursor-pointer ${
+                            parseFloat(payAmount) === Number(monthlyDue)
+                              ? 'bg-primary text-primary-foreground border-primary shadow-xs'
+                              : 'bg-card text-foreground border-border hover:bg-muted'
+                          }`}
+                        >
+                          1 Month: {fmt(monthlyDue)}
+                        </button>
+                      )}
+                      {monthlyDue > 0 && currentBal >= monthlyDue * 2 && (
+                        <button
+                          type="button"
+                          onClick={() => setPayAmount((monthlyDue * 2).toString())}
+                          className={`px-3 py-1.5 rounded-lg font-mono font-semibold text-xs border transition-all cursor-pointer ${
+                            parseFloat(payAmount) === Number(monthlyDue * 2)
+                              ? 'bg-primary text-primary-foreground border-primary shadow-xs'
+                              : 'bg-card text-foreground border-border hover:bg-muted'
+                          }`}
+                        >
+                          2 Months: {fmt(monthlyDue * 2)}
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => setPayAmount(currentBal.toString())}
+                        className={`px-3 py-1.5 rounded-lg font-mono font-bold text-xs border transition-all cursor-pointer ${
+                          parseFloat(payAmount) === currentBal
+                            ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs'
+                            : 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/20'
+                        }`}
+                      >
+                        Full Settlement: {fmt(currentBal)}
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* 5. Payment Amount & Live Balance Computation */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 items-start">
+                    <div className="p-3.5 rounded-2xl bg-card border border-border space-y-2">
+                      <label className="block font-bold text-foreground mb-1 text-xs uppercase tracking-wider">
+                        Payment Amount (PHP) *
+                      </label>
+                      <div className="relative">
+                        <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-sm font-bold text-muted-foreground font-mono">
+                          ₱
+                        </span>
+                        <input
+                          type="number"
+                          step="0.01"
+                          min="1"
+                          max={currentBal}
+                          value={payAmount}
+                          onChange={e => setPayAmount(e.target.value)}
+                          placeholder="0.00"
+                          required
+                          className="w-full pl-8 pr-3 py-2.5 rounded-xl border border-border bg-card text-foreground font-mono font-bold text-base focus:ring-2 focus:ring-primary/20 focus:outline-none"
+                        />
+                      </div>
+                      {isOverpayment && (
+                        <div className="text-[11px] font-semibold text-rose-500 flex items-center gap-1">
+                          <FiAlertTriangle className="w-3.5 h-3.5" />
+                          Amount exceeds remaining balance by {fmt(inputAmount - currentBal)}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Live Balance Card */}
+                    <div className={`p-3.5 rounded-2xl border transition-all space-y-2 ${
+                      isFullPayment
+                        ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-900 dark:text-emerald-200'
+                        : 'bg-muted/30 border-border text-foreground'
+                    }`}>
+                      <div className="flex items-center justify-between text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
+                        <span>Balance Calculation</span>
+                        {isFullPayment && (
+                          <span className="text-emerald-600 dark:text-emerald-400 font-bold flex items-center gap-1">
+                            <FiCheckCircle className="w-3.5 h-3.5" /> Full Settlement
+                          </span>
+                        )}
+                      </div>
+                      <div className="space-y-1 text-xs">
+                        <div className="flex justify-between">
+                          <span className="text-muted-foreground">Current Balance:</span>
+                          <span className="font-mono font-semibold">{fmt(currentBal)}</span>
+                        </div>
+                        <div className="flex justify-between text-primary">
+                          <span>Deducting Payment:</span>
+                          <span className="font-mono font-bold">- {fmt(inputAmount)}</span>
+                        </div>
+                        <div className="flex justify-between pt-1.5 border-t border-border/80 font-bold">
+                          <span>Balance After Payment:</span>
+                          <span className={`font-mono text-sm ${isFullPayment ? 'text-emerald-600 dark:text-emerald-400 font-extrabold' : 'text-foreground'}`}>
+                            {fmt(balanceAfter)}
+                          </span>
+                        </div>
+                      </div>
+                      {isFullPayment && (
+                        <div className="text-[10px] text-emerald-600 dark:text-emerald-400 font-semibold bg-emerald-500/10 p-1.5 rounded-lg text-center">
+                          🎉 This payment will completely pay off and close this installment account!
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* 6. Payment Method & Method-Specific Transaction Details */}
+                  <div className="p-4 rounded-2xl bg-card border border-border space-y-3">
+                    <div className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider flex items-center gap-1.5">
+                      <FiCreditCard className="text-primary" /> Payment Method & Transaction Verification
+                    </div>
+
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
+                      <div>
+                        <label className="block font-bold text-muted-foreground mb-1 text-[11px]">Payment Method *</label>
+                        <select
+                          value={payMethod}
+                          onChange={e => setPayMethod(e.target.value)}
+                          className="w-full border border-border rounded-xl px-3 py-2 text-xs bg-card text-foreground font-semibold cursor-pointer"
+                        >
+                          <option value="Cash">Cash</option>
+                          <option value="GCash">GCash</option>
+                          <option value="Maya">Maya</option>
+                          <option value="Bank Transfer">Bank Transfer</option>
+                          <option value="Cheque">Cheque</option>
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="block font-bold text-muted-foreground mb-1 text-[11px]">Payment Date *</label>
+                        <input
+                          type="date"
+                          value={payDate}
+                          onChange={e => setPayDate(e.target.value)}
+                          required
+                          className="w-full border border-border rounded-xl px-3 py-2 text-xs bg-card text-foreground font-mono"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block font-bold text-muted-foreground mb-1 text-[11px]">
+                          {payMethod === 'Cash' ? 'Official Receipt Preview' : 'Reference / Transaction #'}
+                        </label>
+                        {payMethod === 'Cash' ? (
+                          <div className="py-2 px-3 rounded-xl bg-muted/40 border border-border text-[11px] font-mono text-muted-foreground truncate">
+                            Auto REC-2026-XXXXX
+                          </div>
+                        ) : (
+                          <input
+                            type="text"
+                            placeholder={payMethod === 'GCash' ? 'GCash Ref (e.g. 1002...)' : payMethod === 'Maya' ? 'Maya Ref #' : 'Trace / Transaction #'}
+                            value={payRef}
+                            onChange={e => setPayRef(e.target.value)}
+                            required
+                            className="w-full border border-border rounded-xl px-3 py-2 text-xs bg-card text-foreground font-mono"
+                          />
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Method Specific Inputs */}
+                    {payMethod === 'Cash' && (
+                      <div className="p-3 rounded-xl bg-muted/30 border border-border grid grid-cols-1 sm:grid-cols-2 gap-3 items-center">
+                        <div>
+                          <label className="block font-bold text-foreground mb-1 text-[11px]">
+                            Cash Tendered / Received from Customer
+                          </label>
+                          <div className="relative">
+                            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs font-bold text-muted-foreground font-mono">₱</span>
+                            <input
+                              type="number"
+                              step="0.01"
+                              value={cashTendered}
+                              onChange={e => setCashTendered(e.target.value)}
+                              placeholder={payAmount || '0.00'}
+                              className="w-full pl-7 pr-3 py-2 rounded-xl border border-border bg-card text-foreground text-xs font-mono font-bold"
+                            />
+                          </div>
+                        </div>
+
+                        <div className="p-2.5 rounded-xl bg-card border border-border text-center">
+                          <div className="text-[10px] text-muted-foreground uppercase font-bold">Sukli / Change Due</div>
+                          <div className={`font-mono font-extrabold text-base ${changeDue > 0 ? 'text-primary' : 'text-muted-foreground'}`}>
+                            {fmt(changeDue)}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {(payMethod === 'GCash' || payMethod === 'Maya') && (
+                      <div className="p-3 rounded-xl bg-muted/30 border border-border">
+                        <label className="block font-bold text-foreground mb-1 text-[11px]">
+                          Sender Mobile Number / Account Name (Optional)
+                        </label>
+                        <input
+                          type="text"
+                          value={senderName}
+                          onChange={e => setSenderName(e.target.value)}
+                          placeholder="e.g. 0917-123-4567 / Juan Dela Cruz"
+                          className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground text-xs font-mono"
+                        />
+                      </div>
+                    )}
+
+                    {payMethod === 'Bank Transfer' && (
+                      <div className="p-3 rounded-xl bg-muted/30 border border-border grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div>
+                          <label className="block font-bold text-foreground mb-1 text-[11px]">Bank Name</label>
+                          <select
+                            value={bankName}
+                            onChange={e => setBankName(e.target.value)}
+                            className="w-full border border-border rounded-xl px-3 py-2 text-xs bg-card text-foreground font-medium"
+                          >
+                            <option value="BDO">BDO Unibank</option>
+                            <option value="BPI">Bank of the Philippine Islands (BPI)</option>
+                            <option value="Metrobank">Metrobank</option>
+                            <option value="Landbank">Landbank of the Philippines</option>
+                            <option value="UnionBank">UnionBank of the Philippines</option>
+                            <option value="Security Bank">Security Bank</option>
+                            <option value="RCBC">RCBC</option>
+                            <option value="PNB">Philippine National Bank (PNB)</option>
+                            <option value="Other">Other Domestic Bank</option>
+                          </select>
+                        </div>
+                        <div>
+                          <label className="block font-bold text-foreground mb-1 text-[11px]">Sender / Remitter Name</label>
+                          <input
+                            type="text"
+                            value={senderName}
+                            onChange={e => setSenderName(e.target.value)}
+                            placeholder="Account Holder Name"
+                            className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground text-xs"
+                          />
+                        </div>
+                      </div>
+                    )}
+
+                    {payMethod === 'Cheque' && (
+                      <div className="p-3 rounded-xl bg-muted/30 border border-border grid grid-cols-1 sm:grid-cols-3 gap-3">
+                        <div>
+                          <label className="block font-bold text-foreground mb-1 text-[11px]">Cheque Number *</label>
+                          <input
+                            type="text"
+                            value={chequeNo}
+                            onChange={e => setChequeNo(e.target.value)}
+                            placeholder="e.g. 00012345"
+                            required
+                            className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground text-xs font-mono"
+                          />
+                        </div>
+                        <div>
+                          <label className="block font-bold text-foreground mb-1 text-[11px]">Issuing Bank & Branch</label>
+                          <input
+                            type="text"
+                            value={chequeBank}
+                            onChange={e => setChequeBank(e.target.value)}
+                            placeholder="e.g. BDO Iligan Branch"
+                            className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground text-xs"
+                          />
+                        </div>
+                        <div>
+                          <label className="block font-bold text-foreground mb-1 text-[11px]">Cheque Date</label>
+                          <input
+                            type="date"
+                            value={chequeDate}
+                            onChange={e => setChequeDate(e.target.value)}
+                            className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground text-xs font-mono"
+                          />
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* 7. Collector & Branch Information */}
+                  <div className="p-3 rounded-xl bg-muted/20 border border-border flex flex-col sm:flex-row sm:items-center justify-between text-xs text-muted-foreground gap-2">
+                    <div className="flex items-center gap-1.5">
+                      <FiShield className="text-primary shrink-0" />
+                      <span>Issuing Branch:</span>
+                      <strong className="text-foreground">{userBranchName || selectedInst.branch || 'Assigned Branch'}</strong>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <FiUser className="text-primary shrink-0" />
+                      <span>Collector / Store Admin:</span>
+                      <strong className="text-foreground">{user?.username || 'Store Administrator'}</strong>
+                    </div>
+                  </div>
+
+                  {/* 8. Collapsible Past Payment Records */}
+                  <div className="rounded-xl border border-border overflow-hidden">
+                    <button
+                      type="button"
+                      onClick={() => setShowAccountHistory(prev => !prev)}
+                      className="w-full p-3 bg-muted/30 hover:bg-muted/50 flex items-center justify-between text-xs font-bold text-foreground cursor-pointer transition-colors"
+                    >
+                      <span className="flex items-center gap-1.5">
+                        <FiClock className="text-primary" /> Past Payment Receipts for this Account ({accountPayments.length})
+                      </span>
+                      {showAccountHistory ? <FiChevronUp className="w-4 h-4" /> : <FiChevronDown className="w-4 h-4" />}
+                    </button>
+
+                    {showAccountHistory && (
+                      <div className="p-3 bg-card border-t border-border">
+                        {accountPayments.length === 0 ? (
+                          <div className="text-center py-2 text-muted-foreground text-xs">
+                            No prior recorded payments for this account yet.
+                          </div>
+                        ) : (
+                          <div className="max-h-36 overflow-y-auto">
+                            <table className="w-full text-[11px]">
+                              <thead>
+                                <tr className="border-b border-border text-muted-foreground text-left">
+                                  <th className="py-1.5 px-2">Receipt #</th>
+                                  <th className="py-1.5 px-2">Date</th>
+                                  <th className="py-1.5 px-2">Method</th>
+                                  <th className="py-1.5 px-2">Amount</th>
+                                  <th className="py-1.5 px-2">Collector</th>
+                                  <th className="py-1.5 px-2 text-center">Status</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-border">
+                                {accountPayments.map((p, idx) => (
+                                  <tr key={p.payment_id || idx} className="hover:bg-muted/20">
+                                    <td className="py-1.5 px-2 font-mono font-bold text-primary">{p.receipt_no}</td>
+                                    <td className="py-1.5 px-2 font-mono text-muted-foreground">{p.payment_date}</td>
+                                    <td className="py-1.5 px-2">{p.payment_method}</td>
+                                    <td className="py-1.5 px-2 font-mono font-bold text-emerald-600 dark:text-emerald-400">{fmt(p.amount)}</td>
+                                    <td className="py-1.5 px-2 text-muted-foreground">{p.received_by_name || 'Admin'}</td>
+                                    <td className="py-1.5 px-2 text-center">
+                                      <Badge variant={p.status === 'Completed' ? 'success' : 'warning'}>
+                                        {p.status}
+                                      </Badge>
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* 9. Notes / Remarks */}
+                  <div>
+                    <label className="block font-bold text-muted-foreground mb-1 text-[11px]">
+                      Collection Notes & Remarks (Optional)
+                    </label>
+                    <textarea
+                      placeholder="e.g. Paid at store cashier counter, verified customer ID, customer requested text receipt..."
+                      value={payNotes}
+                      onChange={e => setPayNotes(e.target.value)}
+                      rows={2}
+                      className="w-full border border-border rounded-xl px-3 py-2 text-xs bg-card text-foreground"
+                    />
+                  </div>
+                </>
+              )}
+
+              {/* 10. Modal Actions Footer */}
+              <div className="flex justify-between items-center pt-4 border-t border-border">
+                <button
+                  type="button"
+                  onClick={() => setNewPayModal(false)}
+                  className="flex items-center gap-1 px-4 py-2 rounded-xl border border-border hover:bg-muted font-semibold cursor-pointer text-xs"
                 >
-                  <option value="Cash">Cash</option>
-                  <option value="GCash">GCash</option>
-                  <option value="Maya">Maya</option>
-                  <option value="Bank Transfer">Bank Transfer</option>
-                  <option value="Cheque">Cheque</option>
-                </select>
+                  <FiX className="w-3.5 h-3.5" />
+                  <span>Cancel</span>
+                </button>
+
+                <button
+                  type="submit"
+                  disabled={saving || !selectedInst || inputAmount <= 0 || isOverpayment}
+                  className="flex items-center gap-1.5 px-5 py-2.5 rounded-xl bg-primary hover:bg-primary/90 text-primary-foreground font-bold text-xs cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed shadow-xs transition-all"
+                >
+                  <FiCheckCircle className="w-4 h-4" />
+                  <span>{saving ? 'Processing Payment...' : 'Confirm & Record Payment'}</span>
+                </button>
               </div>
-
-              <div>
-                <label className="block font-bold text-muted-foreground mb-1">Payment Date</label>
-                <input
-                  type="date"
-                  value={payDate}
-                  onChange={e => setPayDate(e.target.value)}
-                  required
-                  className="w-full border border-border rounded-xl px-3 py-2 text-xs bg-card text-foreground font-mono"
-                />
-              </div>
-            </div>
-
-            <div>
-              <label className="block font-bold text-muted-foreground mb-1">Reference # (Optional)</label>
-              <input
-                type="text"
-                placeholder="GCash Ref / Bank Ref"
-                value={payRef}
-                onChange={e => setPayRef(e.target.value)}
-                className="w-full border border-border rounded-xl px-3 py-2 text-xs bg-card text-foreground font-mono"
-              />
-            </div>
-
-            <div>
-              <label className="block font-bold text-muted-foreground mb-1">Notes / Remarks</label>
-              <textarea
-                placeholder="Optional payment notes..."
-                value={payNotes}
-                onChange={e => setPayNotes(e.target.value)}
-                rows={2}
-                className="w-full border border-border rounded-xl px-3 py-2 text-xs bg-card text-foreground"
-              />
-            </div>
-
-            <div className="flex justify-end gap-3 pt-4 border-t border-border">
-              <button
-                type="button"
-                onClick={() => setNewPayModal(false)}
-                className="flex items-center gap-1 px-4 py-2 rounded-xl border border-border hover:bg-muted font-semibold cursor-pointer"
-              >
-                <FiX className="w-3.5 h-3.5" />
-                <span>Cancel</span>
-              </button>
-              <button
-                type="submit"
-                disabled={saving}
-                className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-primary hover:bg-primary/90 text-primary-foreground font-bold cursor-pointer"
-              >
-                <FiCheckCircle className="w-3.5 h-3.5" />
-                <span>{saving ? 'Processing...' : 'Confirm Payment'}</span>
-              </button>
-            </div>
-          </form>
-        </Modal>
-      )}
+            </form>
+          </Modal>
+        )
+      })()}
 
       {/* VIEW PAYMENT DETAILS MODAL */}
       {viewPayment && (

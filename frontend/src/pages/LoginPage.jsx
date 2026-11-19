@@ -2638,7 +2638,7 @@ export default function LoginPage() {
                         <ul className="text-xs space-y-1.5 text-gray-500 dark:text-slate-400">
                           <li>• 7-Day immediate unit replacement for factory defects</li>
                           <li>• 6 to 12 Months full service coverage</li>
-                          <li>• Rapid 48-hour diagnostic turnaround at any branch</li>
+                          <li>• Rapid 48-hour diagnostic turn around at any branch</li>
                         </ul>
                       </div>
                     </div>

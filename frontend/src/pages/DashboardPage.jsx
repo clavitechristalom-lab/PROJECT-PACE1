@@ -1446,13 +1446,6 @@ export function EmployeeDashboard() {
           <div className="flex items-center gap-2 flex-wrap">
             <SyncButton sync={syncEmpDashboard} isSyncing={isSyncingEmpDashboard} label="Sync" />
             <button
-              onClick={() => navigate('/employee/notifications')}
-              className="flex items-center gap-2 px-3.5 py-2 bg-card hover:bg-muted text-foreground border border-border font-semibold text-xs rounded-xl shadow-xs transition-all cursor-pointer"
-            >
-              <FiBell className="w-4 h-4 text-primary" />
-              <span>Notifications</span>
-            </button>
-            <button
               onClick={() => navigate('/employee/attendance')}
               className="flex items-center gap-2 px-4 py-2 bg-primary hover:bg-primary/90 text-primary-foreground font-semibold text-xs rounded-xl shadow-xs transition-all cursor-pointer"
             >

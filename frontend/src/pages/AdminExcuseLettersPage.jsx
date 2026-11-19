@@ -159,6 +159,7 @@ export function printAdminLetter(letter) {
 
 export default function AdminExcuseLettersPage() {
   const { user } = useAuth()
+  const isAdmin = user?.role === 'Administrator'
   const [letters, setLetters] = useState([])
   const [counts, setCounts] = useState({ categories: {}, statuses: {} })
   const [loading, setLoading] = useState(true)
@@ -174,6 +175,7 @@ export default function AdminExcuseLettersPage() {
   const [activeLetter, setActiveLetter] = useState(null)
   const [reviewModalOpen, setReviewModalOpen] = useState(false)
   const [reviewDecision, setReviewDecision] = useState(null) // 'Approved' | 'Rejected' | null
+  const [leaveType, setLeaveType] = useState('with_pay') // 'with_pay' | 'without_pay'
   const [adminRemarks, setAdminRemarks] = useState('')
   const [submittingReview, setSubmittingReview] = useState(false)
 
@@ -228,16 +230,21 @@ export default function AdminExcuseLettersPage() {
     const finalDecision = decisionOverride || (reviewDecision === 'Rejected' ? 'Rejected' : 'Approved')
     setSubmittingReview(true)
     try {
+      // If store admin, always 'without_pay'; if admin, use the chosen leaveType
+      const resolvedLeaveType = !isAdmin
+        ? 'without_pay'
+        : (finalDecision === 'Approved' ? leaveType : (activeLetter.leave_type || 'without_pay'))
+
       const payload = {
         status: finalDecision,
-        leave_type: 'with_pay',
-        admin_remarks: adminRemarks.trim() || undefined,
+        leave_type: resolvedLeaveType,
+        admin_remarks: adminRemarks.trim() || null,
       }
 
       await api.employeeLetters.update(activeLetter.letter_id || activeLetter.id, payload)
 
       const successMsg = finalDecision === 'Approved'
-        ? 'Letter approved successfully! Attendance and payroll records synchronized.'
+        ? `Letter approved successfully (${resolvedLeaveType === 'with_pay' ? 'Leave with Pay' : 'Leave without Pay'})! Attendance records synchronized.`
         : 'Letter marked as Rejected.'
 
       showToast(successMsg, 'success')
@@ -258,6 +265,12 @@ export default function AdminExcuseLettersPage() {
     setActiveLetter(letter)
     setReviewDecision(decision)
     setAdminRemarks(letter.admin_remarks || '')
+    // Only Admin can choose between With Pay and Without Pay. Store Admin is always Without Pay.
+    if (isAdmin) {
+      setLeaveType(letter.leave_type === 'without_pay' ? 'without_pay' : 'with_pay')
+    } else {
+      setLeaveType('without_pay')
+    }
     setReviewModalOpen(true)
   }
 
@@ -561,6 +574,15 @@ export default function AdminExcuseLettersPage() {
                       <td className="py-3.5 px-3 align-middle text-center">
                         <div className="flex flex-col items-center gap-1">
                           <StatusBadge status={letter.status} />
+                          {letter.status === 'Approved' && (
+                            <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
+                              letter.leave_type === 'with_pay'
+                                ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20'
+                                : 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20'
+                            }`}>
+                              {letter.leave_type === 'with_pay' ? 'With Pay' : 'Without Pay'}
+                            </span>
+                          )}
                           {letter.is_archived && (
                             <span
                               className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-purple-500/15 text-purple-600 dark:text-purple-400 border border-purple-500/30"
@@ -723,7 +745,7 @@ export default function AdminExcuseLettersPage() {
               </div>
 
               {/* Dates and Reason row */}
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2 border-t border-border/60 text-xs">
+              <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 pt-2 border-t border-border/60 text-xs">
                 <div>
                   <div className="text-[10px] uppercase font-bold text-muted-foreground">Category</div>
                   <div className="font-bold text-primary mt-0.5">{activeLetter.category || 'Excuse Letter'}</div>
@@ -734,6 +756,22 @@ export default function AdminExcuseLettersPage() {
                     {activeLetter.start_date ? String(activeLetter.start_date).slice(0, 10) : '—'} to{' '}
                     {activeLetter.end_date ? String(activeLetter.end_date).slice(0, 10) : '—'}
                     <span className="ml-1 text-muted-foreground font-normal">({activeLetter.total_days || 1} day/s)</span>
+                  </div>
+                </div>
+                <div>
+                  <div className="text-[10px] uppercase font-bold text-muted-foreground">Compensation</div>
+                  <div className="mt-0.5">
+                    {activeLetter.status === 'Approved' ? (
+                      <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold ${
+                        activeLetter.leave_type === 'with_pay'
+                          ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20'
+                          : 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20'
+                      }`}>
+                        {activeLetter.leave_type === 'with_pay' ? 'Leave with Pay' : 'Leave without Pay'}
+                      </span>
+                    ) : (
+                      <span className="text-muted-foreground font-mono text-[11px]">—</span>
+                    )}
                   </div>
                 </div>
                 <div>
@@ -795,7 +833,7 @@ export default function AdminExcuseLettersPage() {
             {/* Review Decision / Actions Section */}
             {activeLetter.status === 'Pending' ? (
               <form onSubmit={(e) => handleReviewSubmit(e, reviewDecision || 'Approved')} className="pt-3 border-t border-border space-y-3">
-                {reviewDecision === 'Rejected' && (
+                {reviewDecision === 'Rejected' ? (
                   <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/20 text-xs text-rose-600 dark:text-rose-400 space-y-1">
                     <div className="font-bold flex items-center gap-1.5">
                       <FiAlertCircle className="w-4 h-4" />
@@ -804,6 +842,93 @@ export default function AdminExcuseLettersPage() {
                     <p className="text-[11px] leading-relaxed">
                       This letter will be marked as Rejected.
                     </p>
+                  </div>
+                ) : (
+                  /* Leave Compensation Type: Only System Administrator can choose between With Pay and Without Pay; Store Admin is strictly Without Pay */
+                  <div className="p-3.5 rounded-xl border border-border bg-muted/20 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
+                        Leave Compensation Type
+                      </span>
+                      {isAdmin ? (
+                        <span className="text-[10px] text-primary font-bold uppercase tracking-wider">
+                          System Admin Authorization
+                        </span>
+                      ) : (
+                        <span className="text-[10px] text-amber-600 dark:text-amber-400 font-bold uppercase tracking-wider">
+                          Store Admin Policy
+                        </span>
+                      )}
+                    </div>
+
+                    {isAdmin ? (
+                      <div className="grid grid-cols-2 gap-2.5 pt-1">
+                        <label
+                          className={`flex items-start gap-2.5 p-3 rounded-xl border cursor-pointer transition-all ${
+                            leaveType === 'with_pay'
+                              ? 'bg-emerald-500/10 border-emerald-500/40 text-foreground shadow-2xs font-semibold'
+                              : 'bg-card border-border text-muted-foreground hover:bg-muted/40'
+                          }`}
+                        >
+                          <input
+                            type="radio"
+                            name="leave_type"
+                            value="with_pay"
+                            checked={leaveType === 'with_pay'}
+                            onChange={() => setLeaveType('with_pay')}
+                            className="mt-0.5 text-primary focus:ring-primary"
+                          />
+                          <div>
+                            <div className="font-bold text-xs text-foreground flex items-center gap-1.5">
+                              <span className="inline-block w-2 h-2 rounded-full bg-emerald-500" />
+                              Leave with Pay
+                            </div>
+                            <div className="text-[11px] text-muted-foreground leading-tight mt-0.5 font-normal">
+                              Absence will be compensated in employee payroll.
+                            </div>
+                          </div>
+                        </label>
+
+                        <label
+                          className={`flex items-start gap-2.5 p-3 rounded-xl border cursor-pointer transition-all ${
+                            leaveType === 'without_pay'
+                              ? 'bg-amber-500/10 border-amber-500/40 text-foreground shadow-2xs font-semibold'
+                              : 'bg-card border-border text-muted-foreground hover:bg-muted/40'
+                          }`}
+                        >
+                          <input
+                            type="radio"
+                            name="leave_type"
+                            value="without_pay"
+                            checked={leaveType === 'without_pay'}
+                            onChange={() => setLeaveType('without_pay')}
+                            className="mt-0.5 text-primary focus:ring-primary"
+                          />
+                          <div>
+                            <div className="font-bold text-xs text-foreground flex items-center gap-1.5">
+                              <span className="inline-block w-2 h-2 rounded-full bg-amber-500" />
+                              Leave without Pay
+                            </div>
+                            <div className="text-[11px] text-muted-foreground leading-tight mt-0.5 font-normal">
+                              Excused absence with no pay / deducted from standard salary.
+                            </div>
+                          </div>
+                        </label>
+                      </div>
+                    ) : (
+                      /* Store Admin view: ALWAYS Leave without Pay */
+                      <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-xs space-y-1">
+                        <div className="flex items-center gap-2">
+                          <span className="inline-block w-2.5 h-2.5 rounded-full bg-amber-500 shrink-0" />
+                          <span className="font-bold text-amber-900 dark:text-amber-200">
+                            Leave without Pay (Fixed)
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-amber-700 dark:text-amber-300 leading-relaxed">
+                          Store Administrator approvals are strictly set to <strong>Leave without Pay</strong>. Only the System Administrator can authorize <em>Leave with Pay</em>.
+                        </p>
+                      </div>
+                    )}
                   </div>
                 )}
 

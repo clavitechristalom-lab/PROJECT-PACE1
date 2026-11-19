@@ -201,9 +201,45 @@ class QrRequestController extends Controller
         $query = QrRequest::with(['employee', 'user', 'reviewedBy', 'approvedBy', 'rejectedBy'])
             ->latest('request_id');
 
+        // View / Tab Filter (active: PENDING & UNDER_REVIEW, history: APPROVED & REJECTED, all)
+        if ($request->filled('view') && $request->view !== 'all') {
+            if ($request->view === 'active') {
+                $query->whereIn('status', ['PENDING', 'UNDER_REVIEW']);
+            } elseif ($request->view === 'history') {
+                $query->whereIn('status', ['APPROVED', 'REJECTED']);
+            }
+        }
+
         // Status Filter
         if ($request->filled('status') && $request->status !== 'All') {
             $query->where('status', $request->status);
+        }
+
+        // Branch Filter
+        if ($request->filled('branch') && $request->branch !== 'All') {
+            $b = trim($request->branch);
+            $branchProfile = \App\Models\BranchProfile::where('name', $b)
+                ->orWhere('id', $b)
+                ->first();
+            $branchId = $branchProfile ? $branchProfile->id : (is_numeric($b) ? (int)$b : null);
+            $branchName = $branchProfile ? $branchProfile->name : $b;
+
+            $query->where(function ($q) use ($branchName, $branchId) {
+                $q->where('branch', $branchName)
+                  ->orWhere('branch', 'like', "%{$branchName}%");
+
+                $q->orWhereHas('employee', function ($eq) use ($branchName, $branchId) {
+                    if ($branchId) {
+                        $eq->where('branch_id', $branchId);
+                    }
+                    $eq->orWhereHas('branch', function ($bq) use ($branchName, $branchId) {
+                        $bq->where('name', $branchName);
+                        if ($branchId) {
+                            $bq->orWhere('id', $branchId);
+                        }
+                    });
+                });
+            });
         }
 
         // Role Filter
@@ -220,14 +256,17 @@ class QrRequestController extends Controller
             $s = '%' . trim($request->search) . '%';
             $query->where(function ($q) use ($s) {
                 $q->where('request_code', 'like', $s)
-                  ->orwhere('branch_id', 'like', $s)
+                  ->orWhere('branch', 'like', $s)
                   ->orWhere('department', 'like', $s)
                   ->orWhere('position', 'like', $s)
                   ->orWhereHas('employee', function ($eq) use ($s) {
                       $eq->where('first_name', 'like', $s)
                          ->orWhere('last_name', 'like', $s)
                          ->orWhere('employee_code', 'like', $s)
-                         ->orWhere('email', 'like', $s);
+                         ->orWhere('email', 'like', $s)
+                         ->orWhereHas('branch', function ($bq) use ($s) {
+                             $bq->where('name', 'like', $s);
+                         });
                   });
             });
         }
@@ -239,6 +278,8 @@ class QrRequestController extends Controller
             'under_review' => QrRequest::where('status', 'UNDER_REVIEW')->count(),
             'approved' => QrRequest::where('status', 'APPROVED')->count(),
             'rejected' => QrRequest::where('status', 'REJECTED')->count(),
+            'active' => QrRequest::whereIn('status', ['PENDING', 'UNDER_REVIEW'])->count(),
+            'history' => QrRequest::whereIn('status', ['APPROVED', 'REJECTED'])->count(),
         ];
 
         $page = (int)$request->input('page', 1);
@@ -247,6 +288,9 @@ class QrRequestController extends Controller
 
         $formatted = $requests->getCollection()->map(function ($r) {
             $emp = $r->employee;
+            $processedAt = $r->status === 'APPROVED' ? $r->approved_at : ($r->status === 'REJECTED' ? $r->rejected_at : null);
+            $processedBy = $r->status === 'APPROVED' ? ($r->approvedBy ? $r->approvedBy->username : null) : ($r->status === 'REJECTED' ? ($r->rejectedBy ? $r->rejectedBy->username : null) : null);
+
             return [
                 'request_id' => $r->request_id,
                 'request_code' => $r->request_code,
@@ -256,7 +300,7 @@ class QrRequestController extends Controller
                 'employee_id' => $emp ? $emp->employee_code : "EMP{$r->employee_id}",
                 'position' => $r->position ?: ($emp ? $emp->position : 'Staff'),
                 'department' => $r->department ?: ($emp ? $emp->department : 'Operations'),
-                'branch' => $r->branch ?: ($emp ? $emp->branch : null),
+                'branch' => $r->branch ?: ($emp ? ($emp->branch_name ?? (is_object($emp->branch) ? $emp->branch->name : ((string)$emp->branch ?: null))) : null),
                 'phone' => $emp ? $emp->phone : '',
                 'email' => $emp ? $emp->email : ($r->user ? $r->user->username : ''),
                 'address' => $emp ? $emp->address : '',
@@ -271,6 +315,8 @@ class QrRequestController extends Controller
                 'approved_at' => $r->approved_at ? $r->approved_at->format('M d, Y h:i A') : null,
                 'rejected_by' => $r->rejectedBy ? $r->rejectedBy->username : null,
                 'rejected_at' => $r->rejected_at ? $r->rejected_at->format('M d, Y h:i A') : null,
+                'processed_at' => $processedAt ? $processedAt->format('M d, Y h:i A') : null,
+                'processed_by' => $processedBy ?: 'Administrator',
                 'rejection_reason' => $r->rejection_reason,
             ];
         });
@@ -306,6 +352,24 @@ class QrRequestController extends Controller
 
         $emp = $qrRequest->employee;
 
+        $history = QrRequest::with(['reviewedBy', 'approvedBy', 'rejectedBy'])
+            ->where('employee_id', $qrRequest->employee_id)
+            ->where('request_id', '!=', $qrRequest->request_id)
+            ->orderByDesc('request_id')
+            ->get()
+            ->map(function ($h) {
+                return [
+                    'request_id' => $h->request_id,
+                    'request_code' => $h->request_code,
+                    'status' => $h->status,
+                    'request_date' => $h->created_at ? $h->created_at->format('M d, Y') : '',
+                    'request_time' => $h->created_at ? $h->created_at->format('h:i A') : '',
+                    'processed_at' => ($h->approved_at ?? $h->rejected_at)?->format('M d, Y h:i A'),
+                    'processed_by' => $h->approvedBy ? $h->approvedBy->username : ($h->rejectedBy ? $h->rejectedBy->username : 'Administrator'),
+                    'rejection_reason' => $h->rejection_reason,
+                ];
+            });
+
         return response()->json([
             'success' => true,
             'request' => [
@@ -316,7 +380,7 @@ class QrRequestController extends Controller
                 'role' => $qrRequest->role,
                 'position' => $qrRequest->position ?: ($emp ? $emp->position : 'Staff'),
                 'department' => $qrRequest->department ?: ($emp ? $emp->department : 'Operations'),
-                'branch' => $qrRequest->branch ?: ($emp ? $emp->branch : null),
+                'branch' => $qrRequest->branch ?: ($emp ? ($emp->branch_name ?? (is_object($emp->branch) ? $emp->branch->name : ((string)$emp->branch ?: null))) : null),
                 'phone' => $emp ? ($emp->phone ?: '09XXXXXXXXX') : '09XXXXXXXXX',
                 'email' => $emp ? $emp->email : ($qrRequest->user ? $qrRequest->user->username : 'employee@email.com'),
                 'address' => $emp ? ($emp->address ?: 'No registered address') : 'No registered address',
@@ -324,8 +388,15 @@ class QrRequestController extends Controller
                 'status' => $qrRequest->status,
                 'checklist' => $qrRequest->checklist,
                 'rejection_reason' => $qrRequest->rejection_reason,
+                'reviewed_by' => $qrRequest->reviewedBy ? $qrRequest->reviewedBy->username : null,
+                'reviewed_at' => $qrRequest->reviewed_at ? $qrRequest->reviewed_at->format('M d, Y h:i A') : null,
+                'approved_by' => $qrRequest->approvedBy ? $qrRequest->approvedBy->username : null,
+                'approved_at' => $qrRequest->approved_at ? $qrRequest->approved_at->format('M d, Y h:i A') : null,
+                'rejected_by' => $qrRequest->rejectedBy ? $qrRequest->rejectedBy->username : null,
+                'rejected_at' => $qrRequest->rejected_at ? $qrRequest->rejected_at->format('M d, Y h:i A') : null,
                 'request_date' => $qrRequest->created_at ? $qrRequest->created_at->format('M d, Y h:i A') : '',
-            ]
+            ],
+            'history' => $history,
         ]);
     }
 

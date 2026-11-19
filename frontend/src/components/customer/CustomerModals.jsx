@@ -952,10 +952,31 @@ export function InstallmentAccountDetailsModal({ isOpen, onClose, installmentId 
   const item = saleItems.length > 0 ? saleItems[0] : null;
   const isFullPayment = acc.account_no?.startsWith('REQ') || Number(acc.number_of_installments) === 0;
 
-  if (loading || !accountData) {
+  if (loading) {
     return (
       <Modal isOpen={isOpen} onClose={onClose} title="Loading Details" size="xl">
         <LoadingState message="Loading account details..." />
+      </Modal>
+    );
+  }
+
+  if (!accountData) {
+    return (
+      <Modal isOpen={isOpen} onClose={onClose} title="Account Details" size="md">
+        <div className="p-6 text-center space-y-3">
+          <FiAlertCircle className="w-12 h-12 text-amber-500 mx-auto" />
+          <h3 className="text-base font-bold text-foreground">Installment Account Not Found</h3>
+          <p className="text-xs text-muted-foreground">
+            The requested installment account was not found or has been completed and archived.
+          </p>
+          <button
+            type="button"
+            onClick={onClose}
+            className="mt-2 px-4 py-2 rounded-xl bg-primary text-primary-foreground font-bold text-xs cursor-pointer hover:opacity-90"
+          >
+            Close
+          </button>
+        </div>
       </Modal>
     );
   }

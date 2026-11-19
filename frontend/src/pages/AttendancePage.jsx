@@ -623,9 +623,9 @@ export default function AttendancePage({ branchFilter: propBranchFilter, embedde
               employee: res.employee,
               employee_name: res.employee.name,
               employee_code: res.employee.employee_code,
-              face_biometric_image: user?.face_biometric_image || res.employee?.face_biometric_image,
-              face_biometric_base64: user?.face_biometric_base64 || res.employee?.face_biometric_base64,
-              has_registered_face: !!(user?.face_biometric_image || res.employee?.face_biometric_image),
+              face_biometric_image: res.employee?.face_biometric_image || res.face_biometric_image || (res.employee?.employee_id === user?.employee?.employee_id ? user?.face_biometric_image : null),
+              face_biometric_base64: res.employee?.face_biometric_base64 || res.face_biometric_base64 || (res.employee?.employee_id === user?.employee?.employee_id ? user?.face_biometric_base64 : null),
+              has_registered_face: !!(res.employee?.face_biometric_image || res.face_biometric_image || (res.employee?.employee_id === user?.employee?.employee_id ? user?.face_biometric_image : null)),
               scanned_by: {
                 user_id: user?.user_id,
                 employee: user?.employee || { first_name: 'Store', last_name: 'Admin' }
@@ -816,9 +816,9 @@ export default function AttendancePage({ branchFilter: propBranchFilter, embedde
               employee: res.employee,
               employee_name: res.employee.name,
               employee_code: res.employee.employee_code,
-              face_biometric_image: user?.face_biometric_image || res.employee?.face_biometric_image,
-              face_biometric_base64: user?.face_biometric_base64 || res.employee?.face_biometric_base64,
-              has_registered_face: !!(user?.face_biometric_image || res.employee?.face_biometric_image),
+              face_biometric_image: res.employee?.face_biometric_image || res.face_biometric_image || (res.employee?.employee_id === user?.employee?.employee_id ? user?.face_biometric_image : null),
+              face_biometric_base64: res.employee?.face_biometric_base64 || res.face_biometric_base64 || (res.employee?.employee_id === user?.employee?.employee_id ? user?.face_biometric_base64 : null),
+              has_registered_face: !!(res.employee?.face_biometric_image || res.face_biometric_image || (res.employee?.employee_id === user?.employee?.employee_id ? user?.face_biometric_image : null)),
               scanned_by: {
                 user_id: user?.user_id,
                 employee: user?.employee || { first_name: 'Store', last_name: 'Admin' }
@@ -1859,7 +1859,7 @@ export default function AttendancePage({ branchFilter: propBranchFilter, embedde
                           <td className="py-3 px-3 text-right font-mono font-bold text-amber-600 whitespace-nowrap">{Number(a.overtime_hours) > 0 ? `${Number(a.overtime_hours).toFixed(2)}h` : '—'}</td>
                           <td className="py-3 px-3 text-center whitespace-nowrap">
                             <span className="inline-flex items-center justify-center whitespace-nowrap text-[10px] font-mono px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-700">
-                              {a.verification_method || 'QR + PIN'}
+                              {String(a.verification_method || 'QR + PIN').replace(/\s*\(Authorized by Employee\)/gi, '').trim()}
                             </span>
                           </td>
                           <td className="py-3 px-3 text-muted-foreground text-[11px] whitespace-nowrap">{a.verified_by || 'Store Admin'}</td>
@@ -2103,7 +2103,8 @@ export default function AttendancePage({ branchFilter: propBranchFilter, embedde
       {!isEmployee && (
         <FaceRecognitionAttendanceModal
           isOpen={faceAuthModalOpen}
-          employee={myProfile || user?.employee || user}
+          request={punchResult || null}
+          employee={identifiedEmployee || punchResult?.employee || myProfile || user?.employee || user}
           onClose={() => {
             setFaceAuthModalOpen(false)
             setStationStep('scan')
@@ -2126,7 +2127,22 @@ export default function AttendancePage({ branchFilter: propBranchFilter, embedde
             isProcessingScan.current = false
             setTimeout(() => startCamera(), 80)
           }}
-          onAuthorize={() => {
+          onAuthorize={async (payload) => {
+            const reqId = punchResult?.id || punchResult?.scan_log_id
+            if (reqId) {
+              try {
+                await api.attendance.approveVerification({
+                  scan_log_id: reqId,
+                  verification_type: 'FACE_RECOGNITION',
+                  face_verified: true,
+                  face_matched: payload?.face_matched ?? true,
+                  confidence: payload?.confidence
+                })
+                showToast('Biometric attendance authorized! (Face ID Verified)', 'success')
+              } catch (err) {
+                console.error('Attendance approval error:', err)
+              }
+            }
             setFaceAuthModalOpen(false)
             setStationStep('scan')
             setActiveTab('punch')
@@ -2137,7 +2153,19 @@ export default function AttendancePage({ branchFilter: propBranchFilter, embedde
             isProcessingScan.current = false
             setTimeout(() => startCamera(), 80)
           }}
-          onSuccess={() => {
+          onSuccess={async (payload) => {
+            const reqId = punchResult?.id || punchResult?.scan_log_id
+            if (reqId) {
+              try {
+                await api.attendance.approveVerification({
+                  scan_log_id: reqId,
+                  verification_type: 'FACE_RECOGNITION',
+                  face_verified: true,
+                  face_matched: payload?.face_matched ?? true,
+                  confidence: payload?.confidence
+                })
+              } catch (_) {}
+            }
             setFaceAuthModalOpen(false)
             setStationStep('scan')
             setActiveTab('punch')
