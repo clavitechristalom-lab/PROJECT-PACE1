@@ -26,14 +26,19 @@ export default function SystemPage({ defaultTab = 'users' }) {
   const [searchParams] = useSearchParams()
   const { user } = useAuth()
   const isAdmin = user?.role === 'Administrator'
-  const [activeTab, setActiveTab] = useState(searchParams.get('tab') || defaultTab)
+  const [activeTab, setActiveTab] = useState(() => {
+    const initial = searchParams.get('tab') || defaultTab
+    return initial === 'logs' ? 'users' : initial
+  })
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
 
   useEffect(() => {
     const tabParam = searchParams.get('tab')
-    if (tabParam && ['users', 'logs', 'backups', 'storage', 'settings'].includes(tabParam)) {
+    if (tabParam && ['users', 'backups', 'storage', 'settings'].includes(tabParam)) {
       setActiveTab(tabParam)
+    } else if (tabParam === 'logs') {
+      setActiveTab('users')
     }
   }, [searchParams])
 
@@ -214,13 +219,20 @@ export default function SystemPage({ defaultTab = 'users' }) {
 
     try {
       if (editUser) {
-        const normalizedSalary =
+        const enteredSalary =
           userForm.basic_salary !== '' &&
           userForm.basic_salary !== null &&
           userForm.basic_salary !== undefined &&
           !isNaN(Number(userForm.basic_salary))
             ? Number(userForm.basic_salary)
             : 0
+
+        // Field is Daily PHP (e.g. 500.00)
+        const dailyRateVal = enteredSalary > 0
+          ? (enteredSalary >= 2600 ? Math.round((enteredSalary / 26) * 100) / 100 : enteredSalary)
+          : 0
+        const monthlySalaryVal = dailyRateVal > 0 ? Math.round(dailyRateVal * 26 * 100) / 100 : 0
+        const hourlyRateVal = dailyRateVal > 0 ? Math.round((dailyRateVal / 8) * 100) / 100 : 0
 
         const payload = {
           ...userForm,
@@ -232,8 +244,12 @@ export default function SystemPage({ defaultTab = 'users' }) {
         }
         if (userForm.role === 'Customer') {
           delete payload.basic_salary
+          delete payload.daily_rate
+          delete payload.hourly_rate
         } else {
-          payload.basic_salary = normalizedSalary
+          payload.daily_rate = dailyRateVal
+          payload.basic_salary = monthlySalaryVal
+          payload.hourly_rate = hourlyRateVal
         }
         const res = await api.system.updateUser(editUser.user_id, payload)
         setUsers(prev => prev.map(u => u.user_id === editUser.user_id ? (res.user || { ...u, ...payload }) : u))
@@ -248,12 +264,24 @@ export default function SystemPage({ defaultTab = 'users' }) {
       } else {
         const rolePayload = userForm.role === 'Store Admin' ? 'Store Administrator' : userForm.role
         const defaultPos = rolePayload === 'Store Administrator' ? 'Manager (Store Admin)' : 'Cashier (Employee)'
+        const enteredSalary =
+          (userForm.basic_salary !== '' && userForm.basic_salary !== null && !isNaN(Number(userForm.basic_salary)))
+            ? Number(userForm.basic_salary)
+            : null
+        const dailyRateVal = enteredSalary && enteredSalary > 0
+          ? (enteredSalary >= 2600 ? Math.round((enteredSalary / 26) * 100) / 100 : enteredSalary)
+          : null
+        const monthlySalaryVal = dailyRateVal ? Math.round(dailyRateVal * 26 * 100) / 100 : null
+        const hourlyRateVal = dailyRateVal ? Math.round((dailyRateVal / 8) * 100) / 100 : null
+
         const payload = {
           ...userForm,
           role: rolePayload,
           position: userForm.position || defaultPos,
           department: userForm.department || (rolePayload === 'Store Administrator' ? 'Store Admin' : 'Employee'),
-          basic_salary: (userForm.basic_salary !== '' && userForm.basic_salary !== null && !isNaN(Number(userForm.basic_salary))) ? Number(userForm.basic_salary) : null,
+          daily_rate: dailyRateVal,
+          basic_salary: monthlySalaryVal,
+          hourly_rate: hourlyRateVal,
           branch_id: userForm.branch_id || null,
           attendance_pin: userForm.attendance_pin || null,
           from_admin: true,
@@ -263,6 +291,8 @@ export default function SystemPage({ defaultTab = 'users' }) {
           delete payload.attendance_pin
           delete payload.confirm_attendance_pin
           delete payload.basic_salary
+          delete payload.daily_rate
+          delete payload.hourly_rate
           payload.position = 'System Administrator'
           payload.department = 'Administration'
         }
@@ -315,6 +345,15 @@ export default function SystemPage({ defaultTab = 'users' }) {
     }
     const dept = emp.department || (pos === 'Manager (Store Admin)' ? 'Store Admin' : (u.role === 'Administrator' ? 'Administration' : 'Employee'))
 
+    const rawDaily = (emp.daily_rate !== undefined && emp.daily_rate !== null && emp.daily_rate !== '') ? Number(emp.daily_rate) : null
+    const rawBasic = (emp.basic_salary !== undefined && emp.basic_salary !== null && emp.basic_salary !== '') ? Number(emp.basic_salary) : null
+    let initialDailySalary = ''
+    if (rawDaily && rawDaily > 0) {
+      initialDailySalary = rawDaily.toString()
+    } else if (rawBasic && rawBasic > 0) {
+      initialDailySalary = (rawBasic >= 2600 ? Math.round((rawBasic / 26) * 100) / 100 : rawBasic).toString()
+    }
+
     setUserForm({
       username: u.username,
       password: '',
@@ -337,7 +376,7 @@ export default function SystemPage({ defaultTab = 'users' }) {
       department: dept,
       position: pos,
       working_hours: emp.working_hours || '8 AM to 5 PM',
-      basic_salary: emp.basic_salary !== undefined ? emp.basic_salary : '',
+      basic_salary: initialDailySalary,
       pay_type: emp.pay_type || 'Cash',
       attendance_pin: '',
       confirm_attendance_pin: ''
@@ -565,7 +604,6 @@ export default function SystemPage({ defaultTab = 'users' }) {
 
   const tabs = [
     { id: 'users', label: 'User Accounts & Verification', icon: <FiUsers className="w-3.5 h-3.5" /> },
-    { id: 'logs', label: 'Audit & System Logs', icon: <FiActivity className="w-3.5 h-3.5" /> },
     { id: 'backups', label: 'Database Backup & Restore', icon: <FiDatabase className="w-3.5 h-3.5" /> },
     { id: 'storage', label: 'System Storage Management', icon: <FiHardDrive className="w-3.5 h-3.5" /> },
     { id: 'settings', label: 'Company Configuration', icon: <FiSettings className="w-3.5 h-3.5" /> },
@@ -575,7 +613,7 @@ export default function SystemPage({ defaultTab = 'users' }) {
     <div className="space-y-6">
       <PageHeader
         title="System Administration & Settings"
-        subtitle="Manage user accounts, audit security trails, database backups, and company settings"
+        subtitle="Manage user accounts, database backups, storage management, and company settings"
       />
 
       <TabBar
@@ -1765,7 +1803,7 @@ export default function SystemPage({ defaultTab = 'users' }) {
                         </div>
                         <div>
                           <label className="text-[10px] text-muted-foreground uppercase tracking-wider font-bold mb-1 block">
-                            Basic Salary (Monthly PHP)
+                            Basic Salary (Daily PHP)
                           </label>
                           <div className="relative">
                             <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs font-bold text-muted-foreground">₱</span>
@@ -1779,6 +1817,14 @@ export default function SystemPage({ defaultTab = 'users' }) {
                               className="w-full pl-7 pr-3 py-2 rounded-xl border border-border bg-card text-foreground text-xs font-mono font-semibold"
                             />
                           </div>
+                          {Number(userForm.basic_salary) > 0 && (
+                            <p className="text-[10px] text-muted-foreground mt-1 font-mono">
+                              Hourly: ₱{(Number(userForm.basic_salary) / 8).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                              {' • '}Daily: ₱{(Number(userForm.basic_salary)).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                              {' • '}Weekly: ₱{(Number(userForm.basic_salary) * 6).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                              {' • '}Monthly: ₱{(Number(userForm.basic_salary) * 26).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            </p>
+                          )}
                         </div>
                       </div>
                     ) : userForm.role === 'Customer' ? (
@@ -1953,7 +1999,7 @@ export default function SystemPage({ defaultTab = 'users' }) {
                         </div>
                         <div className="col-span-2">
                           <label className="text-[10px] text-muted-foreground uppercase tracking-wider font-bold mb-1 block">
-                            Basic Salary (Monthly PHP)
+                            Basic Salary (Daily PHP)
                           </label>
                           <div className="relative">
                             <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs font-bold text-muted-foreground">₱</span>
@@ -1963,15 +2009,16 @@ export default function SystemPage({ defaultTab = 'users' }) {
                               step="0.01"
                               value={userForm.basic_salary ?? ''}
                               onChange={e => setUserForm(f => ({ ...f, basic_salary: e.target.value }))}
-                              placeholder="e.g. 13000.00"
+                              placeholder="e.g. 500.00"
                               className="w-full pl-7 pr-3 py-2 rounded-xl border border-border bg-card text-foreground text-xs font-mono font-semibold"
                             />
                           </div>
                           {Number(userForm.basic_salary) > 0 && (
                             <p className="text-[10px] text-muted-foreground mt-1 font-mono">
-                              Daily: ₱{(Number(userForm.basic_salary) / 26).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                              {' • '}Weekly: ₱{((Number(userForm.basic_salary) / 26) * 6).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                              {' • '}Hourly: ₱{(Number(userForm.basic_salary) / 26 / 8).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                              Hourly: ₱{(Number(userForm.basic_salary) / 8).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                              {' • '}Daily: ₱{(Number(userForm.basic_salary)).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                              {' • '}Weekly: ₱{((Number(userForm.basic_salary)) * 6).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                              {' • '}Monthly: ₱{((Number(userForm.basic_salary)) * 26).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                             </p>
                           )}
                         </div>

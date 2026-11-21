@@ -120,6 +120,8 @@ class SystemController extends Controller
                     'pay_type' => $emp->pay_type,
                     'working_hours' => $emp->working_hours,
                     'basic_salary' => $emp->basic_salary,
+                    'daily_rate' => $emp->daily_rate,
+                    'hourly_rate' => $emp->hourly_rate,
                     'phone' => $emp->phone,
                     'email' => $emp->email,
                     'address' => $emp->address,
@@ -193,6 +195,8 @@ class SystemController extends Controller
                     'pay_type' => $emp->pay_type,
                     'working_hours' => $emp->working_hours,
                     'basic_salary' => $emp->basic_salary,
+                    'daily_rate' => $emp->daily_rate,
+                    'hourly_rate' => $emp->hourly_rate,
                     'phone' => $emp->phone,
                     'email' => $emp->email,
                     'address' => $emp->address,
@@ -552,13 +556,31 @@ class SystemController extends Controller
                 if ($request->has('first_name')) $empData['first_name'] = $request->input('first_name');
                 if ($request->has('last_name')) $empData['last_name'] = $request->input('last_name');
 
-                // Basic Salary: accepts empty or nullable values cleanly without DB errors
-                if ($request->has('basic_salary')) {
-                    $sal = $request->input('basic_salary');
-                    $salVal = ($sal !== '' && $sal !== null && is_numeric($sal)) ? (float)$sal : 0.00;
+                // Basic Salary & Daily Rate: accepts empty or nullable values cleanly without DB errors
+                if ($request->has('daily_rate') || $request->has('basic_salary')) {
+                    $dailyInput = $request->input('daily_rate');
+                    $salInput = $request->input('basic_salary');
+
+                    if ($dailyInput !== null && $dailyInput !== '' && is_numeric($dailyInput) && (float)$dailyInput > 0) {
+                        $dailyVal = (float)$dailyInput;
+                        $salVal = round($dailyVal * 26, 2);
+                    } elseif ($salInput !== null && $salInput !== '' && is_numeric($salInput) && (float)$salInput > 0) {
+                        $val = (float)$salInput;
+                        if ($val >= 2600) {
+                            $salVal = $val;
+                            $dailyVal = round($val / 26, 2);
+                        } else {
+                            $dailyVal = $val;
+                            $salVal = round($val * 26, 2);
+                        }
+                    } else {
+                        $dailyVal = 0.00;
+                        $salVal = 0.00;
+                    }
+
                     $empData['basic_salary'] = $salVal;
-                    $empData['daily_rate'] = $salVal > 0 ? round($salVal / 26, 2) : 0.00;
-                    $empData['hourly_rate'] = $empData['daily_rate'] > 0 ? round($empData['daily_rate'] / 8, 2) : 0.00;
+                    $empData['daily_rate'] = $dailyVal;
+                    $empData['hourly_rate'] = $dailyVal > 0 ? round($dailyVal / 8, 2) : 0.00;
                 }
 
                 // Permanent QR: converts empty/null to NULL to avoid unique index violation
@@ -1069,11 +1091,43 @@ class SystemController extends Controller
             ->orderBy('id')
             ->get(['id', 'name', 'location', 'contact_number', 'status', 'color', 'image_url']);
 
+        $adminUsers = \App\Models\User::with(['employee.branch'])
+            ->whereIn('role', ['Administrator', 'Store Administrator', 'Store Admin'])
+            ->orderByRaw("CASE WHEN role = 'Administrator' THEN 0 ELSE 1 END")
+            ->orderByRaw("CASE WHEN username = 'admin' THEN 1 ELSE 0 END")
+            ->orderBy('user_id')
+            ->get();
+
+        $adminContacts = $adminUsers->map(function ($u) {
+            $emp = $u->employee;
+            $fullName = $emp ? trim("{$emp->first_name} {$emp->middle_name} {$emp->last_name}") : '';
+            $fullName = preg_replace('/\s+/', ' ', $fullName) ?: ($u->username === 'admin' ? 'System Administrator' : $u->username);
+            $rawPhone = $u->phone_number ?: ($emp ? $emp->phone : '');
+            $phone = ($rawPhone && $rawPhone !== '00000000000') ? $rawPhone : '';
+            $email = $u->email ?: ($emp ? $emp->email : '');
+            $branchObj = ($emp && $emp->branch && is_object($emp->branch)) ? $emp->branch : null;
+            $branchName = $branchObj ? $branchObj->name : ($emp && is_string($emp->branch) && $emp->branch !== '' ? $emp->branch : 'Head Office (Main)');
+
+            return [
+                'user_id' => $u->user_id,
+                'username' => $u->username,
+                'name' => $fullName,
+                'role' => $u->role,
+                'position' => ($emp && $emp->position) ? $emp->position : ($u->role === 'Administrator' ? 'System Administrator' : 'Manager (Store Admin)'),
+                'department' => ($emp && $emp->department) ? $emp->department : ($u->role === 'Administrator' ? 'Administration' : 'Store Admin'),
+                'email' => $email,
+                'phone' => $phone,
+                'branch_name' => $branchName,
+                'working_hours' => ($emp && $emp->working_hours) ? $emp->working_hours : '8:00 AM – 5:00 PM (Mon–Sat)',
+            ];
+        })->values();
+
         $dynamic = [
             'total_products'    => \App\Models\Product::count(),
             'total_customers'   => \App\Models\Customer::count(),
             'total_branches'    => $branches->count(),
             'branches'          => $branches,
+            'admin_contacts'    => $adminContacts,
             'total_appliances'  => \App\Models\Product::whereIn('category', CategoryFramework::matchingCategories('Appliances'))->count(),
             'total_furniture'   => \App\Models\Product::whereIn('category', CategoryFramework::matchingCategories('Furniture'))->count(),
             'total_electronics' => \App\Models\Product::whereIn('category', array_unique(array_merge(
@@ -1085,6 +1139,11 @@ class SystemController extends Controller
         ];
 
         $merged = array_merge($defaults, $settings, $dynamic);
+
+        if (empty($merged['email'])) {
+            $firstAdminEmail = $adminContacts->first(fn ($a) => !empty($a['email']))['email'] ?? null;
+            $merged['email'] = $firstAdminEmail ?: 'z.licz2000@gmail.com';
+        }
 
         // Alias synchronization
         if (!empty($merged['company_name'])) {
@@ -1377,43 +1436,271 @@ class SystemController extends Controller
         ]);
     }
 
+    public function deleteStorageFile(Request $request)
+    {
+        $user = $request->user();
+        if ($user && $user->role !== 'Administrator') {
+            return response()->json(['message' => 'Unauthorized. Media file deletion is strictly restricted to Administrators.'], 403);
+        }
+
+        $validated = $request->validate([
+            'relative_path' => 'nullable|string|max:500',
+            'relative_paths' => 'nullable|array|min:1',
+            'relative_paths.*' => 'required|string|max:500',
+        ]);
+
+        if (empty($validated['relative_path']) && empty($validated['relative_paths'])) {
+            return response()->json([
+                'success' => false,
+                'message' => 'No media file path specified for deletion.',
+            ], 422);
+        }
+
+        try {
+            if (!empty($validated['relative_paths'])) {
+                $result = \App\Services\StorageService::deleteMediaFilesBatch($validated['relative_paths']);
+                $logDesc = "Bulk deleted {$result['deleted_count']} uploaded media file(s) ({$result['reclaimed_formatted']})";
+            } else {
+                $result = \App\Services\StorageService::deleteMediaFile($validated['relative_path']);
+                $logDesc = "Deleted uploaded media file: {$result['relative_path']} ({$result['reclaimed_formatted']})";
+            }
+        } catch (\Throwable $e) {
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage() ?: 'Failed to delete media file.',
+            ], 422);
+        }
+
+        $actingUserId = $this->resolveActingUserId($request);
+        SystemLog::create([
+            'user_id' => $actingUserId,
+            'action' => 'STORAGE_FILE_DELETE',
+            'module' => 'System',
+            'description' => $logDesc,
+            'ip_address' => $request->ip(),
+            'user_agent' => $request->userAgent(),
+        ]);
+
+        $overview = \App\Services\StorageService::getStorageOverview(true);
+
+        return response()->json([
+            'success' => true,
+            'result' => $result,
+            'storage' => array_merge([
+                'total' => $overview['disk']['total'],
+                'used' => $overview['disk']['used'],
+                'free' => $overview['disk']['free'],
+                'percentage' => $overview['disk']['percentage'],
+            ], $overview),
+        ]);
+    }
+
     public function systemStats(Request $request)
     {
-        // 1. Total Users
+        User::syncSessionStatuses($request->user(), 'users');
+
+        // 1. Total Users & Role Breakdown
         $totalUsers = User::count();
+        $onlineSessions = User::where('is_active', true)->count();
+        $active24h = User::where('last_login', '>=', now()->subDay())->count();
+        $activeSessions = max($onlineSessions, $active24h, $request->user() ? 1 : 0);
+        $verifiedUsers = User::where('account_verified', true)->count();
 
-        // 2. Active Sessions (Users logged in within the last 24 hours)
-        $activeSessions = User::where('last_login', '>=', now()->subDay())->count();
+        $roleCounts = User::selectRaw('role, COUNT(*) as cnt')
+            ->groupBy('role')
+            ->pluck('cnt', 'role');
 
-        // 3. Database Size from real tables
+        $userBreakdown = [
+            'administrators' => (int) ($roleCounts['Administrator'] ?? 0),
+            'store_admins' => (int) (($roleCounts['Store Administrator'] ?? 0) + ($roleCounts['Store Admin'] ?? 0)),
+            'employees' => (int) ($roleCounts['Employee'] ?? 0),
+            'customers' => (int) ($roleCounts['Customer'] ?? 0),
+            'verified' => $verifiedUsers,
+            'online' => $onlineSessions,
+            'active_24h' => $active24h,
+        ];
+
+        // 2. Database Size & Table Distribution
         $dbName = DB::connection()->getDatabaseName();
-        $size = DB::select("SELECT ROUND(SUM(data_length + index_length) / 1024 / 1024, 2) AS size_mb FROM information_schema.tables WHERE table_schema = ?", [$dbName]);
-        $dbSizeMB = $size[0]->size_mb ?? 0;
-        
+        $size = DB::select("SELECT ROUND(SUM(data_length + index_length) / 1024 / 1024, 2) AS size_mb, COUNT(*) AS table_count FROM information_schema.tables WHERE table_schema = ?", [$dbName]);
+        $dbSizeMB = (float) ($size[0]->size_mb ?? 0);
+        $tableCount = (int) ($size[0]->table_count ?? 0);
+
         if ($dbSizeMB > 1024) {
             $dbSizeStr = round($dbSizeMB / 1024, 2) . ' GB';
         } else {
-            $dbSizeStr = $dbSizeMB . ' MB';
+            $dbSizeStr = number_format($dbSizeMB, 2) . ' MB';
         }
 
-        // 4. Live Server / Database Uptime
+        $tableRowsRaw = DB::select("
+            SELECT table_name AS name,
+                   ROUND((data_length + index_length) / 1024, 1) AS size_kb,
+                   table_rows AS approx_rows
+            FROM information_schema.tables
+            WHERE table_schema = ?
+            ORDER BY (data_length + index_length) DESC
+            LIMIT 8
+        ", [$dbName]);
+
+        $totalTopKb = collect($tableRowsRaw)->sum(fn($t) => (float) ($t->size_kb ?? 0)) ?: 1;
+        $databaseTables = collect($tableRowsRaw)->map(function ($t) use ($totalTopKb) {
+            $tName = $t->name;
+            $exactRows = (int) ($t->approx_rows ?? 0);
+            try {
+                if (\Illuminate\Support\Facades\Schema::hasTable($tName)) {
+                    $exactRows = DB::table($tName)->count();
+                }
+            } catch (\Throwable $e) {}
+            $kb = (float) ($t->size_kb ?? 0);
+            return [
+                'name' => $tName,
+                'rows' => $exactRows,
+                'size_kb' => $kb,
+                'size_label' => $kb >= 1024 ? round($kb / 1024, 2) . ' MB' : $kb . ' KB',
+                'share_pct' => min(100, max(3, (int) round(($kb / $totalTopKb) * 100))),
+            ];
+        })->values()->all();
+
+        // 3. Live Server / Database Uptime & Runtime Health
         $uptime = 'Active';
+        $uptimeSeconds = 0;
+        $mysqlVersion = 'MySQL 8.x';
         try {
             $uptimeQuery = DB::select("SHOW GLOBAL STATUS LIKE 'Uptime'");
             if (!empty($uptimeQuery[0]->Value)) {
-                $seconds = (int)$uptimeQuery[0]->Value;
-                $days = floor($seconds / 86400);
-                $hours = floor(($seconds % 86400) / 3600);
-                $mins = floor(($seconds % 3600) / 60);
-                $uptime = $days > 0 ? "{$days}d {$hours}h" : "{$hours}h {$mins}m";
+                $uptimeSeconds = (int) $uptimeQuery[0]->Value;
+                $days = floor($uptimeSeconds / 86400);
+                $hours = floor(($uptimeSeconds % 86400) / 3600);
+                $mins = floor(($uptimeSeconds % 3600) / 60);
+                $uptime = $days > 0 ? "{$days}d {$hours}h {$mins}m" : "{$hours}h {$mins}m";
+            }
+            $verQuery = DB::select("SELECT VERSION() AS ver");
+            if (!empty($verQuery[0]->ver)) {
+                $mysqlVersion = (string) $verQuery[0]->ver;
             }
         } catch (\Throwable $e) {}
+
+        // 4. Catalog & Operational Metrics
+        $totalProducts = Product::count();
+        $inStockProducts = Product::where('stock_quantity', '>', 0)->count();
+        $lowStockProducts = Product::where('stock_quantity', 1)->count();
+        $outOfStockProducts = Product::where('stock_quantity', '<=', 0)->count();
+        $totalCategories = \Illuminate\Support\Facades\Schema::hasTable('categories')
+            ? \App\Models\Category::count()
+            : 44;
+        $totalBranches = BranchProfile::count();
+        $totalEmployees = \App\Models\Employee::count();
+        $totalCustomers = \App\Models\Customer::count();
+
+        $totalSales = \App\Models\SaleTransaction::count();
+        $salesToday = \App\Models\SaleTransaction::whereDate('created_at', today())->count();
+        $activeInstallments = InstallmentAccount::whereIn('status', ['Active', 'Overdue', 'ACTIVE', 'OVERDUE'])->count();
+        $totalPayments = Payment::count();
+        $totalLogs = SystemLog::count();
+        $logsToday = SystemLog::whereDate('created_at', today())->count();
+        $totalBackups = BackupLog::count();
+        $latestBackupObj = BackupLog::latest('created_at')->first();
+        $latestBackup = $latestBackupObj && $latestBackupObj->created_at
+            ? date('M d, Y h:i A', strtotime($latestBackupObj->created_at))
+            : 'No backups recorded';
+
+        // 5. 7-Day System Activity & Transaction Load Trend
+        $activityTrend = [];
+        for ($i = 6; $i >= 0; $i--) {
+            $day = now()->subDays($i);
+            $dateStr = $day->toDateString();
+            $auditCnt = SystemLog::whereDate('created_at', $dateStr)->count();
+            $salesCnt = \App\Models\SaleTransaction::whereDate('created_at', $dateStr)->count();
+            $payCnt = Payment::whereDate('created_at', $dateStr)->count();
+            $attCnt = \Illuminate\Support\Facades\Schema::hasTable('attendances')
+                ? DB::table('attendances')->whereDate('date', $dateStr)->count()
+                : 0;
+            $activityTrend[] = [
+                'date' => $dateStr,
+                'label' => $day->format('M d'),
+                'day_short' => $day->format('D'),
+                'audit_events' => $auditCnt,
+                'sales' => $salesCnt,
+                'payments' => $payCnt,
+                'attendance' => $attCnt,
+                'total_ops' => $auditCnt + $salesCnt + $payCnt + $attCnt,
+            ];
+        }
+
+        // 6. Branch Telemetry
+        $globalProducts = Product::whereNull('branch_id')->count();
+        $branchMetrics = BranchProfile::withCount(['employees', 'customers', 'products', 'sales'])
+            ->get()
+            ->map(fn($b) => [
+                'id' => $b->id,
+                'name' => $b->name,
+                'location' => $b->location ?: ($b->city ?: '—'),
+                'status' => $b->status === 'open' ? 'Active' : 'Inactive',
+                'color' => $b->color ?: '#2b5ce6',
+                'employees_count' => (int) ($b->employees_count ?? 0),
+                'customers_count' => (int) ($b->customers_count ?? 0),
+                'products_count' => (int) ($b->products_count ?? 0) + $globalProducts,
+                'sales_count' => (int) ($b->sales_count ?? 0),
+            ])->values()->all();
+
+        // 7. Server & Storage Health
+        $storageOverview = [];
+        try {
+            $storageOverview = \App\Services\StorageService::getStorageOverview();
+        } catch (\Throwable $e) {}
+
+        $memUsageMb = round(memory_get_usage(true) / 1024 / 1024, 1);
+        $memPeakMb = round(memory_get_peak_usage(true) / 1024 / 1024, 1);
+        $memLimit = ini_get('memory_limit') ?: '512M';
 
         return response()->json([
             'total_users' => $totalUsers,
             'active_sessions' => $activeSessions,
+            'online_sessions' => $onlineSessions,
+            'active_24h' => $active24h,
+            'verified_users' => $verifiedUsers,
             'database_size' => $dbSizeStr,
+            'database_size_mb' => $dbSizeMB,
+            'table_count' => $tableCount,
             'uptime' => $uptime,
+            'uptime_seconds' => $uptimeSeconds,
+            'user_breakdown' => $userBreakdown,
+            'catalog_stats' => [
+                'total_products' => $totalProducts,
+                'in_stock_products' => $inStockProducts,
+                'low_stock_products' => $lowStockProducts,
+                'out_of_stock_products' => $outOfStockProducts,
+                'total_categories' => $totalCategories,
+                'total_branches' => $totalBranches,
+                'total_employees' => $totalEmployees,
+                'total_customers' => $totalCustomers,
+            ],
+            'transaction_stats' => [
+                'total_sales' => $totalSales,
+                'sales_today' => $salesToday,
+                'active_installments' => $activeInstallments,
+                'total_payments' => $totalPayments,
+                'audit_logs_total' => $totalLogs,
+                'audit_logs_today' => $logsToday,
+                'total_backups' => $totalBackups,
+                'latest_backup' => $latestBackup,
+            ],
+            'activity_trend' => $activityTrend,
+            'database_tables' => $databaseTables,
+            'branch_metrics' => $branchMetrics,
+            'server_health' => [
+                'php_version' => PHP_VERSION,
+                'mysql_version' => $mysqlVersion,
+                'laravel_version' => app()->version(),
+                'environment' => config('app.env', 'production'),
+                'memory_usage_mb' => $memUsageMb,
+                'memory_peak_mb' => $memPeakMb,
+                'memory_limit' => $memLimit,
+                'disk_total' => $storageOverview['disk']['total'] ?? 'N/A',
+                'disk_used' => $storageOverview['disk']['used'] ?? 'N/A',
+                'disk_free' => $storageOverview['disk']['free'] ?? 'N/A',
+                'disk_percentage' => $storageOverview['disk']['percentage'] ?? 0,
+            ],
         ]);
     }
 }

@@ -207,12 +207,27 @@ try {
                 $empParams[':bname'] = $bName;
             }
 
-            // Basic Salary: Accepts empty, null, or zero values cleanly without constraint errors
-            if (array_key_exists('basic_salary', $data)) {
-                $sal = (isset($data['basic_salary']) && $data['basic_salary'] !== '' && $data['basic_salary'] !== null && is_numeric($data['basic_salary'])) 
-                    ? (float)$data['basic_salary'] 
-                    : 0.00;
-                $dailyRate  = $sal > 0 ? round($sal / 26, 2) : 0.00;
+            // Basic Salary & Daily Rate: Accepts empty, null, or zero values cleanly without constraint errors
+            if (array_key_exists('daily_rate', $data) || array_key_exists('basic_salary', $data)) {
+                $dailyInput = $data['daily_rate'] ?? null;
+                $salInput = $data['basic_salary'] ?? null;
+
+                if ($dailyInput !== null && $dailyInput !== '' && is_numeric($dailyInput) && (float)$dailyInput > 0) {
+                    $dailyRate = (float)$dailyInput;
+                    $sal = round($dailyRate * 26, 2);
+                } elseif ($salInput !== null && $salInput !== '' && is_numeric($salInput) && (float)$salInput > 0) {
+                    $val = (float)$salInput;
+                    if ($val >= 2600) {
+                        $sal = $val;
+                        $dailyRate = round($val / 26, 2);
+                    } else {
+                        $dailyRate = $val;
+                        $sal = round($val * 26, 2);
+                    }
+                } else {
+                    $dailyRate = 0.00;
+                    $sal = 0.00;
+                }
                 $hourlyRate = $dailyRate > 0 ? round($dailyRate / 8, 2) : 0.00;
 
                 $empUpdates[] = "basic_salary = :salary";

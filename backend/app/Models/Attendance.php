@@ -18,11 +18,17 @@ class Attendance extends Model
         'break_in',
         'lunch_out',
         'lunch_in',
-        'time_out', 
+        'time_out',
         'total_hours',
         'overtime_hours',
         'status',
-        'qr_scan_in', 
+        'leave_type',
+        'reason_code',
+        'absence_status',
+        'shift_type',
+        'late_minutes',
+        'undertime_minutes',
+        'qr_scan_in',
         'qr_scan_out',
         'verification_method',
         'verified_by_name',
@@ -34,6 +40,8 @@ class Attendance extends Model
     protected $casts = [
         'total_hours' => 'decimal:2',
         'overtime_hours' => 'decimal:2',
+        'late_minutes' => 'integer',
+        'undertime_minutes' => 'integer',
     ];
 
     // Relationships

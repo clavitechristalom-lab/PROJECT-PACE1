@@ -15,6 +15,7 @@ class Category extends Model
         'parent_id',
         'main_category',
         'group_name',
+        'branch_id',
         'sku_prefix',
         'classification_scope',
         'sort_order',
@@ -24,7 +25,13 @@ class Category extends Model
     protected $casts = [
         'is_active' => 'boolean',
         'sort_order' => 'integer',
+        'branch_id' => 'integer',
     ];
+
+    public function branch()
+    {
+        return $this->belongsTo(BranchProfile::class, 'branch_id', 'id');
+    }
 
     public function parent()
     {

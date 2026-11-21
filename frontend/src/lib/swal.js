@@ -39,6 +39,8 @@ const getPopupConfig = (type = 'info', isDanger = false) => {
       cancelButton: `inline-flex items-center justify-center font-semibold !rounded-xl cursor-pointer transition-all active:scale-95 px-4 py-2.5 text-sm ${cancelBtnClass}`,
     },
     buttonsStyling: false,
+    allowOutsideClick: false,
+    allowEscapeKey: false,
     background: 'transparent',
     color: 'inherit',
     backdrop: dark ? 'rgba(0, 0, 0, 0.75)' : 'rgba(15, 23, 42, 0.45)',

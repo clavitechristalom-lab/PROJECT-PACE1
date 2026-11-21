@@ -2,7 +2,8 @@ import { useState, useEffect, useMemo, useRef } from 'react'
 import {
   FiUsers, FiActivity, FiSettings, FiBarChart2, FiDatabase,
   FiSearch, FiLock, FiCheckCircle, FiMonitor,
-  FiToggleRight, FiToggleLeft, FiPlus, FiImage, FiTrash2
+  FiToggleRight, FiToggleLeft, FiPlus, FiImage, FiTrash2,
+  FiHardDrive, FiPackage, FiShield, FiRefreshCw, FiBriefcase, FiCpu
 } from 'react-icons/fi'
 import {
   PageHeader, Card, StatCard, Table, TR, TD, Badge, StatusBadge,
@@ -267,20 +268,333 @@ export default function SystemAdminDashboard() {
 
   // --- Views ---
   const renderMetrics = () => {
-    if (loading) return <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4"><div className="h-24 bg-card animate-pulse rounded-xl" /><div className="h-24 bg-card animate-pulse rounded-xl" /><div className="h-24 bg-card animate-pulse rounded-xl" /><div className="h-24 bg-card animate-pulse rounded-xl" /></div>
-    
+    if (loading && !metrics) {
+      return (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="h-24 bg-card animate-pulse rounded-xl" />
+          <div className="h-24 bg-card animate-pulse rounded-xl" />
+          <div className="h-24 bg-card animate-pulse rounded-xl" />
+          <div className="h-24 bg-card animate-pulse rounded-xl" />
+        </div>
+      )
+    }
+
+    const userBreakdown = metrics?.user_breakdown || {}
+    const catalogStats = metrics?.catalog_stats || {}
+    const txStats = metrics?.transaction_stats || {}
+    const serverHealth = metrics?.server_health || {}
+    const activityTrend = Array.isArray(metrics?.activity_trend) ? metrics.activity_trend : []
+    const dbTables = Array.isArray(metrics?.database_tables) ? metrics.database_tables : []
+    const branchMetrics = Array.isArray(metrics?.branch_metrics) ? metrics.branch_metrics : []
+
+    const maxTrendOps = Math.max(1, ...activityTrend.map(d => Number(d.total_ops) || 0))
+    const totalWeekOps = activityTrend.reduce((sum, d) => sum + (Number(d.total_ops) || 0), 0)
+
     return (
       <div className="space-y-6">
+        {/* Top 4 Core KPI Cards */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          <StatCard title="Total Users" value={metrics?.total_users || 0} icon={<FiUsers className="text-blue-500" />} />
-          <StatCard title="Active Sessions" value={metrics?.active_sessions || 0} icon={<FiMonitor className="text-sky-500" />} />
-          <StatCard title="System Uptime" value={metrics?.uptime || 'Active'} icon={<FiActivity className="text-indigo-500" />} />
-          <StatCard title="Database Size" value={metrics?.database_size || '0 MB'} icon={<FiDatabase className="text-cyan-500" />} />
+          <StatCard
+            title="Total Users"
+            value={metrics?.total_users || 0}
+            sub={`${metrics?.verified_users ?? userBreakdown.verified ?? 0} verified accounts`}
+            icon={<FiUsers className="text-blue-500" />}
+            color="blue"
+          />
+          <StatCard
+            title="Active Sessions"
+            value={metrics?.active_sessions || 0}
+            sub={`${metrics?.online_sessions ?? userBreakdown.online ?? 0} online • ${metrics?.active_24h ?? 0} in 24h`}
+            icon={<FiMonitor className="text-sky-500" />}
+            color="green"
+          />
+          <StatCard
+            title="System Uptime"
+            value={metrics?.uptime || 'Active'}
+            sub="MySQL & API service online"
+            icon={<FiActivity className="text-indigo-500" />}
+            color="purple"
+          />
+          <StatCard
+            title="Database Size"
+            value={metrics?.database_size || '0 MB'}
+            sub={`${metrics?.table_count || dbTables.length || 0} active schema tables`}
+            icon={<FiDatabase className="text-cyan-500" />}
+            color="yellow"
+          />
         </div>
-        <Card className="p-6 flex flex-col items-center justify-center text-center text-muted-foreground min-h-[300px]">
-          <FiBarChart2 className="w-16 h-16 opacity-20 mb-4" />
-          <h3 className="text-lg font-bold text-foreground">Advanced System Metrics</h3>
-          <p className="text-sm max-w-md mx-auto mt-2">Historical system load and API response times are currently stable. The system is operating optimally.</p>
+
+        {/* Advanced System Metrics Main Console */}
+        <Card noPad className="border border-border overflow-hidden">
+          {/* Header Banner */}
+          <div className="p-4 sm:p-5 border-b border-border bg-muted/25 flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-primary/10 border border-primary/20 text-primary flex items-center justify-center shrink-0">
+                <FiBarChart2 className="w-5 h-5" />
+              </div>
+              <div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <h3 className="text-base font-bold text-foreground">Advanced System Metrics</h3>
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/25 text-[10px] font-bold uppercase tracking-wider">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                    Optimal • Live Telemetry
+                  </span>
+                </div>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Real-time database storage distribution, 7-day operational load, runtime health, and multi-branch telemetry.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => loadData('metrics')}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-primary/10 hover:bg-primary/20 text-primary font-bold text-xs transition-colors cursor-pointer"
+              >
+                <FiRefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
+                <span>Refresh</span>
+              </button>
+            </div>
+          </div>
+
+          <div className="p-4 sm:p-5 space-y-6">
+            {/* 3 Subsystem Health Summary Cards */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5 text-xs">
+              {/* Catalog & Inventory Health */}
+              <div className="p-3.5 rounded-2xl bg-muted/20 border border-border space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+                    Catalog & Inventory
+                  </span>
+                  <FiPackage className="w-4 h-4 text-blue-500" />
+                </div>
+                <div className="flex items-baseline justify-between">
+                  <span className="text-xl font-bold font-mono text-foreground">
+                    {catalogStats.total_products ?? 0}
+                  </span>
+                  <span className="text-[11px] font-semibold text-emerald-600 dark:text-emerald-400">
+                    {catalogStats.in_stock_products ?? 0} In Stock
+                  </span>
+                </div>
+                <div className="flex items-center justify-between text-[11px] text-muted-foreground pt-1 border-t border-border">
+                  <span>{catalogStats.total_categories ?? 0} Categories</span>
+                  <span>
+                    {catalogStats.low_stock_products ?? 0} Low • {catalogStats.out_of_stock_products ?? 0} Out
+                  </span>
+                </div>
+              </div>
+
+              {/* Transaction & Ledger Throughput */}
+              <div className="p-3.5 rounded-2xl bg-muted/20 border border-border space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+                    Ledger & Transactions
+                  </span>
+                  <FiActivity className="w-4 h-4 text-emerald-500" />
+                </div>
+                <div className="flex items-baseline justify-between">
+                  <span className="text-xl font-bold font-mono text-foreground">
+                    {txStats.total_sales ?? 0}
+                  </span>
+                  <span className="text-[11px] font-semibold text-primary">
+                    +{txStats.sales_today ?? 0} Today
+                  </span>
+                </div>
+                <div className="flex items-center justify-between text-[11px] text-muted-foreground pt-1 border-t border-border">
+                  <span>{txStats.active_installments ?? 0} Active Contracts</span>
+                  <span>{txStats.total_payments ?? 0} Payments</span>
+                </div>
+              </div>
+
+              {/* Audit & Security Telemetry */}
+              <div className="p-3.5 rounded-2xl bg-muted/20 border border-border space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+                    Audit & Backup Security
+                  </span>
+                  <FiShield className="w-4 h-4 text-indigo-500" />
+                </div>
+                <div className="flex items-baseline justify-between">
+                  <span className="text-xl font-bold font-mono text-foreground">
+                    {txStats.audit_logs_total ?? 0}
+                  </span>
+                  <span className="text-[11px] font-semibold text-indigo-500">
+                    +{txStats.audit_logs_today ?? 0} Events Today
+                  </span>
+                </div>
+                <div className="flex items-center justify-between text-[11px] text-muted-foreground pt-1 border-t border-border">
+                  <span>{txStats.total_backups ?? 0} Backups</span>
+                  <span className="truncate max-w-[130px]" title={txStats.latest_backup}>
+                    {txStats.latest_backup || 'No backups'}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* 7-Day System Load & Operational Activity Chart */}
+            <div className="p-4 rounded-2xl bg-card border border-border space-y-4">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <h4 className="text-xs font-bold uppercase tracking-wider text-foreground">
+                    7-Day System Load & Operational Activity ({totalWeekOps} Total Events)
+                  </h4>
+                  <p className="text-[11px] text-muted-foreground">
+                    Daily breakdown of system audit events, POS sales, payment collections, and attendance scans.
+                  </p>
+                </div>
+                <div className="flex flex-wrap items-center gap-3 text-[11px]">
+                  <span className="inline-flex items-center gap-1.5 text-muted-foreground">
+                    <span className="w-2.5 h-2.5 rounded-xs bg-blue-500 inline-block" /> Audit Logs
+                  </span>
+                  <span className="inline-flex items-center gap-1.5 text-muted-foreground">
+                    <span className="w-2.5 h-2.5 rounded-xs bg-emerald-500 inline-block" /> Sales
+                  </span>
+                  <span className="inline-flex items-center gap-1.5 text-muted-foreground">
+                    <span className="w-2.5 h-2.5 rounded-xs bg-amber-500 inline-block" /> Payments
+                  </span>
+                  <span className="inline-flex items-center gap-1.5 text-muted-foreground">
+                    <span className="w-2.5 h-2.5 rounded-xs bg-purple-500 inline-block" /> Attendance
+                  </span>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-7 gap-2.5 pt-2 items-end h-44">
+                {activityTrend.map((day) => {
+                  const total = Number(day.total_ops) || 0
+                  const barHeightPct = total > 0 ? Math.max(12, Math.round((total / maxTrendOps) * 100)) : 6
+                  const auditH = total > 0 ? Math.round(((day.audit_events || 0) / total) * 100) : 0
+                  const salesH = total > 0 ? Math.round(((day.sales || 0) / total) * 100) : 0
+                  const payH = total > 0 ? Math.round(((day.payments || 0) / total) * 100) : 0
+                  const attH = Math.max(0, 100 - auditH - salesH - payH)
+
+                  return (
+                    <div key={day.date} className="flex flex-col items-center h-full justify-end group">
+                      <span className="font-mono text-[10px] font-bold text-foreground mb-1">
+                        {total}
+                      </span>
+                      <div className="w-full max-w-[46px] h-28 bg-muted/40 rounded-xl p-1 flex items-end border border-border/60">
+                        <div
+                          className="w-full rounded-lg overflow-hidden flex flex-col justify-end transition-all duration-300"
+                          style={{ height: `${barHeightPct}%` }}
+                          title={`${day.label}: ${day.audit_events} Audit, ${day.sales} Sales, ${day.payments} Payments, ${day.attendance} Attendance`}
+                        >
+                          {total > 0 ? (
+                            <>
+                              {day.attendance > 0 && (
+                                <div className="w-full bg-purple-500" style={{ height: `${Math.max(10, attH)}%` }} />
+                              )}
+                              {day.payments > 0 && (
+                                <div className="w-full bg-amber-500" style={{ height: `${Math.max(10, payH)}%` }} />
+                              )}
+                              {day.sales > 0 && (
+                                <div className="w-full bg-emerald-500" style={{ height: `${Math.max(10, salesH)}%` }} />
+                              )}
+                              {day.audit_events > 0 && (
+                                <div className="w-full bg-blue-500" style={{ height: `${Math.max(15, auditH)}%` }} />
+                              )}
+                            </>
+                          ) : (
+                            <div className="w-full h-full bg-muted-foreground/20 rounded-lg" />
+                          )}
+                        </div>
+                      </div>
+                      <div className="text-[11px] font-bold text-foreground mt-1.5">{day.day_short}</div>
+                      <div className="text-[10px] text-muted-foreground font-mono">{day.label}</div>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+
+            {/* Bottom 2-Column Telemetry Grid: User Role Breakdown + Multi-Branch Operational Telemetry */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 text-xs">
+              {/* User Role Distribution */}
+              <div className="p-4 rounded-2xl bg-card border border-border space-y-3">
+                <div className="flex items-center justify-between border-b border-border pb-2">
+                  <div>
+                    <h4 className="font-bold text-foreground uppercase tracking-wider text-xs flex items-center gap-1.5">
+                      <FiUsers className="w-3.5 h-3.5 text-blue-500" />
+                      <span>Account Role & Access Breakdown</span>
+                    </h4>
+                    <p className="text-[10px] text-muted-foreground mt-0.5">
+                      Distribution across {metrics?.total_users || 0} registered system accounts.
+                    </p>
+                  </div>
+                  <span className="px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-mono text-[10px] font-bold">
+                    {userBreakdown.verified ?? 0} Verified
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                  {[
+                    { label: 'Admins', count: userBreakdown.administrators ?? 0 },
+                    { label: 'Store Admins', count: userBreakdown.store_admins ?? 0 },
+                    { label: 'Employees', count: userBreakdown.employees ?? 0 },
+                    { label: 'Customers', count: userBreakdown.customers ?? 0 },
+                  ].map((roleItem) => (
+                    <div key={roleItem.label} className="p-2.5 rounded-xl bg-muted/25 border border-border">
+                      <span className="text-[10px] font-bold uppercase text-muted-foreground block">
+                        {roleItem.label}
+                      </span>
+                      <div className="mt-0.5">
+                        <span className="font-mono font-bold text-base text-foreground">{roleItem.count}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Multi-Branch Operational Telemetry */}
+              <div className="p-4 rounded-2xl bg-card border border-border space-y-3">
+                <div className="flex items-center justify-between border-b border-border pb-2">
+                  <div>
+                    <h4 className="font-bold text-foreground uppercase tracking-wider text-xs flex items-center gap-1.5">
+                      <FiBriefcase className="w-3.5 h-3.5 text-primary" />
+                      <span>Multi-Branch Operational Telemetry</span>
+                    </h4>
+                    <p className="text-[10px] text-muted-foreground mt-0.5">
+                      Live staff, customer, catalog, and transaction distribution by store branch.
+                    </p>
+                  </div>
+                  <span className="font-mono text-[11px] font-bold text-muted-foreground">
+                    {branchMetrics.length} Branches
+                  </span>
+                </div>
+
+                <div className="divide-y divide-border rounded-xl border border-border overflow-hidden">
+                  {branchMetrics.map((b) => (
+                    <div key={b.id} className="px-3.5 py-2.5 bg-card flex flex-wrap items-center justify-between gap-2">
+                      <div className="min-w-0">
+                        <div className="font-bold text-foreground flex items-center gap-2">
+                          <span
+                            className="w-2 h-2 rounded-full shrink-0"
+                            style={{ backgroundColor: b.color || '#2b5ce6' }}
+                          />
+                          <span>{b.name}</span>
+                        </div>
+                        <div className="text-[10px] text-muted-foreground pl-4">{b.location}</div>
+                      </div>
+                      <div className="flex items-center gap-2 font-mono text-[11px]">
+                        <span className="px-2 py-0.5 rounded-md bg-muted/60 border border-border text-foreground">
+                          {b.employees_count} Staff
+                        </span>
+                        <span className="px-2 py-0.5 rounded-md bg-muted/60 border border-border text-foreground">
+                          {b.customers_count} Cust
+                        </span>
+                        <span className="px-2 py-0.5 rounded-md bg-primary/10 border border-primary/20 text-primary font-bold">
+                          {b.products_count} Prod
+                        </span>
+                        <span className="px-2 py-0.5 rounded-md bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 font-bold">
+                          {b.sales_count} Sales
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
         </Card>
       </div>
     )

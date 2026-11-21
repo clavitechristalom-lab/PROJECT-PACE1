@@ -17,19 +17,90 @@ use App\Services\NotificationService;
 class InstallmentController extends Controller
 {
     /**
+     * Resolve branch ID and human-readable branch name for an InstallmentAccount.
+     */
+    private function resolveBranchInfo($inst): array
+    {
+        $branchId = $inst->customer?->branch_id
+            ?? $inst->sale?->branch_id
+            ?? $inst->sale?->processedBy?->employee?->branch_id
+            ?? null;
+
+        $branchName = $inst->customer?->branch?->name
+            ?? (is_string($inst->customer?->branch) ? $inst->customer->branch : null)
+            ?? $inst->sale?->branch?->name
+            ?? $inst->sale?->processedBy?->employee?->branch?->name
+            ?? (is_string($inst->sale?->processedBy?->employee?->branch) ? $inst->sale->processedBy->employee->branch : null);
+
+        if (!$branchName && $branchId) {
+            $branchName = \App\Models\BranchProfile::where('id', $branchId)->value('name');
+        }
+
+        return [
+            'branch_id' => $branchId ? (int) $branchId : null,
+            'branch_name' => $branchName ?: 'Main Branch',
+        ];
+    }
+
+    /**
+     * Apply role-based or requested branch filter consistently across endpoints.
+     */
+    private function applyBranchFilter($query, $user, $requestedBranch): void
+    {
+        if ($user && in_array($user->role, ['Store Administrator', 'Store Admin'], true)) {
+            $userBranch = $user->employee ? $user->employee->branch_id : null;
+            if ($userBranch) {
+                $query->where(function ($q) use ($userBranch) {
+                    $q->whereHas('customer', fn($cq) => $cq->where('branch_id', $userBranch))
+                      ->orWhereHas('sale', fn($sq) => $sq->where('branch_id', $userBranch))
+                      ->orWhereHas('sale.processedBy.employee', fn($eq) => $eq->where('branch_id', $userBranch));
+                });
+            } else {
+                $query->where('installment_id', -1);
+            }
+            return;
+        }
+
+        if ($requestedBranch !== null && $requestedBranch !== '' && $requestedBranch !== 'All') {
+            $query->where(function ($q) use ($requestedBranch) {
+                if (is_numeric($requestedBranch)) {
+                    $branchId = (int) $requestedBranch;
+                    $q->whereHas('customer', fn($cq) => $cq->where('branch_id', $branchId))
+                      ->orWhereHas('sale', fn($sq) => $sq->where('branch_id', $branchId))
+                      ->orWhereHas('sale.processedBy.employee', fn($eq) => $eq->where('branch_id', $branchId));
+                } else {
+                    $q->whereHas('customer', function ($cq) use ($requestedBranch) {
+                        $cq->where('branch', $requestedBranch)
+                           ->orWhereHas('branch', fn($bq) => $bq->where('name', $requestedBranch));
+                    })->orWhereHas('sale', function ($sq) use ($requestedBranch) {
+                        $sq->whereHas('branch', fn($bq) => $bq->where('name', $requestedBranch))
+                           ->orWhereHas('processedBy.employee.branch', fn($bq) => $bq->where('name', $requestedBranch));
+                    });
+                }
+            });
+        }
+    }
+
+    /**
+     * Unified financial breakdown via model helper (excludes pending/rejected,
+     * prevents double-counting down payments).
+     */
+    private function computeFinancials($inst): array
+    {
+        return $inst->financialBreakdown();
+    }
+
+    /**
      * Helper to format an InstallmentAccount instance consistently.
      */
     private function formatAccount($inst, $today)
     {
-        $paid = (float)$inst->payments->sum('amount') + (float)$inst->down_payment;
+        $fin = $this->computeFinancials($inst);
+        $paid = $fin['paid'];
         $totalPayable = (float)$inst->total_payable;
-        $balance = max(0, round($totalPayable - $paid, 2));
+        $balance = $fin['balance'];
 
-        // Determine branch
-        $branch = null;
-        if ($inst->sale && $inst->sale->processedBy && $inst->sale->processedBy->employee) {
-            $branch = $inst->sale->processedBy->employee->branch_id ?: null;
-        }
+        $branchInfo = $this->resolveBranchInfo($inst);
 
         // Next Due Schedule
         $nextSchedule = $inst->paymentSchedules
@@ -38,7 +109,7 @@ class InstallmentController extends Controller
             ->first();
 
         // Check if there are overdue schedules
-        $hasOverdue = $inst->paymentSchedules
+        $hasOverdue = $balance > 0 && $inst->paymentSchedules
             ->where('due_date', '<', $today)
             ->where('balance_due', '>', 0)
             ->isNotEmpty();
@@ -46,22 +117,30 @@ class InstallmentController extends Controller
         // Computed Status
         $computedStatus = $inst->status;
         if ($balance <= 0) {
-            $computedStatus = 'Completed';
+            $computedStatus = 'Complete Payment';
         } elseif ($hasOverdue) {
             $computedStatus = 'Overdue';
         } elseif ($computedStatus === 'Overdue' && !$hasOverdue) {
             $computedStatus = 'Active';
         }
 
-        // Product name extraction
+        // Product name & category extraction
         $productName = 'Multiple / Custom Items';
+        $productCategory = '';
+        $itemsCount = 0;
         if ($inst->sale && $inst->sale->items && $inst->sale->items->isNotEmpty()) {
+            $itemsCount = $inst->sale->items->count();
             $firstItem = $inst->sale->items->first();
             $productName = $firstItem->product ? $firstItem->product->product_name : 'Appliance / Furniture';
-            if ($inst->sale->items->count() > 1) {
-                $productName .= ' (+' . ($inst->sale->items->count() - 1) . ' more)';
+            $productCategory = $firstItem->product ? ($firstItem->product->category ?: ($firstItem->product->category_group ?: ($firstItem->product->main_category ?: ''))) : '';
+            if ($itemsCount > 1) {
+                $productName .= ' (+' . ($itemsCount - 1) . ' more)';
             }
         }
+
+        // Schedule progress counts
+        $paidTermsCount = $inst->paymentSchedules->where('balance_due', '<=', 0)->count();
+        $totalTermsCount = max((int) $inst->number_of_installments, $inst->paymentSchedules->count());
 
         // Days overdue calculation
         $daysOverdue = 0;
@@ -82,12 +161,17 @@ class InstallmentController extends Controller
             'installment_id' => $inst->installment_id,
             'account_no' => $inst->account_no,
             'customer_id' => $inst->customer_id,
-            'customer_name' => $inst->customer ? "{$inst->customer->first_name} {$inst->customer->last_name}" : 'Customer',
+            'customer_code' => $inst->customer ? ($inst->customer->customer_code ?: '') : '',
+            'customer_name' => $inst->customer ? trim("{$inst->customer->first_name} {$inst->customer->last_name}") : 'Customer',
             'customer_phone' => $inst->customer ? $inst->customer->phone : '',
             'customer_email' => $inst->customer ? $inst->customer->email : '',
             'customer_address' => $inst->customer ? $inst->customer->address : '',
             'product_name' => $productName,
-            'branch' => $branch,
+            'product_category' => $productCategory,
+            'items_count' => $itemsCount,
+            'branch_id' => $branchInfo['branch_id'],
+            'branch' => $branchInfo['branch_name'],
+            'branch_name' => $branchInfo['branch_name'],
             'sale_id' => $inst->sale_id,
             'invoice_no' => $inst->sale ? $inst->sale->invoice_no : 'N/A',
             'start_date' => $inst->start_date,
@@ -99,9 +183,13 @@ class InstallmentController extends Controller
             'total_payable' => $totalPayable,
             'installment_amount' => (float)$inst->installment_amount,
             'number_of_installments' => (int)$inst->number_of_installments,
+            'paid_installments' => $paidTermsCount,
+            'total_terms' => $totalTermsCount,
             'frequency' => $inst->frequency ?: 'Monthly',
             'paid' => round($paid, 2),
             'balance' => $balance,
+            'pending_payments_amount' => $fin['pending_amount'],
+            'pending_payments_count' => $fin['pending_count'],
             'progress_percentage' => $totalPayable > 0 ? min(100, round(($paid / $totalPayable) * 100, 1)) : 0,
             'next_due_date' => $nextSchedule ? $nextSchedule->due_date : null,
             'next_amount_due' => $nextSchedule ? (float)$nextSchedule->balance_due : 0,
@@ -147,13 +235,16 @@ class InstallmentController extends Controller
         }
 
         $query = InstallmentAccount::with([
-            'customer:customer_id,first_name,last_name,phone,email,address,branch_id',
+            'customer:customer_id,customer_code,first_name,last_name,phone,email,address,branch_id,branch,allow_installment',
+            'customer.branch:id,name',
             'sale:sale_id,invoice_no,processed_by,branch_id',
+            'sale.branch:id,name',
             'sale.processedBy:user_id,username,employee_id',
             'sale.processedBy.employee:employee_id,branch_id',
-            'sale.items:sale_item_id,sale_id,product_id',
-            'sale.items.product:product_id,product_name',
-            'payments:payment_id,installment_id,amount,status',
+            'sale.processedBy.employee.branch:id,name',
+            'sale.items:sale_item_id,sale_id,product_id,quantity,unit_price,line_total',
+            'sale.items.product:product_id,product_name,product_code,category,image_url',
+            'payments:payment_id,installment_id,amount,status,reference_no,notes',
             'paymentSchedules:schedule_id,installment_id,due_date,balance_due,amount_due,amount_paid,status'
         ])->select([
             'installment_id',
@@ -176,30 +267,7 @@ class InstallmentController extends Controller
               ->orWhere('status', '!=', 'Completed');
         });
 
-        // Branch scoping for Store Administrator — use customer.branch_id for direct relationship
-        if ($user && in_array($user->role, ['Store Administrator', 'Store Admin'])) {
-            $userBranch = $user->employee ? $user->employee->branch_id : null;
-            if ($userBranch) {
-                $query->where(function ($q) use ($userBranch) {
-                    $q->whereHas('customer', function ($cq) use ($userBranch) {
-                        $cq->where('branch_id', $userBranch);
-                    })->orWhereHas('sale', function ($sq) use ($userBranch) {
-                        $sq->where('branch_id', $userBranch);
-                    });
-                });
-            } else {
-                $query->where('installment_id', -1); // No branch — return empty
-            }
-        } elseif ($request->filled('branch') && $request->query('branch') !== 'All') {
-            $branch = $request->query('branch');
-            $query->where(function ($q) use ($branch) {
-                $q->whereHas('customer', function ($cq) use ($branch) {
-                    $cq->where('branch_id', $branch);
-                })->orWhereHas('sale', function ($sq) use ($branch) {
-                    $sq->where('branch_id', $branch);
-                });
-            });
-        }
+        $this->applyBranchFilter($query, $user, $request->query('branch'));
 
         if ($request->filled('search')) {
             $s = trim($request->query('search'));
@@ -282,7 +350,7 @@ class InstallmentController extends Controller
         $totalOutstanding = (float)$installments->sum('balance');
         $activeCount = $installments->where('status', 'Active')->count();
         $overdueCount = $installments->where('status', 'Overdue')->count();
-        $completedCount = $installments->where('status', 'Completed')->count();
+        $completedCount = $installments->whereIn('status', ['Completed', 'Complete Payment'])->count();
         $pendingCount = $installments->where('status', 'Pending')->count();
 
         $payload = [
@@ -327,6 +395,7 @@ class InstallmentController extends Controller
 
             'product_id' => 'nullable|exists:products,product_id',
             'product_name' => 'nullable|string|max:255',
+            'product_category' => 'nullable|string|max:120',
             'principal_amount' => 'required|numeric|min:1',
             'down_payment' => 'nullable|numeric|min:0',
             'interest_rate' => 'nullable|numeric|min:0',
@@ -341,12 +410,29 @@ class InstallmentController extends Controller
             'notes' => 'nullable|string',
         ]);
 
+        $principalCheck = (float) $validated['principal_amount'];
+        $downCheck = isset($validated['down_payment']) ? (float) $validated['down_payment'] : 0.0;
+        if ($downCheck >= $principalCheck) {
+            return response()->json([
+                'message' => 'Down payment must be less than the product price for an installment agreement.'
+            ], 422);
+        }
+
         return DB::transaction(function () use ($validated, $request, $user, $today) {
+            $userBranch = $user && $user->employee ? $user->employee->branch_id : null;
+            $userBranchName = $userBranch
+                ? (\App\Models\BranchProfile::where('id', $userBranch)->value('name') ?: null)
+                : null;
+
             // 1. Resolve or Create Customer
             $customerId = $validated['customer_id'] ?? null;
             if (!$customerId) {
-                $custCount = Customer::count() + 1;
-                $custCode = 'CUST-' . date('Y') . '-' . str_pad($custCount, 4, '0', STR_PAD_LEFT);
+                $custCount = (Customer::max('customer_id') ?? 0) + 1;
+                $custCode = 'CUS-' . str_pad($custCount, 3, '0', STR_PAD_LEFT);
+                while (Customer::where('customer_code', $custCode)->exists()) {
+                    $custCount++;
+                    $custCode = 'CUS-' . str_pad($custCount, 3, '0', STR_PAD_LEFT);
+                }
                 $customer = Customer::create([
                     'customer_code' => $custCode,
                     'first_name' => $validated['first_name'],
@@ -354,13 +440,21 @@ class InstallmentController extends Controller
                     'phone' => $validated['phone'] ?? '',
                     'email' => $validated['email'] ?? '',
                     'address' => $validated['address'] ?? '',
+                    'branch_id' => $userBranch,
+                    'branch' => $userBranchName,
+                    'allow_installment' => true,
                     'status' => 'Active',
                 ]);
                 $customerId = $customer->customer_id;
             } else {
                 $customer = Customer::findOrFail($customerId);
+                if ($user && in_array($user->role, ['Store Administrator', 'Store Admin'], true) && $userBranch && $customer->branch_id && (int) $customer->branch_id !== (int) $userBranch) {
+                    return response()->json([
+                        'message' => 'Unauthorized: Selected customer belongs to another branch.'
+                    ], 403);
+                }
                 // Optionally update contact details if provided
-                if (!empty($validated['phone']) || !empty($validated['address'])) {
+                if (!empty($validated['phone']) || !empty($validated['address']) || !empty($validated['email'])) {
                     $customer->update(array_filter([
                         'phone' => $validated['phone'] ?? null,
                         'address' => $validated['address'] ?? null,
@@ -372,8 +466,9 @@ class InstallmentController extends Controller
             $principal = (float)$validated['principal_amount'];
             $downPayment = isset($validated['down_payment']) ? (float)$validated['down_payment'] : 0.00;
             $interestRate = isset($validated['interest_rate']) ? (float)$validated['interest_rate'] : 0.00;
-            $interestAmount = isset($validated['interest_amount']) ? (float)$validated['interest_amount'] : ($principal * ($interestRate / 100));
-            $totalPayable = isset($validated['total_payable']) ? (float)$validated['total_payable'] : ($principal + $interestAmount);
+            $financedBase = max(0, $principal - $downPayment);
+            $interestAmount = isset($validated['interest_amount']) ? (float)$validated['interest_amount'] : round($financedBase * ($interestRate / 100), 2);
+            $totalPayable = isset($validated['total_payable']) ? (float)$validated['total_payable'] : round($principal + $interestAmount, 2);
             $numInstallments = (int)$validated['number_of_installments'];
             $frequency = $validated['frequency'] ?? 'Monthly';
             $startDate = $validated['start_date'] ?? $today;
@@ -381,15 +476,24 @@ class InstallmentController extends Controller
             $notes = $validated['notes'] ?? '';
 
             // Calculate installment amount if missing
-            $installmentAmount = isset($validated['installment_amount']) ? (float)$validated['installment_amount'] : round(($totalPayable - $downPayment) / $numInstallments, 2);
+            $installmentAmount = isset($validated['installment_amount'])
+                ? (float)$validated['installment_amount']
+                : round(max(0, $totalPayable - $downPayment) / max(1, $numInstallments), 2);
 
-            // 2. Create Sale Transaction
-            $saleCount = SaleTransaction::count() + 1;
+            $effectiveBranchId = $customer->branch_id ?? $userBranch;
+
+            // 2. Create Sale Transaction (collision-safe invoice_no)
+            $saleCount = (SaleTransaction::max('sale_id') ?? 0) + 1;
             $invoiceNo = 'INV-' . date('Y') . '-' . str_pad($saleCount, 5, '0', STR_PAD_LEFT);
+            while (SaleTransaction::where('invoice_no', $invoiceNo)->exists()) {
+                $saleCount++;
+                $invoiceNo = 'INV-' . date('Y') . '-' . str_pad($saleCount, 5, '0', STR_PAD_LEFT);
+            }
 
             $sale = SaleTransaction::create([
                 'invoice_no' => $invoiceNo,
                 'customer_id' => $customerId,
+                'branch_id' => $effectiveBranchId,
                 'processed_by' => $user ? $user->user_id : ($request->input('user_id') && \App\Models\User::where('user_id', $request->input('user_id'))->exists() ? $request->input('user_id') : \App\Models\User::value('user_id')),
                 'sale_date' => $startDate . ' ' . date('H:i:s'),
                 'payment_method' => $numInstallments === 0 ? 'Cash' : 'Installment',
@@ -406,11 +510,10 @@ class InstallmentController extends Controller
             $productId = $validated['product_id'] ?? null;
             if ($productId) {
                 $product = Product::find($productId);
-                
-                // Branch Validation
-                $userBranch = $user && $user->employee ? $user->employee->branch_id : null;
-                if ($user && in_array($user->role, ['Store Administrator', 'Store Admin'])) {
-                    if ($product && $product->branch_id != $userBranch) {
+
+                // Branch Validation: allow global catalog products (branch_id === null) or same-branch products
+                if ($user && in_array($user->role, ['Store Administrator', 'Store Admin'], true)) {
+                    if ($product && $product->branch_id && (int) $product->branch_id !== (int) $userBranch) {
                         return response()->json([
                             'message' => "Unauthorized: Product does not belong to your branch."
                         ], 403);
@@ -432,12 +535,12 @@ class InstallmentController extends Controller
                     }
                 }
             } else {
-                // Attach first product or generic
-                $firstProd = Product::first();
-                if ($firstProd) {
+                // Fallback line item for custom product entry
+                $fallbackProd = Product::first();
+                if ($fallbackProd) {
                     SaleItem::create([
                         'sale_id' => $sale->sale_id,
-                        'product_id' => $firstProd->product_id,
+                        'product_id' => $fallbackProd->product_id,
                         'quantity' => 1,
                         'unit_price' => $principal,
                         'discount_amount' => 0.00,
@@ -446,66 +549,47 @@ class InstallmentController extends Controller
                 }
             }
 
-            // 4. Create or Update Installment
-            $account = InstallmentAccount::where('customer_id', $customerId)
-                ->whereIn('status', ['Active', 'Pending'])
-                ->first();
-
-            if ($account) {
-                $account->principal_amount += $principal;
-                $account->down_payment += $downPayment;
-                $account->interest_amount += $interestAmount;
-                $account->total_payable += $totalPayable;
-                $account->number_of_installments += $numInstallments;
-                $account->installment_amount += $installmentAmount;
-                $account->save();
-                
-                $lastSchedule = PaymentSchedule::where('installment_id', $account->installment_id)
-                    ->orderBy('installment_no', 'desc')
-                    ->first();
-                
-                $startNo = $lastSchedule ? $lastSchedule->installment_no : 0;
-                $lastDate = $lastSchedule ? $lastSchedule->due_date : $startDate;
-            } else {
-                $accountCount = InstallmentAccount::count() + 1;
+            // 4. Create Dedicated Installment Contract (collision-safe account_no)
+            $accountCount = (InstallmentAccount::max('installment_id') ?? 0) + 1;
+            $accountNo = 'ACC-' . date('Y') . '-' . str_pad($accountCount, 5, '0', STR_PAD_LEFT);
+            while (InstallmentAccount::where('account_no', $accountNo)->exists()) {
+                $accountCount++;
                 $accountNo = 'ACC-' . date('Y') . '-' . str_pad($accountCount, 5, '0', STR_PAD_LEFT);
-
-                $account = InstallmentAccount::create([
-                    'account_no' => $accountNo,
-                    'customer_id' => $customerId,
-                    'sale_id' => $sale->sale_id,
-                    'start_date' => $startDate,
-                    'principal_amount' => $principal,
-                    'down_payment' => $downPayment,
-                    'interest_rate' => $interestRate,
-                    'interest_amount' => $interestAmount,
-                    'total_payable' => $totalPayable,
-                    'installment_amount' => $installmentAmount,
-                    'number_of_installments' => $numInstallments,
-                    'frequency' => $frequency,
-                    'status' => $status,
-                    'notes' => $notes,
-                ]);
-                
-                $startNo = 0;
-                $lastDate = $startDate;
             }
 
-            // 5. Generate Payment Schedule entries
-            $firstDueDate = $validated['due_date'] ?? date('Y-m-d', strtotime($lastDate . ' +1 month'));
-            $daysStep = ($frequency === 'Weekly') ? 7 : (($frequency === 'Bi-weekly' || $frequency === 'Biweekly') ? 14 : 30);
+            $account = InstallmentAccount::create([
+                'account_no' => $accountNo,
+                'customer_id' => $customerId,
+                'sale_id' => $sale->sale_id,
+                'start_date' => $startDate,
+                'principal_amount' => $principal,
+                'down_payment' => $downPayment,
+                'interest_rate' => $interestRate,
+                'interest_amount' => $interestAmount,
+                'total_payable' => $totalPayable,
+                'installment_amount' => $installmentAmount,
+                'number_of_installments' => $numInstallments,
+                'frequency' => $frequency,
+                'status' => $status,
+                'notes' => $notes,
+            ]);
 
+            // 5. Generate Payment Schedule entries
+            $firstDueDate = $validated['due_date'] ?? date('Y-m-d', strtotime($startDate . ' +1 month'));
             for ($i = 1; $i <= $numInstallments; $i++) {
-                $nextNo = $startNo + $i;
-                if ($i === 1 && $startNo === 0) {
+                if ($i === 1) {
                     $schedDueDate = $firstDueDate;
+                } elseif ($frequency === 'Weekly') {
+                    $schedDueDate = date('Y-m-d', strtotime($firstDueDate . ' +' . (($i - 1) * 7) . ' days'));
+                } elseif ($frequency === 'Bi-weekly' || $frequency === 'Biweekly') {
+                    $schedDueDate = date('Y-m-d', strtotime($firstDueDate . ' +' . (($i - 1) * 14) . ' days'));
                 } else {
-                    $schedDueDate = date('Y-m-d', strtotime($firstDueDate . ' +' . (($i - 1) * $daysStep) . ' days'));
+                    $schedDueDate = date('Y-m-d', strtotime($firstDueDate . ' +' . ($i - 1) . ' months'));
                 }
 
                 PaymentSchedule::create([
                     'installment_id' => $account->installment_id,
-                    'installment_no' => $nextNo,
+                    'installment_no' => $i,
                     'due_date' => $schedDueDate,
                     'amount_due' => $installmentAmount,
                     'amount_paid' => 0.00,
@@ -516,9 +600,9 @@ class InstallmentController extends Controller
 
             // 6. Record Down Payment Receipt if paid upfront
             if ($downPayment > 0) {
-                $payCount = (\App\Models\Payment::max('payment_id') ?? 0) + 1;
+                $payCount = (Payment::max('payment_id') ?? 0) + 1;
                 $receiptNo = 'REC-' . date('Y') . '-' . str_pad($payCount, 5, '0', STR_PAD_LEFT);
-                while (\App\Models\Payment::where('receipt_no', $receiptNo)->exists()) {
+                while (Payment::where('receipt_no', $receiptNo)->exists()) {
                     $payCount++;
                     $receiptNo = 'REC-' . date('Y') . '-' . str_pad($payCount, 5, '0', STR_PAD_LEFT);
                 }
@@ -531,14 +615,15 @@ class InstallmentController extends Controller
                     'amount' => $downPayment,
                     'payment_method' => 'Cash',
                     'reference_no' => 'DOWNPAYMENT-' . $accountNo,
-                    'received_by' => $user ? $user->user_id : \App\Models\User::value('user_id'),
+                    'received_by' => $user ? $user->user_id : User::value('user_id'),
+                    'status' => 'Completed',
                     'notes' => 'Initial down payment collected upon account activation',
                     'created_at' => now(),
                 ]);
             }
 
             // 7. System Audit Log
-            $custFullName = "{$customer->first_name} {$customer->last_name}";
+            $custFullName = trim("{$customer->first_name} {$customer->last_name}");
             SystemLog::create([
                 'user_id' => $user ? $user->user_id : $request->input('user_id'),
                 'action' => 'CREATE',
@@ -560,10 +645,15 @@ class InstallmentController extends Controller
                 'priority' => 'normal',
             ]);
 
+            SyncController::invalidateFingerprint(['installments', 'sales', 'payments', 'products', 'customers']);
+
             // Load fresh relationships for formatting
             $account->load([
                 'customer',
+                'customer.branch:id,name',
+                'sale.branch:id,name',
                 'sale.processedBy.employee',
+                'sale.processedBy.employee.branch:id,name',
                 'sale.items.product',
                 'payments',
                 'paymentSchedules'
@@ -594,7 +684,10 @@ class InstallmentController extends Controller
 
         $query = InstallmentAccount::with([
             'customer',
+            'customer.branch:id,name',
+            'sale.branch:id,name',
             'sale.processedBy.employee',
+            'sale.processedBy.employee.branch:id,name',
             'sale.items.product',
             'payments',
             'paymentSchedules' => function ($q) use ($today) {
@@ -604,18 +697,7 @@ class InstallmentController extends Controller
             $q->where('due_date', '<', $today)->where('balance_due', '>', 0);
         });
 
-        // Store Admin branch scoping
-        if ($user && in_array($user->role, ['Store Administrator', 'Store Admin'])) {
-            $userBranch = $user->employee ? $user->employee->branch_id : null;
-            $query->whereHas('sale.processedBy.employee', function ($eq) use ($userBranch) {
-                $eq->where('branch_id', $userBranch);
-            });
-        } elseif ($request->filled('branch') && $request->query('branch') !== 'All') {
-            $branch = $request->query('branch');
-            $query->whereHas('sale.processedBy.employee', function ($eq) use ($branch) {
-                $eq->where('branch_id', $branch);
-            });
-        }
+        $this->applyBranchFilter($query, $user, $request->query('branch'));
 
         if ($request->filled('search')) {
             $s = trim($request->query('search'));
@@ -624,14 +706,16 @@ class InstallmentController extends Controller
                   ->orWhereHas('customer', function ($cq) use ($s) {
                       $cq->where('first_name', 'like', "%{$s}%")
                          ->orWhere('last_name', 'like', "%{$s}%")
+                         ->orWhere('customer_code', 'like', "%{$s}%")
                          ->orWhere('phone', 'like', "%{$s}%");
                   });
             });
         }
 
         $overdueList = $query->get()->map(function ($inst) use ($today) {
-            $paid = (float)$inst->payments->sum('amount') + (float)$inst->down_payment;
-            $balance = max(0, round((float)$inst->total_payable - $paid, 2));
+            $fin = $this->computeFinancials($inst);
+            $balance = $fin['balance'];
+            $branchInfo = $this->resolveBranchInfo($inst);
 
             $earliestOverdue = $inst->paymentSchedules->first();
             $dueTime = $earliestOverdue ? strtotime($earliestOverdue->due_date) : strtotime($today);
@@ -640,30 +724,35 @@ class InstallmentController extends Controller
 
             $totalOverdueAmount = (float)$inst->paymentSchedules->sum('balance_due');
 
-            $branch = null;
-            if ($inst->sale && $inst->sale->processedBy && $inst->sale->processedBy->employee) {
-                $branch = $inst->sale->processedBy->employee->branch_id ?: null;
-            }
-
             $productName = 'Appliance / Furniture';
             if ($inst->sale && $inst->sale->items && $inst->sale->items->isNotEmpty()) {
                 $firstItem = $inst->sale->items->first();
                 $productName = $firstItem->product ? $firstItem->product->product_name : 'Appliance / Furniture';
+                if ($inst->sale->items->count() > 1) {
+                    $productName .= ' (+' . ($inst->sale->items->count() - 1) . ' more)';
+                }
             }
 
             return [
                 'installment_id' => $inst->installment_id,
                 'account_no' => $inst->account_no,
-                'customer_name' => $inst->customer ? "{$inst->customer->first_name} {$inst->customer->last_name}" : 'Customer',
+                'customer_code' => $inst->customer ? ($inst->customer->customer_code ?: '') : '',
+                'customer_name' => $inst->customer ? trim("{$inst->customer->first_name} {$inst->customer->last_name}") : 'Customer',
                 'customer_phone' => $inst->customer ? $inst->customer->phone : '—',
                 'customer_address' => $inst->customer ? $inst->customer->address : '—',
                 'product_name' => $productName,
-                'branch' => $branch,
+                'branch_id' => $branchInfo['branch_id'],
+                'branch' => $branchInfo['branch_name'],
+                'branch_name' => $branchInfo['branch_name'],
                 'due_date' => $earliestOverdue ? $earliestOverdue->due_date : $today,
                 'amount_due' => $earliestOverdue ? (float)$earliestOverdue->amount_due : 0,
                 'amount_paid' => $earliestOverdue ? (float)$earliestOverdue->amount_paid : 0,
                 'overdue_balance' => $totalOverdueAmount,
+                'total_payable' => (float)$inst->total_payable,
+                'paid' => $fin['paid'],
                 'total_outstanding' => $balance,
+                'pending_payments_amount' => $fin['pending_amount'],
+                'pending_payments_count' => $fin['pending_count'],
                 'days_overdue' => $daysOverdue,
                 'status' => 'Overdue',
             ];
@@ -688,10 +777,16 @@ class InstallmentController extends Controller
 
         $relations = [
             'customer',
+            'customer.branch:id,name',
+            'sale.branch:id,name',
             'sale.processedBy.employee',
+            'sale.processedBy.employee.branch:id,name',
             'sale.items.product',
             'paymentSchedules' => function ($q) {
                 $q->orderBy('installment_no');
+            },
+            'payments' => function ($q) {
+                $q->orderByDesc('payment_date')->orderByDesc('payment_id');
             },
             'payments.receivedBy.employee'
         ];
@@ -742,34 +837,28 @@ class InstallmentController extends Controller
         }
 
         // Security check for Store Administrator
+        $branchInfo = $this->resolveBranchInfo($account);
         if ($user && in_array($user->role, ['Store Administrator', 'Store Admin'])) {
-            $userBranch = $user->employee ? $user->employee->branch_id : null;
-            $accBranch = null;
-            if ($account->sale && $account->sale->processedBy && $account->sale->processedBy->employee) {
-                $accBranch = $account->sale->processedBy->employee->branch_id ?: null;
-            }
-            if ($userBranch !== $accBranch) {
+            $userBranch = $user->employee ? (int) $user->employee->branch_id : null;
+            if (!$userBranch || $userBranch !== $branchInfo['branch_id']) {
                 return response()->json(['message' => 'Unauthorized access to installment in another branch.'], 403);
             }
         }
 
-        $paid = (float)$account->payments->sum('amount');
+        $fin = $this->computeFinancials($account);
+        $paid = $fin['paid'];
         $totalPayable = (float)$account->total_payable;
-        $balance = max(0, round($totalPayable - $paid, 2));
+        $balance = $fin['balance'];
 
         // Branch and Store Admin
-        $branch = null;
+        $branch = $branchInfo['branch_name'];
         $storeAdmin = 'System/Admin';
-        
+
         if ($account->sale && $account->sale->processedBy) {
             $adminUser = $account->sale->processedBy;
-            $storeAdmin = $adminUser->employee 
-                ? "{$adminUser->employee->first_name} {$adminUser->employee->last_name}" 
+            $storeAdmin = $adminUser->employee
+                ? trim("{$adminUser->employee->first_name} {$adminUser->employee->last_name}")
                 : $adminUser->username;
-                
-            if ($adminUser->employee) {
-                $branch = $adminUser->employee->branch_name ?? (is_object($adminUser->employee->branch) ? $adminUser->employee->branch->name : ((string)$adminUser->employee->branch ?: null));
-            }
         }
 
         // Sale Items
@@ -828,12 +917,12 @@ class InstallmentController extends Controller
 
         // Payments History
         $payments = $account->payments->map(function ($p) {
-            $receivedName = 'Staff';
-            if ($p->receivedBy) {
-                $receivedName = $p->receivedBy->employee 
-                    ? "{$p->receivedBy->employee->first_name} {$p->receivedBy->employee->last_name}" 
-                    : $p->receivedBy->username;
-            }
+            $actualStatus = $p->status ?: 'Completed';
+            $receivedName = $p->receivedBy
+                ? ($p->receivedBy->employee
+                    ? trim("{$p->receivedBy->employee->first_name} {$p->receivedBy->employee->last_name}")
+                    : $p->receivedBy->username)
+                : ($actualStatus === 'Pending' ? 'Awaiting Verification' : 'Staff');
 
             return [
                 'payment_id' => $p->payment_id,
@@ -845,21 +934,28 @@ class InstallmentController extends Controller
                 'payment_method' => $p->payment_method,
                 'reference_no' => $p->reference_no,
                 'received_by' => $receivedName,
-                'status' => 'Completed',
+                'status' => $actualStatus,
+                'proof_of_payment' => $p->proof_of_payment ? asset('storage/' . $p->proof_of_payment) : null,
                 'notes' => $p->notes,
             ];
         });
+
+        $paidTermsCount = $schedules->where('balance_due', '<=', 0)->count();
+        $totalTermsCount = max((int) $account->number_of_installments, $schedules->count());
 
         return response()->json([
             'account' => [
                 'installment_id' => $account->installment_id,
                 'account_no' => $account->account_no,
                 'customer_id' => $account->customer_id,
-                'customer_name' => $account->customer ? "{$account->customer->first_name} {$account->customer->last_name}" : 'Customer',
+                'customer_code' => $account->customer ? ($account->customer->customer_code ?: '') : '',
+                'customer_name' => $account->customer ? trim("{$account->customer->first_name} {$account->customer->last_name}") : 'Customer',
                 'customer_phone' => $account->customer ? $account->customer->phone : '—',
                 'customer_email' => $account->customer ? $account->customer->email : '—',
                 'customer_address' => $account->customer ? $account->customer->address : '—',
+                'branch_id' => $branchInfo['branch_id'],
                 'branch' => $branch,
+                'branch_name' => $branch,
                 'store_admin' => $storeAdmin,
                 'sale_id' => $account->sale_id,
                 'invoice_no' => $account->sale ? $account->sale->invoice_no : 'N/A',
@@ -873,11 +969,15 @@ class InstallmentController extends Controller
                 'total_payable' => $totalPayable,
                 'installment_amount' => (float)$account->installment_amount,
                 'number_of_installments' => (int)$account->number_of_installments,
+                'paid_installments' => $paidTermsCount,
+                'total_terms' => $totalTermsCount,
                 'frequency' => $account->frequency ?: 'Monthly',
                 'paid' => round($paid, 2),
                 'balance' => $balance,
+                'pending_payments_amount' => $fin['pending_amount'],
+                'pending_payments_count' => $fin['pending_count'],
                 'progress_percentage' => $totalPayable > 0 ? min(100, round(($paid / $totalPayable) * 100, 1)) : 0,
-                'status' => $balance <= 0 ? 'Completed' : $account->status,
+                'status' => $balance <= 0 ? 'Complete Payment' : $account->status,
                 'notes' => $account->notes,
             ],
             'next_payment' => $nextSchedule ? [
@@ -965,11 +1065,16 @@ class InstallmentController extends Controller
 
         $account->load([
             'customer',
+            'customer.branch:id,name',
+            'sale.branch:id,name',
             'sale.processedBy.employee',
+            'sale.processedBy.employee.branch:id,name',
             'sale.items.product',
             'payments',
             'paymentSchedules'
         ]);
+
+        SyncController::invalidateFingerprint(['installments', 'sales', 'payments', 'customers']);
 
         return response()->json([
             'message' => "Installment {$account->account_no} updated successfully",
@@ -1035,6 +1140,8 @@ class InstallmentController extends Controller
                 'ip_address' => $request->ip(),
                 'user_agent' => $request->userAgent(),
             ]);
+
+            SyncController::invalidateFingerprint(['installments', 'sales', 'payments', 'products', 'customers']);
 
             return response()->json([
                 'message' => "Installment {$accountNo} deleted successfully",

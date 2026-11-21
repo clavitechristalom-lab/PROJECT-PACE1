@@ -36,7 +36,7 @@ function parseBranchInfo(branchObj) {
     cityName = 'ILIGAN';
   } else if (mDepolog) {
     companyName = mDepolog[1].replace(/[/\\-]+$/, '').trim();
-    cityName = 'DEPOLOG';
+    cityName = 'DIPOLOG';
   } else if (rawLoc) {
     cityName = rawLoc.toUpperCase().replace(/\s+CITY$/i, '').trim();
   }

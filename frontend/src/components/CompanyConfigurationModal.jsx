@@ -314,10 +314,7 @@ export default function CompanyConfigurationModal({ isOpen, onClose, onSave, cur
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div
-        className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm"
-        onClick={onClose}
-      />
+      <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" />
       <div className={`relative bg-card rounded-2xl shadow-2xl w-full ${isStoreAdmin ? 'max-w-4xl' : 'max-w-3xl'} max-h-[90vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-200 border border-border`}>
         {/* Modal Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-border bg-muted/20 shrink-0">

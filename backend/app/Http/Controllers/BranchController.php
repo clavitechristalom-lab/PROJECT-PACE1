@@ -15,15 +15,40 @@ class BranchController extends Controller
     public function index()
     {
         $managers = \App\Models\User::where('role', 'Store Administrator')
-            ->with('employee:employee_id,branch_id')
-            ->get()
+            ->with('employee:employee_id,first_name,middle_name,last_name,phone,email,branch_id')
+            ->get();
+
+        $managersByBranch = $managers
             ->filter(fn($u) => $u->employee && $u->employee->branch_id)
             ->keyBy(fn($u) => $u->employee->branch_id);
 
-        $branches = BranchProfile::all()->map(function ($branch) use ($managers) {
-            $branch->manager = $managers->get($branch->id)?->username;
-            return $branch;
-        });
+        $managersById = $managers->keyBy('user_id');
+
+        $globalProductCount = \App\Models\Product::whereNull('branch_id')->count();
+
+        $branches = BranchProfile::withCount(['employees', 'customers', 'products', 'sales'])
+            ->get()
+            ->map(function ($branch) use ($managersByBranch, $managersById, $globalProductCount) {
+                $managerUser = $managersByBranch->get($branch->id)
+                    ?? ($branch->manager_id ? $managersById->get($branch->manager_id) : null);
+
+                $fullName = null;
+                if ($managerUser && $managerUser->employee) {
+                    $fullName = trim(implode(' ', array_filter([
+                        $managerUser->employee->first_name,
+                        $managerUser->employee->middle_name,
+                        $managerUser->employee->last_name,
+                    ])));
+                }
+
+                $branch->manager = $managerUser?->username;
+                $branch->manager_name = $fullName ?: $managerUser?->username;
+                if (!$branch->manager_id && $managerUser) {
+                    $branch->manager_id = $managerUser->user_id;
+                }
+                $branch->catalog_products_count = (int) ($branch->products_count ?? 0) + (int) $globalProductCount;
+                return $branch;
+            });
         
         return response()->json([
             'branches' => $branches
@@ -78,15 +103,52 @@ class BranchController extends Controller
     {
         $validated = $request->validate([
             'name' => 'required|string|max:255|unique:branch_profiles',
+            'branch_code' => 'nullable|string|max:50',
+            'branch_type' => 'nullable|string|max:100',
             'location' => 'nullable|string|max:255',
+            'address' => 'nullable|string|max:255',
+            'city' => 'nullable|string|max:120',
+            'province' => 'nullable|string|max:120',
+            'manager_id' => 'nullable',
             'manager_name' => 'nullable|string|max:255',
             'contact_number' => 'nullable|string|max:255',
+            'email' => 'nullable|string|max:160',
+            'operating_hours' => 'nullable|string|max:160',
+            'opening_date' => 'nullable|string|max:40',
+            'description' => 'nullable|string|max:1000',
             'status' => 'nullable|string|in:open,closed',
             'color' => 'nullable|string|max:50',
             'image_url' => 'nullable|string',
         ]);
 
+        if (empty($validated['location'])) {
+            $parts = array_filter([
+                $validated['address'] ?? null,
+                $validated['city'] ?? null,
+                $validated['province'] ?? null,
+            ]);
+            if (!empty($parts)) {
+                $validated['location'] = implode(', ', $parts);
+            }
+        }
+
+        $validated['manager_id'] = !empty($validated['manager_id']) && is_numeric($validated['manager_id'])
+            ? (int) $validated['manager_id']
+            : null;
+        $validated['status'] = $validated['status'] ?? 'open';
+        $validated['color'] = $validated['color'] ?? '#2b5ce6';
+
         $branch = BranchProfile::create($validated);
+
+        if ($branch->manager_id) {
+            $managerUser = \App\Models\User::find($branch->manager_id);
+            if ($managerUser && $managerUser->employee_id) {
+                \App\Models\Employee::where('employee_id', $managerUser->employee_id)->update([
+                    'branch_id' => $branch->id,
+                    'branch' => $branch->name,
+                ]);
+            }
+        }
 
         if ($request->hasFile('image')) {
             $request->validate([
@@ -150,16 +212,52 @@ class BranchController extends Controller
 
         $validated = $request->validate([
             'name' => 'required|string|max:255|unique:branch_profiles,name,' . $id,
+            'branch_code' => 'nullable|string|max:50',
+            'branch_type' => 'nullable|string|max:100',
             'location' => 'nullable|string|max:255',
+            'address' => 'nullable|string|max:255',
+            'city' => 'nullable|string|max:120',
+            'province' => 'nullable|string|max:120',
             'manager_name' => 'nullable|string|max:255',
             'manager_id' => 'nullable',
             'contact_number' => 'nullable|string|max:255',
+            'email' => 'nullable|string|max:160',
+            'operating_hours' => 'nullable|string|max:160',
+            'opening_date' => 'nullable|string|max:40',
+            'description' => 'nullable|string|max:1000',
             'status' => 'nullable|string',
             'color' => 'nullable|string',
             'image_url' => 'nullable|string',
         ]);
 
+        if (empty($validated['location'])) {
+            $parts = array_filter([
+                $validated['address'] ?? null,
+                $validated['city'] ?? null,
+                $validated['province'] ?? null,
+            ]);
+            if (!empty($parts)) {
+                $validated['location'] = implode(', ', $parts);
+            }
+        }
+
+        if (array_key_exists('manager_id', $validated)) {
+            $validated['manager_id'] = !empty($validated['manager_id']) && is_numeric($validated['manager_id'])
+                ? (int) $validated['manager_id']
+                : null;
+        }
+
         $branch->update($validated);
+
+        if ($branch->manager_id) {
+            $managerUser = \App\Models\User::find($branch->manager_id);
+            if ($managerUser && $managerUser->employee_id) {
+                \App\Models\Employee::where('employee_id', $managerUser->employee_id)->update([
+                    'branch_id' => $branch->id,
+                    'branch' => $branch->name,
+                ]);
+            }
+        }
 
         // Cascade branch name change across linked records
         if (!empty($validated['name']) && $validated['name'] !== $oldName) {

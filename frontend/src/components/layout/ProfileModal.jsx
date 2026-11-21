@@ -2026,11 +2026,24 @@ export default function ProfileModal() {
           size="md"
         >
           <div className="space-y-4 text-center">
-            <img
-              src={proofLightboxRecord.proof_of_payment}
-              alt="Proof of Payment"
-              className="max-h-[65vh] w-auto mx-auto rounded-xl border border-border object-contain"
-            />
+            <div className="space-y-2">
+              <img
+                src={(() => {
+                  const u = String(proofLightboxRecord.proof_of_payment || '')
+                  if (u.includes('/storage/')) return u.substring(u.indexOf('/storage/'))
+                  return u.startsWith('http') || u.startsWith('data:') || u.startsWith('blob:') ? u : `/storage/${u.replace(/^\/+/, '')}`
+                })()}
+                alt="Proof of Payment"
+                className="max-h-[65vh] w-auto mx-auto rounded-xl border border-border object-contain"
+                onError={(e) => {
+                  e.currentTarget.style.display = 'none'
+                  if (e.currentTarget.nextElementSibling) e.currentTarget.nextElementSibling.style.display = 'block'
+                }}
+              />
+              <p className="hidden py-6 text-xs text-muted-foreground text-center">
+                Proof image file could not be loaded or is missing from storage.
+              </p>
+            </div>
             <div className="flex justify-end">
               <Btn variant="outline" size="sm" onClick={() => setProofLightboxRecord(null)}>
                 Close

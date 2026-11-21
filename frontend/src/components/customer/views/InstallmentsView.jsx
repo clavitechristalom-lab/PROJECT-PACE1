@@ -351,6 +351,11 @@ export default function InstallmentsView({
                   <div>
                     <p className="text-[10px] text-muted-foreground uppercase font-bold tracking-wider">Total Settled</p>
                     <p className="font-mono font-extrabold text-emerald-600 dark:text-emerald-400 text-sm mt-0.5">{fmt(totalPaidVal)}</p>
+                    {Number(inst.pending_payments_amount) > 0 && (
+                      <p className="text-[10px] font-semibold text-amber-600 dark:text-amber-400 mt-0.5">
+                        +{fmt(inst.pending_payments_amount)} pending verif.
+                      </p>
+                    )}
                   </div>
                   <div>
                     <p className="text-[10px] text-muted-foreground uppercase font-bold tracking-wider">Remaining Balance</p>

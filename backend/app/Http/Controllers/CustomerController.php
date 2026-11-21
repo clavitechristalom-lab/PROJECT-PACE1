@@ -47,8 +47,8 @@ class CustomerController extends Controller
             'installmentAllowedByUser:user_id,username',
         ]);
 
-        if ($user && $user->role === 'Store Administrator') {
-            // Store Admin sees only their branch customers + unassigned (NULL branch) customers
+        if ($user && in_array($user->role, ['Store Administrator', 'Store Admin'], true)) {
+            // Store Admin sees only their branch customers
             $employee = $user->employee;
             if ($employee && $employee->branch_id) {
                 $branchId = $employee->branch_id;
@@ -82,8 +82,10 @@ class CustomerController extends Controller
             $branchVal = $request->query('branch');
             if ($branchVal === 'unassigned') {
                 $query->whereNull('branch_id');
+            } elseif (is_numeric($branchVal)) {
+                $query->where('branch_id', (int) $branchVal);
             } else {
-                $query->where('branch_id', $branchVal);
+                $query->whereHas('branch', fn($bq) => $bq->where('name', $branchVal));
             }
         }
 

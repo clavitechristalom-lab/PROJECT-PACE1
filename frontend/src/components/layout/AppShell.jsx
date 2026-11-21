@@ -769,7 +769,8 @@ function Header({
   }
 
   useEffect(() => {
-    if (!searchQuery.trim() || searchQuery.trim().length < 2) {
+    const trimmed = searchQuery.trim()
+    if (!trimmed) {
       setSearchResults([])
       setGroupedResults({})
       setTotalMatches(0)
@@ -777,10 +778,12 @@ function Header({
       return
     }
 
+    const controller = new AbortController()
     setIsSearching(true)
     const delayDebounceFn = setTimeout(() => {
-      api.search(searchQuery.trim())
+      api.search(trimmed, { signal: controller.signal })
         .then(res => {
+          if (controller.signal.aborted) return
           const results = Array.isArray(res) ? res : (res?.results || [])
           const grouped = res?.grouped || {}
           setSearchResults(results)
@@ -789,15 +792,21 @@ function Header({
           setSelectedIndex(0)
         })
         .catch(err => {
+          if (err?.name === 'AbortError') return
           console.error('Search error:', err)
           setSearchResults([])
           setGroupedResults({})
           setTotalMatches(0)
         })
-        .finally(() => setIsSearching(false))
-    }, 280)
+        .finally(() => {
+          if (!controller.signal.aborted) setIsSearching(false)
+        })
+    }, 300)
 
-    return () => clearTimeout(delayDebounceFn)
+    return () => {
+      clearTimeout(delayDebounceFn)
+      controller.abort()
+    }
   }, [searchQuery])
 
   useEffect(() => {
@@ -912,19 +921,19 @@ function Header({
           <div className="absolute top-11 left-0 right-0 !bg-white dark:!bg-[#071328] rounded-2xl border border-blue-500/30 shadow-2xl z-50 overflow-hidden max-h-[420px] flex flex-col animate-[slideUp_0.15s_ease]">
             <div className="p-2.5 border-b border-blue-500/20 !bg-blue-50/70 dark:!bg-blue-950/70 flex items-center justify-between text-[11px] text-blue-800 dark:text-blue-300">
               <span>
-                {searchQuery.trim().length < 2
-                  ? 'Type at least 2 characters to search...'
+                {!searchQuery.trim()
+                  ? 'Search products, customers, employees, branches & invoices'
                   : `${totalMatches} matching record${totalMatches === 1 ? '' : 's'} found`}
               </span>
-              {isSearching && <span className="text-blue-600 dark:text-blue-400 font-medium animate-pulse">Searching database...</span>}
+              {isSearching && <span className="text-blue-600 dark:text-blue-400 font-medium animate-pulse">Searching...</span>}
             </div>
 
             <div className="overflow-y-auto flex-1 p-1 divide-y divide-blue-500/10 !bg-transparent" ref={listRef}>
-              {searchQuery.trim().length >= 2 && searchResults.length === 0 && !isSearching && (
+              {searchQuery.trim().length >= 1 && searchResults.length === 0 && !isSearching && (
                 <div className="py-8 text-center text-xs text-muted-foreground">
                   <FiSearch className="w-8 h-8 mx-auto text-blue-500/30 mb-1" />
                   <p className="font-semibold text-slate-950 dark:text-white">No matching database records found</p>
-                  <p className="text-[11px] text-muted-foreground mt-0.5">Try searching by employee name, code, customer, SKU, invoice #, or log keyword.</p>
+                  <p className="text-[11px] text-muted-foreground mt-0.5">Try searching by product name, SKU, customer, employee, invoice #, or branch.</p>
                 </div>
               )}
 

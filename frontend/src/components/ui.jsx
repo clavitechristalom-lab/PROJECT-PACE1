@@ -313,24 +313,18 @@ export function Textarea({ label, required, value, onChange, rows = 3, className
 
 // ─── Modal ────────────────────────────────────────────────────────────────────
 export function Modal({ title, onClose, children, footer, size = 'lg', className = '' }) {
-  useEffect(() => {
-    const fn = (e) => { if (e.key === 'Escape') onClose() }
-    document.addEventListener('keydown', fn)
-    return () => document.removeEventListener('keydown', fn)
-  }, [onClose])
-
   const widths = { sm: 'max-w-2xl', md: 'max-w-3xl', lg: 'max-w-3xl', xl: 'max-w-4xl', '2xl': 'max-w-4xl' }
 
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 animate-[fadeIn_0.15s_ease]"
       style={{ background: 'rgba(15,31,61,0.6)', backdropFilter: 'blur(4px)' }}
-      onClick={e => { if (e.target === e.currentTarget) onClose() }}
     >
       <div className={`bg-card rounded-2xl shadow-2xl border border-border w-full ${widths[size] || 'max-w-3xl'} max-h-[90vh] flex flex-col animate-[slideUp_0.15s_ease] overflow-hidden ${className}`}>
         <div className="flex items-center justify-between px-6 py-4 border-b border-border flex-shrink-0 bg-muted/40">
           <h2 className="font-bold text-foreground text-base flex items-center gap-2 truncate pr-2">{title}</h2>
           <button
+            type="button"
             onClick={onClose}
             className="w-8 h-8 rounded-xl hover:bg-muted flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors cursor-pointer shrink-0"
             aria-label="Close"
@@ -721,6 +715,7 @@ export function TabBar({ tabs = [], activeTab, active, onChange }) {
 
         return (
           <button
+            type="button"
             key={id}
             onClick={() => onChange(id)}
             className={`flex items-center gap-2 px-4 py-2.5 text-xs font-bold cursor-pointer transition-all border-b-2 -mb-px whitespace-nowrap ${isActive

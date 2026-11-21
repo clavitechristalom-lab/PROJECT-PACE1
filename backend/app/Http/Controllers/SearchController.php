@@ -14,14 +14,15 @@ use App\Models\Attendance;
 use App\Models\Payment;
 use App\Models\User;
 use App\Models\SystemLog;
-use Illuminate\Support\Facades\Auth;
+use App\Models\BranchProfile;
+use Illuminate\Support\Facades\Cache;
 
 class SearchController extends Controller
 {
     public function search(Request $request)
     {
-        $q = trim($request->query('q', ''));
-        if (strlen($q) < 2) {
+        $q = trim((string) $request->query('q', ''));
+        if ($q === '') {
             return response()->json([
                 'success' => true,
                 'query' => $q,
@@ -41,9 +42,21 @@ class SearchController extends Controller
 
         $role = $user->role;
         $isAdmin = ($role === 'Administrator');
-        $isStoreAdmin = in_array($role, ['Store Administrator', 'Store Admin']);
+        $isStoreAdmin = in_array($role, ['Store Administrator', 'Store Admin'], true);
         $isEmployee = ($role === 'Employee');
-        $userBranch = ($user && $user->employee && $user->employee->branch_id) ? $user->employee->branch_id : null;
+        $userBranch = ($user->employee && $user->employee->branch_id) ? $user->employee->branch_id : null;
+
+        $cacheKey = 'global_search_' . md5(json_encode([
+            'r' => $role,
+            'b' => $userBranch,
+            'e' => $isEmployee ? $user->employee_id : 0,
+            'q' => strtolower($q),
+        ]));
+
+        $cached = Cache::get($cacheKey);
+        if ($cached !== null) {
+            return response()->json($cached);
+        }
 
         $results = [];
 
@@ -137,9 +150,42 @@ class SearchController extends Controller
             }
         }
 
+        // ─── 1B. BRANCHES (Admins & Store Admins) ────────────────────────────────
+        if ($isAdmin || $isStoreAdmin) {
+            $branchQuery = BranchProfile::select(['id', 'name', 'branch_type', 'location', 'city', 'status']);
+            if ($isStoreAdmin && $userBranch) {
+                $branchQuery->where('id', $userBranch);
+            }
+            $branches = $branchQuery->where(function ($query) use ($q) {
+                $query->where('name', 'like', "%{$q}%")
+                      ->orWhere('location', 'like', "%{$q}%")
+                      ->orWhere('city', 'like', "%{$q}%")
+                      ->orWhere('branch_type', 'like', "%{$q}%");
+            })->limit(5)->get();
+
+            foreach ($branches as $br) {
+                $results[] = [
+                    'id' => 'br_' . $br->id,
+                    'record_id' => $br->id,
+                    'type' => 'branch',
+                    'module' => 'Branches',
+                    'title' => $br->name,
+                    'subtitle' => ($br->branch_type ?: 'Branch Store') . ($br->city ? " · {$br->city}" : ''),
+                    'description' => "Location: " . ($br->location ?: 'N/A') . " · Status: " . ucfirst($br->status ?: 'open'),
+                    'url' => '/branches',
+                    'route' => '/branches',
+                    'icon' => '🏢',
+                ];
+            }
+        }
+
         // ─── 2. CUSTOMERS (Admins & Store Admins) ───────────────────────────────
         if ($isAdmin || $isStoreAdmin) {
-            $customers = Customer::where(function($query) use ($q) {
+            $custQuery = Customer::select(['customer_id', 'customer_code', 'first_name', 'middle_name', 'last_name', 'phone', 'address', 'branch_id']);
+            if ($isStoreAdmin && $userBranch) {
+                $custQuery->where('branch_id', $userBranch);
+            }
+            $customers = $custQuery->where(function($query) use ($q) {
                 $query->where('first_name', 'like', "%{$q}%")
                       ->orWhere('middle_name', 'like', "%{$q}%")
                       ->orWhere('last_name', 'like', "%{$q}%")
@@ -153,7 +199,7 @@ class SearchController extends Controller
             ->get();
 
             foreach ($customers as $cust) {
-                $fullName = trim("{$cust->first_name} {$cust->middle_name} {$cust->last_name}");
+                $fullName = trim(implode(' ', array_filter([$cust->first_name, $cust->middle_name, $cust->last_name])));
                 $results[] = [
                     'id' => 'cust_' . $cust->customer_id,
                     'record_id' => $cust->customer_id,
@@ -171,14 +217,20 @@ class SearchController extends Controller
 
         // ─── 3. PRODUCTS & INVENTORY (Admins & Store Admins) ────────────────────
         if ($isAdmin || $isStoreAdmin) {
-            $products = Product::where(function($query) use ($q) {
+            $prodQuery = Product::select(['product_id', 'product_code', 'product_name', 'category', 'brand', 'unit_price', 'stock_quantity', 'branch_id']);
+            if ($isStoreAdmin && $userBranch) {
+                $prodQuery->where(function ($pq) use ($userBranch) {
+                    $pq->where('branch_id', $userBranch)->orWhereNull('branch_id');
+                });
+            }
+            $products = $prodQuery->where(function($query) use ($q) {
                 $query->where('product_name', 'like', "%{$q}%")
                       ->orWhere('product_code', 'like', "%{$q}%")
                       ->orWhere('category', 'like', "%{$q}%")
                       ->orWhere('brand', 'like', "%{$q}%")
                       ->orWhere('description', 'like', "%{$q}%");
             })
-            ->limit(6)
+            ->limit(8)
             ->get();
 
             foreach ($products as $prod) {
@@ -386,7 +438,7 @@ class SearchController extends Controller
                 'module' => 'Payroll',
                 'title' => "Payslip: {$periodName}",
                 'subtitle' => ($isAdmin || $isStoreAdmin) ? "Employee: {$empName}" : "Your Payslip Record",
-                'description' => "Net Pay: ₱" . number_format($pay->net_pay, 2) . " · Basic: ₱" . number_format($pay->basic_pay, 2) . " · Status: {$pay->status}",
+                'description' => "Net Pay: ₱" . number_format((float) $pay->net_pay, 2) . " · Basic: ₱" . number_format((float) ($pay->basic_salary ?? 0), 2) . " · Status: {$pay->status}",
                 'url' => $isAdmin ? "/payroll?id={$pay->payroll_id}" : "/employee/payroll",
                 'route' => $isAdmin ? "/payroll?id={$pay->payroll_id}" : "/employee/payroll",
                 'icon' => '💰',
@@ -470,9 +522,9 @@ class SearchController extends Controller
 
             if ($isEmployee) {
                 $letterQuery->where('employee_id', $user->employee_id ?? 0);
-            } elseif ($isStoreAdmin && $branchId) {
-                $letterQuery->whereHas('employee', function($sub) use ($branchId) {
-                    $sub->where('branch_id', $branchId);
+            } elseif ($isStoreAdmin && $userBranch) {
+                $letterQuery->whereHas('employee', function($sub) use ($userBranch) {
+                    $sub->where('branch_id', $userBranch);
                 });
             }
 
@@ -504,13 +556,17 @@ class SearchController extends Controller
             $grouped[$mod][] = $res;
         }
 
-        return response()->json([
+        $payload = [
             'success' => true,
             'query' => $q,
             'total' => count($results),
             'results' => $results,
             'grouped' => $grouped,
-        ]);
+        ];
+
+        Cache::put($cacheKey, $payload, 10);
+
+        return response()->json($payload);
     }
 }
 

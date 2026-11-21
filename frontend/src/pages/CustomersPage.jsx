@@ -84,8 +84,10 @@ export default function CustomersPage({ branchFilter, embedded }) {
   useEffect(() => {
     if (branchFilter && branchFilter !== 'All') {
       setSelectedBranchFilter(String(branchFilter))
+    } else if (isStoreAdmin && (user?.employee?.branch_id || user?.branch_id)) {
+      setSelectedBranchFilter(String(user?.employee?.branch_id || user?.branch_id))
     }
-  }, [branchFilter])
+  }, [branchFilter, isStoreAdmin, user?.employee?.branch_id, user?.branch_id])
 
   const openAssignBranch = (c) => {
     setAssignBranchCustomer(c)
@@ -179,7 +181,9 @@ export default function CustomersPage({ branchFilter, embedded }) {
     }
     setError('')
     try {
-      const effectiveBranch = branchFilter || (selectedBranchFilter !== 'All' ? selectedBranchFilter : undefined)
+      const effectiveBranch = (branchFilter && branchFilter !== 'All')
+        ? branchFilter
+        : (selectedBranchFilter !== 'All' ? selectedBranchFilter : undefined)
       const data = await api.customers.getAll({
         search: search || undefined,
         status: statusFilter !== 'All' ? statusFilter : undefined,
@@ -448,17 +452,19 @@ export default function CustomersPage({ branchFilter, embedded }) {
           </div>
 
           <div className="flex flex-wrap gap-2">
-            <select
-              value={selectedBranchFilter}
-              onChange={e => { setSelectedBranchFilter(e.target.value); setPage(1) }}
-              className="border border-border rounded-xl px-3 py-2 text-xs font-semibold text-foreground bg-card cursor-pointer"
-            >
-              <option value="All">All Branches</option>
-              {branches.map(b => (
-                <option key={b.id || b.name} value={String(b.id || b.name)}>{b.name}</option>
-              ))}
-              <option value="unassigned">Unassigned</option>
-            </select>
+            {(!branchFilter || branchFilter === 'All') && (
+              <select
+                value={selectedBranchFilter}
+                disabled={isStoreAdmin}
+                onChange={e => { setSelectedBranchFilter(e.target.value); setPage(1) }}
+                className="border border-border rounded-xl px-3 py-2 text-xs font-semibold text-foreground bg-card cursor-pointer disabled:opacity-70 disabled:bg-muted disabled:cursor-not-allowed"
+              >
+                <option value="All">All Branches</option>
+                {branches.map(b => (
+                  <option key={b.id || b.name} value={String(b.id || b.name)}>{b.name}</option>
+                ))}
+              </select>
+            )}
 
             <select
               value={statusFilter}

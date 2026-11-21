@@ -51,7 +51,7 @@ function RespondModal({ isOpen, onClose, message, onSend }) {
 
   return (
     <div className="fixed inset-0 z-[99999] flex items-center justify-center p-4">
-      <div className="fixed inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose}></div>
+      <div className="fixed inset-0 bg-black/60 backdrop-blur-sm"></div>
       <div className="relative bg-card border border-border rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] overflow-hidden flex flex-col animate-in fade-in zoom-in-95 duration-200">
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-border bg-gradient-to-r from-primary/5 to-transparent">

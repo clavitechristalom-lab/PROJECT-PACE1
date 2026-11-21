@@ -268,7 +268,22 @@ class AttendanceSchedule
         $date = substr((string) $a->attendance_date, 0, 10);
         $fmt = fn ($t) => $t ? date('h:i A', strtotime($t)) : '';
         $raw = fn ($t) => $t ? date('H:i', strtotime($t)) : '';
-        $hours = ($a->time_in && $a->time_out) ? self::computeHours($a) : ['regular' => 0, 'overtime' => 0, 'total' => 0];
+        $shiftType = strtoupper((string) ($a->shift_type ?? ''));
+
+        if ($a->status === 'Half Day' && in_array($shiftType, ['AM', 'PM'], true)) {
+            $rendered = (float) ($a->total_hours ?: 4.0);
+            $hours = ['regular' => $rendered, 'overtime' => 0.0, 'total' => $rendered];
+            $lateMins = 0;
+            $undertimeMins = 0;
+        } else {
+            $hours = ($a->time_in && $a->time_out) ? self::computeHours($a) : ['regular' => 0, 'overtime' => 0, 'total' => 0];
+            $lateMins = isset($a->late_minutes) && (int) $a->late_minutes > 0
+                ? (int) $a->late_minutes
+                : self::lateMinutes($date, $a->time_in);
+            $undertimeMins = isset($a->undertime_minutes) && (int) $a->undertime_minutes > 0
+                ? (int) $a->undertime_minutes
+                : self::undertimeMinutes($date, $a->time_out);
+        }
 
         return [
             'time_in' => $fmt($a->time_in),
@@ -279,11 +294,14 @@ class AttendanceSchedule
             'lunch_out_raw' => $raw($a->lunch_out),
             'lunch_in_raw' => $raw($a->lunch_in),
             'time_out_raw' => $raw($a->time_out),
-            'late_minutes' => self::lateMinutes($date, $a->time_in),
-            'undertime_minutes' => self::undertimeMinutes($date, $a->time_out),
+            'late_minutes' => $lateMins,
+            'undertime_minutes' => $undertimeMins,
             'regular_hours' => $hours['regular'],
             'overtime_hours' => 0.0,
             'total_hours' => $a->time_out ? $hours['total'] : min(8.0, (float) $a->total_hours),
+            'reason_code' => $a->reason_code,
+            'absence_status' => $a->absence_status,
+            'shift_type' => $a->shift_type,
         ];
     }
 }

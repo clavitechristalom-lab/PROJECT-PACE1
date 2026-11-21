@@ -733,9 +733,6 @@ export default function PayrollWorkflowModal({
     <div
       className="fixed inset-0 z-50 flex items-center justify-center p-4 animate-[fadeIn_0.15s_ease]"
       style={{ background: 'rgba(15, 23, 42, 0.7)', backdropFilter: 'blur(6px)' }}
-      onClick={(e) => {
-        if (e.target === e.currentTarget && !approving) onClose()
-      }}
     >
       <div className="bg-card rounded-2xl shadow-2xl border border-border w-full max-w-4xl max-h-[90vh] flex flex-col overflow-hidden animate-[slideUp_0.2s_ease]">
         {/* Header */}

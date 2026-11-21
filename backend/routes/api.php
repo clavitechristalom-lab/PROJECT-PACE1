@@ -186,6 +186,8 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/attendance/schedule', [AttendanceController::class, 'schedule']);
     Route::get('/attendance/summary', [AttendanceController::class, 'summary']);
     Route::get('/attendance/scan-logs', [AttendanceController::class, 'scanLogs']);
+    Route::get('/attendance/period-metrics', [AttendanceController::class, 'periodMetrics']);
+    Route::post('/attendance/simulate-period', [AttendanceController::class, 'simulatePeriod']);
 
     // ─── Administrator Only: QR Management, Requests, Audit & Operations ────────
     Route::middleware('role:Administrator')->group(function () {
@@ -292,6 +294,8 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/settings', [SystemController::class, 'saveSettings'])->middleware('role:Administrator,Store Administrator,Store Admin');
     Route::get('/system/storage', [SystemController::class, 'storage'])->middleware('role:Administrator');
     Route::post('/system/storage/clean', [SystemController::class, 'cleanStorage'])->middleware('role:Administrator');
+    Route::post('/system/storage/delete-file', [SystemController::class, 'deleteStorageFile'])->middleware('role:Administrator');
+    Route::delete('/system/storage/delete-file', [SystemController::class, 'deleteStorageFile'])->middleware('role:Administrator');
 
     // ─── Notifications ──────────────────────────────────────────────────────────
     Route::get('/notifications', [NotificationController::class, 'index']);

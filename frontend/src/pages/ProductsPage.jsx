@@ -110,6 +110,10 @@ export default function ProductsPage({ branchFilter, embedded }) {
     level: 'group',
     main_category: 'Furniture',
     parent_id: '',
+    branch_id: 'all',
+    sku_prefix: 'FUR',
+    slug: '',
+    sort_order: '1',
     classification_scope: '',
     is_active: true,
   })
@@ -355,7 +359,7 @@ export default function ProductsPage({ branchFilter, embedded }) {
 
   const getCategoryAssignedProducts = (catName) => {
     return products.filter(p =>
-      (!activeBranch || activeBranch === 'All' || String(p.branch_id) === String(activeBranch)) &&
+      (!activeBranch || activeBranch === 'All' || !p.branch_id || String(p.branch_id) === String(activeBranch)) &&
       matchesCategoryFilter(p, catName, categoryTree)
     )
   }
@@ -370,6 +374,16 @@ export default function ProductsPage({ branchFilter, embedded }) {
     return 'bg-primary/10 text-primary border border-primary/20'
   }
 
+  const getCategoryBranchLabel = (row) => {
+    if (!row) return 'All Branches'
+    if (row.branch_name) return row.branch_name
+    if (row.branch_id) {
+      const found = branches.find(b => String(b.id) === String(row.branch_id))
+      return found ? (found.name || found.branch) : `Branch #${row.branch_id}`
+    }
+    return 'All Branches'
+  }
+
   const filteredCategoryRows = useMemo(() => {
     const q = categorySearch.trim().toLowerCase()
     return normalizedCategoryRows.filter((row) => {
@@ -377,13 +391,15 @@ export default function ProductsPage({ branchFilter, embedded }) {
       if (categoryDomainTab !== 'All' && row.main_category !== categoryDomainTab) return false
       if (categoryStatusFilter === 'Active' && row.is_active === false) return false
       if (categoryStatusFilter === 'Inactive' && row.is_active !== false) return false
+      if (activeBranch && activeBranch !== 'All' && row.branch_id && String(row.branch_id) !== String(activeBranch)) return false
       if (q) {
-        const hay = `${row.name || ''} ${row.scope || ''} ${row.main_category || ''} ${row.group_name || ''}`.toLowerCase()
+        const branchLabel = getCategoryBranchLabel(row)
+        const hay = `${row.name || ''} ${row.scope || ''} ${row.main_category || ''} ${row.group_name || ''} ${branchLabel}`.toLowerCase()
         if (!hay.includes(q)) return false
       }
       return true
     })
-  }, [normalizedCategoryRows, categoryLevelFilter, categoryDomainTab, categoryStatusFilter, categorySearch])
+  }, [normalizedCategoryRows, categoryLevelFilter, categoryDomainTab, categoryStatusFilter, categorySearch, activeBranch, branches])
 
   const paginatedCategoryRows = filteredCategoryRows.slice((catPage - 1) * catPageSize, catPage * catPageSize)
 
@@ -392,14 +408,42 @@ export default function ProductsPage({ branchFilter, embedded }) {
     [normalizedCategoryRows, categoryForm.main_category]
   )
 
-  const openCreateCategory = () => {
-    const defaultMain = categoryDomainTab !== 'All' ? categoryDomainTab : (MAIN_CATEGORIES[0] || 'Furniture')
-    const defaultLevel = 'group'
+  const toCategorySlug = (str) =>
+    String(str || '')
+      .toLowerCase()
+      .replace(/&/g, 'and')
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+
+  const openCreateCategory = (presetParentRow = null) => {
+    if (branches.length === 0) {
+      loadBranches()
+    }
+    const isPresetGroup = Boolean(
+      presetParentRow &&
+      typeof presetParentRow === 'object' &&
+      !presetParentRow.nativeEvent &&
+      presetParentRow.id &&
+      presetParentRow.name
+    )
+    const defaultMain = isPresetGroup
+      ? (presetParentRow.main_category || 'Furniture')
+      : (categoryDomainTab !== 'All' ? categoryDomainTab : (MAIN_CATEGORIES[0] || 'Furniture'))
+    const defaultLevel = isPresetGroup ? 'subcategory' : 'group'
+    const nextOrder = normalizedCategoryRows.filter(r => r.level === defaultLevel).length + 1
     setCategoryForm({
       name: '',
       level: defaultLevel,
       main_category: defaultMain,
-      parent_id: '',
+      parent_id: isPresetGroup ? String(presetParentRow.id) : '',
+      branch_id: isPresetGroup && presetParentRow.branch_id
+        ? String(presetParentRow.branch_id)
+        : (activeBranch && activeBranch !== 'All' ? String(activeBranch) : 'all'),
+      sku_prefix: isPresetGroup && presetParentRow.sku_prefix
+        ? presetParentRow.sku_prefix
+        : (defaultMain === 'Appliances' ? 'APP' : 'FUR'),
+      slug: '',
+      sort_order: String(nextOrder),
       classification_scope: '',
       is_active: true,
     })
@@ -407,11 +451,19 @@ export default function ProductsPage({ branchFilter, embedded }) {
   }
 
   const openEditCategory = (row) => {
+    if (branches.length === 0) {
+      loadBranches()
+    }
+    const resolvedMain = row.main_category || 'Furniture'
     setCategoryForm({
       name: row.name || '',
       level: row.level || 'group',
-      main_category: row.main_category || 'Furniture',
+      main_category: resolvedMain,
       parent_id: row.parent_id ? String(row.parent_id) : '',
+      branch_id: row.branch_id ? String(row.branch_id) : 'all',
+      sku_prefix: row.sku_prefix || (resolvedMain === 'Appliances' ? 'APP' : 'FUR'),
+      slug: row.slug || toCategorySlug(`${resolvedMain} ${row.name || ''}`),
+      sort_order: String(row.sort_order ?? 1),
       classification_scope: row.scope || '',
       is_active: row.is_active !== false,
     })
@@ -444,6 +496,14 @@ export default function ProductsPage({ branchFilter, embedded }) {
         level: categoryForm.level,
         main_category: categoryForm.main_category,
         parent_id: categoryForm.level === 'subcategory' && categoryForm.parent_id ? Number(categoryForm.parent_id) : null,
+        branch_id: categoryForm.branch_id && categoryForm.branch_id !== 'all' && categoryForm.branch_id !== 'All'
+          ? Number(categoryForm.branch_id)
+          : 'all',
+        sku_prefix: (categoryForm.sku_prefix || '').trim().toUpperCase() || undefined,
+        slug: (categoryForm.slug || '').trim() || undefined,
+        sort_order: categoryForm.sort_order !== '' && !Number.isNaN(Number(categoryForm.sort_order))
+          ? Number(categoryForm.sort_order)
+          : undefined,
         classification_scope: categoryForm.classification_scope.trim(),
         is_active: Boolean(categoryForm.is_active),
       }
@@ -455,7 +515,7 @@ export default function ProductsPage({ branchFilter, embedded }) {
         showToast('Category created successfully', 'success')
       }
       setCategoryModal(null)
-      await loadCategories()
+      await Promise.all([loadCategories(), loadProducts('manual')])
       triggerDataSync('products')
     } catch (err) {
       showToast(err.message || 'Failed to save category', 'error')
@@ -507,6 +567,13 @@ export default function ProductsPage({ branchFilter, embedded }) {
       ? targetCat
       : (filterIsConcrete ? category : (scopedOptions[0] || activeMain))
 
+    const matchedCatRow = normalizedCategoryRows.find(
+      r => String(r.name || '').toLowerCase() === String(activeCatPrefill || '').toLowerCase()
+    )
+    const defaultProductBranch = activeBranch !== 'All'
+      ? String(activeBranch)
+      : (matchedCatRow?.branch_id ? String(matchedCatRow.branch_id) : 'all')
+
     setFormMainCategory(activeMain)
     setEditItem(null)
     setSkuManuallyEdited(false)
@@ -514,7 +581,7 @@ export default function ProductsPage({ branchFilter, embedded }) {
       ...emptyForm,
       product_code: getNextSkuPreview(activeCatPrefill, categoryTree, products, nextSkus),
       category: activeCatPrefill,
-      branch_id: activeBranch !== 'All' ? String(activeBranch) : (branches[0]?.id ? String(branches[0].id) : 'all')
+      branch_id: defaultProductBranch,
     })
     setImageFiles([null, null, null, null])
     setExistingImages([null, null, null, null])
@@ -753,7 +820,7 @@ export default function ProductsPage({ branchFilter, embedded }) {
   const filtered = useMemo(() => {
     let result = filterBySearch(products, search, ['product_code', 'product_name', 'brand', 'category', 'main_category', 'category_group'])
     if (activeBranch && activeBranch !== 'All') {
-      result = result.filter(p => String(p.branch_id) === String(activeBranch))
+      result = result.filter(p => !p.branch_id || String(p.branch_id) === String(activeBranch))
     }
     if (category && category !== 'All') {
       result = result.filter(p => matchesCategoryFilter(p, category, categoryTree))
@@ -934,6 +1001,7 @@ export default function ProductsPage({ branchFilter, embedded }) {
                     <thead>
                       <tr className="border-b border-border bg-muted/50 text-muted-foreground uppercase font-semibold text-[11px] tracking-wider">
                         <th className="py-3.5 px-4 text-left">Category Name</th>
+                        <th className="py-3.5 px-4 text-left">Branch</th>
                         <th className="py-3.5 px-4 text-left">Description</th>
                         <th className="py-3.5 px-4 text-center">Assigned Products</th>
                         <th className="py-3.5 px-4 text-center">Status</th>
@@ -946,6 +1014,7 @@ export default function ProductsPage({ branchFilter, embedded }) {
                         const assignedCount = assignedList.length
                         const isActive = row.is_active !== false
                         const avatarCls = getCategoryAvatarClass(row.main_category || row.name)
+                        const branchLabel = getCategoryBranchLabel(row)
                         const subMeta = row.level === 'subcategory' && row.group_name
                           ? `${row.main_category} › ${row.group_name} • ID #${row.id}`
                           : `${row.main_category || row.name} • ID #${row.id}`
@@ -969,6 +1038,12 @@ export default function ProductsPage({ branchFilter, embedded }) {
                                   </div>
                                 </div>
                               </div>
+                            </td>
+
+                            <td className="py-3.5 px-4">
+                              <span className="inline-flex items-center px-2.5 py-1 rounded-lg bg-muted/60 border border-border text-[11px] font-semibold text-foreground whitespace-nowrap">
+                                {branchLabel}
+                              </span>
                             </td>
 
                             <td className="py-3.5 px-4 text-xs text-muted-foreground max-w-md">
@@ -1468,98 +1543,6 @@ export default function ProductsPage({ branchFilter, embedded }) {
               </div>
             </div>
 
-            <div className="p-3 rounded-xl border border-border bg-muted/20 space-y-2.5">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div>
-                  <span className="block font-bold text-foreground">Detailed Unit Measurements</span>
-                  <span className="text-[10px] text-muted-foreground">Specify exact dimensions (Length, Width, Height) and product Weight</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <label className="flex items-center gap-1 text-[10px] font-semibold text-muted-foreground">
-                    <span>Size Unit:</span>
-                    <select
-                      value={form.dimension_unit}
-                      onChange={e => setForm(f => ({ ...f, dimension_unit: e.target.value }))}
-                      className="px-2 py-1 rounded-lg border border-border bg-card text-foreground font-mono font-bold"
-                    >
-                      {DIMENSION_UNITS.map((u) => (
-                        <option key={`dim-u-${u}`} value={u}>{u}</option>
-                      ))}
-                    </select>
-                  </label>
-                  <label className="flex items-center gap-1 text-[10px] font-semibold text-muted-foreground">
-                    <span>Weight Unit:</span>
-                    <select
-                      value={form.weight_unit}
-                      onChange={e => setForm(f => ({ ...f, weight_unit: e.target.value }))}
-                      className="px-2 py-1 rounded-lg border border-border bg-card text-foreground font-mono font-bold"
-                    >
-                      {WEIGHT_UNITS.map((u) => (
-                        <option key={`wt-u-${u}`} value={u}>{u}</option>
-                      ))}
-                    </select>
-                  </label>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                <div>
-                  <label className="block text-[10px] font-bold text-muted-foreground mb-1">Length ({form.dimension_unit})</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    value={form.length}
-                    onChange={e => setForm(f => ({ ...f, length: e.target.value }))}
-                    placeholder="e.g. 120"
-                    className="w-full px-2.5 py-1.5 rounded-xl border border-border bg-card text-foreground font-mono"
-                  />
-                </div>
-                <div>
-                  <label className="block text-[10px] font-bold text-muted-foreground mb-1">Width ({form.dimension_unit})</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    value={form.width}
-                    onChange={e => setForm(f => ({ ...f, width: e.target.value }))}
-                    placeholder="e.g. 60"
-                    className="w-full px-2.5 py-1.5 rounded-xl border border-border bg-card text-foreground font-mono"
-                  />
-                </div>
-                <div>
-                  <label className="block text-[10px] font-bold text-muted-foreground mb-1">Height ({form.dimension_unit})</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    value={form.height}
-                    onChange={e => setForm(f => ({ ...f, height: e.target.value }))}
-                    placeholder="e.g. 85"
-                    className="w-full px-2.5 py-1.5 rounded-xl border border-border bg-card text-foreground font-mono"
-                  />
-                </div>
-                <div>
-                  <label className="block text-[10px] font-bold text-muted-foreground mb-1">Weight ({form.weight_unit})</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    value={form.weight}
-                    onChange={e => setForm(f => ({ ...f, weight: e.target.value }))}
-                    placeholder="e.g. 18.5"
-                    className="w-full px-2.5 py-1.5 rounded-xl border border-border bg-card text-foreground font-mono"
-                  />
-                </div>
-              </div>
-
-              {formatProductMeasurements(form).hasAny && (
-                <div className="text-[10px] font-mono text-primary font-semibold bg-primary/5 border border-primary/20 rounded-lg px-2.5 py-1">
-                  Measure Summary: {formatProductMeasurements(form).summary}
-                </div>
-              )}
-            </div>
-
             <div className="grid grid-cols-2 gap-2.5">
               <div className={!isAdmin ? "col-span-2" : ""}>
                 <label className="block font-bold text-muted-foreground mb-1">Selling Price (PHP) *</label>
@@ -1878,210 +1861,757 @@ export default function ProductsPage({ branchFilter, embedded }) {
       )}
 
       {/* View Category Details Modal */}
-      {viewCategoryModal && (
-        <Modal
-          isOpen={true}
-          title={viewCategoryModal.row.name}
-          onClose={() => setViewCategoryModal(null)}
-          size="lg"
-        >
-          <div className="space-y-4 text-xs">
-            <div className="flex items-start justify-between gap-3 p-3.5 rounded-2xl bg-muted/20 border border-border">
-              <div className="flex items-center gap-3 min-w-0">
-                <div className={`w-10 h-10 rounded-xl flex items-center justify-center font-bold text-sm shrink-0 ${getCategoryAvatarClass(viewCategoryModal.row.main_category || viewCategoryModal.row.name)}`}>
-                  {(viewCategoryModal.row.name || '?').trim().charAt(0).toUpperCase()}
-                </div>
-                <div className="min-w-0">
-                  <div className="font-bold text-sm text-foreground">{viewCategoryModal.row.name}</div>
-                  <div className="text-[11px] text-muted-foreground mt-0.5">
-                    {viewCategoryModal.row.main_category} • ID #{viewCategoryModal.row.id} • SKU Prefix: {viewCategoryModal.row.sku_prefix || 'PRD'}
+      {viewCategoryModal && (() => {
+        const vRow = viewCategoryModal.row
+        const vSubs = viewCategoryModal.childSubs || []
+        const vAssigned = viewCategoryModal.assigned || []
+        const totalUnits = vAssigned.reduce((sum, p) => sum + (Number(p.stock_quantity) || 0), 0)
+        const totalVal = vAssigned.reduce((sum, p) => sum + ((Number(p.discount_price || p.unit_price) || 0) * (Number(p.stock_quantity) || 0)), 0)
+        const lowOrOutCount = vAssigned.filter(p => (Number(p.stock_quantity) || 0) <= 1).length
+
+        return (
+          <Modal
+            isOpen={true}
+            title={`Category Details — ${vRow.name}`}
+            onClose={() => setViewCategoryModal(null)}
+            size="lg"
+          >
+            <div className="space-y-4 text-xs">
+              <div className="flex flex-wrap items-start justify-between gap-3 p-3.5 rounded-2xl bg-muted/20 border border-border">
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className={`w-11 h-11 rounded-xl flex items-center justify-center font-bold text-base shrink-0 ${getCategoryAvatarClass(vRow.main_category || vRow.name)}`}>
+                    {(vRow.name || '?').trim().charAt(0).toUpperCase()}
+                  </div>
+                  <div className="min-w-0">
+                    <div className="font-bold text-sm text-foreground">{vRow.name}</div>
+                    <div className="text-[11px] text-muted-foreground mt-0.5 flex flex-wrap items-center gap-1.5">
+                      <span>{vRow.main_category}</span>
+                      <span>•</span>
+                      <span className="font-mono">ID #{vRow.id}</span>
+                      <span>•</span>
+                      <span className="font-mono">SKU: {vRow.sku_prefix || 'PRD'}</span>
+                      <span>•</span>
+                      <span>Order #{vRow.sort_order ?? 1}</span>
+                      <span>•</span>
+                      <span className="font-semibold text-foreground">{getCategoryBranchLabel(vRow)}</span>
+                    </div>
                   </div>
                 </div>
-              </div>
-              <StatusBadge status={viewCategoryModal.row.is_active !== false ? 'Active' : 'Inactive'} />
-            </div>
-
-            <div className="p-3 rounded-xl bg-card border border-border">
-              <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground block mb-1">
-                Classification / Description
-              </span>
-              <p className="text-foreground leading-relaxed">
-                {viewCategoryModal.row.scope || 'No description provided.'}
-              </p>
-            </div>
-
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
-                  Assigned Products ({viewCategoryModal.assigned.length})
-                </span>
-                <button
-                  type="button"
-                  onClick={() => {
-                    const catName = viewCategoryModal.row.name
-                    setViewCategoryModal(null)
-                    navigate(`/products?category=${encodeURIComponent(catName)}`)
-                  }}
-                  className="text-xs font-bold text-primary hover:underline cursor-pointer"
-                >
-                  Open in Inventory &rarr;
-                </button>
-              </div>
-              {viewCategoryModal.assigned.length === 0 ? (
-                <div className="p-4 text-center text-muted-foreground border border-dashed border-border rounded-xl">
-                  No products are currently assigned to this category.
+                <div className="flex items-center gap-2">
+                  <StatusBadge status={vRow.is_active !== false ? 'Active' : 'Inactive'} />
+                  {canManage && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setViewCategoryModal(null)
+                        openEditCategory(vRow)
+                      }}
+                      className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-primary/10 hover:bg-primary/20 text-primary font-bold text-[11px] cursor-pointer"
+                    >
+                      <FiEdit className="w-3 h-3" />
+                      <span>Edit</span>
+                    </button>
+                  )}
                 </div>
-              ) : (
-                <div className="max-h-48 overflow-y-auto divide-y divide-border rounded-xl border border-border">
-                  {viewCategoryModal.assigned.map((p) => (
-                    <div key={`cat-prod-preview-${p.product_id}`} className="px-3.5 py-2 flex items-center justify-between gap-2 bg-card">
-                      <div className="min-w-0">
-                        <div className="font-semibold text-foreground truncate">{p.product_name}</div>
-                        <div className="text-[10px] font-mono text-muted-foreground">{p.product_code} · {p.category}</div>
-                      </div>
-                      <span className="font-mono font-bold text-emerald-600 shrink-0">{fmt(p.discount_price || p.unit_price)}</span>
-                    </div>
-                  ))}
+              </div>
+
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                <div className="p-2.5 rounded-xl bg-card border border-border">
+                  <span className="text-[10px] font-bold uppercase text-muted-foreground block">Assigned Products</span>
+                  <div className="font-mono font-bold text-sm text-foreground mt-0.5">{vAssigned.length} items</div>
+                </div>
+                <div className="p-2.5 rounded-xl bg-card border border-border">
+                  <span className="text-[10px] font-bold uppercase text-muted-foreground block">Sub-Categories</span>
+                  <div className="font-mono font-bold text-sm text-foreground mt-0.5">{vSubs.length} groups</div>
+                </div>
+                <div className="p-2.5 rounded-xl bg-card border border-border">
+                  <span className="text-[10px] font-bold uppercase text-muted-foreground block">Total Stock Units</span>
+                  <div className="font-mono font-bold text-sm text-primary mt-0.5">
+                    {totalUnits} units {lowOrOutCount > 0 ? `(${lowOrOutCount} low/out)` : ''}
+                  </div>
+                </div>
+                <div className="p-2.5 rounded-xl bg-card border border-border">
+                  <span className="text-[10px] font-bold uppercase text-muted-foreground block">Inventory Value</span>
+                  <div className="font-mono font-bold text-sm text-emerald-600 mt-0.5">{fmt(totalVal)}</div>
+                </div>
+              </div>
+
+              <div className="p-3 rounded-xl bg-card border border-border">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground block mb-1">
+                  Classification / Merchandising Scope
+                </span>
+                <p className="text-foreground leading-relaxed">
+                  {vRow.scope || 'No description provided.'}
+                </p>
+              </div>
+
+              {vSubs.length > 0 && (
+                <div className="space-y-1.5">
+                  <span className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground block">
+                    Sub-Categories ({vSubs.length})
+                  </span>
+                  <div className="flex flex-wrap gap-1.5">
+                    {vSubs.map((sub) => {
+                      const subCnt = getCategoryAssignedProducts(sub.name).length
+                      return (
+                        <span
+                          key={`view-sub-${sub.id}`}
+                          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-muted/50 border border-border text-[11px] font-semibold text-foreground"
+                        >
+                          <span>{sub.name}</span>
+                          <span className="font-mono text-[10px] text-primary font-bold">({subCnt})</span>
+                        </span>
+                      )
+                    })}
+                  </div>
                 </div>
               )}
-            </div>
 
-            <div className="flex justify-end gap-2 pt-2 border-t border-border">
-              <button
-                type="button"
-                onClick={() => setViewCategoryModal(null)}
-                className="flex items-center gap-1 px-4 py-1.5 rounded-xl border border-border hover:bg-muted font-semibold cursor-pointer"
-              >
-                <FiX className="w-3.5 h-3.5" />
-                <span>Close</span>
-              </button>
-            </div>
-          </div>
-        </Modal>
-      )}
-
-      {/* Add / Edit Category Modal */}
-      {categoryModal && (
-        <Modal
-          isOpen={true}
-          title={categoryModal.mode === 'edit' ? `Edit Category — ${categoryModal.item?.name}` : 'Add New Category'}
-          onClose={() => setCategoryModal(null)}
-          size="md"
-        >
-          <form onSubmit={handleSaveCategory} className="space-y-4 text-xs">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div>
-                <label className="block font-bold text-muted-foreground mb-1">Category Name *</label>
-                <input
-                  type="text"
-                  value={categoryForm.name}
-                  onChange={e => setCategoryForm(f => ({ ...f, name: e.target.value }))}
-                  placeholder="e.g. Living Room Furniture"
-                  required
-                  className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground font-semibold"
-                />
-              </div>
-              <div>
-                <label className="block font-bold text-muted-foreground mb-1">Level *</label>
-                <select
-                  value={categoryForm.level}
-                  disabled={categoryModal.mode === 'edit'}
-                  onChange={e => setCategoryForm(f => ({ ...f, level: e.target.value }))}
-                  className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground font-semibold disabled:opacity-60"
-                >
-                  <option value="group">Category Group</option>
-                  <option value="subcategory">Sub-Category</option>
-                  <option value="main">Main Domain</option>
-                </select>
-              </div>
-            </div>
-
-            {categoryForm.level !== 'main' && (
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="block font-bold text-muted-foreground mb-1">Main Category *</label>
-                  <select
-                    value={categoryForm.main_category}
-                    onChange={e => {
-                      const nextMain = e.target.value
-                      const firstGrp = normalizedCategoryRows.find(r => r.level === 'group' && r.main_category === nextMain)
-                      setCategoryForm(f => ({
-                        ...f,
-                        main_category: nextMain,
-                        parent_id: firstGrp ? String(firstGrp.id) : '',
-                      }))
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
+                    Assigned Products ({vAssigned.length})
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const catName = vRow.name
+                      setViewCategoryModal(null)
+                      navigate(`/products?category=${encodeURIComponent(catName)}`)
                     }}
-                    className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground font-semibold"
+                    className="text-xs font-bold text-primary hover:underline cursor-pointer"
                   >
-                    {MAIN_CATEGORIES.map((m) => (
-                      <option key={`cat-form-main-${m}`} value={m}>{m}</option>
-                    ))}
-                  </select>
+                    Open in Inventory &rarr;
+                  </button>
                 </div>
-
-                {categoryForm.level === 'subcategory' && (
-                  <div>
-                    <label className="block font-bold text-muted-foreground mb-1">Parent Group *</label>
-                    <select
-                      value={categoryForm.parent_id}
-                      onChange={e => setCategoryForm(f => ({ ...f, parent_id: e.target.value }))}
-                      className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground font-semibold"
-                      required
-                    >
-                      <option value="">Select Group</option>
-                      {categoryGroupOptions.map((g) => (
-                        <option key={`cat-form-grp-${g.id}`} value={String(g.id)}>{g.name}</option>
-                      ))}
-                    </select>
+                {vAssigned.length === 0 ? (
+                  <div className="p-4 text-center text-muted-foreground border border-dashed border-border rounded-xl">
+                    No products are currently assigned to this category.
+                  </div>
+                ) : (
+                  <div className="max-h-48 overflow-y-auto divide-y divide-border rounded-xl border border-border">
+                    {vAssigned.map((p) => (
+                      <div key={`cat-prod-preview-${p.product_id}`} className="px-3.5 py-2 flex items-center justify-between gap-2 bg-card">
+                        <div className="min-w-0">
+                          <div className="font-semibold text-foreground truncate">{p.product_name}</div>
+                          <div className="text-[10px] font-mono text-muted-foreground">
+                            {p.product_code} · {p.category} · {p.stock_quantity} {p.unit || 'unit'}
+                          </div>
+                        </div>
+                        <span className="font-mono font-bold text-emerald-600 shrink-0">{fmt(p.discount_price || p.unit_price)}</span>
+                      </div>
+                    ))}
                   </div>
                 )}
               </div>
-            )}
 
-            <div>
-              <label className="block font-bold text-muted-foreground mb-1">Description / Scope</label>
-              <textarea
-                rows={3}
-                value={categoryForm.classification_scope}
-                onChange={e => setCategoryForm(f => ({ ...f, classification_scope: e.target.value }))}
-                placeholder="Describe what belongs under this category..."
-                className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground"
-              />
+              <div className="flex justify-end gap-2 pt-2 border-t border-border">
+                <button
+                  type="button"
+                  onClick={() => setViewCategoryModal(null)}
+                  className="flex items-center gap-1 px-4 py-1.5 rounded-xl border border-border hover:bg-muted font-semibold cursor-pointer"
+                >
+                  <FiX className="w-3.5 h-3.5" />
+                  <span>Close</span>
+                </button>
+              </div>
             </div>
+          </Modal>
+        )
+      })()}
 
-            <div>
-              <label className="block font-bold text-muted-foreground mb-1">Status</label>
-              <select
-                value={categoryForm.is_active ? 'Active' : 'Inactive'}
-                onChange={e => setCategoryForm(f => ({ ...f, is_active: e.target.value === 'Active' }))}
-                className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground font-semibold"
-              >
-                <option value="Active">Active</option>
-                <option value="Inactive">Inactive</option>
-              </select>
-            </div>
+      {/* Add / Edit Category Modal (Detailed) */}
+      {categoryModal && (() => {
+        const isEditMode = categoryModal.mode === 'edit' && Boolean(categoryModal.item)
+        const editRow = categoryModal.item || null
+        const targetCategoryName = (isEditMode ? (editRow?.name || categoryForm.name) : categoryForm.name).trim()
+        const assignedProductsList = targetCategoryName ? getCategoryAssignedProducts(targetCategoryName) : []
+        const childSubcategories = isEditMode && editRow
+          ? normalizedCategoryRows.filter(r => Number(r.parent_id) === Number(editRow.id))
+          : []
+        const totalStockUnits = assignedProductsList.reduce((acc, p) => acc + (Number(p.stock_quantity) || 0), 0)
+        const totalInventoryValue = assignedProductsList.reduce(
+          (acc, p) => acc + ((Number(p.discount_price || p.unit_price) || 0) * (Number(p.stock_quantity) || 0)),
+          0
+        )
+        const lowOrOutItems = assignedProductsList.filter(p => (Number(p.stock_quantity) || 0) <= 1).length
+        const onSaleItems = assignedProductsList.filter(p => Number(p.discount_price) > 0).length
+        const prices = assignedProductsList
+          .map(p => Number(p.discount_price || p.unit_price) || 0)
+          .filter(v => v > 0)
+        const minPrice = prices.length > 0 ? Math.min(...prices) : 0
+        const maxPrice = prices.length > 0 ? Math.max(...prices) : 0
 
-            <div className="flex justify-end gap-3 pt-4 border-t border-border">
-              <button
-                type="button"
-                onClick={() => setCategoryModal(null)}
-                className="flex items-center gap-1 px-4 py-2 rounded-xl border border-border hover:bg-muted font-semibold cursor-pointer text-xs"
-              >
-                <FiX className="w-3.5 h-3.5" />
-                <span>Cancel</span>
-              </button>
-              <button
-                type="submit"
-                disabled={savingCategory}
-                className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-primary hover:bg-primary/90 text-primary-foreground font-bold cursor-pointer text-xs disabled:opacity-50"
-              >
-                <FiCheckCircle className="w-3.5 h-3.5" />
-                <span>{savingCategory ? 'Saving...' : (categoryModal.mode === 'edit' ? 'Save Changes' : 'Create Category')}</span>
-              </button>
-            </div>
-          </form>
-        </Modal>
-      )}
+        const selectedBranchObj = categoryForm.branch_id && categoryForm.branch_id !== 'all'
+          ? branches.find(b => String(b.id) === String(categoryForm.branch_id))
+          : null
+        const selectedBranchLabel = selectedBranchObj
+          ? `${selectedBranchObj.name || selectedBranchObj.branch}${selectedBranchObj.location ? ` (${selectedBranchObj.location})` : ''}`
+          : 'All Branches (Global Catalog)'
+
+        const parentGroupObj = categoryForm.level === 'subcategory' && categoryForm.parent_id
+          ? normalizedCategoryRows.find(r => String(r.id) === String(categoryForm.parent_id))
+          : null
+
+        const hierarchyBreadcrumb = categoryForm.level === 'main'
+          ? (categoryForm.name || 'Main Domain')
+          : categoryForm.level === 'subcategory'
+            ? `${categoryForm.main_category} › ${parentGroupObj?.name || 'Parent Group'} › ${categoryForm.name || 'Sub-Category'}`
+            : `${categoryForm.main_category} › ${categoryForm.name || 'Category Group'}`
+
+        const effectiveSkuPrefix = (categoryForm.sku_prefix || (categoryForm.main_category === 'Appliances' ? 'APP' : 'FUR')).toUpperCase()
+        const effectiveSlug = categoryForm.slug || toCategorySlug(`${categoryForm.main_category} ${categoryForm.name || 'category'}`)
+
+        const scopeSuggestions = categoryForm.main_category === 'Appliances'
+          ? [
+              'Energy-efficient inverter & residential appliances with manufacturer warranty.',
+              'Kitchen preparation, cooking, refrigeration, and smart home units.',
+              'Climate comfort, cooling, ventilation, and air purification systems.',
+              'Home entertainment, smart displays, and high-fidelity audio systems.',
+            ]
+          : [
+              'Seating, surface furnishings, and media storage for communal living rooms.',
+              'Solid wood bed frames, wardrobes, mattresses, and bedroom storage suites.',
+              'Dining tables, upholstered chairs, buffet cabinets, and kitchen islands.',
+              'Ergonomic office desks, executive mesh chairs, and modular shelving.',
+            ]
+
+        return (
+          <Modal
+            isOpen={true}
+            title={isEditMode ? `Edit Category — ${editRow?.name}` : 'Add New Category'}
+            onClose={() => setCategoryModal(null)}
+            size="lg"
+          >
+            <form onSubmit={handleSaveCategory} className="space-y-4 text-xs">
+              {/* Top Category Identity & Live Analytics Banner */}
+              <div className="p-3.5 rounded-2xl bg-muted/25 border border-border space-y-3">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className={`w-11 h-11 rounded-xl flex items-center justify-center font-bold text-base shrink-0 shadow-2xs ${getCategoryAvatarClass(categoryForm.main_category || categoryForm.name)}`}>
+                      {(categoryForm.name || '?').trim().charAt(0).toUpperCase()}
+                    </div>
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="font-bold text-sm text-foreground truncate">
+                          {categoryForm.name.trim() || 'Untitled Category'}
+                        </span>
+                        {isEditMode && editRow?.id && (
+                          <span className="px-2 py-0.5 rounded-md bg-muted border border-border font-mono text-[10px] font-bold text-muted-foreground">
+                            ID #{editRow.id}
+                          </span>
+                        )}
+                        <span className="px-2 py-0.5 rounded-md bg-primary/10 border border-primary/20 font-mono text-[10px] font-bold text-primary">
+                          SKU: {effectiveSkuPrefix}-XXX
+                        </span>
+                      </div>
+                      <div className="text-[11px] text-muted-foreground mt-0.5 truncate">
+                        {hierarchyBreadcrumb}
+                      </div>
+                      <div className="flex flex-wrap items-center gap-2 mt-1 text-[10px] text-muted-foreground">
+                        <span className="inline-flex items-center gap-1 font-semibold text-foreground bg-card px-2 py-0.5 rounded-md border border-border">
+                          Branch: {selectedBranchLabel}
+                        </span>
+                        <span className="font-mono bg-card px-2 py-0.5 rounded-md border border-border">
+                          /{effectiveSlug}
+                        </span>
+                        <span className="bg-card px-2 py-0.5 rounded-md border border-border font-semibold">
+                          Sort Order #{categoryForm.sort_order || 1}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                  <StatusBadge status={categoryForm.is_active ? 'Active' : 'Inactive'} />
+                </div>
+
+                {/* Live Category Metrics Grid */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1">
+                  <div className="p-2.5 rounded-xl bg-card border border-border">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground block">
+                      Assigned Products
+                    </span>
+                    <div className="font-mono font-bold text-sm text-foreground mt-0.5">
+                      {assignedProductsList.length} {assignedProductsList.length === 1 ? 'Product' : 'Products'}
+                    </div>
+                    <span className="text-[10px] text-muted-foreground">
+                      {onSaleItems > 0 ? `${onSaleItems} currently on sale` : 'Active catalog items'}
+                    </span>
+                  </div>
+
+                  <div className="p-2.5 rounded-xl bg-card border border-border">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground block">
+                      {categoryForm.level === 'subcategory' ? 'Parent Group' : 'Sub-Categories'}
+                    </span>
+                    <div className="font-mono font-bold text-sm text-foreground mt-0.5 truncate">
+                      {categoryForm.level === 'subcategory'
+                        ? (parentGroupObj?.name || editRow?.group_name || '—')
+                        : `${childSubcategories.length} Sub-Groups`}
+                    </div>
+                    <span className="text-[10px] text-muted-foreground">
+                      {categoryForm.level === 'group'
+                        ? 'Level 2 Category Group'
+                        : categoryForm.level === 'subcategory'
+                          ? 'Level 3 Sub-Category'
+                          : 'Level 1 Main Domain'}
+                    </span>
+                  </div>
+
+                  <div className="p-2.5 rounded-xl bg-card border border-border">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground block">
+                      Total Stock Units
+                    </span>
+                    <div className="font-mono font-bold text-sm text-primary mt-0.5">
+                      {totalStockUnits} Units
+                    </div>
+                    <span className={`text-[10px] ${lowOrOutItems > 0 ? 'text-amber-500 font-semibold' : 'text-muted-foreground'}`}>
+                      {lowOrOutItems > 0 ? `${lowOrOutItems} low / out of stock` : 'Healthy stock levels'}
+                    </span>
+                  </div>
+
+                  <div className="p-2.5 rounded-xl bg-card border border-border">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground block">
+                      Category Value
+                    </span>
+                    <div className="font-mono font-bold text-sm text-emerald-600 mt-0.5">
+                      {fmt(totalInventoryValue)}
+                    </div>
+                    <span className="text-[10px] text-muted-foreground">
+                      {prices.length > 0 ? `${fmt(minPrice)} – ${fmt(maxPrice)}` : 'No priced items'}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Section 1: Category Identity & Hierarchy */}
+              <div className="p-3.5 rounded-2xl bg-card border border-border space-y-3">
+                <div className="flex items-center justify-between border-b border-border pb-2">
+                  <div>
+                    <h4 className="font-bold text-foreground text-xs uppercase tracking-wider">
+                      1. Category Identity & Hierarchy
+                    </h4>
+                    <p className="text-[10px] text-muted-foreground">
+                      Define the category display name, hierarchy level, and primary product domain.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block font-bold text-muted-foreground mb-1">Category Name *</label>
+                    <input
+                      type="text"
+                      value={categoryForm.name}
+                      onChange={e => {
+                        const nextName = e.target.value
+                        setCategoryForm(f => ({
+                          ...f,
+                          name: nextName,
+                          slug: !isEditMode || !f.slug
+                            ? toCategorySlug(`${f.main_category} ${nextName}`)
+                            : f.slug,
+                        }))
+                      }}
+                      placeholder="e.g. Living Room Furniture"
+                      required
+                      className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground font-semibold"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block font-bold text-muted-foreground mb-1">Hierarchy Level *</label>
+                    <select
+                      value={categoryForm.level}
+                      disabled={isEditMode}
+                      onChange={e => {
+                        const nextLevel = e.target.value
+                        const firstGrp = normalizedCategoryRows.find(
+                          r => r.level === 'group' && r.main_category === categoryForm.main_category
+                        )
+                        setCategoryForm(f => ({
+                          ...f,
+                          level: nextLevel,
+                          parent_id: nextLevel === 'subcategory' ? (f.parent_id || (firstGrp ? String(firstGrp.id) : '')) : '',
+                        }))
+                      }}
+                      className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground font-semibold disabled:opacity-60"
+                    >
+                      <option value="group">Category Group (Level 2)</option>
+                      <option value="subcategory">Sub-Category (Level 3)</option>
+                      <option value="main">Main Domain (Level 1)</option>
+                    </select>
+                  </div>
+                </div>
+
+                {categoryForm.level !== 'main' && (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block font-bold text-muted-foreground mb-1">Main Category Domain *</label>
+                      <select
+                        value={categoryForm.main_category}
+                        onChange={e => {
+                          const nextMain = e.target.value
+                          const firstGrp = normalizedCategoryRows.find(r => r.level === 'group' && r.main_category === nextMain)
+                          setCategoryForm(f => ({
+                            ...f,
+                            main_category: nextMain,
+                            sku_prefix: nextMain === 'Appliances' ? 'APP' : 'FUR',
+                            parent_id: firstGrp ? String(firstGrp.id) : '',
+                          }))
+                        }}
+                        className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground font-semibold"
+                      >
+                        {MAIN_CATEGORIES.map((m) => (
+                          <option key={`cat-form-main-${m}`} value={m}>{m}</option>
+                        ))}
+                      </select>
+                    </div>
+
+                    {categoryForm.level === 'subcategory' ? (
+                      <div>
+                        <label className="block font-bold text-muted-foreground mb-1">Parent Category Group *</label>
+                        <select
+                          value={categoryForm.parent_id}
+                          onChange={e => setCategoryForm(f => ({ ...f, parent_id: e.target.value }))}
+                          className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground font-semibold"
+                          required
+                        >
+                          <option value="">Select Parent Group</option>
+                          {categoryGroupOptions.map((g) => (
+                            <option key={`cat-form-grp-${g.id}`} value={String(g.id)}>{g.name}</option>
+                          ))}
+                        </select>
+                      </div>
+                    ) : (
+                      <div>
+                        <label className="block font-bold text-muted-foreground mb-1">Assigned Branch / Location *</label>
+                        <select
+                          value={categoryForm.branch_id || 'all'}
+                          onChange={e => setCategoryForm(f => ({ ...f, branch_id: e.target.value }))}
+                          className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground font-semibold"
+                        >
+                          <option value="all">All Branches (Global — Visible in All Branches)</option>
+                          {branches.map(b => (
+                            <option key={`cat-form-branch-${b.id}`} value={String(b.id)}>
+                              {b.name || b.branch} {b.location ? `(${b.location})` : ''}
+                            </option>
+                          ))}
+                        </select>
+                        <p className="text-[10px] text-muted-foreground mt-1">
+                          {(!categoryForm.branch_id || categoryForm.branch_id === 'all')
+                            ? 'All products in this category will be visible across all store branches.'
+                            : `Products in this category will be scoped to ${selectedBranchLabel}.`}
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {categoryForm.level !== 'group' && (
+                  <div>
+                    <label className="block font-bold text-muted-foreground mb-1">Assigned Branch / Location *</label>
+                    <select
+                      value={categoryForm.branch_id || 'all'}
+                      onChange={e => setCategoryForm(f => ({ ...f, branch_id: e.target.value }))}
+                      className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground font-semibold"
+                    >
+                      <option value="all">All Branches (Global — Visible in All Branches)</option>
+                      {branches.map(b => (
+                        <option key={`cat-form-branch-sub-${b.id}`} value={String(b.id)}>
+                          {b.name || b.branch} {b.location ? `(${b.location})` : ''}
+                        </option>
+                      ))}
+                    </select>
+                    <p className="text-[10px] text-muted-foreground mt-1">
+                      {(!categoryForm.branch_id || categoryForm.branch_id === 'all')
+                        ? 'All products in this category will be visible across all store branches.'
+                        : `Products in this category will be scoped to ${selectedBranchLabel}.`}
+                    </p>
+                  </div>
+                )}
+              </div>
+
+              {/* Section 2: Cataloging, SKU & Storefront Configuration */}
+              <div className="p-3.5 rounded-2xl bg-card border border-border space-y-3">
+                <div className="flex items-center justify-between border-b border-border pb-2">
+                  <div>
+                    <h4 className="font-bold text-foreground text-xs uppercase tracking-wider">
+                      2. Cataloging, SKU & Display Configuration
+                    </h4>
+                    <p className="text-[10px] text-muted-foreground">
+                      Configure automatic SKU code prefixing, storefront slug identifier, display order, and active status.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+                  <div>
+                    <label className="block font-bold text-muted-foreground mb-1">SKU Prefix</label>
+                    <input
+                      type="text"
+                      maxLength={10}
+                      value={categoryForm.sku_prefix}
+                      onChange={e => setCategoryForm(f => ({ ...f, sku_prefix: e.target.value.toUpperCase() }))}
+                      placeholder="e.g. FUR"
+                      className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground font-mono font-bold uppercase"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block font-bold text-muted-foreground mb-1">Display Sort Order</label>
+                    <input
+                      type="number"
+                      min="0"
+                      max="9999"
+                      value={categoryForm.sort_order}
+                      onChange={e => setCategoryForm(f => ({ ...f, sort_order: e.target.value }))}
+                      placeholder="1"
+                      className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground font-mono font-semibold"
+                    />
+                  </div>
+
+                  <div className="sm:col-span-2">
+                    <label className="block font-bold text-muted-foreground mb-1">Status *</label>
+                    <select
+                      value={categoryForm.is_active ? 'Active' : 'Inactive'}
+                      onChange={e => setCategoryForm(f => ({ ...f, is_active: e.target.value === 'Active' }))}
+                      className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground font-semibold"
+                    >
+                      <option value="Active">Active — Visible in Inventory, POS & Storefront</option>
+                      <option value="Inactive">Inactive — Hidden from Active Catalog</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="font-bold text-muted-foreground">Catalog Slug / Identifier</label>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setCategoryForm(f => ({
+                          ...f,
+                          slug: toCategorySlug(`${f.main_category} ${f.name}`),
+                        }))
+                      }
+                      className="text-[10px] font-bold text-primary hover:underline cursor-pointer"
+                    >
+                      Auto-Generate from Name
+                    </button>
+                  </div>
+                  <input
+                    type="text"
+                    value={categoryForm.slug}
+                    onChange={e => setCategoryForm(f => ({ ...f, slug: toCategorySlug(e.target.value) }))}
+                    placeholder="e.g. furniture-living-room-furniture"
+                    className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground font-mono text-[11px]"
+                  />
+                </div>
+              </div>
+
+              {/* Section 3: Description & Merchandising Scope */}
+              <div className="p-3.5 rounded-2xl bg-card border border-border space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <label className="block font-bold text-foreground text-xs uppercase tracking-wider">
+                      3. Description / Classification Scope
+                    </label>
+                    <p className="text-[10px] text-muted-foreground">
+                      Explain what product lines, styles, or specifications belong under this category.
+                    </p>
+                  </div>
+                  <span className="text-[10px] font-mono text-muted-foreground">
+                    {(categoryForm.classification_scope || '').length}/500
+                  </span>
+                </div>
+
+                <textarea
+                  rows={3}
+                  maxLength={500}
+                  value={categoryForm.classification_scope}
+                  onChange={e => setCategoryForm(f => ({ ...f, classification_scope: e.target.value }))}
+                  placeholder="Describe what belongs under this category..."
+                  className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground leading-relaxed"
+                />
+
+                <div className="space-y-1">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground block">
+                    Quick Scope Templates (Click to Apply):
+                  </span>
+                  <div className="flex flex-wrap gap-1.5">
+                    {scopeSuggestions.map((tpl, i) => (
+                      <button
+                        key={`scope-tpl-${i}`}
+                        type="button"
+                        onClick={() => setCategoryForm(f => ({ ...f, classification_scope: tpl }))}
+                        className="px-2.5 py-1 rounded-lg bg-muted/50 hover:bg-muted border border-border text-[10px] text-muted-foreground hover:text-foreground transition-colors cursor-pointer text-left truncate max-w-full"
+                      >
+                        + {tpl}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {/* Section 4 (Edit Mode): Sub-Categories & Assigned Products Breakdown */}
+              {isEditMode && (
+                <div className="p-3.5 rounded-2xl bg-card border border-border space-y-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border pb-2">
+                    <div>
+                      <h4 className="font-bold text-foreground text-xs uppercase tracking-wider">
+                        4. Linked Sub-Categories & Assigned Inventory
+                      </h4>
+                      <p className="text-[10px] text-muted-foreground">
+                        Inspect child sub-categories and products currently mapped to {editRow?.name}.
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      {categoryForm.level === 'group' && (
+                        <button
+                          type="button"
+                          onClick={() => openCreateCategory(editRow)}
+                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-primary/10 hover:bg-primary/20 text-primary font-bold text-[11px] cursor-pointer"
+                        >
+                          <FiPlus className="w-3 h-3" />
+                          <span>Add Sub-Category</span>
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setCategoryModal(null)
+                          openAssignedProductsModal(editRow)
+                        }}
+                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-blue-500/10 hover:bg-blue-500/20 text-blue-600 dark:text-blue-400 font-bold text-[11px] cursor-pointer"
+                      >
+                        <FiBox className="w-3 h-3" />
+                        <span>Manage Products ({assignedProductsList.length})</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {categoryForm.level !== 'subcategory' && (
+                    <div className="space-y-1.5">
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground block">
+                        Child Sub-Categories ({childSubcategories.length})
+                      </span>
+                      {childSubcategories.length === 0 ? (
+                        <div className="p-3 rounded-xl border border-dashed border-border text-center text-muted-foreground text-[11px]">
+                          No sub-categories under this group yet.
+                        </div>
+                      ) : (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-36 overflow-y-auto pr-1">
+                          {childSubcategories.map((sub) => {
+                            const subCount = getCategoryAssignedProducts(sub.name).length
+                            return (
+                              <div
+                                key={`edit-cat-sub-${sub.id}`}
+                                className="px-3 py-2 rounded-xl bg-muted/30 border border-border flex items-center justify-between gap-2"
+                              >
+                                <div className="min-w-0">
+                                  <div className="font-semibold text-foreground truncate">{sub.name}</div>
+                                  <div className="text-[10px] text-muted-foreground">
+                                    {subCount} {subCount === 1 ? 'Product' : 'Products'} • {getCategoryBranchLabel(sub)}
+                                  </div>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => openEditCategory(sub)}
+                                  title={`Switch to editing ${sub.name}`}
+                                  className="px-2 py-1 rounded-lg border border-border bg-card hover:bg-muted text-[10px] font-bold text-foreground shrink-0 cursor-pointer"
+                                >
+                                  Edit
+                                </button>
+                              </div>
+                            )
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Top 4 Assigned Products Preview */}
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+                        Assigned Products Preview ({assignedProductsList.length})
+                      </span>
+                      {canManage && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const targetCat = editRow?.name
+                            setCategoryModal(null)
+                            openAdd(targetCat)
+                          }}
+                          className="text-[11px] font-bold text-primary hover:underline cursor-pointer"
+                        >
+                          + Add Product to {editRow?.name}
+                        </button>
+                      )}
+                    </div>
+
+                    {assignedProductsList.length === 0 ? (
+                      <div className="p-3 rounded-xl border border-dashed border-border text-center text-muted-foreground text-[11px]">
+                        No products currently assigned to this category.
+                      </div>
+                    ) : (
+                      <div className="divide-y divide-border rounded-xl border border-border overflow-hidden bg-muted/15">
+                        {assignedProductsList.slice(0, 4).map((p) => (
+                          <div
+                            key={`edit-cat-prod-${p.product_id}`}
+                            className="px-3 py-2 flex items-center justify-between gap-2 bg-card"
+                          >
+                            <div className="min-w-0">
+                              <div className="font-semibold text-foreground truncate">{p.product_name}</div>
+                              <div className="text-[10px] font-mono text-muted-foreground">
+                                {p.product_code}{p.brand ? ` · ${p.brand}` : ''} · Stock: {p.stock_quantity} {p.unit || 'unit'}
+                              </div>
+                            </div>
+                            <span className="font-mono font-bold text-emerald-600 shrink-0">
+                              {fmt(p.discount_price || p.unit_price)}
+                            </span>
+                          </div>
+                        ))}
+                        {assignedProductsList.length > 4 && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setCategoryModal(null)
+                              openAssignedProductsModal(editRow)
+                            }}
+                            className="w-full py-2 text-center text-[11px] font-bold text-primary hover:bg-muted/40 transition-colors cursor-pointer"
+                          >
+                            View all {assignedProductsList.length} products in {editRow?.name} &rarr;
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              <div className="flex justify-end gap-3 pt-3 border-t border-border">
+                <button
+                  type="button"
+                  onClick={() => setCategoryModal(null)}
+                  className="flex items-center gap-1 px-4 py-2 rounded-xl border border-border hover:bg-muted font-semibold cursor-pointer text-xs"
+                >
+                  <FiX className="w-3.5 h-3.5" />
+                  <span>Cancel</span>
+                </button>
+                <button
+                  type="submit"
+                  disabled={savingCategory}
+                  className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-primary hover:bg-primary/90 text-primary-foreground font-bold cursor-pointer text-xs disabled:opacity-50"
+                >
+                  <FiCheckCircle className="w-3.5 h-3.5" />
+                  <span>{savingCategory ? 'Saving...' : (isEditMode ? 'Save Changes' : 'Create Category')}</span>
+                </button>
+              </div>
+            </form>
+          </Modal>
+        )
+      })()}
 
       {/* Assigned Products Modal */}
       {assignedProductsModal && (() => {

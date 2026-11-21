@@ -264,13 +264,6 @@ function AdminBusinessDashboard() {
         action={
           <div className="flex flex-wrap items-center gap-2">
             <SyncButton sync={syncDashboard} isSyncing={isSyncingDashboard} label="Sync" />
-            <button
-              onClick={() => setShowCreateBranchModal(true)}
-              className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-blue-600 via-blue-600 to-indigo-700 hover:from-blue-500 hover:to-indigo-600 text-white font-semibold text-xs rounded-xl shadow-sm shadow-blue-950/40 border border-blue-400/30 transition-all cursor-pointer"
-            >
-              <FiPlus className="w-4 h-4 text-blue-100" />
-              <span>Create Branch</span>
-            </button>
           </div>
         }
       />

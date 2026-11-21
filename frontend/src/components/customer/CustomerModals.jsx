@@ -578,7 +578,6 @@ function ProductDetailModal({ product, onClose, onBuyProduct }) {
         <div 
           ref={fullScreenRef}
           className="fixed inset-0 z-[100] bg-black/95 backdrop-blur-xl flex flex-col justify-between p-4 sm:p-6 animate-[fadeIn_0.2s_ease]"
-          onClick={() => setIsFullScreen(false)}
         >
           {/* Top Fullscreen Bar */}
           <div 

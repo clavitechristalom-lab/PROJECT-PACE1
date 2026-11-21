@@ -1601,61 +1601,38 @@ export default function PayrollPage() {
         userBranch={userBranchName}
         selectedPeriodId={selectedPeriodId}
         onApproved={(res) => {
-          // Optimistically update payroll state in < 1 second (< 1000ms target)
-          if (res?.employee_id !== undefined) {
-            const empId = Number(res.employee_id)
-            const sssAmt = Number(res.sss_amount || 0)
-            const phicAmt = Number(res.philhealth_amount || 0)
-            const pagibigAmt = Number(res.pagibig_amount || 0)
-            const taxAmt = Number(res.tax_amount || 0)
-            const statutorySum = sssAmt + phicAmt + pagibigAmt + taxAmt
+          const applyBatchEntries = Array.isArray(res?.results)
+            ? res.results
+            : (res?.employee_id !== undefined ? [res] : [])
+
+          if (applyBatchEntries.length > 0) {
+            const byEmpId = new Map(
+              applyBatchEntries.map((entry) => [Number(entry.employee_id), entry])
+            )
 
             setPayroll((prev) =>
               prev.map((item) => {
-                if (Number(item.employee_id) === empId) {
-                  // Keep attendance, loan and custom non-statutory deductions
-                  const otherDeductions = Math.max(
-                    0,
-                    (Number(item.total_deductions) || 0) -
-                    (Number(item.sss_deduction) || 0) -
-                    (Number(item.philhealth_deduction) || 0) -
-                    (Number(item.pagibig_deduction) || 0) -
-                    (Number(item.withholding_tax_deduction) || 0)
-                  )
-                  const newTotalDeductions = Math.round((otherDeductions + statutorySum) * 100) / 100
-                  const newGross = Number(item.gross_pay || 0)
-                  const newNetPay = Math.max(0, Math.round((newGross - newTotalDeductions) * 100) / 100)
-
-                  return {
-                    ...item,
-                    sss_deduction: sssAmt,
-                    philhealth_deduction: phicAmt,
-                    pagibig_deduction: pagibigAmt,
-                    withholding_tax_deduction: taxAmt,
-                    total_deductions: newTotalDeductions,
-                    net_pay: newNetPay,
-                  }
-                }
-                return item
-              })
-            )
-
-            setViewRecord((prev) => {
-              if (prev && Number(prev.employee_id) === empId) {
+                const entry = byEmpId.get(Number(item.employee_id))
+                if (!entry) return item
+                const sssAmt = Number(entry.sss_amount || 0)
+                const phicAmt = Number(entry.philhealth_amount || 0)
+                const pagibigAmt = Number(entry.pagibig_amount || 0)
+                const taxAmt = Number(entry.tax_amount || 0)
+                const statutorySum = sssAmt + phicAmt + pagibigAmt + taxAmt
                 const otherDeductions = Math.max(
                   0,
-                  (Number(prev.total_deductions) || 0) -
-                  (Number(prev.sss_deduction) || 0) -
-                  (Number(prev.philhealth_deduction) || 0) -
-                  (Number(prev.pagibig_deduction) || 0) -
-                  (Number(prev.withholding_tax_deduction) || 0)
+                  (Number(item.total_deductions) || 0) -
+                  (Number(item.sss_deduction) || 0) -
+                  (Number(item.philhealth_deduction) || 0) -
+                  (Number(item.pagibig_deduction) || 0) -
+                  (Number(item.withholding_tax_deduction) || 0)
                 )
                 const newTotalDeductions = Math.round((otherDeductions + statutorySum) * 100) / 100
-                const newGross = Number(prev.gross_pay || 0)
+                const newGross = Number(item.gross_pay || 0)
                 const newNetPay = Math.max(0, Math.round((newGross - newTotalDeductions) * 100) / 100)
 
                 return {
-                  ...prev,
+                  ...item,
                   sss_deduction: sssAmt,
                   philhealth_deduction: phicAmt,
                   pagibig_deduction: pagibigAmt,
@@ -1663,8 +1640,39 @@ export default function PayrollPage() {
                   total_deductions: newTotalDeductions,
                   net_pay: newNetPay,
                 }
+              })
+            )
+
+            setViewRecord((prev) => {
+              if (!prev) return prev
+              const entry = byEmpId.get(Number(prev.employee_id))
+              if (!entry) return prev
+              const sssAmt = Number(entry.sss_amount || 0)
+              const phicAmt = Number(entry.philhealth_amount || 0)
+              const pagibigAmt = Number(entry.pagibig_amount || 0)
+              const taxAmt = Number(entry.tax_amount || 0)
+              const statutorySum = sssAmt + phicAmt + pagibigAmt + taxAmt
+              const otherDeductions = Math.max(
+                0,
+                (Number(prev.total_deductions) || 0) -
+                (Number(prev.sss_deduction) || 0) -
+                (Number(prev.philhealth_deduction) || 0) -
+                (Number(prev.pagibig_deduction) || 0) -
+                (Number(prev.withholding_tax_deduction) || 0)
+              )
+              const newTotalDeductions = Math.round((otherDeductions + statutorySum) * 100) / 100
+              const newGross = Number(prev.gross_pay || 0)
+              const newNetPay = Math.max(0, Math.round((newGross - newTotalDeductions) * 100) / 100)
+
+              return {
+                ...prev,
+                sss_deduction: sssAmt,
+                philhealth_deduction: phicAmt,
+                pagibig_deduction: pagibigAmt,
+                withholding_tax_deduction: taxAmt,
+                total_deductions: newTotalDeductions,
+                net_pay: newNetPay,
               }
-              return prev
             })
           }
           loadData(selectedPeriodId, { branch: branchFilter }, true)
@@ -1792,14 +1800,17 @@ export function GovernmentContributionsModal({
     })
   }, [employeeList, searchQuery])
 
-  // Selected Employee Details
-  const selectedEmployee = useMemo(() => {
-    return employeeList.find((e) => String(e.employee_id) === String(selectedEmployeeId)) || null
-  }, [employeeList, selectedEmployeeId])
+  const isAllSelected = selectedEmployeeId === 'all'
 
-  // Fetch active ledger deductions when employee is chosen
+  // Selected Employee Details (single)
+  const selectedEmployee = useMemo(() => {
+    if (isAllSelected || !selectedEmployeeId) return null
+    return employeeList.find((e) => String(e.employee_id) === String(selectedEmployeeId)) || null
+  }, [employeeList, selectedEmployeeId, isAllSelected])
+
+  // Fetch active ledger deductions when a single employee is chosen
   useEffect(() => {
-    if (selectedEmployeeId) {
+    if (selectedEmployeeId && selectedEmployeeId !== 'all') {
       setApprovalResult(null)
       setErrorMessage('')
       setLoadingFinancials(true)
@@ -1824,13 +1835,25 @@ export function GovernmentContributionsModal({
           setLoadingFinancials(false)
         })
     } else {
+      setApprovalResult(null)
       setActiveLedgerDeductions([])
     }
   }, [selectedEmployeeId])
 
-  // Statutory Contributions Computation (Weekly / Semi-Monthly / Monthly Split)
+  // Statutory Contributions Computation (Weekly / Semi-Monthly / Monthly Split, supports single or All Employees)
   const computation = useMemo(() => {
-    if (!selectedEmployee) {
+    let multiplier = 0.5
+    let multiplierLabel = '50% Semi-Monthly Cutoff Split'
+    if (cutoffType === 'weekly') {
+      multiplier = 0.25
+      multiplierLabel = '25% Weekly Payroll Split'
+    } else if (cutoffType === 'monthly') {
+      multiplier = 1.0
+      multiplierLabel = '100% Full Monthly Share'
+    }
+
+    const targets = isAllSelected ? filteredEmployees : (selectedEmployee ? [selectedEmployee] : [])
+    if (targets.length === 0) {
       return {
         monthlyBase: 0,
         cutoffBase: 0,
@@ -1842,58 +1865,60 @@ export function GovernmentContributionsModal({
         calculatedPagibig: 0,
         total: 0,
         netRemaining: 0,
-        multiplierLabel: '50% Semi-Monthly Split',
+        multiplierLabel,
+        employeeCount: 0,
       }
     }
 
-    const rawDr = Number(selectedEmployee.daily_rate || 0)
-    const rawBasic = Number(selectedEmployee.basic_salary || 0)
-    const dailyRate = (rawDr >= 100 && rawDr <= 500)
-      ? rawDr
-      : ((rawBasic >= 2600 && rawBasic <= 13000) ? Math.round((rawBasic / 26) * 100) / 100 : 500)
-    const monthlySalary = Math.round(dailyRate * 26 * 100) / 100
-
-    // Schedule Apportioning Multipliers:
-    // weekly: 25% (0.25)
-    // semi-monthly: 50% (0.50)
-    // monthly: 100% (1.00)
-    let multiplier = 0.5
-    let multiplierLabel = '50% Semi-Monthly Cutoff Split'
-    if (cutoffType === 'weekly') {
-      multiplier = 0.25
-      multiplierLabel = '25% Weekly Payroll Split'
-    } else if (cutoffType === 'monthly') {
-      multiplier = 1.0
-      multiplierLabel = '100% Full Monthly Share'
-    }
-
-    const basePay = Math.round(monthlySalary * multiplier * 100) / 100
-
-    // 1. SSS: 4.5% statutory employee share (apportioned by cycle multiplier)
-    const monthlySss = Math.round(monthlySalary * 0.045 * 100) / 100
-    const calculatedSss = Math.round(monthlySss * multiplier * 100) / 100
-
-    // 2. PhilHealth: 2.5% statutory employee share (apportioned by cycle multiplier)
-    const monthlyPhilhealth = Math.round(monthlySalary * 0.025 * 100) / 100
-    const calculatedPhilhealth = Math.round(monthlyPhilhealth * multiplier * 100) / 100
-
-    // 3. Pag-IBIG (HDMF): 2% of basic pay, capped by statutory ceiling:
-    // Monthly: ₱200.00 | Semi-monthly (50%): ₱100.00 | Weekly (25%): ₱50.00
     const pagibigCap = cutoffType === 'weekly' ? 50.00 : (cutoffType === 'monthly' ? 200.00 : 100.00)
-    const rawPagibig = Math.round(basePay * 0.02 * 100) / 100
-    const calculatedPagibig = basePay > 0 ? Math.min(pagibigCap, rawPagibig) : 0
 
-    // Standard Statutory Contributions:
+    let monthlyBaseSum = 0
+    let cutoffBaseSum = 0
+    let calcSssSum = 0
+    let calcPhicSum = 0
+    let calcPagibigSum = 0
+
+    targets.forEach((emp) => {
+      const rawDr = Number(emp.daily_rate || 0)
+      const rawBasic = Number(emp.basic_salary || 0)
+      const dailyRate = (rawDr >= 100 && rawDr <= 500)
+        ? rawDr
+        : ((rawBasic >= 2600 && rawBasic <= 13000) ? Math.round((rawBasic / 26) * 100) / 100 : 500)
+      const monthlySalary = Math.round(dailyRate * 26 * 100) / 100
+      const basePay = Math.round(monthlySalary * multiplier * 100) / 100
+
+      const monthlySss = Math.round(monthlySalary * 0.045 * 100) / 100
+      const empSss = Math.round(monthlySss * multiplier * 100) / 100
+
+      const monthlyPhilhealth = Math.round(monthlySalary * 0.025 * 100) / 100
+      const empPhic = Math.round(monthlyPhilhealth * multiplier * 100) / 100
+
+      const rawPagibig = Math.round(basePay * 0.02 * 100) / 100
+      const empPagibig = basePay > 0 ? Math.min(pagibigCap, rawPagibig) : 0
+
+      monthlyBaseSum += monthlySalary
+      cutoffBaseSum += basePay
+      calcSssSum += empSss
+      calcPhicSum += empPhic
+      calcPagibigSum += empPagibig
+    })
+
+    const calculatedSss = Math.round(calcSssSum * 100) / 100
+    const calculatedPhilhealth = Math.round(calcPhicSum * 100) / 100
+    const calculatedPagibig = Math.round(calcPagibigSum * 100) / 100
+
     const sss_amount = includeSss ? calculatedSss : 0
     const philhealth_amount = includePhilhealth ? calculatedPhilhealth : 0
     const pagibig_amount = includePagibig ? calculatedPagibig : 0
 
     const total_deductions = Math.round((sss_amount + philhealth_amount + pagibig_amount) * 100) / 100
-    const netRemaining = Math.max(0, Math.round((basePay - total_deductions) * 100) / 100)
+    const cutoffBase = Math.round(cutoffBaseSum * 100) / 100
+    const monthlyBase = Math.round(monthlyBaseSum * 100) / 100
+    const netRemaining = Math.max(0, Math.round((cutoffBase - total_deductions) * 100) / 100)
 
     return {
-      monthlyBase: monthlySalary,
-      cutoffBase: basePay,
+      monthlyBase,
+      cutoffBase,
       sss: sss_amount,
       philhealth: philhealth_amount,
       pagibig: pagibig_amount,
@@ -1903,8 +1928,9 @@ export function GovernmentContributionsModal({
       total: total_deductions,
       netRemaining,
       multiplierLabel,
+      employeeCount: targets.length,
     }
-  }, [selectedEmployee, includeSss, includePhilhealth, includePagibig, cutoffType])
+  }, [selectedEmployee, isAllSelected, filteredEmployees, includeSss, includePhilhealth, includePagibig, cutoffType])
 
   // Check if current employee already has active approved statutory deductions in database
   const hasApprovedStatutoryInDb = useMemo(() => {
@@ -1913,70 +1939,94 @@ export function GovernmentContributionsModal({
     )
   }, [activeLedgerDeductions])
 
-  // Strict Approval Gate: Handle "Approve & Apply Deductions"
+  // Strict Approval Gate: Handle "Approve & Apply Deductions" (single employee OR all filtered employees)
   const handleApprove = async () => {
-    if (!selectedEmployee) {
-      setErrorMessage('Please select a target employee first.')
+    if (!isAllSelected && !selectedEmployee) {
+      setErrorMessage('Please select a target employee or choose Select All Employees first.')
+      return
+    }
+    if (isAllSelected && filteredEmployees.length === 0) {
+      setErrorMessage('No matching employees found to apply statutory deductions.')
       return
     }
 
     setApproving(true)
     setErrorMessage('')
 
-    // Immediate optimistic state update (< 1000ms target)
-    const optimisticDeductions = []
-    if (includeSss && computation.sss > 0) {
-      optimisticDeductions.push({ id: 'opt-sss', name: 'SSS Contribution', amount: computation.sss, is_active: true })
-    }
-    if (includePhilhealth && computation.philhealth > 0) {
-      optimisticDeductions.push({ id: 'opt-ph', name: 'PhilHealth Contribution', amount: computation.philhealth, is_active: true })
-    }
-    if (includePagibig && computation.pagibig > 0) {
-      optimisticDeductions.push({ id: 'opt-pi', name: 'Pag-IBIG (HDMF)', amount: computation.pagibig, is_active: true })
-    }
-    const nonStatutory = activeLedgerDeductions.filter(
-      (d) => !['SSS Contribution', 'PhilHealth Contribution', 'Pag-IBIG (HDMF)', 'Withholding Tax'].includes(d.name)
-    )
-    setActiveLedgerDeductions([...optimisticDeductions, ...nonStatutory])
+    if (!isAllSelected && selectedEmployee) {
+      // Immediate optimistic state update for single employee (< 1000ms target)
+      const optimisticDeductions = []
+      if (includeSss && computation.sss > 0) {
+        optimisticDeductions.push({ id: 'opt-sss', name: 'SSS Contribution', amount: computation.sss, is_active: true })
+      }
+      if (includePhilhealth && computation.philhealth > 0) {
+        optimisticDeductions.push({ id: 'opt-ph', name: 'PhilHealth Contribution', amount: computation.philhealth, is_active: true })
+      }
+      if (includePagibig && computation.pagibig > 0) {
+        optimisticDeductions.push({ id: 'opt-pi', name: 'Pag-IBIG (HDMF)', amount: computation.pagibig, is_active: true })
+      }
+      const nonStatutory = activeLedgerDeductions.filter(
+        (d) => !['SSS Contribution', 'PhilHealth Contribution', 'Pag-IBIG (HDMF)', 'Withholding Tax'].includes(d.name)
+      )
+      setActiveLedgerDeductions([...optimisticDeductions, ...nonStatutory])
 
-    if (typeof onApproved === 'function') {
-      onApproved({
-        employee_id: selectedEmployee.employee_id,
-        sss_amount: computation.sss,
-        philhealth_amount: computation.philhealth,
-        pagibig_amount: computation.pagibig,
-        total_statutory_deductions: computation.total,
-        cutoff_type: cutoffType,
-        optimistic: true,
-      })
+      if (typeof onApproved === 'function') {
+        onApproved({
+          employee_id: selectedEmployee.employee_id,
+          sss_amount: computation.sss,
+          philhealth_amount: computation.philhealth,
+          pagibig_amount: computation.pagibig,
+          total_statutory_deductions: computation.total,
+          cutoff_type: cutoffType,
+          optimistic: true,
+        })
+      }
     }
 
     try {
-      const payload = {
-        employee_id: selectedEmployee.employee_id,
-        cutoff_type: cutoffType,
-        include_sss: includeSss,
-        include_philhealth: includePhilhealth,
-        include_pagibig: includePagibig,
-        custom_sss: computation.sss,
-        custom_philhealth: computation.philhealth,
-        custom_pagibig: computation.pagibig,
-        period_id: selectedPeriodId || undefined,
-      }
+      const payload = isAllSelected
+        ? {
+            employee_id: 'all',
+            employee_ids: filteredEmployees.map((e) => e.employee_id),
+            branch: selectedBranch !== 'All' ? selectedBranch : undefined,
+            cutoff_type: cutoffType,
+            include_sss: includeSss,
+            include_philhealth: includePhilhealth,
+            include_pagibig: includePagibig,
+            period_id: selectedPeriodId || undefined,
+          }
+        : {
+            employee_id: selectedEmployee.employee_id,
+            cutoff_type: cutoffType,
+            include_sss: includeSss,
+            include_philhealth: includePhilhealth,
+            include_pagibig: includePagibig,
+            custom_sss: computation.sss,
+            custom_philhealth: computation.philhealth,
+            custom_pagibig: computation.pagibig,
+            period_id: selectedPeriodId || undefined,
+          }
 
       const res = await api.payroll.approveContributions(payload)
 
       if (res && res.success) {
         setApprovalResult(res)
-        showToast(`Statutory deductions approved & synchronized for ${selectedEmployee.full_name}!`, 'success')
+        showToast(
+          isAllSelected
+            ? `Statutory deductions approved & synchronized for all ${res.processed_count || filteredEmployees.length} employees!`
+            : `Statutory deductions approved & synchronized for ${selectedEmployee.full_name}!`,
+          'success'
+        )
         triggerDataSync('payroll')
 
-        if (res.active_deductions) {
-          setActiveLedgerDeductions(res.active_deductions)
-        } else {
-          api.employees?.getFinancials(selectedEmployee.employee_id)
-            .then((d) => setActiveLedgerDeductions(d?.deductions || []))
-            .catch(() => {})
+        if (!isAllSelected && selectedEmployee) {
+          if (res.active_deductions) {
+            setActiveLedgerDeductions(res.active_deductions)
+          } else {
+            api.employees?.getFinancials(selectedEmployee.employee_id)
+              .then((d) => setActiveLedgerDeductions(d?.deductions || []))
+              .catch(() => {})
+          }
         }
 
         if (typeof onApproved === 'function') {
@@ -2152,17 +2202,33 @@ export function GovernmentContributionsModal({
 
             {/* Step 3: Select Target Employee */}
             <div className="p-4 rounded-2xl bg-slate-900/60 border border-slate-800 space-y-3">
-              <label className="text-xs font-bold text-slate-200 flex items-center justify-between">
-                <span className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <label className="text-xs font-bold text-slate-200 flex items-center gap-2">
                   <span className="w-5 h-5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 flex items-center justify-center text-xs font-bold">3</span>
                   <span>Select Target Employee</span>
-                </span>
-                {loadingEmployees && (
-                  <span className="text-[11px] text-emerald-400 flex items-center gap-1.5 animate-pulse">
-                    <LuRefreshCw className="w-3 h-3 animate-spin" /> Loading employees...
-                  </span>
-                )}
-              </label>
+                </label>
+
+                <div className="flex items-center gap-2">
+                  {loadingEmployees && (
+                    <span className="text-[11px] text-emerald-400 flex items-center gap-1.5 animate-pulse">
+                      <LuRefreshCw className="w-3 h-3 animate-spin" /> Loading employees...
+                    </span>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setSelectedEmployeeId(isAllSelected ? '' : 'all')}
+                    disabled={loadingEmployees || filteredEmployees.length === 0}
+                    className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-xl text-[11px] font-bold border transition-all cursor-pointer disabled:opacity-50 ${
+                      isAllSelected
+                        ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/50 shadow-sm'
+                        : 'bg-slate-800/80 text-slate-300 border-slate-700 hover:border-emerald-500/40 hover:text-emerald-300'
+                    }`}
+                  >
+                    <LuCheck className="w-3 h-3" />
+                    <span>{isAllSelected ? `All Employees Selected (${filteredEmployees.length})` : `Select All Employees (${filteredEmployees.length})`}</span>
+                  </button>
+                </div>
+              </div>
 
               <select
                 value={selectedEmployeeId}
@@ -2171,12 +2237,55 @@ export function GovernmentContributionsModal({
                 className="w-full px-3.5 py-2.5 text-xs font-medium border border-slate-800 rounded-xl bg-slate-900 text-slate-100 focus:outline-none focus:border-emerald-500/50 focus:ring-2 focus:ring-emerald-500/20 cursor-pointer disabled:opacity-50"
               >
                 <option value="">-- Choose Employee ({filteredEmployees.length} available) --</option>
+                <option value="all">
+                  All Employees ({filteredEmployees.length} employee{filteredEmployees.length === 1 ? '' : 's'}) {selectedBranch !== 'All' ? `• ${selectedBranch}` : '• All Branches'}
+                </option>
                 {filteredEmployees.map((emp) => (
                   <option key={emp.employee_id} value={emp.employee_id}>
                     {emp.full_name} ({emp.employee_code}) - {emp.position} • {emp.branch_name}
                   </option>
                 ))}
               </select>
+
+              {/* Batch Selection Summary Card when Select All Employees is chosen */}
+              {isAllSelected && filteredEmployees.length > 0 && (
+                <div className="p-4.5 rounded-2xl border border-emerald-500/30 bg-slate-950/80 shadow-md space-y-3 transition-all animate-[fadeIn_0.15s_ease]">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-800">
+                    <div>
+                      <div className="text-sm font-bold text-slate-100 flex items-center gap-2">
+                        <span>Batch Mode: All Selected Employees</span>
+                        <span className="px-2 py-0.5 rounded-md text-[10px] font-mono bg-emerald-500/15 text-emerald-300 font-bold border border-emerald-500/30">
+                          {filteredEmployees.length} Employees
+                        </span>
+                      </div>
+                      <div className="text-xs text-slate-400 mt-0.5">
+                        Branch Scope: <strong className="text-emerald-400">{selectedBranch === 'All' ? 'All Branches' : selectedBranch}</strong>
+                        {searchQuery.trim() ? <> &bull; Filter: <strong className="text-slate-200">"{searchQuery.trim()}"</strong></> : null}
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <span className="text-[10px] text-slate-400 block uppercase font-bold tracking-wider">Combined Monthly Base</span>
+                      <span className="text-sm font-mono font-bold text-emerald-400">
+                        {fmt(computation.monthlyBase)}
+                      </span>
+                      <span className="text-[10px] text-slate-500 block">
+                        Combined Cutoff Base ({cutoffType}): <strong className="text-slate-300 font-mono">{fmt(computation.cutoffBase)}</strong>
+                      </span>
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto">
+                    {filteredEmployees.map((emp) => (
+                      <span
+                        key={emp.employee_id}
+                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-slate-900 border border-slate-800 text-[10px] text-slate-300 font-mono"
+                      >
+                        <span className="text-emerald-400 font-bold">{emp.employee_code}</span>
+                        <span>{emp.full_name}</span>
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               {/* Selected Target Employee Detail Card */}
               {selectedEmployee && (
@@ -2510,7 +2619,7 @@ export function GovernmentContributionsModal({
               type="button"
               id="btn-approve-contributions"
               onClick={handleApprove}
-              disabled={approving || !selectedEmployee}
+              disabled={approving || (!selectedEmployee && !isAllSelected) || (isAllSelected && filteredEmployees.length === 0)}
               className="flex items-center gap-2 px-5 py-2.5 text-xs font-extrabold rounded-2xl bg-gradient-to-r from-emerald-600 via-emerald-500 to-teal-500 hover:from-emerald-500 hover:to-teal-400 text-slate-950 shadow-lg shadow-emerald-500/25 transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
             >
               {approving ? (
@@ -2521,7 +2630,11 @@ export function GovernmentContributionsModal({
               ) : (
                 <>
                   <LuCheckCheck className="w-4 h-4 text-slate-950 stroke-[2.5]" />
-                  <span>Approve &amp; Apply Deductions</span>
+                  <span>
+                    {isAllSelected
+                      ? `Approve & Apply to All (${filteredEmployees.length})`
+                      : 'Approve & Apply Deductions'}
+                  </span>
                 </>
               )}
             </button>

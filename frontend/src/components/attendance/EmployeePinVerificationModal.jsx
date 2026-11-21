@@ -103,6 +103,16 @@ export default function EmployeePinVerificationModal({ request, onClose, onSucce
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 bg-slate-950/80 backdrop-blur-sm animate-in fade-in duration-200">
       <Card noPad className="w-full max-w-2xl rounded-2xl overflow-hidden bg-card border-border shadow-2xl relative animate-in zoom-in-95 duration-200 flex flex-col">
         <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-emerald-500 via-primary to-emerald-500 animate-gradient-x"></div>
+        {(onCancel || onClose) && (
+          <button
+            type="button"
+            onClick={() => (onCancel ? onCancel() : onClose())}
+            className="absolute top-3.5 right-3.5 z-20 w-8 h-8 rounded-xl hover:bg-muted flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+            aria-label="Close modal"
+          >
+            <FiX className="w-4 h-4" />
+          </button>
+        )}
         
         <div className="p-6 sm:p-8 space-y-5">
           <div className="text-center space-y-1.5 border-b border-border pb-4">

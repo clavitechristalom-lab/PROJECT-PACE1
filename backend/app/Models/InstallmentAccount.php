@@ -15,17 +15,25 @@ class InstallmentAccount extends Model
 
     protected $appends = ['total_paid', 'balance', 'remaining_balance'];
 
-    public function getTotalPaidAttribute(): float
+    /**
+     * Canonical financial breakdown: counts only confirmed/completed payments,
+     * avoids double-counting down payment, and tracks pending verifications separately.
+     */
+    public function financialBreakdown(): array
     {
         $payments = $this->relationLoaded('payments')
             ? $this->payments
             : $this->payments()->get();
 
         $completedPayments = $payments->filter(function ($p) {
-            return !in_array($p->status, ['Pending Verification', 'Rejected']);
+            $st = strtolower(trim((string) ($p->status ?? 'completed')));
+            return !in_array($st, ['pending', 'pending verification', 'pending approval', 'rejected', 'failed', 'cancelled'], true);
         });
 
-        $paymentsSum = (float) $completedPayments->sum('amount');
+        $pendingPayments = $payments->filter(function ($p) {
+            $st = strtolower(trim((string) ($p->status ?? '')));
+            return in_array($st, ['pending', 'pending verification', 'pending approval'], true);
+        });
 
         $hasDownpaymentRow = $completedPayments->contains(function ($p) {
             $ref = strtoupper((string) ($p->reference_no ?? ''));
@@ -35,8 +43,24 @@ class InstallmentAccount extends Model
                 || str_contains($notes, 'down payment');
         });
 
+        $paymentsSum = (float) $completedPayments->sum('amount');
         $downPaymentToAdd = $hasDownpaymentRow ? 0.0 : (float) $this->down_payment;
-        return round($paymentsSum + $downPaymentToAdd, 2);
+        $paid = round($paymentsSum + $downPaymentToAdd, 2);
+        $totalPayable = (float) $this->total_payable;
+        $balance = max(0, round($totalPayable - $paid, 2));
+
+        return [
+            'paid' => $paid,
+            'balance' => $balance,
+            'pending_amount' => round((float) $pendingPayments->sum('amount'), 2),
+            'pending_count' => $pendingPayments->count(),
+            'completed_payments_count' => $completedPayments->count(),
+        ];
+    }
+
+    public function getTotalPaidAttribute(): float
+    {
+        return $this->financialBreakdown()['paid'];
     }
 
     public function getBalanceAttribute(): float

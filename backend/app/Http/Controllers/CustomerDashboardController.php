@@ -69,8 +69,10 @@ class CustomerDashboardController extends Controller
         }
 
         $prodQuery = Product::query();
-        if ($branchId && Product::where('branch_id', $branchId)->exists()) {
-            $prodQuery->where('branch_id', $branchId);
+        if ($branchId) {
+            $prodQuery->where(function ($q) use ($branchId) {
+                $q->where('branch_id', $branchId)->orWhereNull('branch_id');
+            });
         }
 
         $prodStats = (clone $prodQuery)->selectRaw("
@@ -225,12 +227,12 @@ class CustomerDashboardController extends Controller
                 $imageUrl = $firstItem->product?->image_url ?? $firstItem->product?->image ?? null;
             }
 
-            $paidAmount = (float)$inst->payments->sum('amount');
-            $balance = max(0, round($inst->total_payable - $paidAmount, 2));
-            
+            $fin = $inst->financialBreakdown();
+            $paidAmount = $fin['paid'];
+            $balance = $fin['balance'];
+
             $nextDue = $inst->paymentSchedules
-                ->where('status', 'Pending')
-                ->where('due_date', '>=', now()->format('Y-m-d'))
+                ->where('balance_due', '>', 0)
                 ->sortBy('due_date')
                 ->first();
 
@@ -238,12 +240,18 @@ class CustomerDashboardController extends Controller
                 'account_no' => $inst->account_no,
                 'product' => $productName,
                 'purchase_date' => $inst->start_date,
-                'total_amount' => $inst->principal_amount + $inst->interest_amount,
-                'monthly_payment' => $inst->installment_amount,
+                'payment_term' => $inst->number_of_installments ? "{$inst->number_of_installments} " . ($inst->frequency ?: 'Monthly') : null,
+                'down_payment' => (float)$inst->down_payment,
+                'total_payable' => (float)$inst->total_payable,
+                'total_amount' => (float)$inst->total_payable,
+                'monthly_payment' => (float)$inst->installment_amount,
+                'total_paid' => $paidAmount,
                 'paid_amount' => $paidAmount,
                 'balance' => $balance,
+                'pending_payments_amount' => $fin['pending_amount'],
+                'pending_payments_count' => $fin['pending_count'],
                 'next_due_date' => $nextDue ? $nextDue->due_date : null,
-                'status' => $inst->status,
+                'status' => $balance <= 0 ? 'Complete Payment' : $inst->status,
                 'image_url' => $imageUrl,
                 'installment_id' => $inst->installment_id,
                 'payment_method' => $inst->sale?->payment_method ?? 'Installment',

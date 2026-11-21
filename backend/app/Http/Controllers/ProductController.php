@@ -124,10 +124,17 @@ class ProductController extends Controller
             // Administrators see all products
         }
 
-        // Branch filter (for Administrator or explicit branch filter)
+        // Branch filter (for Administrator or explicit branch filter; always include global products with null branch_id)
         $branchQuery = $request->query('branch', $request->query('branch_id'));
-        if ($branchQuery && !in_array($branchQuery, ['All', 'all'])) {
-            $query->where('branch_id', $branchQuery);
+        if ($branchQuery && !in_array(strtolower(trim((string) $branchQuery)), ['all', 'null', ''], true)) {
+            $resolvedBranchId = is_numeric($branchQuery)
+                ? (int) $branchQuery
+                : \App\Models\BranchProfile::where('name', trim((string) $branchQuery))->value('id');
+            if ($resolvedBranchId) {
+                $query->where(function ($q) use ($resolvedBranchId) {
+                    $q->where('branch_id', $resolvedBranchId)->orWhereNull('branch_id');
+                });
+            }
         }
 
         if ($request->filled('search')) {
@@ -294,7 +301,9 @@ class ProductController extends Controller
             if (!$employee || !$employee->branch_id) {
                 return response()->json(['message' => 'Store Administrator is not assigned to any branch. (DEBUG: user_id=' . $user->user_id . ', employee_id=' . $user->employee_id . ', has_employee=' . ($employee ? 'yes' : 'no') . ')'], 403);
             }
-            $validated['branch_id'] = $employee->branch_id;
+            $validated['branch_id'] = array_key_exists('branch_id', $validated) && $validated['branch_id'] === null
+                ? null
+                : $employee->branch_id;
         } elseif ($user && $user->role === 'Administrator') {
             if (empty($validated['branch_id']) || $validated['branch_id'] === 'all') {
                 $validated['branch_id'] = null;
@@ -372,7 +381,7 @@ class ProductController extends Controller
 
         if ($user && in_array($user->role, ['Store Administrator', 'Store Admin'])) {
             $employee = \App\Models\Employee::where('employee_id', $user->employee_id)->first();
-            if (!$employee || $employee->branch_id !== $product->branch_id) {
+            if (!$employee || ($product->branch_id !== null && (int) $employee->branch_id !== (int) $product->branch_id)) {
                 return response()->json(['message' => 'Unauthorized to update product from another branch.'], 403);
             }
         }

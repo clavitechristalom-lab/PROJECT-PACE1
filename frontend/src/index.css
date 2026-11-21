@@ -25,15 +25,15 @@
 }
 
 :root {
-  --background: #f8fafc;
+  --background: #fbf9f5;
   --foreground: #0f172a;
-  --card: #ffffff;
+  --card: #fffdf9;
   --card-foreground: #0f172a;
   --primary: #2563eb;
   --primary-foreground: #ffffff;
   --secondary: #e0e7ff;
   --secondary-foreground: #1e3a8a;
-  --muted: #e2e8f0;
+  --muted: #f2efe9;
   --muted-foreground: #475569;
   --accent: #0284c7;
   --accent-foreground: #ffffff;
@@ -90,14 +90,32 @@
 }
 
 body {
-  font-family: 'Inter', system-ui, sans-serif;
+  font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: clamp(13px, 0.88vw, 14px);
+  line-height: 1.5;
+  letter-spacing: -0.005em;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
   background-color: var(--background);
   color: var(--foreground);
   margin: 0;
 }
 
+h1, h2, h3, h4, h5, h6 {
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  letter-spacing: -0.015em;
+}
+
+input, select, textarea, button {
+  font-family: inherit;
+}
+
+table {
+  font-variant-numeric: tabular-nums;
+}
+
 .font-mono {
-  font-family: 'DM Mono', 'Courier New', monospace;
+  font-family: 'DM Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
 /* Hide scrollbars by default, show on hover */
@@ -185,9 +203,9 @@ body {
 
 /* -- Branch Carousel & Modal Custom CSS -- */
 :root {
-  --c-bg: #f5f6fa;
-  --c-surface: #ffffff;
-  --c-border: #e4e6ed;
+  --c-bg: #fbf9f5;
+  --c-surface: #fffdf9;
+  --c-border: #ebe6dc;
   --c-border-md: #d0d3de;
   --c-text: #0f1117;
   --c-text-2: #5a5f72;
@@ -616,7 +634,7 @@ body {
 
 /* Solid Clean Sidebar & Header */
 .sidebar-shell {
-  background: #F5F5F5 !important;
+  background: #fbf9f5 !important;
   backdrop-filter: none !important;
   -webkit-backdrop-filter: none !important;
   border-right: none !important;
@@ -632,11 +650,11 @@ body {
 }
 
 .header-shell {
-  background: #F5F5F5 !important;
+  background: #fbf9f5 !important;
   backdrop-filter: none !important;
   -webkit-backdrop-filter: none !important;
   border-left: none !important;
-  border-bottom: 1px solid #e2e8f0 !important;
+  border-bottom: 1px solid #ebe6dc !important;
   box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06);
 }
 
@@ -650,11 +668,11 @@ body {
 }
 
 .brand-logo-shell {
-  background: #F5F5F5 !important;
+  background: #fbf9f5 !important;
   backdrop-filter: none !important;
   -webkit-backdrop-filter: none !important;
   border-right: none !important;
-  border-bottom: 1px solid #e2e8f0 !important;
+  border-bottom: 1px solid #ebe6dc !important;
   box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06);
 }
 
@@ -674,7 +692,7 @@ body {
   position: relative;
   min-height: 100vh;
   overflow: hidden;
-  background: #f5f3ed;
+  background: #fbf9f5;
 }
 
 .page-shell button,
@@ -724,8 +742,8 @@ html.dark .hero-image {
 
 .hero-wash {
   background:
-    linear-gradient(90deg, rgba(255, 255, 255, 0.45) 0%, rgba(255, 255, 255, 0.12) 42%, transparent 72%),
-    linear-gradient(180deg, transparent 65%, rgba(245, 243, 237, 0.65) 100%);
+    linear-gradient(90deg, rgba(251, 249, 245, 0.45) 0%, rgba(251, 249, 245, 0.12) 42%, transparent 72%),
+    linear-gradient(180deg, transparent 65%, rgba(251, 249, 245, 0.72) 100%);
   transition: background 0.3s ease;
 }
 
@@ -1316,6 +1334,11 @@ input[type="date"] {
 }
 
 @media print {
+  @page {
+    size: auto;
+    margin: 10mm 12mm;
+  }
+
   html,
   body,
   #root {
@@ -1324,6 +1347,9 @@ input[type="date"] {
     overflow: visible !important;
     background: #ffffff !important;
     color: #0f172a !important;
+    font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif !important;
+    font-size: 11px !important;
+    line-height: 1.4 !important;
   }
 
   .no-print {
@@ -1335,21 +1361,38 @@ input[type="date"] {
     print-color-adjust: exact !important;
   }
 
-  .reports-print-document table {
-    page-break-inside: auto;
-    border-collapse: collapse;
+  .overflow-x-auto,
+  .overflow-hidden {
+    overflow: visible !important;
   }
 
-  .reports-print-document thead {
+  table {
+    width: 100% !important;
+    min-width: 0 !important;
+    border-collapse: collapse !important;
+    table-layout: auto !important;
+    page-break-inside: auto;
+  }
+
+  th, td {
+    white-space: normal !important;
+    word-break: break-word !important;
+    overflow-wrap: anywhere !important;
+    padding: 5px 6px !important;
+    font-size: 10px !important;
+    line-height: 1.35 !important;
+  }
+
+  thead {
     display: table-header-group;
   }
 
-  .reports-print-document tfoot {
+  tfoot {
     display: table-footer-group;
   }
 
-  .reports-print-document tr,
-  .reports-print-document .print-avoid-break {
+  tr,
+  .print-avoid-break {
     break-inside: avoid;
     page-break-inside: avoid;
   }

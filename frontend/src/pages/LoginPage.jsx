@@ -32,7 +32,8 @@ export default function LoginPage() {
   const [activeTab, setActiveTab] = useState('login')
   const [serviceModal, setServiceModal] = useState(null) // 'warranty' | 'installment' | 'maintenance' | null
   const [isContactModalOpen, setIsContactModalOpen] = useState(false)
-  const [branchModalType, setBranchModalType] = useState(null) // 'locations' | 'call' | null
+  const [isCompanyProfileModalOpen, setIsCompanyProfileModalOpen] = useState(false)
+  const [branchModalType, setBranchModalType] = useState(null) // 'locations' | 'call' | 'admin' | null
   const [contactForm, setContactForm] = useState({ name: '', email: '', topic: 'General Inquiry', message: '' })
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
@@ -113,8 +114,51 @@ export default function LoginPage() {
   const [sysSettings, setSysSettings] = useState(null)
   const companyName = sysSettings?.company_name || ''
   const companyAddress = sysSettings?.address || ''
-  const companyEmail = sysSettings?.email || ''
+  const adminContacts = useMemo(() => {
+    const list = Array.isArray(sysSettings?.admin_contacts) ? sysSettings.admin_contacts : []
+    if (list.length > 0) return list
+    return [
+      {
+        user_id: 2,
+        username: 'Clavite',
+        name: 'Christalom Clavite',
+        role: 'Administrator',
+        position: 'System Administrator',
+        department: 'Administration',
+        email: 'clavitechristalom@gmail.com',
+        phone: '09631090031',
+        branch_name: 'Head Office (Main)',
+        working_hours: '8:00 AM – 5:00 PM (Mon–Sat)',
+      },
+      {
+        user_id: 1,
+        username: 'admin',
+        name: 'System Administrator',
+        role: 'Administrator',
+        position: 'System Administrator',
+        department: 'Administration',
+        email: 'Z-LICZ@gmail.com',
+        phone: '09631090031',
+        branch_name: 'Head Office (Main)',
+        working_hours: '8:00 AM – 5:00 PM (Mon–Sat)',
+      },
+      {
+        user_id: 3,
+        username: 'Clavite123',
+        name: 'Chris Clavite',
+        role: 'Store Administrator',
+        position: 'Manager (Store Admin)',
+        department: 'Store Admin',
+        email: 'christalomclavite@gmail.com',
+        phone: '09242045869',
+        branch_name: 'Z-Lics Iligan',
+        working_hours: '8:00 AM – 5:00 PM (Mon–Sat)',
+      },
+    ]
+  }, [sysSettings])
   const companyPhone = sysSettings?.phone || ''
+  const companyEmail = sysSettings?.email || adminContacts.find(a => a.email)?.email || 'clavitechristalom@gmail.com'
+  const primaryAdminPhone = adminContacts.find(a => a.phone)?.phone || companyPhone || '09631090031'
   const companyWebLinks = sysSettings?.web_links || ''
   const companyLogo = sysSettings?.logo || ''
   const branchLocations = useMemo(
@@ -842,7 +886,7 @@ export default function LoginPage() {
         </div>
       </div>
 
-      <main className="relative z-10 w-full bg-[#f5f3ed] dark:bg-[#0b131e] text-gray-900 dark:text-slate-100 transition-colors duration-300">
+      <main className="relative z-10 w-full bg-[#fbf9f5] dark:bg-[#0b131e] text-gray-900 dark:text-slate-100 transition-colors duration-300">
         {/* Shared Showcase Renderer helper via inline sections */}
         {[
           {
@@ -856,7 +900,7 @@ export default function LoginPage() {
             setPage: setAppliancePage,
             pageSize: appliancePageSize,
             emptyText: 'No appliances available at the moment.',
-            sectionBg: 'bg-white dark:bg-[#0f172a]',
+            sectionBg: 'bg-[#fbf9f5] dark:bg-[#0f172a]',
           },
           {
             id: 'furniture',
@@ -869,7 +913,7 @@ export default function LoginPage() {
             setPage: setFurniturePage,
             pageSize: furniturePageSize,
             emptyText: 'No furniture available at the moment.',
-            sectionBg: 'bg-[#f5f3ed] dark:bg-[#0b131e]',
+            sectionBg: 'bg-[#f7f4ee] dark:bg-[#0b131e]',
           },
         ].map((sec) => {
           const categoryOptions = getScopedCategoryOptions(sec.title, activePublicCategoryTree)
@@ -879,9 +923,9 @@ export default function LoginPage() {
           const start = (sec.page - 1) * sec.pageSize
           const pageItems = filteredItems.slice(start, start + sec.pageSize)
           return (
-            <section key={sec.id} id={sec.id} className={`px-4 md:px-16 py-16 ${sec.sectionBg} border-t border-gray-200 dark:border-slate-800 transition-colors duration-300`}>
-              <div className="max-w-6xl mx-auto">
-                <div className="mb-6">
+            <section key={sec.id} id={sec.id} className={`w-full min-h-screen px-4 sm:px-6 lg:px-10 py-6 sm:py-8 flex flex-col justify-center ${sec.sectionBg} border-t border-gray-200 dark:border-slate-800 transition-colors duration-300`}>
+              <div className="w-full max-w-[1800px] mx-auto">
+                <div className="mb-4">
                   <div className="flex items-center justify-between">
                     <div>
                       <h2 className="text-2xl md:text-3xl font-bold text-gray-900 dark:text-white">{sec.title}</h2>
@@ -890,7 +934,7 @@ export default function LoginPage() {
                   </div>
 
                   {categoryOptions.length > 0 && (
-                    <div className="mt-5 flex flex-wrap items-center gap-2">
+                    <div className="mt-3.5 flex flex-wrap lg:flex-nowrap items-center gap-2 overflow-x-auto pb-1">
                       {[sec.title, ...categoryOptions].map((catName) => {
                         const isAll = catName === sec.title
                         const isActive = sec.activeCategory === catName
@@ -905,9 +949,9 @@ export default function LoginPage() {
                               sec.setActiveCategory(catName)
                               sec.setPage(1)
                             }}
-                            className={`px-3.5 py-1.5 rounded-full text-xs font-semibold border transition-all cursor-pointer flex items-center gap-1.5 ${isActive
+                            className={`px-3.5 py-1.5 rounded-full text-xs font-semibold border transition-all cursor-pointer flex items-center gap-1.5 whitespace-nowrap shrink-0 ${isActive
                               ? 'bg-[#58B947] border-[#58B947] text-white shadow-sm'
-                              : 'bg-white/80 dark:bg-slate-800/80 border-gray-200 dark:border-slate-700 text-gray-700 dark:text-slate-300 hover:border-[#58B947]/60 hover:text-gray-900 dark:hover:text-white'
+                              : 'bg-[#fffdf9]/90 dark:bg-slate-800/80 border-gray-200 dark:border-slate-700 text-gray-700 dark:text-slate-300 hover:border-[#58B947]/60 hover:text-gray-900 dark:hover:text-white'
                               }`}
                           >
                             <span>{isAll ? `All ${sec.title}` : catName}</span>
@@ -928,12 +972,12 @@ export default function LoginPage() {
                   <div className="flex justify-center py-12"><Spinner className="w-8 h-8 text-gray-900 dark:text-white" /></div>
                 ) : filteredItems.length > 0 ? (
                   <>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 lg:gap-5">
                       {pageItems.map(product => {
                         const catMeta = getMainCategoryBadgeMeta(product)
                         return (
-                          <div key={product.product_id || product.id} className="rounded-2xl overflow-hidden border bg-white dark:bg-slate-800/80 border-gray-200 dark:border-slate-700 shadow-sm transition-all hover:-translate-y-1 hover:shadow-lg group cursor-pointer">
-                            <div className="h-48 bg-gray-100 dark:bg-slate-700/50 overflow-hidden relative">
+                          <div key={product.product_id || product.id} className="rounded-2xl overflow-hidden border bg-[#fffdf9] dark:bg-slate-800/80 border-gray-200 dark:border-slate-700 shadow-sm transition-all hover:-translate-y-1 hover:shadow-lg group cursor-pointer">
+                            <div className="h-36 sm:h-40 bg-gray-100 dark:bg-slate-700/50 overflow-hidden relative">
                               {product.image_url ? (
                                 <img
                                   src={product.image_url.includes('/storage/') ? `${STORAGE_BASE}${product.image_url.substring(product.image_url.indexOf('/storage/'))}` : (product.image_url.startsWith('http') ? product.image_url : `${STORAGE_BASE}${product.image_url.startsWith('/') ? '' : '/storage/'}${product.image_url}`)}
@@ -954,10 +998,10 @@ export default function LoginPage() {
                                 </span>
                               )}
                             </div>
-                            <div className="p-5">
+                            <div className="p-3.5 sm:p-4">
                               {product.brand && <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400 dark:text-slate-400 mb-1">{product.brand}</p>}
-                              <h3 className="font-bold mb-1 text-gray-900 dark:text-white leading-tight" title={product.product_name}>{product.product_name}</h3>
-                              {product.description && <p className="text-xs text-gray-400 dark:text-slate-400 mb-2 line-clamp-2">{product.description}</p>}
+                              <h3 className="text-sm font-bold mb-1 text-gray-900 dark:text-white leading-tight line-clamp-1" title={product.product_name}>{product.product_name}</h3>
+                              {product.description && <p className="text-xs text-gray-400 dark:text-slate-400 mb-1.5 line-clamp-1">{product.description}</p>}
                               <div className="flex items-center justify-between mt-2">
                                 <div>
                                   {product.discount_price && Number(product.discount_price) < Number(product.unit_price) ? (
@@ -982,7 +1026,7 @@ export default function LoginPage() {
                     </div>
 
                     {filteredItems.length > sec.pageSize && (
-                      <div className="mt-8">
+                      <div className="mt-5">
                         <Pagination
                           page={sec.page}
                           total={filteredItems.length}
@@ -1005,7 +1049,7 @@ export default function LoginPage() {
         })}
 
         {/* About Section */}
-        <section id="about" className="px-4 md:px-16 py-20 bg-white dark:bg-[#0f172a] border-t border-gray-200 dark:border-slate-800 transition-colors duration-300">
+        <section id="about" className="px-4 md:px-16 py-20 bg-[#fbf9f5] dark:bg-[#0f172a] border-t border-gray-200 dark:border-slate-800 transition-colors duration-300">
           <div className="max-w-6xl mx-auto">
             <div className="text-center mb-14">
               <span className="text-xs font-bold uppercase tracking-widest text-[#58B947] mb-3 block">Who We Are</span>
@@ -1019,7 +1063,7 @@ export default function LoginPage() {
                 <button
                   type="button"
                   onClick={() => setBranchModalType('locations')}
-                  className="rounded-2xl border border-gray-100 dark:border-slate-700 bg-gray-50 dark:bg-slate-800/60 p-7 flex flex-col gap-3 shadow-sm hover:shadow-md hover:border-[#58B947]/50 dark:hover:border-[#58B947]/50 transition-all text-left cursor-pointer group"
+                  className="rounded-2xl border border-[#ebe6dc] dark:border-slate-700 bg-[#fffdf9] dark:bg-slate-800/60 p-7 flex flex-col gap-3 shadow-sm hover:shadow-md hover:border-[#58B947]/50 dark:hover:border-[#58B947]/50 transition-all text-left cursor-pointer group"
                 >
                   <div className="flex items-center justify-between gap-2 w-full">
                     <div className="w-12 h-12 rounded-xl bg-[#58B947]/10 flex items-center justify-center group-hover:scale-105 transition-transform">
@@ -1064,7 +1108,7 @@ export default function LoginPage() {
                 <button
                   type="button"
                   onClick={() => setBranchModalType('call')}
-                  className="rounded-2xl border border-gray-100 dark:border-slate-700 bg-gray-50 dark:bg-slate-800/60 p-7 flex flex-col gap-3 shadow-sm hover:shadow-md hover:border-[#58B947]/50 dark:hover:border-[#58B947]/50 transition-all text-left cursor-pointer group"
+                  className="rounded-2xl border border-[#ebe6dc] dark:border-slate-700 bg-[#fffdf9] dark:bg-slate-800/60 p-7 flex flex-col gap-3 shadow-sm hover:shadow-md hover:border-[#58B947]/50 dark:hover:border-[#58B947]/50 transition-all text-left cursor-pointer group"
                 >
                   <div className="flex items-center justify-between gap-2 w-full">
                     <div className="w-12 h-12 rounded-xl bg-[#58B947]/10 flex items-center justify-center group-hover:scale-105 transition-transform">
@@ -1107,24 +1151,73 @@ export default function LoginPage() {
                   </span>
                 </button>
               )}
-              {companyEmail && (
-                <button
-                  onClick={() => setIsContactModalOpen(true)}
-                  className="rounded-2xl border border-gray-100 dark:border-slate-700 bg-gray-50 dark:bg-slate-800/60 p-7 flex flex-col gap-4 shadow-sm hover:shadow-md transition-shadow text-left"
-                >
-                  <div className="w-12 h-12 rounded-xl bg-[#58B947]/10 flex items-center justify-center">
-                    <FiMail className="w-6 h-6 text-[#58B947]" />
+              <button
+                type="button"
+                onClick={() => setBranchModalType('admin')}
+                className="rounded-2xl border border-[#ebe6dc] dark:border-slate-700 bg-[#fffdf9] dark:bg-slate-800/60 p-7 flex flex-col gap-3 shadow-sm hover:shadow-md hover:border-[#58B947]/50 dark:hover:border-[#58B947]/50 transition-all text-left cursor-pointer group"
+              >
+                <div className="flex items-center justify-between gap-2 w-full">
+                  <div className="w-12 h-12 rounded-xl bg-[#58B947]/10 flex items-center justify-center group-hover:scale-105 transition-transform">
+                    <FiShield className="w-6 h-6 text-[#58B947]" />
                   </div>
-                  <h3 className="font-bold text-gray-900 dark:text-white text-base">Email Us</h3>
-                  <span className="text-[#58B947] font-semibold text-sm hover:underline">{companyEmail}</span>
-                </button>
-              )}
+                  {adminContacts.length > 0 && (
+                    <span className="text-[11px] font-bold px-2.5 py-1 rounded-full bg-[#58B947]/10 text-[#58B947] border border-[#58B947]/20">
+                      {adminContacts.length} {adminContacts.length === 1 ? 'Admin' : 'Admins'}
+                    </span>
+                  )}
+                </div>
+                <h3 className="font-bold text-gray-900 dark:text-white text-base">Admin Contact</h3>
+                <div className="space-y-0.5">
+                  <p className="text-[#58B947] font-semibold text-sm break-all">{companyEmail}</p>
+                  {primaryAdminPhone && (
+                    <p className="text-xs font-mono font-semibold text-gray-500 dark:text-slate-400">{primaryAdminPhone}</p>
+                  )}
+                </div>
+                <p className="text-xs text-gray-500 dark:text-slate-400 flex items-center gap-1.5">
+                  <FiClock className="w-3.5 h-3.5 text-[#58B947] shrink-0" />
+                  <span>Direct Admin &amp; Management Support (24/7 Inquiry)</span>
+                </p>
+                {adminContacts.length > 0 && (
+                  <div className="space-y-1.5 pt-2 border-t border-gray-200/70 dark:border-slate-700/70 w-full">
+                    {adminContacts.slice(0, 3).map((adm) => (
+                      <div key={adm.user_id || adm.username} className="flex items-center justify-between gap-2 text-xs text-gray-600 dark:text-slate-300">
+                        <span className="font-semibold truncate">{adm.name}</span>
+                        <span className="text-[#58B947] font-medium truncate max-w-[55%] text-right">
+                          {adm.email || adm.phone || adm.role}
+                        </span>
+                      </div>
+                    ))}
+                    {adminContacts.length > 3 && (
+                      <div className="text-[11px] text-gray-400 dark:text-slate-400 font-medium">
+                        +{adminContacts.length - 3} more admin{adminContacts.length - 3 === 1 ? '' : 's'}
+                      </div>
+                    )}
+                  </div>
+                )}
+                <span className="mt-auto pt-2 inline-flex items-center gap-1.5 text-xs font-bold text-[#58B947] group-hover:gap-2 transition-all">
+                  <span>View Admin Contact Details</span>
+                  <FiArrowRight className="w-3.5 h-3.5" />
+                </span>
+              </button>
+            </div>
+
+            {/* Company Profile, Mission & Governance Button */}
+            <div className="mt-10 flex justify-center">
+              <button
+                type="button"
+                onClick={() => setIsCompanyProfileModalOpen(true)}
+                className="inline-flex items-center gap-2.5 px-6 py-3.5 rounded-2xl bg-[#58B947]/10 hover:bg-[#58B947] border border-[#58B947]/30 hover:border-[#58B947] text-[#58B947] hover:text-white text-xs sm:text-sm font-extrabold uppercase tracking-wider shadow-sm hover:shadow-lg hover:shadow-green-500/20 transition-all cursor-pointer group"
+              >
+                <FiBriefcase className="w-4 h-4 shrink-0" />
+                <span>Company Profile, Mission &amp; Governance</span>
+                <FiArrowRight className="w-4 h-4 shrink-0 group-hover:translate-x-1 transition-transform" />
+              </button>
             </div>
           </div>
         </section>
 
         {/* Support Section */}
-        <section id="support" className="px-4 md:px-16 py-20 bg-[#f5f3ed] dark:bg-[#0b131e] border-t border-gray-200 dark:border-slate-800 transition-colors duration-300">
+        <section id="support" className="px-4 md:px-16 py-20 bg-[#f7f4ee] dark:bg-[#0b131e] border-t border-gray-200 dark:border-slate-800 transition-colors duration-300">
           <div className="max-w-6xl mx-auto">
             <div className="text-center mb-14">
               <span className="text-xs font-bold uppercase tracking-widest text-[#58B947] mb-3 block">We're Here For You</span>
@@ -1137,7 +1230,7 @@ export default function LoginPage() {
               {/* Card 1: Warranty Support */}
               <div
                 onClick={() => setServiceModal('warranty')}
-                className="rounded-2xl bg-white dark:bg-slate-800/90 border border-gray-200 dark:border-slate-700 p-6 sm:p-7 shadow-sm hover:shadow-xl hover:border-blue-500/60 dark:hover:border-blue-400/60 hover:-translate-y-1 transition-all duration-300 flex flex-col justify-between cursor-pointer group"
+                className="rounded-2xl bg-[#fffdf9] dark:bg-slate-800/90 border border-[#ebe6dc] dark:border-slate-700 p-6 sm:p-7 shadow-sm hover:shadow-xl hover:border-blue-500/60 dark:hover:border-blue-400/60 hover:-translate-y-1 transition-all duration-300 flex flex-col justify-between cursor-pointer group"
                 role="button"
                 tabIndex={0}
                 aria-label="View Warranty Support details"
@@ -1184,7 +1277,7 @@ export default function LoginPage() {
               {/* Card 2: Installment Plans */}
               <div
                 onClick={() => setServiceModal('installment')}
-                className="rounded-2xl bg-white dark:bg-slate-800/90 border border-gray-200 dark:border-slate-700 p-6 sm:p-7 shadow-sm hover:shadow-xl hover:border-purple-500/60 dark:hover:border-purple-400/60 hover:-translate-y-1 transition-all duration-300 flex flex-col justify-between cursor-pointer group"
+                className="rounded-2xl bg-[#fffdf9] dark:bg-slate-800/90 border border-[#ebe6dc] dark:border-slate-700 p-6 sm:p-7 shadow-sm hover:shadow-xl hover:border-purple-500/60 dark:hover:border-purple-400/60 hover:-translate-y-1 transition-all duration-300 flex flex-col justify-between cursor-pointer group"
                 role="button"
                 tabIndex={0}
                 aria-label="View Installment Plans details"
@@ -1231,7 +1324,7 @@ export default function LoginPage() {
               {/* Card 3: Maintenance */}
               <div
                 onClick={() => setServiceModal('maintenance')}
-                className="rounded-2xl bg-white dark:bg-slate-800/90 border border-gray-200 dark:border-slate-700 p-6 sm:p-7 shadow-sm hover:shadow-xl hover:border-orange-500/60 dark:hover:border-orange-400/60 hover:-translate-y-1 transition-all duration-300 flex flex-col justify-between cursor-pointer group"
+                className="rounded-2xl bg-[#fffdf9] dark:bg-slate-800/90 border border-[#ebe6dc] dark:border-slate-700 p-6 sm:p-7 shadow-sm hover:shadow-xl hover:border-orange-500/60 dark:hover:border-orange-400/60 hover:-translate-y-1 transition-all duration-300 flex flex-col justify-between cursor-pointer group"
                 role="button"
                 tabIndex={0}
                 aria-label="View Maintenance details"
@@ -1486,12 +1579,7 @@ export default function LoginPage() {
 
       {isLoginModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 md:p-6 bg-black/30 backdrop-blur-md animate-[fadeIn_0.15s_ease]">
-          <div
-            className="absolute inset-0 cursor-pointer"
-            onClick={() =>
-              setIsLoginModalOpen(false)
-            }
-          />
+          <div className="absolute inset-0" />
 
           <div className="relative w-full max-w-4xl bg-[#121c29]/95 backdrop-blur-2xl rounded-3xl overflow-hidden shadow-2xl border border-white/10 z-10 grid grid-cols-1 md:grid-cols-12 animate-[slideUp_0.2s_ease]">
             <button
@@ -2237,49 +2325,69 @@ export default function LoginPage() {
 
       {/* Contact Us Modal */}
       {isContactModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/30 backdrop-blur-md animate-[fadeIn_0.15s_ease]">
-          <div className="absolute inset-0 cursor-pointer" onClick={() => setIsContactModalOpen(false)} />
-          <div className="relative w-full max-w-2xl bg-white rounded-3xl overflow-hidden shadow-2xl z-10 p-6 sm:p-8 animate-[slideUp_0.2s_ease]">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-md animate-[fadeIn_0.15s_ease]">
+          <div className="absolute inset-0" />
+          <div className="relative w-full max-w-2xl bg-[#fbf9f5] dark:bg-[#121c29] text-gray-900 dark:text-white rounded-3xl border border-[#ebe6dc] dark:border-white/10 overflow-hidden shadow-2xl z-10 p-6 sm:p-8 animate-[slideUp_0.2s_ease]">
             <button
+              type="button"
               onClick={() => setIsContactModalOpen(false)}
-              className="absolute top-5 right-5 text-gray-400 hover:text-gray-900 transition-colors"
+              className="absolute top-5 right-5 text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors cursor-pointer"
             >
               <FiX className="w-6 h-6" />
             </button>
-            <h2 className="text-2xl font-bold text-gray-900 mb-2">Contact Support</h2>
-            <p className="text-sm text-gray-500 mb-6">Send us a message and we'll get back to you soon.</p>
+            <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-1.5">Contact Admin Support</h2>
+            <p className="text-sm text-gray-500 dark:text-slate-400 mb-4">Send a direct message to our administrative team and we'll get back to you soon.</p>
+
+            <div className="mb-5 px-4 py-3 rounded-2xl bg-[#58B947]/10 border border-[#58B947]/25 flex flex-wrap items-center justify-between gap-2 text-xs">
+              <div className="flex flex-wrap items-center gap-3 text-gray-700 dark:text-slate-200">
+                <a href={`mailto:${companyEmail}`} className="inline-flex items-center gap-1.5 font-semibold text-[#58B947] hover:underline break-all">
+                  <FiMail className="w-3.5 h-3.5 shrink-0" />
+                  <span>{companyEmail}</span>
+                </a>
+                {primaryAdminPhone && (
+                  <>
+                    <span className="text-gray-400 dark:text-slate-500">•</span>
+                    <a href={`tel:${primaryAdminPhone}`} className="inline-flex items-center gap-1.5 font-mono font-semibold hover:text-[#58B947] transition-colors">
+                      <FiPhone className="w-3.5 h-3.5 text-[#58B947] shrink-0" />
+                      <span>{primaryAdminPhone}</span>
+                    </a>
+                  </>
+                )}
+              </div>
+              <span className="text-[11px] font-bold text-[#58B947]">24/7 Inquiry Desk</span>
+            </div>
 
             <form onSubmit={handleContactSubmit} className="space-y-4">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-1">Your Name</label>
+                  <label className="block text-sm font-semibold text-gray-700 dark:text-slate-300 mb-1">Your Name</label>
                   <input
                     type="text"
                     required
                     value={contactForm.name}
                     onChange={e => setContactForm({ ...contactForm, name: e.target.value })}
-                    className="w-full bg-gray-50 border border-gray-200 text-gray-900 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-[#58B947] transition-all"
+                    className="w-full bg-[#fffdf9] dark:bg-slate-800/80 border border-[#ebe6dc] dark:border-slate-700 text-gray-900 dark:text-white rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-[#58B947] transition-all"
                     placeholder="John Doe"
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-1">Email Address</label>
+                  <label className="block text-sm font-semibold text-gray-700 dark:text-slate-300 mb-1">Email Address</label>
                   <input
                     type="email"
                     required
                     value={contactForm.email}
                     onChange={e => setContactForm({ ...contactForm, email: e.target.value })}
-                    className="w-full bg-gray-50 border border-gray-200 text-gray-900 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-[#58B947] transition-all"
+                    className="w-full bg-[#fffdf9] dark:bg-slate-800/80 border border-[#ebe6dc] dark:border-slate-700 text-gray-900 dark:text-white rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-[#58B947] transition-all"
                     placeholder="john@example.com"
                   />
                 </div>
               </div>
               <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-1">Topic</label>
+                <label className="block text-sm font-semibold text-gray-700 dark:text-slate-300 mb-1">Topic</label>
                 <select
                   value={contactForm.topic}
                   onChange={e => setContactForm({ ...contactForm, topic: e.target.value })}
-                  className="w-full bg-gray-50 border border-gray-200 text-gray-900 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-[#58B947] transition-all"
+                  className="w-full bg-[#fffdf9] dark:bg-slate-800/80 border border-[#ebe6dc] dark:border-slate-700 text-gray-900 dark:text-white rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-[#58B947] transition-all"
                 >
                   <option value="General Inquiry">General Inquiry</option>
                   <option value="Sales / Quotation">Sales / Quotation</option>
@@ -2288,21 +2396,21 @@ export default function LoginPage() {
                 </select>
               </div>
               <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-1">Message</label>
+                <label className="block text-sm font-semibold text-gray-700 dark:text-slate-300 mb-1">Message</label>
                 <textarea
                   required
                   rows={4}
                   value={contactForm.message}
                   onChange={e => setContactForm({ ...contactForm, message: e.target.value })}
-                  className="w-full bg-gray-50 border border-gray-200 text-gray-900 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-[#58B947] transition-all resize-none"
+                  className="w-full bg-[#fffdf9] dark:bg-slate-800/80 border border-[#ebe6dc] dark:border-slate-700 text-gray-900 dark:text-white rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-[#58B947] transition-all resize-none"
                   placeholder="How can we help you?"
                 />
               </div>
-              <div className="flex items-center justify-end gap-3 pt-4 border-t border-gray-100">
+              <div className="flex items-center justify-end gap-3 pt-4 border-t border-gray-100 dark:border-slate-800">
                 <button
                   type="button"
                   onClick={() => setIsContactModalOpen(false)}
-                  className="px-5 py-2.5 rounded-xl border border-gray-200 hover:bg-gray-50 text-gray-700 font-semibold text-sm transition-all cursor-pointer"
+                  className="px-5 py-2.5 rounded-xl border border-gray-200 dark:border-slate-700 hover:bg-gray-50 dark:hover:bg-slate-800 text-gray-700 dark:text-slate-300 font-semibold text-sm transition-all cursor-pointer"
                 >
                   Cancel
                 </button>
@@ -2320,7 +2428,7 @@ export default function LoginPage() {
       {/* Forgot Password Modal (Connected to backend /api/forgot-password/*) */}
       {forgotModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-md animate-[fadeIn_0.15s_ease]">
-          <div className="absolute inset-0 cursor-pointer" onClick={() => !forgotLoading && setForgotModalOpen(false)} />
+          <div className="absolute inset-0" />
           <div className="relative w-full max-w-2xl bg-[#090d16] border border-white/10 text-white rounded-3xl overflow-hidden shadow-2xl z-10 p-6 sm:p-8 animate-[slideUp_0.2s_ease]">
             <button
               type="button"
@@ -2536,15 +2644,11 @@ export default function LoginPage() {
       {/* Service Details Modal */}
       {serviceModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 md:p-6 bg-black/60 backdrop-blur-md overflow-y-auto animate-[fadeIn_0.15s_ease]">
-          <div
-            className="fixed inset-0 cursor-pointer"
-            onClick={() => setServiceModal(null)}
-            aria-label="Close modal overlay"
-          />
+          <div className="fixed inset-0" />
 
-          <div className="relative w-full max-w-4xl bg-white dark:bg-[#121c29] text-gray-900 dark:text-white rounded-3xl shadow-2xl border border-gray-200 dark:border-white/10 overflow-hidden my-auto max-h-[92vh] flex flex-col z-10 animate-[slideUp_0.2s_ease]">
+          <div className="relative w-full max-w-4xl bg-[#fbf9f5] dark:bg-[#121c29] text-gray-900 dark:text-white rounded-3xl shadow-2xl border border-[#ebe6dc] dark:border-white/10 overflow-hidden my-auto max-h-[92vh] flex flex-col z-10 animate-[slideUp_0.2s_ease]">
             {/* Modal Header */}
-            <div className="px-6 py-5 border-b border-gray-100 dark:border-slate-800 flex items-center justify-between gap-4 bg-gray-50/80 dark:bg-slate-900/60 shrink-0">
+            <div className="px-6 py-5 border-b border-[#ebe6dc] dark:border-slate-800 flex items-center justify-between gap-4 bg-[#f7f4ee] dark:bg-slate-900/60 shrink-0">
               <div className="flex items-center gap-3">
                 <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-lg ${serviceModal === 'warranty'
                   ? 'bg-blue-100 dark:bg-blue-950/70 text-blue-600 dark:text-blue-400'
@@ -2603,7 +2707,7 @@ export default function LoginPage() {
                       Warranty Coverage Breakdown
                     </h5>
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                      <div className="p-4 rounded-xl bg-gray-50 dark:bg-slate-800/60 border border-gray-200 dark:border-slate-700/70 space-y-2">
+                      <div className="p-4 rounded-xl bg-[#fffdf9] dark:bg-slate-800/60 border border-[#ebe6dc] dark:border-slate-700/70 space-y-2">
                         <div className="flex items-center justify-between">
                           <span className="text-xs font-bold text-blue-600 dark:text-blue-400">Major Appliances</span>
                           <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300">1–2 Yrs Parts & Labor</span>
@@ -2677,22 +2781,22 @@ export default function LoginPage() {
                       Simple 4-Step Warranty Claim Procedure
                     </h5>
                     <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 text-xs">
-                      <div className="p-3 rounded-lg bg-white dark:bg-slate-800 border border-gray-200/70 dark:border-slate-700/70">
+                      <div className="p-3 rounded-lg bg-[#fffdf9] dark:bg-slate-800 border border-[#ebe6dc] dark:border-slate-700/70">
                         <span className="w-6 h-6 rounded-full bg-blue-600 text-white font-bold flex items-center justify-center text-[11px] mb-2">1</span>
                         <h6 className="font-bold text-gray-900 dark:text-white mb-1">Locate Receipt</h6>
                         <p className="text-gray-500 dark:text-slate-400">Keep your sales invoice, official receipt, or order ID from your customer account.</p>
                       </div>
-                      <div className="p-3 rounded-lg bg-white dark:bg-slate-800 border border-gray-200/70 dark:border-slate-700/70">
+                      <div className="p-3 rounded-lg bg-[#fffdf9] dark:bg-slate-800 border border-[#ebe6dc] dark:border-slate-700/70">
                         <span className="w-6 h-6 rounded-full bg-blue-600 text-white font-bold flex items-center justify-center text-[11px] mb-2">2</span>
                         <h6 className="font-bold text-gray-900 dark:text-white mb-1">Submit Ticket</h6>
                         <p className="text-gray-500 dark:text-slate-400">File a claim via your customer portal account or call our service branch hotline.</p>
                       </div>
-                      <div className="p-3 rounded-lg bg-white dark:bg-slate-800 border border-gray-200/70 dark:border-slate-700/70">
+                      <div className="p-3 rounded-lg bg-[#fffdf9] dark:bg-slate-800 border border-[#ebe6dc] dark:border-slate-700/70">
                         <span className="w-6 h-6 rounded-full bg-blue-600 text-white font-bold flex items-center justify-center text-[11px] mb-2">3</span>
                         <h6 className="font-bold text-gray-900 dark:text-white mb-1">Diagnostics</h6>
                         <p className="text-gray-500 dark:text-slate-400">Our certified technician conducts an on-site inspection or branch assessment.</p>
                       </div>
-                      <div className="p-3 rounded-lg bg-white dark:bg-slate-800 border border-gray-200/70 dark:border-slate-700/70">
+                      <div className="p-3 rounded-lg bg-[#fffdf9] dark:bg-slate-800 border border-[#ebe6dc] dark:border-slate-700/70">
                         <span className="w-6 h-6 rounded-full bg-blue-600 text-white font-bold flex items-center justify-center text-[11px] mb-2">4</span>
                         <h6 className="font-bold text-gray-900 dark:text-white mb-1">Fast Resolution</h6>
                         <p className="text-gray-500 dark:text-slate-400">Authorized genuine replacement completed within 3 to 7 business days.</p>
@@ -2725,7 +2829,7 @@ export default function LoginPage() {
                       Financing Tenures & Options
                     </h5>
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                      <div className="p-4 rounded-xl bg-gray-50 dark:bg-slate-800/60 border border-gray-200 dark:border-slate-700/70 space-y-2">
+                      <div className="p-4 rounded-xl bg-[#fffdf9] dark:bg-slate-800/60 border border-[#ebe6dc] dark:border-slate-700/70 space-y-2">
                         <div className="flex items-center justify-between">
                           <span className="text-xs font-bold text-purple-600 dark:text-purple-400">Short-Term</span>
                           <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-purple-100 dark:bg-purple-900/50 text-purple-700 dark:text-purple-300">3–6 Months</span>
@@ -2893,7 +2997,7 @@ export default function LoginPage() {
                       Our Service Commitments & Standards
                     </h5>
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
-                      <div className="p-3.5 rounded-xl bg-white dark:bg-slate-800 border border-gray-200/70 dark:border-slate-700/70 space-y-1.5">
+                      <div className="p-3.5 rounded-xl bg-[#fffdf9] dark:bg-slate-800 border border-[#ebe6dc] dark:border-slate-700/70 space-y-1.5">
                         <div className="flex items-center gap-2 font-bold text-orange-600 dark:text-orange-400">
                           <FiClock className="w-4 h-4" />
                           <span>24 to 48-Hour Dispatch</span>
@@ -2903,7 +3007,7 @@ export default function LoginPage() {
                         </p>
                       </div>
 
-                      <div className="p-3.5 rounded-xl bg-white dark:bg-slate-800 border border-gray-200/70 dark:border-slate-700/70 space-y-1.5">
+                      <div className="p-3.5 rounded-xl bg-[#fffdf9] dark:bg-slate-800 border border-[#ebe6dc] dark:border-slate-700/70 space-y-1.5">
                         <div className="flex items-center gap-2 font-bold text-emerald-600 dark:text-emerald-400">
                           <FiCheckCircle className="w-4 h-4" />
                           <span>30-Day Service Guarantee</span>
@@ -2913,7 +3017,7 @@ export default function LoginPage() {
                         </p>
                       </div>
 
-                      <div className="p-3.5 rounded-xl bg-white dark:bg-slate-800 border border-gray-200/70 dark:border-slate-700/70 space-y-1.5">
+                      <div className="p-3.5 rounded-xl bg-[#fffdf9] dark:bg-slate-800 border border-[#ebe6dc] dark:border-slate-700/70 space-y-1.5">
                         <div className="flex items-center gap-2 font-bold text-blue-600 dark:text-blue-400">
                           <FiShield className="w-4 h-4" />
                           <span>Transparent Upfront Pricing</span>
@@ -2929,7 +3033,7 @@ export default function LoginPage() {
             </div>
 
             {/* Modal Footer */}
-            <div className="px-6 py-4 border-t border-gray-100 dark:border-slate-800 bg-gray-50/80 dark:bg-slate-900/60 flex flex-col sm:flex-row items-center justify-between gap-3 shrink-0">
+            <div className="px-6 py-4 border-t border-[#ebe6dc] dark:border-slate-800 bg-[#f7f4ee] dark:bg-slate-900/60 flex flex-col sm:flex-row items-center justify-between gap-3 shrink-0">
               <div className="flex flex-wrap items-center gap-4 text-xs text-gray-500 dark:text-slate-400">
                 {companyPhone && (
                   <span className="flex items-center gap-1.5">
@@ -2972,21 +3076,19 @@ export default function LoginPage() {
         </div>
       )}
 
-      {/* Branch Directory Modal (Locations & Call Us by Branch) */}
+      {/* Branch & Admin Directory Modal (Locations, Call Us, Admin Contact) */}
       {branchModalType && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 md:p-6 bg-black/60 backdrop-blur-md overflow-y-auto animate-[fadeIn_0.15s_ease]">
-          <div
-            className="fixed inset-0 cursor-pointer"
-            onClick={() => setBranchModalType(null)}
-            aria-label="Close modal overlay"
-          />
+          <div className="fixed inset-0" />
 
-          <div className="relative w-full max-w-3xl bg-white dark:bg-[#121c29] text-gray-900 dark:text-white rounded-3xl shadow-2xl border border-gray-200 dark:border-white/10 overflow-hidden my-auto max-h-[90vh] flex flex-col z-10 animate-[slideUp_0.2s_ease]">
+          <div className="relative w-full max-w-3xl bg-[#fbf9f5] dark:bg-[#121c29] text-gray-900 dark:text-white rounded-3xl shadow-2xl border border-[#ebe6dc] dark:border-white/10 overflow-hidden my-auto max-h-[90vh] flex flex-col z-10 animate-[slideUp_0.2s_ease]">
             {/* Modal Header */}
-            <div className="px-6 py-5 border-b border-gray-100 dark:border-slate-800 flex items-center justify-between gap-4 bg-gray-50/80 dark:bg-slate-900/60 shrink-0">
+            <div className="px-6 py-5 border-b border-[#ebe6dc] dark:border-slate-800 flex items-center justify-between gap-4 bg-[#f7f4ee] dark:bg-slate-900/60 shrink-0">
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 rounded-xl bg-[#58B947]/15 text-[#58B947] flex items-center justify-center shrink-0">
-                  {branchModalType === 'call' ? (
+                  {branchModalType === 'admin' ? (
+                    <FiShield className="w-5 h-5" />
+                  ) : branchModalType === 'call' ? (
                     <FiPhone className="w-5 h-5" />
                   ) : (
                     <FiMapPin className="w-5 h-5" />
@@ -2994,12 +3096,18 @@ export default function LoginPage() {
                 </div>
                 <div>
                   <h3 className="font-extrabold text-base sm:text-lg text-gray-900 dark:text-white">
-                    {branchModalType === 'call' ? 'Call Us by Branch' : 'Our Locations by Branch'}
+                    {branchModalType === 'admin'
+                      ? 'Admin Contact & Management Directory'
+                      : branchModalType === 'call'
+                        ? 'Call Us by Branch'
+                        : 'Our Locations by Branch'}
                   </h3>
                   <p className="text-xs text-gray-500 dark:text-slate-400">
-                    {branchModalType === 'call'
-                      ? 'We accept calls 24/7 — direct store contact numbers by branch'
-                      : 'Open on Monday to Saturday • Time: 8:00 AM to 5:00 PM'}
+                    {branchModalType === 'admin'
+                      ? 'Direct contact details for System Administrators, Head Office & Branch Store Managers'
+                      : branchModalType === 'call'
+                        ? 'We accept calls 24/7 — direct store contact numbers by branch'
+                        : 'Open on Monday to Saturday • Time: 8:00 AM to 5:00 PM'}
                   </p>
                 </div>
               </div>
@@ -3019,172 +3127,339 @@ export default function LoginPage() {
               <div className="px-4 py-3 rounded-2xl bg-slate-100/80 dark:bg-slate-800/70 border border-gray-200/80 dark:border-slate-700/70 flex items-center gap-2.5 text-xs font-semibold text-gray-700 dark:text-slate-200">
                 <FiClock className="w-4 h-4 text-[#58B947] shrink-0" />
                 <span>
-                  {branchModalType === 'call'
-                    ? 'We accept calls 24/7 — reach out anytime for inquiries, orders, or support.'
-                    : 'Open on Monday to Saturday, 8:00 AM to 5:00 PM.'}
+                  {branchModalType === 'admin'
+                    ? 'Direct administrative support for account verification, billing inquiries, warranty claims, and store escalations.'
+                    : branchModalType === 'call'
+                      ? 'We accept calls 24/7 — reach out anytime for inquiries, orders, or support.'
+                      : 'Open on Monday to Saturday, 8:00 AM to 5:00 PM.'}
                 </span>
               </div>
-              {branchModalType === 'locations' && companyAddress && (
-                <div className="p-4 rounded-2xl bg-[#58B947]/10 border border-[#58B947]/25 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                  <div className="flex items-start gap-3">
-                    <div className="w-9 h-9 rounded-xl bg-[#58B947]/20 text-[#58B947] flex items-center justify-center shrink-0 mt-0.5">
-                      <FiHome className="w-4 h-4" />
-                    </div>
-                    <div>
-                      <span className="text-[11px] font-bold uppercase tracking-wider text-[#58B947] block">
-                        Main Office / Primary Address
-                      </span>
-                      <p className="text-sm font-semibold text-gray-900 dark:text-white mt-0.5">
-                        {companyAddress}
-                      </p>
-                    </div>
-                  </div>
-                  <a
-                    href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${companyName || 'Z-LICZ'} ${companyAddress}`)}`}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="inline-flex items-center gap-1.5 text-xs font-bold text-[#58B947] hover:underline shrink-0"
-                  >
-                    <FiMapPin className="w-3.5 h-3.5" /> View on Map
-                  </a>
-                </div>
-              )}
 
-              {branchModalType === 'call' && companyPhone && (
-                <div className="p-4 rounded-2xl bg-[#58B947]/10 border border-[#58B947]/25 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                  <div className="flex items-start gap-3">
-                    <div className="w-9 h-9 rounded-xl bg-[#58B947]/20 text-[#58B947] flex items-center justify-center shrink-0 mt-0.5">
-                      <FiPhone className="w-4 h-4" />
+              {branchModalType === 'admin' ? (
+                <>
+                  {/* Head Office Primary Admin Contact Banner */}
+                  <div className="p-4 sm:p-5 rounded-2xl bg-[#58B947]/10 border border-[#58B947]/25 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                    <div className="flex items-start gap-3">
+                      <div className="w-10 h-10 rounded-xl bg-[#58B947]/20 text-[#58B947] flex items-center justify-center shrink-0 mt-0.5">
+                        <FiShield className="w-5 h-5" />
+                      </div>
+                      <div className="space-y-1">
+                        <span className="text-[11px] font-bold uppercase tracking-wider text-[#58B947] block">
+                          Head Office Primary Admin Contact
+                        </span>
+                        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs sm:text-sm font-semibold text-gray-900 dark:text-white">
+                          <a href={`mailto:${companyEmail}`} className="inline-flex items-center gap-1.5 text-[#58B947] hover:underline break-all">
+                            <FiMail className="w-3.5 h-3.5 shrink-0" />
+                            <span>{companyEmail}</span>
+                          </a>
+                          {primaryAdminPhone && (
+                            <a href={`tel:${primaryAdminPhone}`} className="inline-flex items-center gap-1.5 font-mono hover:text-[#58B947] transition-colors">
+                              <FiPhone className="w-3.5 h-3.5 text-[#58B947] shrink-0" />
+                              <span>{primaryAdminPhone}</span>
+                            </a>
+                          )}
+                        </div>
+                        {companyAddress && (
+                          <p className="text-xs text-gray-600 dark:text-slate-300 flex items-center gap-1.5">
+                            <FiMapPin className="w-3.5 h-3.5 text-[#58B947] shrink-0" />
+                            <span>{companyAddress}</span>
+                          </p>
+                        )}
+                      </div>
                     </div>
-                    <div>
-                      <span className="text-[11px] font-bold uppercase tracking-wider text-[#58B947] block">
-                        Main Office Hotline
-                      </span>
-                      <p className="text-sm font-semibold text-gray-900 dark:text-white mt-0.5">
-                        {companyPhone}
-                      </p>
-                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setBranchModalType(null);
+                        setIsContactModalOpen(true);
+                      }}
+                      className="inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl bg-[#58B947] hover:bg-[#4da83d] text-white text-xs font-bold transition-colors shrink-0 cursor-pointer"
+                    >
+                      <FiMail className="w-3.5 h-3.5" />
+                      <span>Message Admin</span>
+                    </button>
                   </div>
-                  <a
-                    href={`tel:${companyPhone}`}
-                    className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-[#58B947] hover:bg-[#4da83d] text-white text-xs font-bold transition-colors shrink-0"
-                  >
-                    <FiPhone className="w-3.5 h-3.5" /> Call Main Office
-                  </a>
-                </div>
-              )}
 
-              {branchLocations.length > 0 ? (
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  {branchLocations.map((branch) => {
-                    const isOpen = (branch.status || 'open').toLowerCase() === 'open'
-                    const mapQuery = encodeURIComponent(
-                      [branch.name, branch.location].filter(Boolean).join(' ')
-                    )
-                    return (
-                      <div
-                        key={branch.id}
-                        className="rounded-2xl border border-gray-200 dark:border-slate-700/80 bg-gray-50/80 dark:bg-slate-800/60 p-4 flex flex-col justify-between gap-4 hover:border-[#58B947]/50 transition-colors"
-                      >
-                        <div className="space-y-3">
-                          <div className="flex items-start gap-3">
-                            {branch.image_url ? (
-                              <img
-                                src={getLogoUrl(branch.image_url)}
-                                alt={branch.name}
-                                className="w-12 h-12 rounded-xl object-cover border border-gray-200 dark:border-slate-700 shrink-0"
-                              />
-                            ) : (
-                              <div
-                                className="w-12 h-12 rounded-xl flex items-center justify-center text-white font-bold text-base shrink-0 shadow-sm"
-                                style={{ backgroundColor: branch.color || '#58B947' }}
-                              >
-                                {branchModalType === 'call' ? (
-                                  <FiPhone className="w-5 h-5" />
-                                ) : (
-                                  <FiMapPin className="w-5 h-5" />
-                                )}
+                  {/* Detailed Grid of Admin Contacts */}
+                  {adminContacts.length > 0 ? (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      {adminContacts.map((adm) => {
+                        const isTopAdmin = adm.role === 'Administrator'
+                        return (
+                          <div
+                            key={adm.user_id || adm.username}
+                            className="rounded-2xl border border-[#ebe6dc] dark:border-slate-700/80 bg-[#fffdf9] dark:bg-slate-800/60 p-4 flex flex-col justify-between gap-4 hover:border-[#58B947]/50 transition-colors"
+                          >
+                            <div className="space-y-3">
+                              <div className="flex items-start gap-3">
+                                <div className={`w-11 h-11 rounded-xl flex items-center justify-center font-bold shrink-0 shadow-sm ${isTopAdmin
+                                  ? 'bg-blue-600 text-white'
+                                  : 'bg-[#58B947] text-white'
+                                  }`}>
+                                  {isTopAdmin ? <FiShield className="w-5 h-5" /> : <FiUser className="w-5 h-5" />}
+                                </div>
+                                <div className="min-w-0 flex-1">
+                                  <div className="flex items-start justify-between gap-2">
+                                    <div className="min-w-0">
+                                      <h4 className="font-bold text-sm text-gray-900 dark:text-white truncate">
+                                        {adm.name}
+                                      </h4>
+                                      {adm.username && (
+                                        <span className="text-[11px] font-mono text-gray-400 dark:text-slate-400 block">
+                                          @{adm.username}
+                                        </span>
+                                      )}
+                                    </div>
+                                    <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full shrink-0 border ${isTopAdmin
+                                      ? 'bg-blue-100 text-blue-700 border-blue-200 dark:bg-blue-950/70 dark:text-blue-300 dark:border-blue-800/60'
+                                      : 'bg-emerald-100 text-emerald-700 border-emerald-200 dark:bg-emerald-950/70 dark:text-emerald-300 dark:border-emerald-800/60'
+                                      }`}>
+                                      {adm.role}
+                                    </span>
+                                  </div>
+                                </div>
                               </div>
-                            )}
-                            <div className="min-w-0 flex-1">
-                              <div className="flex items-center justify-between gap-2">
-                                <h4 className="font-bold text-sm text-gray-900 dark:text-white truncate">
-                                  {branch.name}
-                                </h4>
-                                <span
-                                  className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full shrink-0 ${isOpen
-                                    ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/70 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800/60'
-                                    : 'bg-gray-200 text-gray-600 dark:bg-slate-700 dark:text-slate-300'
-                                    }`}
-                                >
-                                  {branch.status || 'Open'}
-                                </span>
+
+                              <div className="grid grid-cols-2 gap-2 pt-2 border-t border-gray-200/70 dark:border-slate-700/70 text-[11px]">
+                                <div>
+                                  <span className="text-[10px] uppercase font-bold text-gray-400 dark:text-slate-400 block">Position</span>
+                                  <span className="font-semibold text-gray-700 dark:text-slate-200 block truncate">{adm.position || '—'}</span>
+                                </div>
+                                <div>
+                                  <span className="text-[10px] uppercase font-bold text-gray-400 dark:text-slate-400 block">Department</span>
+                                  <span className="font-semibold text-gray-700 dark:text-slate-200 block truncate">{adm.department || '—'}</span>
+                                </div>
+                                <div>
+                                  <span className="text-[10px] uppercase font-bold text-gray-400 dark:text-slate-400 block">Assigned Branch</span>
+                                  <span className="font-semibold text-gray-700 dark:text-slate-200 block truncate">{adm.branch_name || 'Head Office'}</span>
+                                </div>
+                                <div>
+                                  <span className="text-[10px] uppercase font-bold text-gray-400 dark:text-slate-400 block">Working Hours</span>
+                                  <span className="font-semibold text-gray-700 dark:text-slate-200 block truncate">{adm.working_hours || '8:00 AM – 5:00 PM'}</span>
+                                </div>
                               </div>
-                              {branchModalType === 'call' ? (
-                                <>
-                                  <p className="text-sm font-bold text-[#58B947] mt-1 flex items-center gap-1.5">
-                                    <FiPhone className="w-3.5 h-3.5 shrink-0" />
-                                    <span>{branch.contact_number || 'No hotline listed'}</span>
-                                  </p>
-                                  {branch.location && (
-                                    <p className="text-[11px] text-gray-500 dark:text-slate-400 mt-1 flex items-start gap-1.5">
-                                      <FiMapPin className="w-3 h-3 shrink-0 mt-0.5" />
-                                      <span>{branch.location}</span>
-                                    </p>
+
+                              <div className="space-y-1.5 pt-2 border-t border-gray-200/70 dark:border-slate-700/70 text-xs">
+                                <div className="flex items-center gap-2">
+                                  <FiMail className="w-3.5 h-3.5 text-[#58B947] shrink-0" />
+                                  {adm.email ? (
+                                    <a href={`mailto:${adm.email}`} className="font-semibold text-[#58B947] hover:underline truncate">
+                                      {adm.email}
+                                    </a>
+                                  ) : (
+                                    <span className="text-gray-400 dark:text-slate-500 italic">No email listed</span>
                                   )}
-                                </>
-                              ) : (
-                                <p className="text-xs text-gray-600 dark:text-slate-300 mt-1 flex items-start gap-1.5 leading-relaxed">
-                                  <FiMapPin className="w-3.5 h-3.5 text-[#58B947] shrink-0 mt-0.5" />
-                                  <span>{branch.location || 'Location not specified'}</span>
-                                </p>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  <FiPhone className="w-3.5 h-3.5 text-[#58B947] shrink-0" />
+                                  {adm.phone ? (
+                                    <a href={`tel:${adm.phone}`} className="font-mono font-semibold text-gray-700 dark:text-slate-200 hover:text-[#58B947] transition-colors">
+                                      {adm.phone}
+                                    </a>
+                                  ) : (
+                                    <span className="text-gray-400 dark:text-slate-500 italic">Via Head Office Hotline</span>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+
+                            <div className="pt-3 border-t border-gray-200/80 dark:border-slate-700/70 flex items-center justify-end gap-2 text-xs">
+                              {adm.phone && (
+                                <a
+                                  href={`tel:${adm.phone}`}
+                                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-800 hover:bg-gray-100 dark:hover:bg-slate-700 text-gray-800 dark:text-white font-bold transition-colors shrink-0"
+                                >
+                                  <FiPhone className="w-3.5 h-3.5 text-[#58B947]" />
+                                  <span>Call Admin</span>
+                                </a>
+                              )}
+                              {adm.email && (
+                                <a
+                                  href={`mailto:${adm.email}`}
+                                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#58B947] hover:bg-[#4da83d] text-white font-bold transition-colors shrink-0"
+                                >
+                                  <FiMail className="w-3.5 h-3.5" />
+                                  <span>Email Admin</span>
+                                </a>
                               )}
                             </div>
                           </div>
+                        )
+                      })}
+                    </div>
+                  ) : (
+                    <div className="text-center py-8 text-sm text-gray-500 dark:text-slate-400">
+                      No administrator contact records have been configured yet.
+                    </div>
+                  )}
+                </>
+              ) : (
+                <>
+                  {branchModalType === 'locations' && companyAddress && (
+                    <div className="p-4 rounded-2xl bg-[#58B947]/10 border border-[#58B947]/25 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                      <div className="flex items-start gap-3">
+                        <div className="w-9 h-9 rounded-xl bg-[#58B947]/20 text-[#58B947] flex items-center justify-center shrink-0 mt-0.5">
+                          <FiHome className="w-4 h-4" />
                         </div>
-
-                        <div className="pt-3 border-t border-gray-200/80 dark:border-slate-700/70 flex items-center justify-end gap-2 text-xs">
-                          {branchModalType === 'call' ? (
-                            branch.contact_number ? (
-                              <a
-                                href={`tel:${branch.contact_number}`}
-                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#58B947] hover:bg-[#4da83d] text-white font-bold transition-colors shrink-0"
-                              >
-                                <FiPhone className="w-3.5 h-3.5" />
-                                <span>Call Branch</span>
-                              </a>
-                            ) : (
-                              <span className="text-gray-400 dark:text-slate-500 italic">Unavailable</span>
-                            )
-                          ) : (
-                            branch.location ? (
-                              <a
-                                href={`https://www.google.com/maps/search/?api=1&query=${mapQuery}`}
-                                target="_blank"
-                                rel="noreferrer"
-                                className="inline-flex items-center gap-1 font-bold text-[#58B947] hover:underline shrink-0"
-                              >
-                                <span>Directions</span>
-                                <FiArrowRight className="w-3 h-3" />
-                              </a>
-                            ) : null
-                          )}
+                        <div>
+                          <span className="text-[11px] font-bold uppercase tracking-wider text-[#58B947] block">
+                            Main Office / Primary Address
+                          </span>
+                          <p className="text-sm font-semibold text-gray-900 dark:text-white mt-0.5">
+                            {companyAddress}
+                          </p>
                         </div>
                       </div>
-                    )
-                  })}
-                </div>
-              ) : (
-                <div className="text-center py-8 text-sm text-gray-500 dark:text-slate-400">
-                  No individual branch details have been configured yet.
-                </div>
+                      <a
+                        href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${companyName || 'Z-LICZ'} ${companyAddress}`)}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex items-center gap-1.5 text-xs font-bold text-[#58B947] hover:underline shrink-0"
+                      >
+                        <FiMapPin className="w-3.5 h-3.5" /> View on Map
+                      </a>
+                    </div>
+                  )}
+
+                  {branchModalType === 'call' && companyPhone && (
+                    <div className="p-4 rounded-2xl bg-[#58B947]/10 border border-[#58B947]/25 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                      <div className="flex items-start gap-3">
+                        <div className="w-9 h-9 rounded-xl bg-[#58B947]/20 text-[#58B947] flex items-center justify-center shrink-0 mt-0.5">
+                          <FiPhone className="w-4 h-4" />
+                        </div>
+                        <div>
+                          <span className="text-[11px] font-bold uppercase tracking-wider text-[#58B947] block">
+                            Main Office Hotline
+                          </span>
+                          <p className="text-sm font-semibold text-gray-900 dark:text-white mt-0.5">
+                            {companyPhone}
+                          </p>
+                        </div>
+                      </div>
+                      <a
+                        href={`tel:${companyPhone}`}
+                        className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-[#58B947] hover:bg-[#4da83d] text-white text-xs font-bold transition-colors shrink-0"
+                      >
+                        <FiPhone className="w-3.5 h-3.5" /> Call Main Office
+                      </a>
+                    </div>
+                  )}
+
+                  {branchLocations.length > 0 ? (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      {branchLocations.map((branch) => {
+                        const isOpen = (branch.status || 'open').toLowerCase() === 'open'
+                        const mapQuery = encodeURIComponent(
+                          [branch.name, branch.location].filter(Boolean).join(' ')
+                        )
+                        return (
+                          <div
+                            key={branch.id}
+                            className="rounded-2xl border border-[#ebe6dc] dark:border-slate-700/80 bg-[#fffdf9] dark:bg-slate-800/60 p-4 flex flex-col justify-between gap-4 hover:border-[#58B947]/50 transition-colors"
+                          >
+                            <div className="space-y-3">
+                              <div className="flex items-start gap-3">
+                                {branch.image_url ? (
+                                  <img
+                                    src={getLogoUrl(branch.image_url)}
+                                    alt={branch.name}
+                                    className="w-12 h-12 rounded-xl object-cover border border-gray-200 dark:border-slate-700 shrink-0"
+                                  />
+                                ) : (
+                                  <div
+                                    className="w-12 h-12 rounded-xl flex items-center justify-center text-white font-bold text-base shrink-0 shadow-sm"
+                                    style={{ backgroundColor: branch.color || '#58B947' }}
+                                  >
+                                    {branchModalType === 'call' ? (
+                                      <FiPhone className="w-5 h-5" />
+                                    ) : (
+                                      <FiMapPin className="w-5 h-5" />
+                                    )}
+                                  </div>
+                                )}
+                                <div className="min-w-0 flex-1">
+                                  <div className="flex items-center justify-between gap-2">
+                                    <h4 className="font-bold text-sm text-gray-900 dark:text-white truncate">
+                                      {branch.name}
+                                    </h4>
+                                    <span
+                                      className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full shrink-0 ${isOpen
+                                        ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/70 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800/60'
+                                        : 'bg-gray-200 text-gray-600 dark:bg-slate-700 dark:text-slate-300'
+                                        }`}
+                                    >
+                                      {branch.status || 'Open'}
+                                    </span>
+                                  </div>
+                                  {branchModalType === 'call' ? (
+                                    <>
+                                      <p className="text-sm font-bold text-[#58B947] mt-1 flex items-center gap-1.5">
+                                        <FiPhone className="w-3.5 h-3.5 shrink-0" />
+                                        <span>{branch.contact_number || 'No hotline listed'}</span>
+                                      </p>
+                                      {branch.location && (
+                                        <p className="text-[11px] text-gray-500 dark:text-slate-400 mt-1 flex items-start gap-1.5">
+                                          <FiMapPin className="w-3 h-3 shrink-0 mt-0.5" />
+                                          <span>{branch.location}</span>
+                                        </p>
+                                      )}
+                                    </>
+                                  ) : (
+                                    <p className="text-xs text-gray-600 dark:text-slate-300 mt-1 flex items-start gap-1.5 leading-relaxed">
+                                      <FiMapPin className="w-3.5 h-3.5 text-[#58B947] shrink-0 mt-0.5" />
+                                      <span>{branch.location || 'Location not specified'}</span>
+                                    </p>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+
+                            <div className="pt-3 border-t border-gray-200/80 dark:border-slate-700/70 flex items-center justify-end gap-2 text-xs">
+                              {branchModalType === 'call' ? (
+                                branch.contact_number ? (
+                                  <a
+                                    href={`tel:${branch.contact_number}`}
+                                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#58B947] hover:bg-[#4da83d] text-white font-bold transition-colors shrink-0"
+                                  >
+                                    <FiPhone className="w-3.5 h-3.5" />
+                                    <span>Call Branch</span>
+                                  </a>
+                                ) : (
+                                  <span className="text-gray-400 dark:text-slate-500 italic">Unavailable</span>
+                                )
+                              ) : (
+                                branch.location ? (
+                                  <a
+                                    href={`https://www.google.com/maps/search/?api=1&query=${mapQuery}`}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="inline-flex items-center gap-1 font-bold text-[#58B947] hover:underline shrink-0"
+                                  >
+                                    <span>Directions</span>
+                                    <FiArrowRight className="w-3 h-3" />
+                                  </a>
+                                ) : null
+                              )}
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  ) : (
+                    <div className="text-center py-8 text-sm text-gray-500 dark:text-slate-400">
+                      No individual branch details have been configured yet.
+                    </div>
+                  )}
+                </>
               )}
             </div>
 
             {/* Modal Footer */}
-            <div className="px-6 py-4 border-t border-gray-100 dark:border-slate-800 bg-gray-50/80 dark:bg-slate-900/60 flex items-center justify-between gap-3 shrink-0">
+            <div className="px-6 py-4 border-t border-[#ebe6dc] dark:border-slate-800 bg-[#f7f4ee] dark:bg-slate-900/60 flex items-center justify-between gap-3 shrink-0">
               <span className="text-xs text-gray-500 dark:text-slate-400">
-                {companyName || 'Z-LICZ'} Store Directory
+                {branchModalType === 'admin'
+                  ? `${companyName || 'Z-LICZ'} Administrative Directory`
+                  : `${companyName || 'Z-LICZ'} Store Directory`}
               </span>
               <button
                 type="button"
@@ -3193,6 +3468,173 @@ export default function LoginPage() {
               >
                 Close
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Company Profile, Mission & Governance Modal */}
+      {isCompanyProfileModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 md:p-6 bg-black/60 backdrop-blur-md overflow-y-auto animate-[fadeIn_0.15s_ease]">
+          <div className="fixed inset-0" />
+
+          <div className="relative w-full max-w-4xl bg-[#fbf9f5] dark:bg-[#121c29] text-gray-900 dark:text-white rounded-3xl shadow-2xl border border-[#ebe6dc] dark:border-white/10 overflow-hidden my-auto max-h-[92vh] flex flex-col z-10 animate-[slideUp_0.2s_ease]">
+            {/* Modal Header */}
+            <div className="px-6 py-5 border-b border-[#ebe6dc] dark:border-slate-800 flex items-center justify-between gap-4 bg-[#f7f4ee] dark:bg-slate-900/60 shrink-0">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-[#58B947]/15 text-[#58B947] flex items-center justify-center shrink-0">
+                  <FiBriefcase className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-extrabold text-base sm:text-lg text-gray-900 dark:text-white">
+                    Company Profile, Mission &amp; Governance
+                  </h3>
+                  <p className="text-xs text-gray-500 dark:text-slate-400">
+                    {companyName || 'Z-LICZ Furniture & Appliances Trading'} • Corporate &amp; Administrative Overview
+                  </p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setIsCompanyProfileModalOpen(false)}
+                className="w-9 h-9 rounded-full flex items-center justify-center text-gray-400 hover:text-gray-700 dark:hover:text-white hover:bg-gray-200 dark:hover:bg-slate-800 transition-colors cursor-pointer shrink-0"
+                aria-label="Close modal"
+              >
+                <FiX className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-6 sm:p-8 overflow-y-auto space-y-7 flex-1">
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+                <div className="lg:col-span-7 space-y-3">
+                  <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-[#58B947]/10 border border-[#58B947]/20 text-[11px] font-bold uppercase tracking-wider text-[#58B947]">
+                    <FiBriefcase className="w-3.5 h-3.5" />
+                    <span>Company Profile, Mission &amp; Governance</span>
+                  </div>
+                  <h4 className="text-xl sm:text-2xl font-extrabold text-gray-900 dark:text-white leading-snug">
+                    Dedicated Retail Excellence &amp; Direct Administrative Oversight
+                  </h4>
+                  <p className="text-sm text-gray-600 dark:text-slate-300 leading-relaxed">
+                    Founded to serve families across Northern Mindanao, <strong className="text-gray-900 dark:text-white">{companyName || 'Z-LICZ Furniture & Appliances Trading'}</strong> combines quality residential furnishings, energy-efficient home appliances, and accessible in-house financing under strict administrative and customer-care standards.
+                  </p>
+                  <p className="text-xs sm:text-sm text-gray-500 dark:text-slate-400 leading-relaxed">
+                    Headquartered at <strong className="text-gray-700 dark:text-slate-200">{companyAddress || 'Carmen, Cagayan de Oro City'}</strong>, our central administration oversees account verification, branch inventory accuracy, installment approvals, warranty resolution, and 24/7 customer inquiry routing across every store location.
+                  </p>
+                </div>
+
+                <div className="lg:col-span-5 rounded-2xl border border-[#ebe6dc] dark:border-slate-700 bg-[#fffdf9] dark:bg-slate-900/70 p-5 space-y-3">
+                  <div className="flex items-center justify-between border-b border-gray-200/80 dark:border-slate-800 pb-2.5">
+                    <span className="text-xs font-extrabold uppercase tracking-wider text-gray-900 dark:text-white">
+                      Head Office &amp; Admin Desk
+                    </span>
+                    <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800/50">
+                      Active Support
+                    </span>
+                  </div>
+                  <div className="space-y-2.5 text-xs">
+                    <div className="flex items-start gap-2.5">
+                      <FiMapPin className="w-4 h-4 text-[#58B947] shrink-0 mt-0.5" />
+                      <div>
+                        <span className="text-[10px] font-bold uppercase text-gray-400 dark:text-slate-400 block">Headquarters</span>
+                        <span className="font-semibold text-gray-800 dark:text-slate-200">{companyAddress || 'Carmen, Cagayan de Oro City'}</span>
+                      </div>
+                    </div>
+                    <div className="flex items-start gap-2.5">
+                      <FiMail className="w-4 h-4 text-[#58B947] shrink-0 mt-0.5" />
+                      <div>
+                        <span className="text-[10px] font-bold uppercase text-gray-400 dark:text-slate-400 block">Official Admin Email</span>
+                        <a href={`mailto:${companyEmail}`} className="font-semibold text-[#58B947] hover:underline break-all">{companyEmail}</a>
+                      </div>
+                    </div>
+                    <div className="flex items-start gap-2.5">
+                      <FiPhone className="w-4 h-4 text-[#58B947] shrink-0 mt-0.5" />
+                      <div>
+                        <span className="text-[10px] font-bold uppercase text-gray-400 dark:text-slate-400 block">Admin Hotline</span>
+                        <a href={`tel:${primaryAdminPhone}`} className="font-mono font-semibold text-gray-800 dark:text-slate-200 hover:text-[#58B947] transition-colors">{primaryAdminPhone}</a>
+                      </div>
+                    </div>
+                    <div className="flex items-start gap-2.5">
+                      <FiClock className="w-4 h-4 text-[#58B947] shrink-0 mt-0.5" />
+                      <div>
+                        <span className="text-[10px] font-bold uppercase text-gray-400 dark:text-slate-400 block">Showroom &amp; Office Hours</span>
+                        <span className="font-semibold text-gray-800 dark:text-slate-200">Monday – Saturday, 8:00 AM – 5:00 PM</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* 4 Detailed Pillars */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                <div className="p-4 rounded-2xl bg-[#fffdf9] dark:bg-slate-800/60 border border-[#ebe6dc] dark:border-slate-700/70 space-y-2">
+                  <div className="w-9 h-9 rounded-xl bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400 flex items-center justify-center">
+                    <FiPackage className="w-4 h-4" />
+                  </div>
+                  <h5 className="font-bold text-sm text-gray-900 dark:text-white">Authentic Furniture &amp; Appliances</h5>
+                  <p className="text-xs text-gray-500 dark:text-slate-400 leading-relaxed">
+                    Curated living, bedroom, dining, home office, and outdoor furniture paired with major &amp; small home appliances.
+                  </p>
+                </div>
+
+                <div className="p-4 rounded-2xl bg-[#fffdf9] dark:bg-slate-800/60 border border-[#ebe6dc] dark:border-slate-700/70 space-y-2">
+                  <div className="w-9 h-9 rounded-xl bg-purple-50 dark:bg-purple-950/60 text-purple-600 dark:text-purple-400 flex items-center justify-center">
+                    <FiCreditCard className="w-4 h-4" />
+                  </div>
+                  <h5 className="font-bold text-sm text-gray-900 dark:text-white">Flexible In-House Installments</h5>
+                  <p className="text-xs text-gray-500 dark:text-slate-400 leading-relaxed">
+                    3 to 24-month financing plans with transparent ledger schedules, digital e-wallet, and walk-in payment support.
+                  </p>
+                </div>
+
+                <div className="p-4 rounded-2xl bg-[#fffdf9] dark:bg-slate-800/60 border border-[#ebe6dc] dark:border-slate-700/70 space-y-2">
+                  <div className="w-9 h-9 rounded-xl bg-emerald-50 dark:bg-emerald-950/60 text-[#58B947] flex items-center justify-center">
+                    <FiHome className="w-4 h-4" />
+                  </div>
+                  <h5 className="font-bold text-sm text-gray-900 dark:text-white">Multi-Branch Regional Network</h5>
+                  <p className="text-xs text-gray-500 dark:text-slate-400 leading-relaxed">
+                    Operating across Cagayan de Oro, Iligan City, and Dipolog City with synchronized stock and centralized support.
+                  </p>
+                </div>
+
+                <div className="p-4 rounded-2xl bg-[#fffdf9] dark:bg-slate-800/60 border border-[#ebe6dc] dark:border-slate-700/70 space-y-2">
+                  <div className="w-9 h-9 rounded-xl bg-amber-50 dark:bg-amber-950/60 text-amber-600 dark:text-amber-400 flex items-center justify-center">
+                    <FiShield className="w-4 h-4" />
+                  </div>
+                  <h5 className="font-bold text-sm text-gray-900 dark:text-white">Direct Admin &amp; Store Governance</h5>
+                  <p className="text-xs text-gray-500 dark:text-slate-400 leading-relaxed">
+                    Dedicated System Administrators and Branch Store Managers handling verification, warranty, and escalations.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Modal Footer */}
+            <div className="px-6 py-4 border-t border-[#ebe6dc] dark:border-slate-800 bg-[#f7f4ee] dark:bg-slate-900/60 flex flex-col sm:flex-row items-center justify-between gap-3 shrink-0">
+              <p className="text-xs text-gray-500 dark:text-slate-400">
+                Need direct assistance from management, billing review, or branch escalation?
+              </p>
+              <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto justify-end">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsCompanyProfileModalOpen(false);
+                    setIsContactModalOpen(true);
+                  }}
+                  className="px-4 py-2 rounded-xl bg-[#58B947] hover:bg-[#4da83d] text-white text-xs font-bold shadow-md shadow-green-500/20 transition-all flex items-center gap-1.5 cursor-pointer"
+                >
+                  <FiMail className="w-3.5 h-3.5" />
+                  <span>Send Direct Inquiry to Admin</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsCompanyProfileModalOpen(false)}
+                  className="px-4 py-2 rounded-xl border border-gray-300 dark:border-slate-700 hover:bg-gray-100 dark:hover:bg-slate-800 text-gray-700 dark:text-slate-300 text-xs font-semibold transition-all cursor-pointer"
+                >
+                  Close
+                </button>
+              </div>
             </div>
           </div>
         </div>

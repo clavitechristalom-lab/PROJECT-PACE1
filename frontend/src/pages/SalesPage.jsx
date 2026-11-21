@@ -155,7 +155,14 @@ function SalesPage({ branchFilter, embedded }) {
   }
 
   useEffect(() => {
-    loadData()
+    const controller = new AbortController()
+    const timer = setTimeout(() => {
+      loadData(false, controller.signal)
+    }, search ? 300 : 0)
+    return () => {
+      clearTimeout(timer)
+      controller.abort()
+    }
   }, [methodFilter, statusFilter, branchFilter, search])
 
   // On-demand click-driven synchronization

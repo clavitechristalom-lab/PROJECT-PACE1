@@ -13,6 +13,7 @@ import api from '../lib/api'
 import { useAuth } from '../context/AuthContext'
 import { useRealtimeSync, triggerDataSync } from '../lib/realtimeSync'
 import CreateBranchModal from '../components/branches/CreateBranchModal'
+import EditBranchModal from '../components/branches/EditBranchModal'
 
 export default function BranchesPage() {
   const { user } = useAuth()
@@ -57,21 +58,46 @@ export default function BranchesPage() {
   }, [], { module: 'branches' })
 
   // Form
-  const emptyForm = { name: '', location: '', contact_number: '', status: 'open', color: '#2b5ce6' }
+  const emptyForm = {
+    name: '',
+    branch_code: '',
+    branch_type: 'Main Showroom & Retail Branch',
+    location: '',
+    address: '',
+    city: '',
+    province: '',
+    contact_number: '',
+    email: '',
+    operating_hours: 'Monday – Saturday, 8:00 AM – 5:00 PM',
+    opening_date: '',
+    description: '',
+    status: 'open',
+    color: '#2b5ce6',
+  }
   const [form, setForm] = useState(emptyForm)
   const [formErrors, setFormErrors] = useState({})
 
   const handleCreateSuccess = () => {
     setShowCreateModal(false)
     showToast('Branch successfully created!', 'success')
+    loadData(true)
     triggerDataSync('branches')
   }
 
   const openEdit = (b) => {
     setForm({
       name: b.name || '',
+      branch_code: b.branch_code || '',
+      branch_type: b.branch_type || 'Main Showroom & Retail Branch',
       location: b.location || '',
+      address: b.address || '',
+      city: b.city || '',
+      province: b.province || '',
       contact_number: b.contact_number || '',
+      email: b.email || '',
+      operating_hours: b.operating_hours || 'Monday – Saturday, 8:00 AM – 5:00 PM',
+      opening_date: b.opening_date || '',
+      description: b.description || '',
       status: b.status || 'open',
       color: b.color || '#2b5ce6',
       image_url: b.image_url || '',
@@ -152,8 +178,17 @@ export default function BranchesPage() {
     try {
       const payload = new FormData()
       payload.append('name', (form.name || '').trim())
+      payload.append('branch_code', (form.branch_code || '').trim())
+      payload.append('branch_type', (form.branch_type || '').trim())
       payload.append('location', (form.location || '').trim())
+      payload.append('address', (form.address || '').trim())
+      payload.append('city', (form.city || '').trim())
+      payload.append('province', (form.province || '').trim())
       payload.append('contact_number', (form.contact_number || '').trim())
+      payload.append('email', (form.email || '').trim())
+      payload.append('operating_hours', (form.operating_hours || '').trim())
+      payload.append('opening_date', (form.opening_date || '').trim())
+      payload.append('description', (form.description || '').trim())
       payload.append('status', form.status || 'open')
       payload.append('color', form.color || '#2b5ce6')
       if (form.image_url) {
@@ -278,10 +313,10 @@ export default function BranchesPage() {
                       </div>
                     </TD>
                     <TD>
-                      {b.location ? (
+                      {(b.location || b.city) ? (
                         <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                          <FiMapPin className="w-3 h-3" /> 
-                          <span className="truncate max-w-[150px]">{b.location}</span>
+                          <FiMapPin className="w-3 h-3" />
+                          <span className="truncate max-w-[150px]">{b.location || b.city}</span>
                         </div>
                       ) : <span className="text-xs text-muted-foreground/50 italic">Not set</span>}
                     </TD>
@@ -335,154 +370,24 @@ export default function BranchesPage() {
       />
 
       {/* EDIT MODAL */}
-      {editItem && (
-        <Modal onClose={() => setEditItem(null)} title="Edit Branch Details" size="lg">
-          <form onSubmit={handleEditSubmit} className="space-y-4">
-            {/* Branch Image */}
-            <div className="space-y-1.5">
-              <label className="text-xs font-bold text-muted-foreground uppercase flex items-center justify-between">
-                <span className="flex items-center gap-1.5">
-                  <FiImage className="w-3.5 h-3.5" /> Branch Image
-                </span>
-                {editImagePreview && (
-                  <span className="text-[10px] text-muted-foreground font-normal lowercase">
-                    (click photo to change)
-                  </span>
-                )}
-              </label>
-
-            {/* Hidden Single File Input */}
-            <input
-              ref={editFileInputRef}
-              type="file"
-              accept="image/*"
-              className="hidden"
-              onChange={handleImageChange}
-              onClick={(e) => { e.target.value = null }}
-            />
-
-            <div className="flex items-center gap-4 p-3 bg-muted/20 border border-border rounded-2xl">
-              <div className="relative group shrink-0">
-                <button
-                  type="button"
-                  onClick={() => editFileInputRef.current?.click()}
-                  className="w-20 h-20 sm:w-24 sm:h-24 rounded-xl bg-card border-2 border-dashed border-border flex flex-col items-center justify-center cursor-pointer overflow-hidden transition-all hover:border-primary/50 relative block shadow-xs p-0 text-left"
-                >
-                  {editImagePreview ? (
-                    <img
-                      src={editImagePreview}
-                      alt="Branch Preview"
-                      className="w-full h-full object-cover"
-                    />
-                  ) : (
-                    <div className="flex flex-col items-center justify-center text-muted-foreground p-2 text-center w-full h-full">
-                      <FiImage className="w-6 h-6 mb-1 text-muted-foreground/50" />
-                      <span className="text-[10px] font-semibold">No Image</span>
-                    </div>
-                  )}
-
-                  <div className="absolute inset-0 bg-black/60 text-white flex flex-col items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity rounded-xl">
-                    <FiCamera className="w-5 h-5 mb-1 text-blue-400" />
-                    <span className="text-[9px] font-bold">Change</span>
-                  </div>
-                </button>
-              </div>
-
-              <div className="flex-1 space-y-2">
-                <p className="text-xs text-muted-foreground leading-relaxed">
-                  Upload a photo of this storefront or location. PNG, JPG or WebP up to 5MB.
-                </p>
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => editFileInputRef.current?.click()}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary/10 hover:bg-primary/20 text-primary text-xs font-semibold cursor-pointer transition-colors"
-                  >
-                    <FiUploadCloud className="w-3.5 h-3.5" />
-                    <span>{editImagePreview ? 'Change Photo' : 'Upload Photo'}</span>
-                  </button>
-
-                  {editImageFile && (
-                    <button
-                      type="button"
-                      onClick={handleResetImage}
-                      className="text-xs text-rose-500 hover:text-rose-600 font-semibold px-2 py-1 transition-colors cursor-pointer"
-                    >
-                      Revert
-                    </button>
-                  )}
-                </div>
-              </div>
-            </div>
-            </div>
-
-            <div className="space-y-1">
-              <label className="text-xs font-bold text-muted-foreground uppercase">Branch Name *</label>
-              <Input
-                value={form.name}
-                onChange={e => setForm({ ...form, name: e?.target ? e.target.value : e })}
-                placeholder="e.g. Cagayan de Oro Branch"
-                error={formErrors.name}
-              />
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-1">
-                <label className="text-xs font-bold text-muted-foreground uppercase flex items-center gap-1">
-                  <FiMapPin className="w-3 h-3" /> Location
-                </label>
-                <Input
-                  value={form.location}
-                  onChange={e => setForm({ ...form, location: e?.target ? e.target.value : e })}
-                  placeholder="City or Address"
-                />
-              </div>
-              <div className="space-y-1">
-                <label className="text-xs font-bold text-muted-foreground uppercase flex items-center gap-1">
-                  <FiPhone className="w-3 h-3" /> Contact #
-                </label>
-                <Input
-                  value={form.contact_number}
-                  onChange={e => setForm({ ...form, contact_number: e?.target ? e.target.value : e })}
-                  placeholder="(+63) 900-000-0000"
-                />
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-1">
-                <label className="text-xs font-bold text-muted-foreground uppercase">Status</label>
-                <Select value={form.status} onChange={e => setForm({ ...form, status: e?.target ? e.target.value : e })}>
-                  <option value="open">Open (Active)</option>
-                  <option value="closed">Closed (Inactive)</option>
-                </Select>
-              </div>
-              <div className="space-y-1">
-                <label className="text-xs font-bold text-muted-foreground uppercase">Accent Color</label>
-                <div className="flex items-center gap-2">
-                  <input
-                    type="color"
-                    value={form.color || '#2b5ce6'}
-                    onChange={e => setForm({ ...form, color: e.target.value })}
-                    className="w-10 h-9 p-0.5 rounded-xl border border-border bg-card cursor-pointer shrink-0"
-                  />
-                  <Input
-                    value={form.color}
-                    onChange={e => setForm({ ...form, color: e?.target ? e.target.value : e })}
-                    placeholder="#2b5ce6"
-                    className="font-mono text-xs uppercase"
-                  />
-                </div>
-              </div>
-            </div>
-
-            <div className="pt-4 flex justify-end gap-3 border-t border-border mt-6">
-              <Btn variant="outline" onClick={() => setEditItem(null)} type="button">Cancel</Btn>
-              <Btn variant="primary" type="submit" loading={saving}>Save Changes</Btn>
-            </div>
-          </form>
-        </Modal>
-      )}
+      <EditBranchModal
+        isOpen={Boolean(editItem)}
+        onClose={() => setEditItem(null)}
+        initialData={editItem}
+        onUpdate={async (branchId, payload) => {
+          await api.branches.update(branchId, payload)
+          showToast('Branch updated successfully', 'success')
+          setEditItem(null)
+          loadData(true)
+          triggerDataSync('branches')
+        }}
+        onDelete={editItem ? () => {
+          const targetId = editItem.id
+          const targetName = editItem.name
+          setEditItem(null)
+          handleDelete(targetId, targetName)
+        } : undefined}
+      />
     </div>
   )
 }

@@ -492,12 +492,14 @@ class ReportController extends Controller
             $query = Product::query();
 
             if ($saBranchId) {
-                $query->where('branch_id', $saBranchId);
+                $query->where(function ($q) use ($saBranchId) {
+                    $q->where('branch_id', $saBranchId)->orWhereNull('branch_id');
+                });
             } elseif ($user && in_array($user->role, ['Store Administrator', 'Store Admin'])) {
                 $query->where('product_id', -1);
             } elseif ($filterBranch && $filterBranch !== 'All') {
                 $query->where(function ($q) use ($filterBranch) {
-                    $q->where('branch_id', $filterBranch);
+                    $q->where('branch_id', $filterBranch)->orWhereNull('branch_id');
                     if (!is_numeric($filterBranch)) {
                         $q->orWhereHas('branch', function ($bq) use ($filterBranch) {
                             $bq->where('name', $filterBranch);
@@ -732,7 +734,9 @@ class ReportController extends Controller
                 'active_employees' => Employee::where('branch_id', $branchId)->where('status', 'Active')->count(),
             ];
         } else if ($validated['report_type'] === 'Product / Inventory Report') {
-            $products = Product::where('branch_id', $branchId)->get();
+            $products = Product::where(function ($q) use ($branchId) {
+                $q->where('branch_id', $branchId)->orWhereNull('branch_id');
+            })->get();
             $content['inventory_summary'] = [
                 'total_products' => $products->count(),
                 'in_stock' => $products->where('stock_quantity', '>', 0)->count(),

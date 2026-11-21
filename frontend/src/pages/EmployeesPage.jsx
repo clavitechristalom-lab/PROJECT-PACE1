@@ -15,6 +15,7 @@ import {
 import { fmt, fmtDate, filterBySearch, fastDeepEqual } from '../lib/utils'
 import { api } from '../lib/api'
 import { useRealtimeSync, triggerDataSync, SyncButton } from '../lib/realtimeSync'
+import { downloadCenteredQrPng, printSingleBadge } from '../lib/qrBadge'
 import { QRCodeSVG } from 'qrcode.react'
 import EmployeeFinancialsTab from '../components/employees/EmployeeFinancialsTab'
 import { TbCurrencyPeso } from 'react-icons/tb'
@@ -155,7 +156,14 @@ export default function EmployeesPage({ branchFilter, embedded }) {
   }
 
   useEffect(() => {
-    loadEmployees('filter_change')
+    const controller = new AbortController()
+    const timer = setTimeout(() => {
+      loadEmployees('filter_change', controller.signal)
+    }, search ? 300 : 0)
+    return () => {
+      clearTimeout(timer)
+      controller.abort()
+    }
   }, [search, deptFilter, branchSelectFilter, statusFilter, branchFilter])
 
   // On-demand click-driven synchronization
@@ -495,21 +503,18 @@ export default function EmployeesPage({ branchFilter, embedded }) {
     }
   }
 
-  const handleDownloadQr = () => {
+  const handleDownloadQr = async () => {
     if (!detailItem?.employee?.qr_token) return
-    const svgEl = document.getElementById('employee-badge-qr-code')
-    if (!svgEl) return
-    const svgData = new XMLSerializer().serializeToString(svgEl)
-    const blob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' })
-    const url = URL.createObjectURL(blob)
-    const link = document.createElement('a')
-    link.href = url
-    link.download = `QR_${detailItem.employee.employee_code || detailItem.employee.employee_id}.svg`
-    document.body.appendChild(link)
-    link.click()
-    document.body.removeChild(link)
-    URL.revokeObjectURL(url)
-    showToast('Permanent QR code SVG downloaded', 'success')
+    const emp = detailItem.employee
+    const ok = await downloadCenteredQrPng(
+      'employee-badge-qr-code',
+      `QR_${emp.employee_code || emp.employee_id}`,
+      {
+        name: `${emp.first_name || ''} ${emp.last_name || ''}`.trim(),
+        code: emp.employee_code,
+      }
+    )
+    if (ok) showToast('High-resolution centered QR badge downloaded', 'success')
   }
 
   const handleOpenPinModal = (emp) => {
@@ -559,7 +564,20 @@ export default function EmployeesPage({ branchFilter, embedded }) {
   }
 
   const handlePrintBadge = () => {
-    window.print()
+    if (!detailItem?.employee?.qr_token) {
+      showToast('Generate a permanent QR badge first before printing.', 'warning')
+      return
+    }
+    const emp = detailItem.employee
+    printSingleBadge({
+      svgElementId: 'employee-badge-qr-code',
+      name: `${emp.first_name || ''} ${emp.last_name || ''}`.trim(),
+      position: emp.position,
+      department: emp.department,
+      branch: emp.branch?.name || emp.branch_name || '',
+      code: emp.employee_code,
+      statusLabel: emp.qr_active ? 'Active Permanent QR Badge' : 'Disabled QR Badge',
+    })
   }
 
   const filtered = useMemo(() => {
@@ -1557,6 +1575,7 @@ export default function EmployeesPage({ branchFilter, embedded }) {
                             {/* Refresh UUID Action */}
                             {isAdmin && (
                               <button
+                                type="button"
                                 onClick={handleRegenerateQr}
                                 disabled={qrActionLoading}
                                 title="Regenerate QR UUID"

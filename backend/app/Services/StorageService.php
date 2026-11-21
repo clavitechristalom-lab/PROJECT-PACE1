@@ -640,6 +640,116 @@ class StorageService
     }
 
     /**
+     * Delete a specific uploaded media file from storage/app/public safely.
+     */
+    public static function deleteMediaFile(string $relativePath): array
+    {
+        $cleanRel = ltrim(str_replace('\\', '/', trim($relativePath)), '/');
+        if ($cleanRel === '' || str_contains($cleanRel, '..') || basename($cleanRel) === '.gitignore') {
+            throw new \InvalidArgumentException('Invalid media file path.');
+        }
+
+        $publicRoot = realpath(storage_path('app/public'));
+        if (!$publicRoot) {
+            throw new \RuntimeException('Public storage directory is unavailable.');
+        }
+
+        $targetPath = $publicRoot . DIRECTORY_SEPARATOR . str_replace('/', DIRECTORY_SEPARATOR, $cleanRel);
+        $realTarget = realpath($targetPath);
+
+        if (!$realTarget || !is_file($realTarget) || !str_starts_with($realTarget, $publicRoot)) {
+            throw new \RuntimeException('The specified media file was not found on disk.');
+        }
+
+        $sizeBytes = (float) (@filesize($realTarget) ?: 0);
+        $filename = basename($realTarget);
+
+        if (!@File::delete($realTarget)) {
+            throw new \RuntimeException('Unable to delete the file from disk.');
+        }
+
+        // Clean up any database references to this storage file
+        try {
+            $needle = '/storage/' . $cleanRel;
+            \App\Models\Product::where('image_url', 'like', "%{$needle}")->update(['image_url' => null]);
+            \App\Models\Product::where('image_url_2', 'like', "%{$needle}")->update(['image_url_2' => null]);
+            \App\Models\Product::where('image_url_3', 'like', "%{$needle}")->update(['image_url_3' => null]);
+            \App\Models\Product::where('image_url_4', 'like', "%{$needle}")->update(['image_url_4' => null]);
+            \App\Models\BranchProfile::where('image_url', 'like', "%{$needle}")->update(['image_url' => null]);
+            if (class_exists(\App\Models\CarouselImage::class)) {
+                \App\Models\CarouselImage::where('image_url', 'like', "%{$needle}")->delete();
+            }
+        } catch (\Throwable $e) {}
+
+        Cache::forget('pace_storage_overview');
+
+        return [
+            'success' => true,
+            'filename' => $filename,
+            'relative_path' => $cleanRel,
+            'message' => "Deleted media file '{$filename}' successfully.",
+            'reclaimed_bytes' => $sizeBytes,
+            'reclaimed_formatted' => self::formatBytes($sizeBytes),
+        ];
+    }
+
+    /**
+     * Delete multiple uploaded media files from storage/app/public safely in a single batch.
+     */
+    public static function deleteMediaFilesBatch(array $relativePaths): array
+    {
+        $publicRoot = realpath(storage_path('app/public'));
+        if (!$publicRoot) {
+            throw new \RuntimeException('Public storage directory is unavailable.');
+        }
+
+        $deletedCount = 0;
+        $reclaimedBytes = 0.0;
+
+        foreach ($relativePaths as $rawPath) {
+            $cleanRel = ltrim(str_replace('\\', '/', trim((string) $rawPath)), '/');
+            if ($cleanRel === '' || str_contains($cleanRel, '..') || basename($cleanRel) === '.gitignore') {
+                continue;
+            }
+
+            $targetPath = $publicRoot . DIRECTORY_SEPARATOR . str_replace('/', DIRECTORY_SEPARATOR, $cleanRel);
+            $realTarget = realpath($targetPath);
+
+            if (!$realTarget || !is_file($realTarget) || !str_starts_with($realTarget, $publicRoot)) {
+                continue;
+            }
+
+            $sizeBytes = (float) (@filesize($realTarget) ?: 0);
+            if (@File::delete($realTarget)) {
+                $deletedCount++;
+                $reclaimedBytes += $sizeBytes;
+
+                try {
+                    $needle = '/storage/' . $cleanRel;
+                    \App\Models\Product::where('image_url', 'like', "%{$needle}")->update(['image_url' => null]);
+                    \App\Models\Product::where('image_url_2', 'like', "%{$needle}")->update(['image_url_2' => null]);
+                    \App\Models\Product::where('image_url_3', 'like', "%{$needle}")->update(['image_url_3' => null]);
+                    \App\Models\Product::where('image_url_4', 'like', "%{$needle}")->update(['image_url_4' => null]);
+                    \App\Models\BranchProfile::where('image_url', 'like', "%{$needle}")->update(['image_url' => null]);
+                    if (class_exists(\App\Models\CarouselImage::class)) {
+                        \App\Models\CarouselImage::where('image_url', 'like', "%{$needle}")->delete();
+                    }
+                } catch (\Throwable $e) {}
+            }
+        }
+
+        Cache::forget('pace_storage_overview');
+
+        return [
+            'success' => true,
+            'deleted_count' => $deletedCount,
+            'message' => "Deleted {$deletedCount} media file(s) successfully.",
+            'reclaimed_bytes' => $reclaimedBytes,
+            'reclaimed_formatted' => self::formatBytes($reclaimedBytes),
+        ];
+    }
+
+    /**
      * Human-readable byte formatting utility.
      */
     public static function formatBytes(float $bytes, int $precision = 2): string

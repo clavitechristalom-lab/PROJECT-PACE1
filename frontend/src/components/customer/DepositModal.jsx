@@ -526,7 +526,6 @@ export default function DepositModal({
     <>
       <div
         className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-[fadeIn_0.2s_ease]"
-        onClick={(e) => { if (e.target === e.currentTarget && !loading) onClose(); }}
       >
         <div
           style={{
@@ -1600,15 +1599,23 @@ export default function DepositModal({
                     <div className="py-2 border-b border-border/50 flex items-center justify-between gap-2">
                       <span className="text-muted-foreground">Proof of Payment</span>
                       <div className="flex items-center gap-2">
-                        <img
-                          src={checkoutData?.proof_of_payment_url || (checkoutData?.proof_of_payment ? formatImgUrl(checkoutData.proof_of_payment) : proofPreview)}
-                          alt="Proof receipt"
-                          className="w-10 h-10 object-cover rounded-lg border border-border shadow-xs cursor-pointer hover:scale-105 transition-transform"
-                          onClick={() => {
-                            const src = checkoutData?.proof_of_payment_url || (checkoutData?.proof_of_payment ? formatImgUrl(checkoutData.proof_of_payment) : proofPreview);
-                            if (src) window.open(src, '_blank');
-                          }}
-                        />
+                        {(() => {
+                          const rawProof = checkoutData?.proof_of_payment_url || checkoutData?.proof_of_payment;
+                          const proofSrc = (rawProof ? formatImgUrl(rawProof) : null) || proofPreview;
+                          return (
+                            <img
+                              src={proofSrc}
+                              alt="Proof receipt"
+                              className="w-10 h-10 object-cover rounded-lg border border-border shadow-xs cursor-pointer hover:scale-105 transition-transform"
+                              onClick={() => {
+                                if (proofSrc) window.open(proofSrc, '_blank');
+                              }}
+                              onError={(e) => {
+                                e.currentTarget.style.display = 'none';
+                              }}
+                            />
+                          );
+                        })()}
                         <span className="text-[10px] text-emerald-600 font-semibold flex items-center gap-1">
                           <FiCheck className="w-3 h-3" /> Attached
                         </span>

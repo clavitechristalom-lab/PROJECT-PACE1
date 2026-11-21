@@ -2388,11 +2388,15 @@ class PayrollController extends Controller
     /**
      * Approve Philippine Statutory Contributions (SSS, PhilHealth, Pag-IBIG, Tax)
      * and securely sync them into employee_deductions and the active payroll ledger.
+     * Supports both single employee and batch approval (employee_id = 'all').
      */
     public function approveContributions(Request $request)
     {
         $request->validate([
-            'employee_id' => 'required|exists:employees,employee_id',
+            'employee_id' => 'required',
+            'employee_ids' => 'nullable|array',
+            'employee_ids.*' => 'exists:employees,employee_id',
+            'branch' => 'nullable|string',
             'cutoff_type' => 'nullable|string|in:weekly,semi-monthly,monthly',
             'include_sss' => 'boolean',
             'include_philhealth' => 'boolean',
@@ -2402,30 +2406,218 @@ class PayrollController extends Controller
         ]);
 
         $user = $request->user();
-        $employee = Employee::with(['branchProfile', 'user'])->findOrFail($request->employee_id);
-
-        // Security check: Store Administrator cannot approve for another branch
-        if ($user && in_array($user->role, ['Store Administrator', 'Store Admin'])) {
-            $userBranchId = $user->employee ? $user->employee->branch_id : null;
-            $userBranchName = $user->employee ? ($user->employee->branch_name ?? $user->employee->branch) : null;
-            if ($userBranchId && $employee->branch_id && $employee->branch_id != $userBranchId) {
-                return response()->json(['message' => 'Unauthorized: Cannot modify deductions for employees outside your assigned branch.'], 403);
-            }
-        }
-
+        $isAll = ($request->employee_id === 'all' || $request->boolean('is_all', false));
         $cutoffType = strtolower($request->input('cutoff_type', 'weekly'));
         $includeSss = $request->boolean('include_sss', false);
         $includePhilhealth = $request->boolean('include_philhealth', false);
         $includePagibig = $request->boolean('include_pagibig', false);
         $includeTax = $request->boolean('include_tax', false);
+        $targetPeriodId = $request->input('period_id');
 
-        // Resolve rates
+        if ($isAll) {
+            $empQuery = Employee::payrollEligible()->with(['branchProfile', 'user']);
+
+            if ($request->filled('employee_ids') && is_array($request->employee_ids)) {
+                $empQuery->whereIn('employee_id', $request->employee_ids);
+            }
+
+            if ($user && in_array($user->role, ['Store Administrator', 'Store Admin'])) {
+                $branchId = $user->employee ? $user->employee->branch_id : null;
+                $branchName = $user->employee ? ($user->employee->branch_name ?? $user->employee->branch) : null;
+                if ($branchId || $branchName) {
+                    $empQuery->where(function ($sub) use ($branchId, $branchName) {
+                        if ($branchId) $sub->where('branch_id', $branchId);
+                        if ($branchName) {
+                            $sub->orWhere('branch', $branchName)
+                                ->orWhereHas('branchProfile', fn($bq) => $bq->where('name', $branchName));
+                        }
+                    });
+                }
+            } elseif ($request->filled('branch') && $request->branch !== 'All') {
+                $branchFilter = $request->branch;
+                $empQuery->where(function ($sub) use ($branchFilter) {
+                    $sub->where('branch', $branchFilter)
+                        ->orWhereHas('branchProfile', fn($bq) => $bq->where('name', $branchFilter));
+                    if (is_numeric($branchFilter)) {
+                        $sub->orWhere('branch_id', (int) $branchFilter);
+                    }
+                });
+            }
+
+            $employees = $empQuery->orderBy('last_name')->get();
+            if ($employees->isEmpty()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'No eligible employees found for the selected filter.',
+                ], 404);
+            }
+
+            $results = [];
+            $totalSss = 0.0;
+            $totalPhilhealth = 0.0;
+            $totalPagibig = 0.0;
+            $totalTax = 0.0;
+            $grandTotal = 0.0;
+
+            DB::transaction(function () use (
+                $employees,
+                $cutoffType,
+                $includeSss,
+                $includePhilhealth,
+                $includePagibig,
+                $includeTax,
+                $targetPeriodId,
+                $user,
+                $request,
+                &$results,
+                &$totalSss,
+                &$totalPhilhealth,
+                &$totalPagibig,
+                &$totalTax,
+                &$grandTotal
+            ) {
+                foreach ($employees as $employee) {
+                    $entry = $this->applyStatutoryDeductionsForEmployee($employee, [
+                        'cutoff_type' => $cutoffType,
+                        'include_sss' => $includeSss,
+                        'include_philhealth' => $includePhilhealth,
+                        'include_pagibig' => $includePagibig,
+                        'include_tax' => $includeTax,
+                        'period_id' => $targetPeriodId,
+                        'allow_custom' => false,
+                    ]);
+                    $results[] = $entry;
+                    $totalSss += $entry['sss_amount'];
+                    $totalPhilhealth += $entry['philhealth_amount'];
+                    $totalPagibig += $entry['pagibig_amount'];
+                    $totalTax += $entry['tax_amount'];
+                    $grandTotal += $entry['total_statutory_deductions'];
+                }
+
+                SystemLog::create([
+                    'user_id' => $user ? $user->user_id : null,
+                    'action' => 'APPROVE',
+                    'module' => 'Payroll',
+                    'description' => "Batch Approved & Applied statutory deductions for {$employees->count()} employee(s) - SSS Total: ₱" . number_format($totalSss, 2) . ", PhilHealth Total: ₱" . number_format($totalPhilhealth, 2) . ", Pag-IBIG Total: ₱" . number_format($totalPagibig, 2) . " (" . ucfirst($cutoffType) . ")",
+                    'ip_address' => $request->ip(),
+                    'user_agent' => $request->userAgent(),
+                ]);
+            });
+
+            SyncController::invalidateFingerprint(['payroll', 'dashboard']);
+
+            $summaryApplied = [
+                ['name' => 'SSS Contribution', 'amount' => round($totalSss, 2), 'is_active' => $includeSss && $totalSss > 0],
+                ['name' => 'PhilHealth Contribution', 'amount' => round($totalPhilhealth, 2), 'is_active' => $includePhilhealth && $totalPhilhealth > 0],
+                ['name' => 'Pag-IBIG (HDMF)', 'amount' => round($totalPagibig, 2), 'is_active' => $includePagibig && $totalPagibig > 0],
+                ['name' => 'Withholding Tax', 'amount' => round($totalTax, 2), 'is_active' => $includeTax && $totalTax > 0],
+            ];
+
+            return response()->json([
+                'success' => true,
+                'is_all' => true,
+                'processed_count' => count($results),
+                'message' => "Statutory contributions successfully approved and applied to all " . count($results) . " selected employee(s).",
+                'total_statutory_deductions' => round($grandTotal, 2),
+                'sss_amount' => round($totalSss, 2),
+                'philhealth_amount' => round($totalPhilhealth, 2),
+                'pagibig_amount' => round($totalPagibig, 2),
+                'tax_amount' => round($totalTax, 2),
+                'applied_deductions' => $summaryApplied,
+                'cutoff_type' => $cutoffType,
+                'results' => $results,
+            ]);
+        }
+
+        // Single employee approval
+        $request->validate([
+            'employee_id' => 'required|exists:employees,employee_id',
+        ]);
+
+        $employee = Employee::with(['branchProfile', 'user'])->findOrFail($request->employee_id);
+
+        // Security check: Store Administrator cannot approve for another branch
+        if ($user && in_array($user->role, ['Store Administrator', 'Store Admin'])) {
+            $userBranchId = $user->employee ? $user->employee->branch_id : null;
+            if ($userBranchId && $employee->branch_id && $employee->branch_id != $userBranchId) {
+                return response()->json(['message' => 'Unauthorized: Cannot modify deductions for employees outside your assigned branch.'], 403);
+            }
+        }
+
+        $result = [];
+        DB::transaction(function () use (
+            $employee,
+            $cutoffType,
+            $includeSss,
+            $includePhilhealth,
+            $includePagibig,
+            $includeTax,
+            $targetPeriodId,
+            $user,
+            $request,
+            &$result
+        ) {
+            $result = $this->applyStatutoryDeductionsForEmployee($employee, [
+                'cutoff_type' => $cutoffType,
+                'include_sss' => $includeSss,
+                'include_philhealth' => $includePhilhealth,
+                'include_pagibig' => $includePagibig,
+                'include_tax' => $includeTax,
+                'period_id' => $targetPeriodId,
+                'allow_custom' => true,
+                'custom_sss' => $request->input('custom_sss'),
+                'custom_philhealth' => $request->input('custom_philhealth'),
+                'custom_pagibig' => $request->input('custom_pagibig'),
+                'custom_tax' => $request->input('custom_tax'),
+            ]);
+
+            SystemLog::create([
+                'user_id' => $user ? $user->user_id : null,
+                'action' => 'APPROVE',
+                'module' => 'Payroll',
+                'description' => "Approved & Applied statutory deductions for {$employee->first_name} {$employee->last_name} ({$employee->employee_code}) - SSS: ₱" . number_format($result['sss_amount'], 2) . ", PhilHealth: ₱" . number_format($result['philhealth_amount'], 2) . ", Pag-IBIG: ₱" . number_format($result['pagibig_amount'], 2) . " (" . ucfirst($cutoffType) . ")",
+                'ip_address' => $request->ip(),
+                'user_agent' => $request->userAgent(),
+            ]);
+        });
+
+        $activeDeductions = EmployeeDeduction::where('employee_id', $employee->employee_id)
+            ->where('is_active', true)
+            ->get();
+
+        SyncController::invalidateFingerprint(['payroll', 'dashboard']);
+
+        return response()->json([
+            'success' => true,
+            'message' => "Statutory contributions successfully approved and applied to database ledger for {$employee->first_name} {$employee->last_name}.",
+            'employee_id' => $employee->employee_id,
+            'total_statutory_deductions' => $result['total_statutory_deductions'],
+            'sss_amount' => $result['sss_amount'],
+            'philhealth_amount' => $result['philhealth_amount'],
+            'pagibig_amount' => $result['pagibig_amount'],
+            'tax_amount' => $result['tax_amount'],
+            'applied_deductions' => $result['applied_deductions'],
+            'active_deductions' => $activeDeductions,
+            'cutoff_type' => $cutoffType,
+            'employee' => $result['employee'],
+        ]);
+    }
+
+    /**
+     * Compute, persist in employee_deductions, and sync open payroll records for one employee.
+     */
+    private function applyStatutoryDeductionsForEmployee(Employee $employee, array $opts): array
+    {
+        $cutoffType = strtolower((string) ($opts['cutoff_type'] ?? 'weekly'));
+        $includeSss = (bool) ($opts['include_sss'] ?? false);
+        $includePhilhealth = (bool) ($opts['include_philhealth'] ?? false);
+        $includePagibig = (bool) ($opts['include_pagibig'] ?? false);
+        $includeTax = (bool) ($opts['include_tax'] ?? false);
+        $allowCustom = (bool) ($opts['allow_custom'] ?? false);
+        $targetPeriodId = $opts['period_id'] ?? null;
+
         [$weeklyBase, $dailyRate, $hourlyRate, $minuteRate, $monthlyBasic] = $this->resolveEmployeeRates($employee);
 
-        // Schedule apportioning multipliers:
-        // Monthly: 100% (1.0)
-        // Semi-monthly: 50% split (0.5)
-        // Weekly: 25% split (0.25)
         $scheduleMultiplier = match ($cutoffType) {
             'weekly' => 0.25,
             'monthly' => 1.0,
@@ -2433,21 +2625,18 @@ class PayrollController extends Controller
         };
         $cutoffBase = round($monthlyBasic * $scheduleMultiplier, 2);
 
-        // 1. SSS Employee Share: 4.5% of monthly salary (standard MSC)
         $monthlySss = round($monthlyBasic * 0.045, 2);
         $calculatedSss = round($monthlySss * $scheduleMultiplier, 2);
         $sssAmount = $includeSss
-            ? (isset($request->custom_sss) && is_numeric($request->custom_sss) ? round((float)$request->custom_sss, 2) : $calculatedSss)
+            ? ($allowCustom && isset($opts['custom_sss']) && is_numeric($opts['custom_sss']) ? round((float)$opts['custom_sss'], 2) : $calculatedSss)
             : 0.0;
 
-        // 2. PhilHealth Employee Share: 2.5% of monthly basic
         $monthlyPhilhealth = round($monthlyBasic * 0.025, 2);
         $calculatedPhilhealth = round($monthlyPhilhealth * $scheduleMultiplier, 2);
         $philhealthAmount = $includePhilhealth
-            ? (isset($request->custom_philhealth) && is_numeric($request->custom_philhealth) ? round((float)$request->custom_philhealth, 2) : $calculatedPhilhealth)
+            ? ($allowCustom && isset($opts['custom_philhealth']) && is_numeric($opts['custom_philhealth']) ? round((float)$opts['custom_philhealth'], 2) : $calculatedPhilhealth)
             : 0.0;
 
-        // 3. Pag-IBIG (HDMF) Employee Share: 2% of basic, capped at ₱200/mo (₱100 semi-monthly, ₱50 weekly)
         $pagibigCap = match ($cutoffType) {
             'weekly' => 50.00,
             'monthly' => 200.00,
@@ -2455,17 +2644,15 @@ class PayrollController extends Controller
         };
         $calculatedPagibig = min($pagibigCap, round($cutoffBase * 0.02, 2));
         $pagibigAmount = $includePagibig
-            ? (isset($request->custom_pagibig) && is_numeric($request->custom_pagibig) ? round((float)$request->custom_pagibig, 2) : $calculatedPagibig)
+            ? ($allowCustom && isset($opts['custom_pagibig']) && is_numeric($opts['custom_pagibig']) ? round((float)$opts['custom_pagibig'], 2) : $calculatedPagibig)
             : 0.0;
 
-        // 4. Withholding Tax (TRAIN Law)
         $taxAmount = 0.0;
         if ($includeTax) {
-            if (isset($request->custom_tax) && is_numeric($request->custom_tax)) {
-                $taxAmount = round((float)$request->custom_tax, 2);
+            if ($allowCustom && isset($opts['custom_tax']) && is_numeric($opts['custom_tax'])) {
+                $taxAmount = round((float)$opts['custom_tax'], 2);
             } else {
-                $periodGross = $cutoffBase;
-                $statutoryResult = $this->computeStatutoryDeductions($periodGross, $periodGross, [
+                $statutoryResult = $this->computeStatutoryDeductions($cutoffBase, $cutoffBase, [
                     'include_sss' => $includeSss,
                     'include_philhealth' => $includePhilhealth,
                     'include_pagibig' => $includePagibig,
@@ -2479,202 +2666,154 @@ class PayrollController extends Controller
         $appliedDeductions = [];
         $totalStatutoryDeductions = round($sssAmount + $philhealthAmount + $pagibigAmount + $taxAmount, 2);
 
-        DB::transaction(function () use (
-            $employee,
-            $includeSss,
-            $sssAmount,
-            $includePhilhealth,
-            $philhealthAmount,
-            $includePagibig,
-            $pagibigAmount,
-            $includeTax,
-            $taxAmount,
-            $cutoffType,
-            $user,
-            $request,
-            &$appliedDeductions,
-            &$totalStatutoryDeductions
-        ) {
-            // Helper to update or create an entry in employee_deductions (and deactivate aliases when unchecked)
-            $syncDeduction = function ($name, $amount, $active, array $aliases = []) use ($employee, &$appliedDeductions) {
-                if (!empty($aliases)) {
-                    EmployeeDeduction::where('employee_id', $employee->employee_id)
-                        ->whereIn('name', $aliases)
-                        ->update(['amount' => 0.00, 'is_active' => false]);
-                }
+        $syncDeduction = function ($name, $amount, $active, array $aliases = []) use ($employee, &$appliedDeductions) {
+            if (!empty($aliases)) {
+                EmployeeDeduction::where('employee_id', $employee->employee_id)
+                    ->whereIn('name', $aliases)
+                    ->update(['amount' => 0.00, 'is_active' => false]);
+            }
 
-                $record = EmployeeDeduction::where('employee_id', $employee->employee_id)
-                    ->where('name', $name)
-                    ->first();
+            $record = EmployeeDeduction::where('employee_id', $employee->employee_id)
+                ->where('name', $name)
+                ->first();
 
-                if ($active && $amount > 0) {
-                    if ($record) {
-                        $record->amount = $amount;
-                        $record->is_active = true;
-                        $record->save();
-                    } else {
-                        $record = EmployeeDeduction::create([
-                            'employee_id' => $employee->employee_id,
-                            'name' => $name,
-                            'amount' => $amount,
-                            'is_active' => true,
-                        ]);
-                    }
-                    $appliedDeductions[] = [
+            if ($active && $amount > 0) {
+                if ($record) {
+                    $record->amount = $amount;
+                    $record->is_active = true;
+                    $record->save();
+                } else {
+                    EmployeeDeduction::create([
+                        'employee_id' => $employee->employee_id,
                         'name' => $name,
                         'amount' => $amount,
                         'is_active' => true,
-                    ];
-                } else {
-                    if ($record) {
-                        $record->amount = 0.00;
-                        $record->is_active = false;
-                        $record->save();
-                    }
-                    $appliedDeductions[] = [
-                        'name' => $name,
-                        'amount' => 0.00,
-                        'is_active' => false,
-                    ];
+                    ]);
                 }
-            };
-
-            // SSS Contribution
-            $syncDeduction('SSS Contribution', $sssAmount, $includeSss, ['SSS']);
-
-            // PhilHealth Contribution
-            $syncDeduction('PhilHealth Contribution', $philhealthAmount, $includePhilhealth, ['PhilHealth', 'PhilHealth Premium']);
-
-            // Pag-IBIG (HDMF)
-            $syncDeduction('Pag-IBIG (HDMF)', $pagibigAmount, $includePagibig, ['Pag-IBIG']);
-
-            // Withholding Tax (if applicable)
-            if ($includeTax && $taxAmount > 0) {
-                $syncDeduction('Withholding Tax', $taxAmount, true, ['Tax']);
+                $appliedDeductions[] = [
+                    'name' => $name,
+                    'amount' => $amount,
+                    'is_active' => true,
+                ];
             } else {
-                $syncDeduction('Withholding Tax', 0, false, ['Tax']);
+                if ($record) {
+                    $record->amount = 0.00;
+                    $record->is_active = false;
+                    $record->save();
+                }
+                $appliedDeductions[] = [
+                    'name' => $name,
+                    'amount' => 0.00,
+                    'is_active' => false,
+                ];
             }
+        };
 
-            // Sync with current/open payroll records in database ledger
-            $targetPeriodId = $request->input('period_id');
-            $openPayrolls = Payroll::where('employee_id', $employee->employee_id)
-                ->where(function ($q) use ($targetPeriodId) {
-                    $q->whereIn('status', ['Draft', 'Pending', 'Approved']);
-                    if ($targetPeriodId && $targetPeriodId !== 'all' && $targetPeriodId !== 'auto') {
-                        $q->orWhere('period_id', $targetPeriodId);
-                    }
-                })
-                ->get();
+        $syncDeduction('SSS Contribution', $sssAmount, $includeSss, ['SSS']);
+        $syncDeduction('PhilHealth Contribution', $philhealthAmount, $includePhilhealth, ['PhilHealth', 'PhilHealth Premium']);
+        $syncDeduction('Pag-IBIG (HDMF)', $pagibigAmount, $includePagibig, ['Pag-IBIG']);
 
-            foreach ($openPayrolls as $p) {
-                $meta = [];
-                if (!empty($p->notes)) {
-                    $decoded = json_decode($p->notes, true);
-                    if (is_array($decoded)) {
-                        $meta = $decoded;
-                    }
+        if ($includeTax && $taxAmount > 0) {
+            $syncDeduction('Withholding Tax', $taxAmount, true, ['Tax']);
+        } else {
+            $syncDeduction('Withholding Tax', 0, false, ['Tax']);
+        }
+
+        $openPayrolls = Payroll::where('employee_id', $employee->employee_id)
+            ->where(function ($q) use ($targetPeriodId) {
+                $q->whereIn('status', ['Draft', 'Pending', 'Approved']);
+                if ($targetPeriodId && $targetPeriodId !== 'all' && $targetPeriodId !== 'auto') {
+                    $q->orWhere('period_id', $targetPeriodId);
                 }
-
-                $workHoursMeta = (float)($meta['work_hours'] ?? $p->regular_hours ?? 0);
-                $paidLeaveMeta = (float)($meta['paid_leave_days'] ?? 0);
-                $isZeroHoursPayroll = !empty($meta['zero_hours'])
-                    || ((float)$p->basic_salary === 0.0 && $workHoursMeta <= 0 && $paidLeaveMeta <= 0);
-
-                // Delete previous statutory deduction line items in payroll_deductions
-                PayrollDeduction::where('payroll_id', $p->payroll_id)
-                    ->whereIn('deduction_type', ['SSS', 'PhilHealth', 'Pag-IBIG', 'Withholding Tax'])
-                    ->delete();
-
-                if ($isZeroHoursPayroll) {
-                    $meta['sss'] = 0.0;
-                    $meta['philhealth'] = 0.0;
-                    $meta['pagibig'] = 0.0;
-                    $meta['withholding_tax'] = 0.0;
-                    $meta['zero_hours'] = true;
-                    $meta['weekly_base_pay'] = 0.0;
-                    $p->notes = json_encode($meta);
-                    $p->total_deductions = 0.0;
-                    $p->net_pay = 0.0;
-                    $p->save();
-                    continue;
-                }
-
-                if ($includeSss && $sssAmount > 0) {
-                    PayrollDeduction::create([
-                        'payroll_id' => $p->payroll_id,
-                        'deduction_type' => 'SSS',
-                        'amount' => $sssAmount,
-                        'notes' => "SSS Statutory Contribution (" . ucfirst($cutoffType) . " Share)",
-                    ]);
-                }
-                if ($includePhilhealth && $philhealthAmount > 0) {
-                    PayrollDeduction::create([
-                        'payroll_id' => $p->payroll_id,
-                        'deduction_type' => 'PhilHealth',
-                        'amount' => $philhealthAmount,
-                        'notes' => "PhilHealth Statutory Contribution (" . ucfirst($cutoffType) . " Share)",
-                    ]);
-                }
-                if ($includePagibig && $pagibigAmount > 0) {
-                    PayrollDeduction::create([
-                        'payroll_id' => $p->payroll_id,
-                        'deduction_type' => 'Pag-IBIG',
-                        'amount' => $pagibigAmount,
-                        'notes' => "Pag-IBIG (HDMF) Statutory Contribution (" . ucfirst($cutoffType) . " Share)",
-                    ]);
-                }
-                if ($includeTax && $taxAmount > 0) {
-                    PayrollDeduction::create([
-                        'payroll_id' => $p->payroll_id,
-                        'deduction_type' => 'Withholding Tax',
-                        'amount' => $taxAmount,
-                        'notes' => "Withholding Tax (TRAIN Law)",
-                    ]);
-                }
-
-                // Sync JSON metadata notes on the payroll record so unselected contributions are cleared
-                $meta['sss'] = ($includeSss && $sssAmount > 0) ? (float)$sssAmount : 0.0;
-                $meta['philhealth'] = ($includePhilhealth && $philhealthAmount > 0) ? (float)$philhealthAmount : 0.0;
-                $meta['pagibig'] = ($includePagibig && $pagibigAmount > 0) ? (float)$pagibigAmount : 0.0;
-                $meta['withholding_tax'] = ($includeTax && $taxAmount > 0) ? (float)$taxAmount : 0.0;
-                $p->notes = json_encode($meta);
-
-                // Recalculate total deductions & net pay on the payroll entry
-                $newDeductionsTotal = (float) PayrollDeduction::where('payroll_id', $p->payroll_id)->sum('amount');
-                $p->total_deductions = round($newDeductionsTotal, 2);
-                $p->net_pay = max(0, round((float)$p->gross_pay - $newDeductionsTotal, 2));
-                $p->save();
-            }
-
-            // System Log
-            SystemLog::create([
-                'user_id' => $user ? $user->user_id : null,
-                'action' => 'APPROVE',
-                'module' => 'Payroll',
-                'description' => "Approved & Applied statutory deductions for {$employee->first_name} {$employee->last_name} ({$employee->employee_code}) - SSS: ₱" . number_format($sssAmount, 2) . ", PhilHealth: ₱" . number_format($philhealthAmount, 2) . ", Pag-IBIG: ₱" . number_format($pagibigAmount, 2) . " (" . ucfirst($cutoffType) . ")",
-                'ip_address' => $request->ip(),
-                'user_agent' => $request->userAgent(),
-            ]);
-        });
-
-        // Retrieve refreshed employee active deductions
-        $activeDeductions = EmployeeDeduction::where('employee_id', $employee->employee_id)
-            ->where('is_active', true)
+            })
             ->get();
 
-        SyncController::invalidateFingerprint(['payroll', 'dashboard']);
+        foreach ($openPayrolls as $p) {
+            $meta = [];
+            if (!empty($p->notes)) {
+                $decoded = json_decode($p->notes, true);
+                if (is_array($decoded)) {
+                    $meta = $decoded;
+                }
+            }
 
-        return response()->json([
-            'success' => true,
-            'message' => "Statutory contributions successfully approved and applied to database ledger for {$employee->first_name} {$employee->last_name}.",
-            'total_statutory_deductions' => round($totalStatutoryDeductions, 2),
+            $workHoursMeta = (float)($meta['work_hours'] ?? $p->regular_hours ?? 0);
+            $paidLeaveMeta = (float)($meta['paid_leave_days'] ?? 0);
+            $isZeroHoursPayroll = !empty($meta['zero_hours'])
+                || ((float)$p->basic_salary === 0.0 && $workHoursMeta <= 0 && $paidLeaveMeta <= 0);
+
+            PayrollDeduction::where('payroll_id', $p->payroll_id)
+                ->whereIn('deduction_type', ['SSS', 'PhilHealth', 'Pag-IBIG', 'Withholding Tax'])
+                ->delete();
+
+            if ($isZeroHoursPayroll) {
+                $meta['sss'] = 0.0;
+                $meta['philhealth'] = 0.0;
+                $meta['pagibig'] = 0.0;
+                $meta['withholding_tax'] = 0.0;
+                $meta['zero_hours'] = true;
+                $meta['weekly_base_pay'] = 0.0;
+                $p->notes = json_encode($meta);
+                $p->total_deductions = 0.0;
+                $p->net_pay = 0.0;
+                $p->save();
+                continue;
+            }
+
+            if ($includeSss && $sssAmount > 0) {
+                PayrollDeduction::create([
+                    'payroll_id' => $p->payroll_id,
+                    'deduction_type' => 'SSS',
+                    'amount' => $sssAmount,
+                    'notes' => "SSS Statutory Contribution (" . ucfirst($cutoffType) . " Share)",
+                ]);
+            }
+            if ($includePhilhealth && $philhealthAmount > 0) {
+                PayrollDeduction::create([
+                    'payroll_id' => $p->payroll_id,
+                    'deduction_type' => 'PhilHealth',
+                    'amount' => $philhealthAmount,
+                    'notes' => "PhilHealth Statutory Contribution (" . ucfirst($cutoffType) . " Share)",
+                ]);
+            }
+            if ($includePagibig && $pagibigAmount > 0) {
+                PayrollDeduction::create([
+                    'payroll_id' => $p->payroll_id,
+                    'deduction_type' => 'Pag-IBIG',
+                    'amount' => $pagibigAmount,
+                    'notes' => "Pag-IBIG (HDMF) Statutory Contribution (" . ucfirst($cutoffType) . " Share)",
+                ]);
+            }
+            if ($includeTax && $taxAmount > 0) {
+                PayrollDeduction::create([
+                    'payroll_id' => $p->payroll_id,
+                    'deduction_type' => 'Withholding Tax',
+                    'amount' => $taxAmount,
+                    'notes' => "Withholding Tax (TRAIN Law)",
+                ]);
+            }
+
+            $meta['sss'] = ($includeSss && $sssAmount > 0) ? (float)$sssAmount : 0.0;
+            $meta['philhealth'] = ($includePhilhealth && $philhealthAmount > 0) ? (float)$philhealthAmount : 0.0;
+            $meta['pagibig'] = ($includePagibig && $pagibigAmount > 0) ? (float)$pagibigAmount : 0.0;
+            $meta['withholding_tax'] = ($includeTax && $taxAmount > 0) ? (float)$taxAmount : 0.0;
+            $p->notes = json_encode($meta);
+
+            $newDeductionsTotal = (float) PayrollDeduction::where('payroll_id', $p->payroll_id)->sum('amount');
+            $p->total_deductions = round($newDeductionsTotal, 2);
+            $p->net_pay = max(0, round((float)$p->gross_pay - $newDeductionsTotal, 2));
+            $p->save();
+        }
+
+        return [
+            'employee_id' => $employee->employee_id,
+            'cutoff_type' => $cutoffType,
             'sss_amount' => round($sssAmount, 2),
             'philhealth_amount' => round($philhealthAmount, 2),
             'pagibig_amount' => round($pagibigAmount, 2),
             'tax_amount' => round($taxAmount, 2),
+            'total_statutory_deductions' => round($totalStatutoryDeductions, 2),
             'applied_deductions' => $appliedDeductions,
-            'active_deductions' => $activeDeductions,
-            'cutoff_type' => $cutoffType,
             'employee' => [
                 'employee_id' => $employee->employee_id,
                 'full_name' => "{$employee->first_name} {$employee->last_name}",
@@ -2682,7 +2821,7 @@ class PayrollController extends Controller
                 'branch_name' => $employee->branchProfile?->name ?? $employee->branch,
                 'basic_salary' => $monthlyBasic,
             ],
-        ]);
+        ];
     }
 
     /**

@@ -287,12 +287,27 @@ class EmployeeController extends Controller
             $validated['employee_code'] = 'EMP-' . str_pad($count, 3, '0', STR_PAD_LEFT);
         }
 
-        $salary = (isset($validated['basic_salary']) && $validated['basic_salary'] !== '' && $validated['basic_salary'] !== null && is_numeric($validated['basic_salary'])) 
-            ? (float)$validated['basic_salary'] 
-            : 0.00;
-        $validated['basic_salary'] = $salary;
-        $validated['daily_rate'] = $salary > 0 ? round($salary / 26, 2) : 0.00;
-        $validated['hourly_rate'] = $salary > 0 ? round($validated['daily_rate'] / 8, 2) : 0.00;
+        $dailyInput = $request->input('daily_rate');
+        $salInput = $validated['basic_salary'] ?? null;
+        if ($dailyInput !== null && $dailyInput !== '' && is_numeric($dailyInput) && (float)$dailyInput > 0) {
+            $dailyRate = (float)$dailyInput;
+            $salVal = round($dailyRate * 26, 2);
+        } elseif ($salInput !== null && $salInput !== '' && is_numeric($salInput) && (float)$salInput > 0) {
+            $val = (float)$salInput;
+            if ($val >= 2600) {
+                $salVal = $val;
+                $dailyRate = round($val / 26, 2);
+            } else {
+                $dailyRate = $val;
+                $salVal = round($val * 26, 2);
+            }
+        } else {
+            $salVal = 0.00;
+            $dailyRate = 0.00;
+        }
+        $validated['basic_salary'] = $salVal;
+        $validated['daily_rate'] = $dailyRate;
+        $validated['hourly_rate'] = $dailyRate > 0 ? round($dailyRate / 8, 2) : 0.00;
 
         // QR is NOT generated automatically upon creation; starts completely empty
         $validated['qr_token'] = null;
@@ -396,13 +411,29 @@ class EmployeeController extends Controller
             $validated['working_hours'] = '8 AM to 5 PM';
         }
 
-        // Basic salary can be updated if provided, accepts empty/null cleanly
-        if ($request->has('basic_salary')) {
-            $sal = $request->input('basic_salary');
-            $salVal = ($sal !== '' && $sal !== null && is_numeric($sal)) ? (float)$sal : 0.00;
+        // Basic salary & daily rate can be updated if provided, accepts empty/null cleanly
+        if ($request->has('daily_rate') || $request->has('basic_salary')) {
+            $dailyInput = $request->input('daily_rate');
+            $salInput = $request->input('basic_salary');
+            if ($dailyInput !== null && $dailyInput !== '' && is_numeric($dailyInput) && (float)$dailyInput > 0) {
+                $dailyRate = (float)$dailyInput;
+                $salVal = round($dailyRate * 26, 2);
+            } elseif ($salInput !== null && $salInput !== '' && is_numeric($salInput) && (float)$salInput > 0) {
+                $val = (float)$salInput;
+                if ($val >= 2600) {
+                    $salVal = $val;
+                    $dailyRate = round($val / 26, 2);
+                } else {
+                    $dailyRate = $val;
+                    $salVal = round($val * 26, 2);
+                }
+            } else {
+                $salVal = 0.00;
+                $dailyRate = 0.00;
+            }
             $validated['basic_salary'] = $salVal;
-            $validated['daily_rate'] = $salVal > 0 ? round($salVal / 26, 2) : 0.00;
-            $validated['hourly_rate'] = $salVal > 0 ? round($salVal / 208, 2) : 0.00;
+            $validated['daily_rate'] = $dailyRate;
+            $validated['hourly_rate'] = $dailyRate > 0 ? round($dailyRate / 8, 2) : 0.00;
         } else {
             unset($validated['basic_salary'], $validated['daily_rate'], $validated['hourly_rate']);
         }
@@ -1154,10 +1185,28 @@ class EmployeeController extends Controller
             elseif ($ep === 'maya' || $ep === 'paymaya') $validated['ewallet_provider'] = 'Maya';
         }
 
-        if (isset($validated['basic_salary'])) {
-            $salary = (float)$validated['basic_salary'];
-            $validated['daily_rate'] = round($salary / 26, 2);
-            $validated['hourly_rate'] = round($validated['daily_rate'] / 8, 2);
+        if ($request->has('daily_rate') || isset($validated['basic_salary'])) {
+            $dailyInput = $request->input('daily_rate');
+            $salInput = $validated['basic_salary'] ?? null;
+            if ($dailyInput !== null && $dailyInput !== '' && is_numeric($dailyInput) && (float)$dailyInput > 0) {
+                $dailyRate = (float)$dailyInput;
+                $salVal = round($dailyRate * 26, 2);
+            } elseif ($salInput !== null && $salInput !== '' && is_numeric($salInput) && (float)$salInput > 0) {
+                $val = (float)$salInput;
+                if ($val >= 2600) {
+                    $salVal = $val;
+                    $dailyRate = round($val / 26, 2);
+                } else {
+                    $dailyRate = $val;
+                    $salVal = round($val * 26, 2);
+                }
+            } else {
+                $salVal = 0.00;
+                $dailyRate = 0.00;
+            }
+            $validated['basic_salary'] = $salVal;
+            $validated['daily_rate'] = $dailyRate;
+            $validated['hourly_rate'] = $dailyRate > 0 ? round($dailyRate / 8, 2) : 0.00;
         }
 
         $employee->update($validated);

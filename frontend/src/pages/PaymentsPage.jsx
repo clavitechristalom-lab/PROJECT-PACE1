@@ -22,17 +22,20 @@ import { FiDownload } from 'react-icons/fi'
 export const formatProofUrl = (url) => {
   if (!url) return null;
   if (typeof url !== 'string') return null;
-  if (url.startsWith('data:') || url.startsWith('blob:')) {
-    return url;
+  const trimmed = url.trim();
+  if (!trimmed) return null;
+  if (trimmed.startsWith('data:') || trimmed.startsWith('blob:')) {
+    return trimmed;
   }
-  if (url.includes('/storage/')) {
-    return url.substring(url.indexOf('/storage/'));
+  const normalized = trimmed.replace(/\\/g, '/');
+  if (normalized.includes('/storage/')) {
+    return normalized.substring(normalized.indexOf('/storage/'));
   }
-  if (url.startsWith('http://') || url.startsWith('https://')) {
-    return url;
+  if (normalized.startsWith('http://') || normalized.startsWith('https://')) {
+    return normalized;
   }
-  const clean = url.startsWith('/') ? url : `/${url}`;
-  return clean.startsWith('/storage') ? clean : `/storage${clean}`;
+  const clean = normalized.replace(/^\/+/, '');
+  return clean.startsWith('storage/') ? `/${clean}` : `/storage/${clean}`;
 };
 
 function PaymentMethodBadge({ method, provider }) {
@@ -240,7 +243,14 @@ export default function PaymentsPage() {
   }
 
   useEffect(() => {
-    loadData()
+    const controller = new AbortController()
+    const timer = setTimeout(() => {
+      loadData(false, controller.signal)
+    }, search ? 300 : 0)
+    return () => {
+      clearTimeout(timer)
+      controller.abort()
+    }
   }, [methodFilter, branchFilter, search, dateFrom, dateTo])
 
   // On-demand click-driven synchronization
@@ -419,8 +429,11 @@ export default function PaymentsPage() {
               ${proofUrl ? `<a href="${proofUrl}" target="_blank" rel="noopener noreferrer" style="font-size: 11px; color: #10b981; font-weight: 600; text-decoration: underline; cursor: pointer;">View Full Image ↗</a>` : ''}
             </div>
             ${proofUrl ? `
-              <div style="border: 1px solid ${borderCol}; border-radius: 12px; overflow: hidden; background: ${bgBox}; padding: 6px; display: flex; align-items: center; justify-content: center; max-height: 220px; cursor: pointer;" onclick="window.open('${proofUrl}', '_blank')" title="Click to view full image">
-                <img src="${proofUrl}" alt="Proof of Payment" style="max-height: 205px; max-width: 100%; object-fit: contain; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);" />
+              <div style="border: 1px solid ${borderCol}; border-radius: 12px; overflow: hidden; background: ${bgBox}; padding: 6px; display: flex; flex-direction: column; align-items: center; justify-content: center; max-height: 220px;">
+                <img src="${proofUrl}" alt="Proof of Payment" style="max-height: 205px; max-width: 100%; object-fit: contain; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); cursor: pointer;" onclick="window.open('${proofUrl}', '_blank')" title="Click to view full image" onerror="this.style.display='none'; if (this.nextElementSibling) this.nextElementSibling.style.display='block';" />
+                <div style="display: none; padding: 12px; text-align: center; color: ${textMuted}; font-size: 11px;">
+                  Proof image file is missing or could not be loaded.
+                </div>
               </div>
             ` : `
               <div style="border: 1px dashed ${borderCol}; border-radius: 8px; padding: 12px; text-align: center; color: ${textMuted}; font-size: 11px; background: ${bgBox};">
@@ -1569,10 +1582,23 @@ export default function PaymentsPage() {
                     View Full Image ↗
                   </a>
                 </div>
-                <div className="border border-border rounded-xl overflow-hidden bg-muted/20 flex justify-center p-2">
+                <div className="border border-border rounded-xl overflow-hidden bg-muted/20 flex flex-col items-center justify-center p-2">
                   <a href={formatProofUrl(viewPayment.proof_of_payment)} target="_blank" rel="noopener noreferrer">
-                    <img src={formatProofUrl(viewPayment.proof_of_payment)} alt="Proof of Payment" className="max-h-64 object-contain rounded-lg shadow-sm" />
+                    <img
+                      src={formatProofUrl(viewPayment.proof_of_payment)}
+                      alt="Proof of Payment"
+                      className="max-h-64 object-contain rounded-lg shadow-sm"
+                      onError={(e) => {
+                        e.currentTarget.style.display = 'none';
+                        if (e.currentTarget.parentElement?.nextElementSibling) {
+                          e.currentTarget.parentElement.nextElementSibling.style.display = 'block';
+                        }
+                      }}
+                    />
                   </a>
+                  <p className="hidden py-4 text-xs text-muted-foreground text-center">
+                    Proof image file is missing or could not be loaded from storage.
+                  </p>
                 </div>
               </div>
             ) : (

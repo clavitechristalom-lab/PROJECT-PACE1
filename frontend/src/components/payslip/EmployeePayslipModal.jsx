@@ -344,14 +344,8 @@ export default function EmployeePayslipModal({ payslip, onClose }) {
 
         {/* Proof of Payment Lightbox */}
         {showProofLightbox && payslip.proof_of_payment && (
-          <div
-            className="no-print fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-[fadeIn_0.15s_ease]"
-            onClick={() => setShowProofLightbox(false)}
-          >
-            <div
-              className="bg-card border border-border rounded-2xl max-w-2xl w-full p-4 space-y-3 shadow-2xl"
-              onClick={(e) => e.stopPropagation()}
-            >
+          <div className="no-print fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-[fadeIn_0.15s_ease]">
+            <div className="bg-card border border-border rounded-2xl max-w-2xl w-full p-4 space-y-3 shadow-2xl">
               <div className="flex items-center justify-between border-b border-border pb-2.5">
                 <div>
                   <h4 className="text-sm font-bold text-foreground">Proof of Payment Receipt</h4>
@@ -367,12 +361,23 @@ export default function EmployeePayslipModal({ payslip, onClose }) {
                   <FiX className="w-4 h-4" />
                 </button>
               </div>
-              <div className="max-h-[70vh] overflow-auto flex items-center justify-center bg-muted/30 rounded-xl p-2 border border-border">
+              <div className="max-h-[70vh] overflow-auto flex flex-col items-center justify-center bg-muted/30 rounded-xl p-2 border border-border">
                 <img
-                  src={payslip.proof_of_payment}
+                  src={String(payslip.proof_of_payment).includes('/storage/')
+                    ? String(payslip.proof_of_payment).substring(String(payslip.proof_of_payment).indexOf('/storage/'))
+                    : (String(payslip.proof_of_payment).startsWith('http') || String(payslip.proof_of_payment).startsWith('data:')
+                      ? payslip.proof_of_payment
+                      : `/storage/${String(payslip.proof_of_payment).replace(/^\/+/, '')}`)}
                   alt="Proof of Payment"
                   className="max-w-full max-h-[65vh] object-contain rounded-lg"
+                  onError={(e) => {
+                    e.currentTarget.style.display = 'none'
+                    if (e.currentTarget.nextElementSibling) e.currentTarget.nextElementSibling.style.display = 'block'
+                  }}
                 />
+                <p className="hidden py-6 text-xs text-muted-foreground text-center">
+                  Proof image file could not be loaded or is missing from storage.
+                </p>
               </div>
               <div className="flex justify-end gap-2 pt-1">
                 <a

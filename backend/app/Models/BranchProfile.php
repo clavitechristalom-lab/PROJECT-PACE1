@@ -8,9 +8,18 @@ class BranchProfile extends Model
 {
     protected $fillable = [
         'name',
+        'branch_code',
+        'branch_type',
         'location',
+        'address',
+        'city',
+        'province',
         'manager_id',
         'contact_number',
+        'email',
+        'operating_hours',
+        'opening_date',
+        'description',
         'status',
         'color',
         'image_url',

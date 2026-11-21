@@ -11,6 +11,7 @@ use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Storage;
 use App\Services\NotificationService;
 use App\Services\AttendanceSchedule;
+use App\Services\AttendancePeriodSimulator;
 use Illuminate\Support\Facades\Cache;
 
 class AttendanceController extends Controller
@@ -71,6 +72,12 @@ class AttendanceController extends Controller
             'total_hours',
             'overtime_hours',
             'status',
+            'leave_type',
+            'reason_code',
+            'absence_status',
+            'shift_type',
+            'late_minutes',
+            'undertime_minutes',
             'verification_method',
             'verified_by_name',
             'remarks'
@@ -203,6 +210,10 @@ class AttendanceController extends Controller
                 'total_hours' => (float)$a->total_hours,
                 'overtime_hours' => (float)$a->overtime_hours,
                 'status' => $a->status,
+                'leave_type' => $a->leave_type,
+                'reason_code' => $a->reason_code,
+                'absence_status' => $a->absence_status,
+                'shift_type' => $a->shift_type,
                 'verification_method' => $a->verification_method ?? 'QR + PIN',
                 'verified_by' => $verifiedBy,
                 'remarks' => $a->remarks ?? '',
@@ -1289,6 +1300,105 @@ class AttendanceController extends Controller
         return response()->json([
             'success' => true,
             'message' => 'Pending verification log already cleared or not found.'
+        ]);
+    }
+
+    /**
+     * GET /attendance/period-metrics
+     * Calculate detailed period attendance metrics for Store Admin & Employees
+     * (4 absences with reason codes & excused/unexcused status, lates, undertime,
+     * half-day AM/PM shifts, regular days worked vs scheduled days).
+     */
+    public function periodMetrics(Request $request)
+    {
+        $startDate = $request->query('start_date', AttendancePeriodSimulator::DEFAULT_START_DATE);
+        $endDate = $request->query('end_date', AttendancePeriodSimulator::DEFAULT_END_DATE);
+        $branchFilter = $request->query('branch');
+        $roleFilter = $request->query('role');
+
+        $user = $request->user();
+        $employeeIdFilter = null;
+
+        if ($user) {
+            if ($user->role === 'Employee') {
+                $employeeIdFilter = $user->employee_id;
+            } elseif (in_array($user->role, ['Store Admin', 'Store Administrator'], true) && empty($branchFilter)) {
+                $emp = Employee::find($user->employee_id);
+                if ($emp && $emp->branch_id) {
+                    $branchFilter = (string) $emp->branch_id;
+                }
+            }
+        }
+
+        // Automatically seed period data once if no records exist yet for the period
+        $existingCount = Attendance::whereBetween('attendance_date', [$startDate, $endDate])->count();
+        if ($existingCount < 50 && $startDate === AttendancePeriodSimulator::DEFAULT_START_DATE && $endDate === AttendancePeriodSimulator::DEFAULT_END_DATE) {
+            AttendancePeriodSimulator::simulatePeriod($startDate, $endDate, false);
+        }
+
+        $data = AttendancePeriodSimulator::calculatePeriodMetrics(
+            $startDate,
+            $endDate,
+            $branchFilter,
+            $roleFilter,
+            $employeeIdFilter
+        );
+
+        return response()->json([
+            'success' => true,
+            'reason_codes' => AttendancePeriodSimulator::REASON_CODES,
+            ...$data,
+        ]);
+    }
+
+    /**
+     * POST /attendance/simulate-period
+     * Simulate or refresh the Oct 12 - Nov 20 attendance metrics for Store Admin & Employees.
+     */
+    public function simulatePeriod(Request $request)
+    {
+        $user = $request->user();
+        if (!$user || !in_array($user->role, ['Administrator', 'Store Admin', 'Store Administrator'], true)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Only Administrator or Store Admin can run period attendance simulation.',
+            ], 403);
+        }
+
+        $startDate = $request->input('start_date', AttendancePeriodSimulator::DEFAULT_START_DATE);
+        $endDate = $request->input('end_date', AttendancePeriodSimulator::DEFAULT_END_DATE);
+        $force = (bool) $request->boolean('force', false);
+
+        $simResult = AttendancePeriodSimulator::simulatePeriod($startDate, $endDate, $force);
+
+        try {
+            SystemLog::create([
+                'user_id' => $user->user_id,
+                'action' => 'ATTENDANCE_PERIOD_SIMULATED',
+                'module' => 'Attendance',
+                'description' => "Simulated period attendance ({$startDate} to {$endDate}): {$simResult['records_created']} created, {$simResult['records_updated']} updated across {$simResult['staff_count']} staff.",
+                'ip_address' => $request->ip(),
+                'user_agent' => $request->userAgent(),
+            ]);
+        } catch (\Throwable $e) {}
+
+        $branchFilter = $request->input('branch');
+        $roleFilter = $request->input('role');
+        if ($user->role === 'Store Admin' && empty($branchFilter)) {
+            $emp = Employee::find($user->employee_id);
+            if ($emp && $emp->branch_id) {
+                $branchFilter = (string) $emp->branch_id;
+            }
+        }
+
+        $metrics = AttendancePeriodSimulator::calculatePeriodMetrics($startDate, $endDate, $branchFilter, $roleFilter, null);
+
+        return response()->json([
+            'success' => true,
+            'message' => "Simulated {$simResult['scheduled_days']} scheduled days ({$startDate} to {$endDate}) for {$simResult['staff_count']} Store Admin & Employee staff.",
+            'simulation' => $simResult,
+            'reason_codes' => AttendancePeriodSimulator::REASON_CODES,
+            ...$metrics,
         ]);
     }
 }

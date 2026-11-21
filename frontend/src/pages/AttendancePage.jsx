@@ -14,14 +14,17 @@ import {
 import { fmtDate, filterBySearch, fastDeepEqual } from '../lib/utils'
 import { api, downloadCsv } from '../lib/api'
 import { useRealtimeSync, triggerDataSync, SyncButton } from '../lib/realtimeSync'
+import { downloadCenteredQrPng, printSingleBadge } from '../lib/qrBadge'
 import { Html5Qrcode } from 'html5-qrcode'
 import { QRCodeSVG } from 'qrcode.react'
 import QrMonitoringModal from '../components/attendance/QrMonitoringModal'
 import FaceRecognitionAttendanceModal from '../components/attendance/FaceRecognitionAttendanceModal'
 import FaceRecognitionEnrollment from '../components/biometrics/FaceRecognitionEnrollment'
 
-const DEPARTMENTS = ['All', 'Operations', 'Sales', 'Finance']
+const DEPARTMENTS = ['All', 'Store Admin', 'Employee']
 const STATUSES = ['All', 'Present', 'Late', 'Absent', 'Half Day']
+const DEFAULT_PERIOD_START = '2026-10-12'
+const DEFAULT_PERIOD_END = '2026-11-20'
 
 // Sound synthesizer using Web Audio API for zero-dependency instant feedback
 const playTone = (type) => {
@@ -143,6 +146,16 @@ export default function AttendancePage({ branchFilter: propBranchFilter, embedde
   const [page, setPage] = useState(1)
   const pageSize = 12
 
+  // Period Analytics & Simulation State (Oct 12 - Nov 20)
+  const [periodStart, setPeriodStart] = useState(DEFAULT_PERIOD_START)
+  const [periodEnd, setPeriodEnd] = useState(DEFAULT_PERIOD_END)
+  const [periodRoleFilter, setPeriodRoleFilter] = useState('All')
+  const [periodSearch, setPeriodSearch] = useState('')
+  const [periodMetrics, setPeriodMetrics] = useState(null)
+  const [periodLoading, setPeriodLoading] = useState(false)
+  const [simulatingPeriod, setSimulatingPeriod] = useState(false)
+  const [selectedStaffMetrics, setSelectedStaffMetrics] = useState(null)
+
   // Scan Logs Tab State
   const [scanLogs, setScanLogs] = useState([])
   const [scanLogsLoading, setScanLogsLoading] = useState(false)
@@ -161,7 +174,7 @@ export default function AttendancePage({ branchFilter: propBranchFilter, embedde
           return 'waiting'
         }
       }
-    } catch (_) {}
+    } catch (_) { }
     return 'scan'
   })
   const [cameraActive, setCameraActive] = useState(() => {
@@ -171,7 +184,7 @@ export default function AttendancePage({ branchFilter: propBranchFilter, embedde
         const parsed = JSON.parse(saved)
         if (parsed.stationStep === 'waiting') return false
       }
-    } catch (_) {}
+    } catch (_) { }
     return true
   })
   const [cameraError, setCameraError] = useState('')
@@ -190,7 +203,7 @@ export default function AttendancePage({ branchFilter: propBranchFilter, embedde
           return parsed.identifiedEmployee
         }
       }
-    } catch (_) {}
+    } catch (_) { }
     return null
   })
   const [availableActions, setAvailableActions] = useState([])
@@ -204,7 +217,7 @@ export default function AttendancePage({ branchFilter: propBranchFilter, embedde
           return parsed.scannedQrToken
         }
       }
-    } catch (_) {}
+    } catch (_) { }
     return ''
   })
   const [verifyingQr, setVerifyingQr] = useState(false)
@@ -225,7 +238,7 @@ export default function AttendancePage({ branchFilter: propBranchFilter, embedde
           return parsed.punchResult
         }
       }
-    } catch (_) {}
+    } catch (_) { }
     return null
   })
   const [countdown, setCountdown] = useState(8)
@@ -294,6 +307,52 @@ export default function AttendancePage({ branchFilter: propBranchFilter, embedde
     }
   }
 
+  const loadPeriodMetrics = async (silent = false) => {
+    if (!silent) setPeriodLoading(true)
+    try {
+      const res = await api.attendance.getPeriodMetrics({
+        start_date: periodStart || DEFAULT_PERIOD_START,
+        end_date: periodEnd || DEFAULT_PERIOD_END,
+        branch: branchFilter !== 'All' ? branchFilter : undefined,
+        role: periodRoleFilter !== 'All' ? periodRoleFilter : undefined,
+      })
+      if (!isMountedRef.current) return
+      if (res?.success) {
+        setPeriodMetrics(prev => (fastDeepEqual(prev, res) ? prev : res))
+      }
+    } catch (err) {
+      console.error('Failed to load period metrics:', err)
+      if (!silent) showToast(err.message || 'Failed to load period attendance metrics', 'error')
+    } finally {
+      if (!silent && isMountedRef.current) setPeriodLoading(false)
+    }
+  }
+
+  const handleSimulatePeriod = async () => {
+    setSimulatingPeriod(true)
+    try {
+      const res = await api.attendance.simulatePeriod({
+        start_date: periodStart || DEFAULT_PERIOD_START,
+        end_date: periodEnd || DEFAULT_PERIOD_END,
+        force: true,
+        branch: branchFilter !== 'All' ? branchFilter : undefined,
+        role: periodRoleFilter !== 'All' ? periodRoleFilter : undefined,
+      })
+      if (res?.success) {
+        setPeriodMetrics(res)
+        showToast(res.message || 'Simulated period attendance metrics successfully.', 'success')
+        loadData(true)
+        triggerDataSync('attendance')
+      } else {
+        showToast(res?.message || 'Failed to simulate period metrics', 'error')
+      }
+    } catch (err) {
+      showToast(err.message || 'Failed to simulate period metrics', 'error')
+    } finally {
+      setSimulatingPeriod(false)
+    }
+  }
+
   const loadScanLogs = async (silent = false) => {
     if (!silent) setScanLogsLoading(true)
     try {
@@ -354,18 +413,24 @@ export default function AttendancePage({ branchFilter: propBranchFilter, embedde
   }, [isEmployee, isStoreAdmin])
 
   useEffect(() => {
-    if (activeTab === 'log' || activeTab === 'timesheet') {
+    if (activeTab === 'log') {
       loadData()
+    } else if (activeTab === 'timesheet') {
+      loadData()
+      loadPeriodMetrics()
     } else if (activeTab === 'audit') {
       loadScanLogs()
     }
-  }, [activeTab, dateFrom, dateTo, deptFilter, statusFilter, branchFilter, scanLogsPage, scanLogsStatusFilter, scanLogsActionFilter])
+  }, [activeTab, dateFrom, dateTo, deptFilter, statusFilter, branchFilter, scanLogsPage, scanLogsStatusFilter, scanLogsActionFilter, periodStart, periodEnd, periodRoleFilter])
 
   // On-demand click-driven synchronization
   const { sync: syncAttendance, isSyncing: isSyncingAttendance } = useRealtimeSync(
     () => {
-      if (activeTab === 'log' || activeTab === 'timesheet') {
+      if (activeTab === 'log') {
         loadData(false)
+      } else if (activeTab === 'timesheet') {
+        loadData(false)
+        loadPeriodMetrics(false)
       } else if (activeTab === 'audit') {
         loadScanLogs(false)
       }
@@ -401,7 +466,7 @@ export default function AttendancePage({ branchFilter: propBranchFilter, embedde
               restoredWaiting = true
             }
           }
-        } catch (_) {}
+        } catch (_) { }
 
         if (!restoredWaiting) {
           setStationStep('scan')
@@ -451,7 +516,7 @@ export default function AttendancePage({ branchFilter: propBranchFilter, embedde
       isProcessingScan.current = false
       try {
         await stopCamera()
-      } catch (_) {}
+      } catch (_) { }
       setTimeout(() => {
         startCamera()
       }, 80)
@@ -623,9 +688,9 @@ export default function AttendancePage({ branchFilter: propBranchFilter, embedde
               employee: res.employee,
               employee_name: res.employee.name,
               employee_code: res.employee.employee_code,
-              face_biometric_image: res.employee?.face_biometric_image || res.face_biometric_image || (res.employee?.employee_id === user?.employee?.employee_id ? user?.face_biometric_image : null),
-              face_biometric_base64: res.employee?.face_biometric_base64 || res.face_biometric_base64 || (res.employee?.employee_id === user?.employee?.employee_id ? user?.face_biometric_base64 : null),
-              has_registered_face: !!(res.employee?.face_biometric_image || res.face_biometric_image || (res.employee?.employee_id === user?.employee?.employee_id ? user?.face_biometric_image : null)),
+              face_biometric_image: res.employee?.face_biometric_image || user?.face_biometric_image,
+              face_biometric_base64: res.employee?.face_biometric_base64 || user?.face_biometric_base64,
+              has_registered_face: !!(res.employee?.face_biometric_image || user?.face_biometric_image),
               scanned_by: {
                 user_id: user?.user_id,
                 employee: user?.employee || { first_name: 'Store', last_name: 'Admin' }
@@ -727,7 +792,7 @@ export default function AttendancePage({ branchFilter: propBranchFilter, embedde
           scan_log_id: logId,
           reason: 'Attendance authorization cancelled by Store Administrator.'
         })
-      } catch (_) {}
+      } catch (_) { }
     }
     setStationStep('scan')
     setPunchResult(null)
@@ -737,7 +802,7 @@ export default function AttendancePage({ branchFilter: propBranchFilter, embedde
     isProcessingScan.current = false
     try {
       await stopCamera()
-    } catch (_) {}
+    } catch (_) { }
     setTimeout(() => {
       startCamera()
     }, 80)
@@ -816,9 +881,9 @@ export default function AttendancePage({ branchFilter: propBranchFilter, embedde
               employee: res.employee,
               employee_name: res.employee.name,
               employee_code: res.employee.employee_code,
-              face_biometric_image: res.employee?.face_biometric_image || res.face_biometric_image || (res.employee?.employee_id === user?.employee?.employee_id ? user?.face_biometric_image : null),
-              face_biometric_base64: res.employee?.face_biometric_base64 || res.face_biometric_base64 || (res.employee?.employee_id === user?.employee?.employee_id ? user?.face_biometric_base64 : null),
-              has_registered_face: !!(res.employee?.face_biometric_image || res.face_biometric_image || (res.employee?.employee_id === user?.employee?.employee_id ? user?.face_biometric_image : null)),
+              face_biometric_image: res.employee?.face_biometric_image || user?.face_biometric_image,
+              face_biometric_base64: res.employee?.face_biometric_base64 || user?.face_biometric_base64,
+              has_registered_face: !!(res.employee?.face_biometric_image || user?.face_biometric_image),
               scanned_by: {
                 user_id: user?.user_id,
                 employee: user?.employee || { first_name: 'Store', last_name: 'Admin' }
@@ -955,20 +1020,30 @@ export default function AttendancePage({ branchFilter: propBranchFilter, embedde
     setStationStep('pin')
   }
 
-  const handleDownloadMyQr = () => {
-    const svgEl = document.getElementById('my-employee-qr')
-    if (!svgEl) return
-    const svgData = new XMLSerializer().serializeToString(svgEl)
-    const blob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' })
-    const url = URL.createObjectURL(blob)
-    const link = document.createElement('a')
-    link.href = url
-    link.download = `QR_${myProfile?.employee_code || 'Badge'}.svg`
-    document.body.appendChild(link)
-    link.click()
-    document.body.removeChild(link)
-    URL.revokeObjectURL(url)
-    showToast('QR badge downloaded successfully', 'success')
+  const handleDownloadMyQr = async () => {
+    const ok = await downloadCenteredQrPng(
+      'my-employee-qr',
+      `QR_${myProfile?.employee_code || 'Badge'}`,
+      {
+        name: `${myProfile?.first_name || ''} ${myProfile?.last_name || ''}`.trim(),
+        code: myProfile?.employee_code || '',
+      }
+    )
+    if (ok) showToast('High-resolution centered QR badge downloaded!', 'success')
+  }
+
+  const handlePrintMyBadge = () => {
+    if (!myProfile?.qr_token) return
+    const branchLabel = myProfile.branch?.name || (typeof myProfile.branch === 'string' ? myProfile.branch : '')
+    printSingleBadge({
+      svgElementId: 'my-employee-qr',
+      name: `${myProfile.first_name || ''} ${myProfile.last_name || ''}`.trim(),
+      position: myProfile.position,
+      department: myProfile.department,
+      branch: branchLabel,
+      code: myProfile.employee_code,
+      statusLabel: 'Permanent Active QR',
+    })
   }
 
   const filtered = useMemo(() => {
@@ -1047,6 +1122,18 @@ export default function AttendancePage({ branchFilter: propBranchFilter, embedde
       return acc
     }, {}))
   }, [records, branchFilter, dateFrom, dateTo])
+
+  const filteredPeriodStaff = useMemo(() => {
+    const list = periodMetrics?.staff || []
+    const q = periodSearch.trim().toLowerCase()
+    if (!q) return list
+    return list.filter(s =>
+      String(s.employee_name || '').toLowerCase().includes(q) ||
+      String(s.employee_code || '').toLowerCase().includes(q) ||
+      String(s.role || '').toLowerCase().includes(q) ||
+      String(s.branch || '').toLowerCase().includes(q)
+    )
+  }, [periodMetrics, periodSearch])
 
   // Determine Tab Options
   const tabList = isEmployee
@@ -1484,6 +1571,7 @@ export default function AttendancePage({ branchFilter: propBranchFilter, embedde
               <div className="w-full max-w-sm space-y-3">
                 <div className="flex gap-3">
                   <button
+                    type="button"
                     onClick={handleDownloadMyQr}
                     className="flex-1 flex items-center justify-center gap-1.5 px-4 py-2.5 bg-primary hover:bg-primary/90 text-primary-foreground font-bold text-xs rounded-xl shadow-xs cursor-pointer transition"
                   >
@@ -1491,7 +1579,8 @@ export default function AttendancePage({ branchFilter: propBranchFilter, embedde
                     <span>Download QR Badge</span>
                   </button>
                   <button
-                    onClick={() => window.print()}
+                    type="button"
+                    onClick={handlePrintMyBadge}
                     className="flex-1 flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-xl border border-border bg-card hover:bg-muted font-semibold text-xs text-foreground cursor-pointer transition"
                   >
                     <FiPrinter className="w-4 h-4" />
@@ -1778,13 +1867,29 @@ export default function AttendancePage({ branchFilter: propBranchFilter, embedde
                 </select>
               </div>
             </div>
-            {(dateFrom || dateTo || search || deptFilter !== 'All' || statusFilter !== 'All' || (!isStoreAdmin && !propBranchFilter && branchFilter !== 'All')) && (
-              <div className="mt-2.5 pt-2.5 border-t border-border/60 flex items-center justify-between text-[11px] text-muted-foreground">
+            <div className="mt-2.5 pt-2.5 border-t border-border/60 flex flex-wrap items-center justify-between gap-2 text-[11px] text-muted-foreground">
+              <div className="flex flex-wrap items-center gap-2">
                 <span>
                   {dateFrom || dateTo
                     ? `Showing records ${dateFrom ? `from ${dateFrom}` : ''}${dateFrom && dateTo ? ' ' : ''}${dateTo ? `to ${dateTo}` : ''}`
-                    : 'Active filters applied'}
+                    : 'Filter by date or load the Oct 12 – Nov 20 evaluation period'}
                 </span>
+                {(dateFrom !== DEFAULT_PERIOD_START || dateTo !== DEFAULT_PERIOD_END) && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDateFrom(DEFAULT_PERIOD_START)
+                      setDateTo(DEFAULT_PERIOD_END)
+                      setPage(1)
+                    }}
+                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-primary/10 text-primary font-semibold hover:bg-primary/20 cursor-pointer transition-colors"
+                  >
+                    <FiCalendar className="w-3 h-3" />
+                    <span>Oct 12 – Nov 20 Period</span>
+                  </button>
+                )}
+              </div>
+              {(dateFrom || dateTo || search || deptFilter !== 'All' || statusFilter !== 'All' || (!isStoreAdmin && !propBranchFilter && branchFilter !== 'All')) && (
                 <button
                   type="button"
                   onClick={() => {
@@ -1801,8 +1906,8 @@ export default function AttendancePage({ branchFilter: propBranchFilter, embedde
                   <FiX className="w-3 h-3" />
                   <span>Reset Filters</span>
                 </button>
-              </div>
-            )}
+              )}
+            </div>
           </Card>
 
           <Card noPad className="border border-border overflow-hidden">
@@ -1863,7 +1968,25 @@ export default function AttendancePage({ branchFilter: propBranchFilter, embedde
                             </span>
                           </td>
                           <td className="py-3 px-3 text-muted-foreground text-[11px] whitespace-nowrap">{a.verified_by || 'Store Admin'}</td>
-                          <td className="py-3 px-3 text-center whitespace-nowrap"><StatusBadge status={a.status} /></td>
+                          <td className="py-3 px-3 text-center whitespace-nowrap">
+                            <div className="flex flex-col items-center gap-1">
+                              <StatusBadge status={a.status} />
+                              {a.status === 'Absent' && (a.reason_code || a.absence_status) && (
+                                <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                                  a.absence_status === 'Excused'
+                                    ? 'bg-sky-50 text-sky-700 border border-sky-200 dark:bg-sky-950/40 dark:text-sky-300 dark:border-sky-800'
+                                    : 'bg-rose-50 text-rose-700 border border-rose-200 dark:bg-rose-950/40 dark:text-rose-300 dark:border-rose-800'
+                                }`}>
+                                  {a.reason_code ? `[${a.reason_code}] ` : ''}{a.absence_status || 'Unexcused'}
+                                </span>
+                              )}
+                              {a.status === 'Half Day' && a.shift_type && (
+                                <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-200 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-800">
+                                  {a.shift_type} Shift ({Number(a.regular_hours || 4).toFixed(1)}h)
+                                </span>
+                              )}
+                            </div>
+                          </td>
                         </tr>
                       ))}
                     </tbody>
@@ -1876,48 +1999,357 @@ export default function AttendancePage({ branchFilter: propBranchFilter, embedde
         </div>
       )}
 
-      {/* TAB: TIMESHEET SUMMARY */}
+      {/* TAB: TIMESHEET & PERIOD ATTENDANCE METRICS (OCT 12 - NOV 20) */}
       {activeTab === 'timesheet' && (
-        <Card noPad className="border border-border overflow-hidden">
-          {loading ? (
-            <TableSkeleton rows={5} cols={7} />
-          ) : timesheetSummary.length === 0 ? (
-            <EmptyState
-              icon={<FiBarChart2 className="w-12 h-12 text-muted-foreground/30 mx-auto" />}
-              title="No timesheet data"
-              description="No attendance records available for the selected period."
-            />
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-xs min-w-[700px]">
-                <thead>
-                  <tr className="border-b border-border bg-muted/50 text-muted-foreground uppercase font-semibold text-[11px]">
-                    <th className="py-3 px-4 text-left">Code</th>
-                    <th className="py-3 px-4 text-left">Employee Name</th>
-                    <th className="py-3 px-4 text-left">Department</th>
-                    <th className="py-3 px-4 text-right">Days Present</th>
-                    <th className="py-3 px-4 text-right">Late Incidents</th>
-                    <th className="py-3 px-4 text-right">Total Shift Hrs</th>
-                    <th className="py-3 px-4 text-right">Total Overtime</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-border">
-                  {timesheetSummary.map((ts, i) => (
-                    <tr key={ts.employee_id || i} className={`hover:bg-muted/40 transition-colors ${i % 2 === 1 ? 'bg-muted/10' : ''}`}>
-                      <td className="py-3 px-4 font-mono font-bold text-foreground">{ts.code}</td>
-                      <td className="py-3 px-4 font-semibold text-foreground">{ts.name}</td>
-                      <td className="py-3 px-4"><Badge text={ts.department || 'General'} variant="neutral" /></td>
-                      <td className="py-3 px-4 text-right font-mono text-emerald-600 font-bold">{ts.present_count}</td>
-                      <td className="py-3 px-4 text-right font-mono font-bold text-rose-600">{ts.late_count}</td>
-                      <td className="py-3 px-4 text-right font-mono font-bold">{ts.total_hours.toFixed(1)}h</td>
-                      <td className="py-3 px-4 text-right font-mono font-bold text-amber-600">{ts.total_overtime.toFixed(1)}h</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+        <div className="space-y-4">
+          {/* Period Filter & Simulator Controls */}
+          <Card noPad className="p-4 border border-border">
+            <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:flex lg:flex-wrap items-end gap-3 flex-1">
+                <div className="min-w-[180px] flex-1">
+                  <label className="text-[11px] font-bold text-muted-foreground uppercase leading-none mb-1.5 block">Staff Search</label>
+                  <div className="relative">
+                    <FiSearch className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground pointer-events-none" />
+                    <input
+                      type="text"
+                      value={periodSearch}
+                      onChange={e => setPeriodSearch(e.target.value)}
+                      placeholder="Search Store Admin or Employee..."
+                      className="w-full h-9 pl-8 pr-7 rounded-xl border border-border bg-card text-foreground text-xs focus:outline-none focus:ring-2 focus:ring-primary/20"
+                    />
+                    {periodSearch && (
+                      <button
+                        type="button"
+                        onClick={() => setPeriodSearch('')}
+                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground cursor-pointer"
+                      >
+                        <FiX className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                <div className="w-full sm:w-[145px]">
+                  <label className="text-[11px] font-bold text-muted-foreground uppercase leading-none mb-1.5 block">Period From</label>
+                  <input
+                    type="date"
+                    value={periodStart}
+                    max={periodEnd || undefined}
+                    onChange={e => setPeriodStart(e.target.value)}
+                    className="w-full h-9 border border-border rounded-xl px-3 text-xs font-semibold text-foreground bg-card cursor-pointer focus:outline-none focus:ring-2 focus:ring-primary/20"
+                  />
+                </div>
+
+                <div className="w-full sm:w-[145px]">
+                  <label className="text-[11px] font-bold text-muted-foreground uppercase leading-none mb-1.5 block">Period To</label>
+                  <input
+                    type="date"
+                    value={periodEnd}
+                    min={periodStart || undefined}
+                    onChange={e => setPeriodEnd(e.target.value)}
+                    className="w-full h-9 border border-border rounded-xl px-3 text-xs font-semibold text-foreground bg-card cursor-pointer focus:outline-none focus:ring-2 focus:ring-primary/20"
+                  />
+                </div>
+
+                <div className="w-full sm:w-[155px]">
+                  <label className="text-[11px] font-bold text-muted-foreground uppercase leading-none mb-1.5 block">Staff Role</label>
+                  <select
+                    value={periodRoleFilter}
+                    onChange={e => setPeriodRoleFilter(e.target.value)}
+                    className="w-full h-9 border border-border rounded-xl px-3 text-xs font-semibold text-foreground bg-card cursor-pointer focus:outline-none focus:ring-2 focus:ring-primary/20"
+                  >
+                    <option value="All">All Staff Roles</option>
+                    <option value="Store Admin">Store Admin</option>
+                    <option value="Employee">Employees (General Staff)</option>
+                  </select>
+                </div>
+
+                {!isStoreAdmin && !propBranchFilter && !isEmployee && (
+                  <div className="w-full sm:w-[165px]">
+                    <label className="text-[11px] font-bold text-muted-foreground uppercase leading-none mb-1.5 block">Branch</label>
+                    <select
+                      value={branchFilter}
+                      onChange={e => setLocalBranchFilter(e.target.value)}
+                      className="w-full h-9 border border-border rounded-xl px-3 text-xs font-semibold text-foreground bg-card cursor-pointer focus:outline-none focus:ring-2 focus:ring-primary/20"
+                    >
+                      <option value="All">All Branches</option>
+                      {branchOptions.map(bName => (
+                        <option key={bName} value={bName}>{bName}</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2 shrink-0">
+                {(periodStart !== DEFAULT_PERIOD_START || periodEnd !== DEFAULT_PERIOD_END || periodRoleFilter !== 'All' || periodSearch) && (
+                  <Btn
+                    size="sm"
+                    variant="outline"
+                    onClick={() => {
+                      setPeriodStart(DEFAULT_PERIOD_START)
+                      setPeriodEnd(DEFAULT_PERIOD_END)
+                      setPeriodRoleFilter('All')
+                      setPeriodSearch('')
+                    }}
+                  >
+                    <FiCalendar className="w-3.5 h-3.5 mr-1" />
+                    Oct 12 – Nov 20
+                  </Btn>
+                )}
+                {!isEmployee && (
+                  <Btn
+                    size="sm"
+                    onClick={handleSimulatePeriod}
+                    disabled={simulatingPeriod || periodLoading}
+                  >
+                    <FiRefreshCw className={`w-3.5 h-3.5 mr-1.5 ${simulatingPeriod ? 'animate-spin' : ''}`} />
+                    {simulatingPeriod ? 'Simulating...' : 'Simulate / Recalculate Period'}
+                  </Btn>
+                )}
+              </div>
+            </div>
+
+            {periodMetrics?.period && (
+              <div className="mt-3 pt-2.5 border-t border-border/60 flex flex-wrap items-center justify-between gap-2 text-[11px] text-muted-foreground">
+                <span className="font-medium">
+                  Evaluation Period: <strong className="text-foreground">{periodMetrics.period.label}</strong> ({periodMetrics.period.scheduled_days} Scheduled Days · {periodMetrics.period.scheduled_shift})
+                </span>
+                <span>
+                  Coverage: <strong className="text-foreground">{filteredPeriodStaff.length}</strong> Store Admin & General Staff
+                </span>
+              </div>
+            )}
+          </Card>
+
+          {/* Period Totals Summary Cards */}
+          {periodMetrics?.totals && (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+              <Card className="p-3.5 border border-border">
+                <div className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">Regular Days Worked</div>
+                <div className="mt-1 flex items-baseline gap-1.5">
+                  <span className="text-xl font-black font-mono text-emerald-600">{periodMetrics.totals.total_regular_full_days}</span>
+                  <span className="text-xs text-muted-foreground font-semibold">/ {periodMetrics.totals.staff_count * periodMetrics.totals.scheduled_days_per_staff} scheduled</span>
+                </div>
+                <div className="text-[11px] text-muted-foreground mt-1">
+                  {periodMetrics.totals.total_equivalent_days} Equivalent Days · {periodMetrics.totals.scheduled_days_per_staff} Scheduled Days/Staff
+                </div>
+              </Card>
+
+              <Card className="p-3.5 border border-border">
+                <div className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">Total Absences</div>
+                <div className="mt-1 flex items-baseline gap-1.5">
+                  <span className="text-xl font-black font-mono text-rose-600">{periodMetrics.totals.total_absences}</span>
+                  <span className="text-xs text-muted-foreground font-semibold">
+                    total days{periodMetrics.totals.staff_count ? ` (${(periodMetrics.totals.total_absences / periodMetrics.totals.staff_count).toFixed(0)} per staff)` : ''}
+                  </span>
+                </div>
+                <div className="text-[11px] text-muted-foreground mt-1">
+                  <span className="text-sky-600 font-semibold">{periodMetrics.totals.total_excused_absences} Excused</span> ·{' '}
+                  <span className="text-rose-600 font-semibold">{periodMetrics.totals.total_unexcused_absences} Unexcused</span>
+                </div>
+              </Card>
+
+              <Card className="p-3.5 border border-border">
+                <div className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">Lates / Tardiness</div>
+                <div className="mt-1 flex items-baseline gap-1.5">
+                  <span className="text-xl font-black font-mono text-amber-600">{periodMetrics.totals.total_late_frequency}</span>
+                  <span className="text-xs text-muted-foreground font-semibold">late incidents</span>
+                </div>
+                <div className="text-[11px] text-muted-foreground mt-1">
+                  {periodMetrics.totals.total_late_minutes} Total Minutes Late (Scheduled In: 08:00 AM)
+                </div>
+              </Card>
+
+              <Card className="p-3.5 border border-border">
+                <div className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">Undertime (Early Logouts)</div>
+                <div className="mt-1 flex items-baseline gap-1.5">
+                  <span className="text-xl font-black font-mono text-orange-600">{periodMetrics.totals.total_undertime_frequency}</span>
+                  <span className="text-xs text-muted-foreground font-semibold">early logouts</span>
+                </div>
+                <div className="text-[11px] text-muted-foreground mt-1">
+                  {periodMetrics.totals.total_undertime_minutes} Total Lost Minutes (Before 05:00 PM)
+                </div>
+              </Card>
+
+              <Card className="p-3.5 border border-border">
+                <div className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">Half-Day Shifts (AM / PM)</div>
+                <div className="mt-1 flex items-baseline gap-1.5">
+                  <span className="text-xl font-black font-mono text-indigo-600">{periodMetrics.totals.total_half_days}</span>
+                  <span className="text-xs text-muted-foreground font-semibold">half-day shifts</span>
+                </div>
+                <div className="text-[11px] text-muted-foreground mt-1">
+                  {(periodMetrics.totals.total_half_days * 4).toFixed(1)} Total Hours Rendered (4.0 hrs/shift)
+                </div>
+              </Card>
             </div>
           )}
-        </Card>
+
+          {/* Individual Staff Metrics Matrix */}
+          <Card noPad className="border border-border overflow-hidden">
+            <div className="px-4 py-3 border-b border-border bg-muted/30 flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <h3 className="text-sm font-bold text-foreground">
+                  Individual Staff Attendance Breakdown ({periodMetrics?.period?.label || `${periodStart} to ${periodEnd}`})
+                </h3>
+                <p className="text-[11px] text-muted-foreground">
+                  Per-staff summary of Absences (Dates, Reason Code &amp; Excused vs. Unexcused), Lates, Undertime, Half-Day Shifts (AM/PM) &amp; Regular Days Worked vs. Scheduled Days.
+                </p>
+              </div>
+              <span className="text-[11px] text-muted-foreground">Click any staff row or <strong>Details</strong> to inspect full date logs</span>
+            </div>
+
+            {periodLoading ? (
+              <TableSkeleton rows={6} cols={8} />
+            ) : filteredPeriodStaff.length === 0 ? (
+              <EmptyState
+                icon={<FiBarChart2 className="w-12 h-12 text-muted-foreground/30 mx-auto" />}
+                title="No period attendance data"
+                description="Click 'Simulate / Recalculate Period' to generate Oct 12 – Nov 20 metrics."
+                action={!isEmployee ? <Btn size="sm" onClick={handleSimulatePeriod}>Simulate Period</Btn> : null}
+              />
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs min-w-[1220px]">
+                  <thead>
+                    <tr className="border-b border-border bg-muted/50 text-muted-foreground uppercase font-semibold text-[11px]">
+                      <th className="py-3 px-3 text-left">Staff Member</th>
+                      <th className="py-3 px-3 text-left">Role &amp; Branch</th>
+                      <th className="py-3 px-3 text-left">Regular Days vs. Scheduled</th>
+                      <th className="py-3 px-3 text-left">Absences (Excused vs. Unexcused)</th>
+                      <th className="py-3 px-3 text-left">Lates / Tardiness (vs. 08:00 AM)</th>
+                      <th className="py-3 px-3 text-left">Undertime (Early Logouts)</th>
+                      <th className="py-3 px-3 text-left">Half-Day Shifts (AM / PM)</th>
+                      <th className="py-3 px-3 text-right">Details</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border">
+                    {filteredPeriodStaff.map((s, i) => (
+                      <tr
+                        key={s.employee_id || i}
+                        onClick={() => setSelectedStaffMetrics(s)}
+                        className={`hover:bg-muted/40 transition-colors cursor-pointer ${i % 2 === 1 ? 'bg-muted/10' : ''}`}
+                      >
+                        <td className="py-3 px-3 align-top whitespace-nowrap">
+                          <div className="font-mono text-[11px] font-bold text-muted-foreground">{s.employee_code}</div>
+                          <div className="font-bold text-foreground text-xs">{s.employee_name}</div>
+                          <div className="text-[10px] text-muted-foreground">{s.position || s.department}</div>
+                        </td>
+                        <td className="py-3 px-3 align-top whitespace-nowrap">
+                          <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold border ${
+                            s.role === 'Store Admin'
+                              ? 'bg-indigo-50 text-indigo-700 border-indigo-200 dark:bg-indigo-950/40 dark:text-indigo-300 dark:border-indigo-800'
+                              : 'bg-slate-100 text-slate-700 border-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700'
+                          }`}>
+                            {s.role}
+                          </span>
+                          <div className="text-[11px] text-muted-foreground mt-1">{s.branch || '—'}</div>
+                        </td>
+                        <td className="py-3 px-3 align-top whitespace-nowrap">
+                          <div className="font-mono font-bold text-emerald-600 text-xs">
+                            {s.regular_days_worked} / {s.scheduled_days} <span className="font-normal text-muted-foreground">Regular Days</span>
+                          </div>
+                          <div className="text-[11px] text-muted-foreground mt-0.5">
+                            {s.equivalent_days_worked} Equivalent Days ({s.attendance_rate}%) · {s.on_time_days} On-Time
+                          </div>
+                          <div className="text-[10px] font-mono text-muted-foreground">
+                            {Number(s.total_hours_rendered || 0).toFixed(1)} hrs Total Rendered
+                          </div>
+                        </td>
+                        <td className="py-3 px-3 align-top whitespace-nowrap">
+                          <div className="flex items-center gap-1.5 mb-1">
+                            <span className="px-1.5 py-0.5 rounded bg-rose-50 text-rose-700 border border-rose-200 dark:bg-rose-950/40 dark:text-rose-300 dark:border-rose-800 font-bold text-[10px]">
+                              {s.absences?.total || 0} Total Absences
+                            </span>
+                          </div>
+                          <div className="text-[11px] flex items-center gap-2">
+                            <span className="text-sky-600 font-semibold">{s.absences?.excused || 0} Excused</span>
+                            <span className="text-muted-foreground">·</span>
+                            <span className="text-rose-600 font-semibold">{s.absences?.unexcused || 0} Unexcused</span>
+                          </div>
+                        </td>
+                        <td className="py-3 px-3 align-top whitespace-nowrap">
+                          <div className="font-mono font-bold text-amber-600">
+                            {s.lates?.frequency || 0} Late{(s.lates?.frequency || 0) === 1 ? '' : 's'}
+                          </div>
+                          <div className="text-[11px] text-muted-foreground mt-0.5">
+                            {s.lates?.total_minutes || 0} Total Mins Late
+                          </div>
+                        </td>
+                        <td className="py-3 px-3 align-top whitespace-nowrap">
+                          <div className="font-mono font-bold text-orange-600">
+                            {s.undertime?.frequency || 0} Early Out{(s.undertime?.frequency || 0) === 1 ? '' : 's'}
+                          </div>
+                          <div className="text-[11px] text-muted-foreground mt-0.5">
+                            {s.undertime?.total_lost_minutes || 0} Lost Mins
+                          </div>
+                        </td>
+                        <td className="py-3 px-3 align-top whitespace-nowrap">
+                          <div className="font-mono font-bold text-indigo-600">
+                            {s.half_days?.count || 0} Shift{(s.half_days?.count || 0) === 1 ? '' : 's'} · {Number(s.half_days?.total_hours || 0).toFixed(1)} hrs
+                          </div>
+                          <div className="text-[11px] text-muted-foreground mt-0.5">
+                            {s.half_days?.am_count || 0} AM · {s.half_days?.pm_count || 0} PM
+                          </div>
+                        </td>
+                        <td className="py-3 px-3 align-top text-right whitespace-nowrap">
+                          <Btn
+                            size="sm"
+                            variant="outline"
+                            onClick={e => {
+                              e.stopPropagation()
+                              setSelectedStaffMetrics(s)
+                            }}
+                          >
+                            <FiEye className="w-3.5 h-3.5 mr-1" />
+                            Details
+                          </Btn>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </Card>
+
+          {/* Secondary Quick Timesheet Reference (from loaded Daily Logs) */}
+          {timesheetSummary.length > 0 && (
+            <Card noPad className="border border-border overflow-hidden">
+              <div className="px-4 py-2.5 border-b border-border bg-muted/30 text-xs font-bold text-muted-foreground uppercase tracking-wider">
+                Timesheet Totals Snapshot (Filtered Daily Logs)
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs min-w-[700px]">
+                  <thead>
+                    <tr className="border-b border-border bg-muted/50 text-muted-foreground uppercase font-semibold text-[11px]">
+                      <th className="py-2.5 px-4 text-left">Code</th>
+                      <th className="py-2.5 px-4 text-left">Employee Name</th>
+                      <th className="py-2.5 px-4 text-left">Department</th>
+                      <th className="py-2.5 px-4 text-right">Days Present</th>
+                      <th className="py-2.5 px-4 text-right">Late Incidents</th>
+                      <th className="py-2.5 px-4 text-right">Total Shift Hrs</th>
+                      <th className="py-2.5 px-4 text-right">Total Overtime</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border">
+                    {timesheetSummary.map((ts, i) => (
+                      <tr key={ts.employee_id || i} className={`hover:bg-muted/40 transition-colors ${i % 2 === 1 ? 'bg-muted/10' : ''}`}>
+                        <td className="py-2.5 px-4 font-mono font-bold text-foreground">{ts.code}</td>
+                        <td className="py-2.5 px-4 font-semibold text-foreground">{ts.name}</td>
+                        <td className="py-2.5 px-4"><Badge text={ts.department || 'General'} variant="neutral" /></td>
+                        <td className="py-2.5 px-4 text-right font-mono text-emerald-600 font-bold">{ts.present_count}</td>
+                        <td className="py-2.5 px-4 text-right font-mono font-bold text-rose-600">{ts.late_count}</td>
+                        <td className="py-2.5 px-4 text-right font-mono font-bold">{ts.total_hours.toFixed(1)}h</td>
+                        <td className="py-2.5 px-4 text-right font-mono font-bold text-amber-600">{ts.total_overtime.toFixed(1)}h</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </Card>
+          )}
+        </div>
       )}
 
       {/* TAB: SECURITY & SCAN AUDIT LOGS */}
@@ -2064,14 +2496,8 @@ export default function AttendancePage({ branchFilter: propBranchFilter, embedde
 
       {/* EMPLOYEE FACE RECOGNITION ENROLLMENT MODAL ("Add a face") */}
       {isEmployee && faceAuthModalOpen && (
-        <div
-          className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-in fade-in duration-200 overflow-y-auto"
-          onClick={() => setFaceAuthModalOpen(false)}
-        >
-          <div
-            className="relative w-full max-w-3xl my-auto"
-            onClick={(e) => e.stopPropagation()}
-          >
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-in fade-in duration-200 overflow-y-auto">
+          <div className="relative w-full max-w-3xl my-auto">
             <button
               type="button"
               onClick={() => setFaceAuthModalOpen(false)}
@@ -2127,22 +2553,7 @@ export default function AttendancePage({ branchFilter: propBranchFilter, embedde
             isProcessingScan.current = false
             setTimeout(() => startCamera(), 80)
           }}
-          onAuthorize={async (payload) => {
-            const reqId = punchResult?.id || punchResult?.scan_log_id
-            if (reqId) {
-              try {
-                await api.attendance.approveVerification({
-                  scan_log_id: reqId,
-                  verification_type: 'FACE_RECOGNITION',
-                  face_verified: true,
-                  face_matched: payload?.face_matched ?? true,
-                  confidence: payload?.confidence
-                })
-                showToast('Biometric attendance authorized! (Face ID Verified)', 'success')
-              } catch (err) {
-                console.error('Attendance approval error:', err)
-              }
-            }
+          onAuthorize={() => {
             setFaceAuthModalOpen(false)
             setStationStep('scan')
             setActiveTab('punch')
@@ -2153,19 +2564,7 @@ export default function AttendancePage({ branchFilter: propBranchFilter, embedde
             isProcessingScan.current = false
             setTimeout(() => startCamera(), 80)
           }}
-          onSuccess={async (payload) => {
-            const reqId = punchResult?.id || punchResult?.scan_log_id
-            if (reqId) {
-              try {
-                await api.attendance.approveVerification({
-                  scan_log_id: reqId,
-                  verification_type: 'FACE_RECOGNITION',
-                  face_verified: true,
-                  face_matched: payload?.face_matched ?? true,
-                  confidence: payload?.confidence
-                })
-              } catch (_) {}
-            }
+          onSuccess={() => {
             setFaceAuthModalOpen(false)
             setStationStep('scan')
             setActiveTab('punch')
@@ -2178,6 +2577,187 @@ export default function AttendancePage({ branchFilter: propBranchFilter, embedde
           }}
           adminName={user?.name || "talom clavite"}
         />
+      )}
+
+      {/* STAFF PERIOD METRICS DRILLDOWN MODAL */}
+      {selectedStaffMetrics && (
+        <Modal
+          open={!!selectedStaffMetrics}
+          onClose={() => setSelectedStaffMetrics(null)}
+          title={`${selectedStaffMetrics.employee_code} — ${selectedStaffMetrics.employee_name} (${selectedStaffMetrics.role})`}
+          size="xl"
+        >
+          <div className="space-y-4 text-xs">
+            <div className="grid grid-cols-2 sm:grid-cols-5 gap-2.5">
+              <div className="p-2.5 rounded-xl border border-border bg-muted/20">
+                <div className="text-[10px] font-bold uppercase text-muted-foreground">Regular vs. Scheduled</div>
+                <div className="text-sm font-black font-mono text-emerald-600 mt-0.5">
+                  {selectedStaffMetrics.regular_days_worked} / {selectedStaffMetrics.scheduled_days} Days
+                </div>
+                <div className="text-[10px] text-muted-foreground">{selectedStaffMetrics.equivalent_days_worked} Equivalent Days</div>
+              </div>
+              <div className="p-2.5 rounded-xl border border-border bg-muted/20">
+                <div className="text-[10px] font-bold uppercase text-muted-foreground">Total Absences</div>
+                <div className="text-sm font-black font-mono text-rose-600 mt-0.5">
+                  {selectedStaffMetrics.absences?.total || 0} Days
+                </div>
+                <div className="text-[10px] text-muted-foreground">
+                  {selectedStaffMetrics.absences?.excused || 0} Excused · {selectedStaffMetrics.absences?.unexcused || 0} Unexcused
+                </div>
+              </div>
+              <div className="p-2.5 rounded-xl border border-border bg-muted/20">
+                <div className="text-[10px] font-bold uppercase text-muted-foreground">Lates / Tardiness</div>
+                <div className="text-sm font-black font-mono text-amber-600 mt-0.5">
+                  {selectedStaffMetrics.lates?.frequency || 0} Lates · {selectedStaffMetrics.lates?.total_minutes || 0} mins
+                </div>
+                <div className="text-[10px] text-muted-foreground">Scheduled In: 08:00 AM</div>
+              </div>
+              <div className="p-2.5 rounded-xl border border-border bg-muted/20">
+                <div className="text-[10px] font-bold uppercase text-muted-foreground">Undertime</div>
+                <div className="text-sm font-black font-mono text-orange-600 mt-0.5">
+                  {selectedStaffMetrics.undertime?.frequency || 0} Early Outs · {selectedStaffMetrics.undertime?.total_lost_minutes || 0} mins
+                </div>
+                <div className="text-[10px] text-muted-foreground">Scheduled Out: 05:00 PM</div>
+              </div>
+              <div className="p-2.5 rounded-xl border border-border bg-muted/20">
+                <div className="text-[10px] font-bold uppercase text-muted-foreground">Half-Day Shifts</div>
+                <div className="text-sm font-black font-mono text-indigo-600 mt-0.5">
+                  {selectedStaffMetrics.half_days?.count || 0} Shifts · {Number(selectedStaffMetrics.half_days?.total_hours || 0).toFixed(1)} hrs
+                </div>
+                <div className="text-[10px] text-muted-foreground">
+                  {selectedStaffMetrics.half_days?.am_count || 0} AM · {selectedStaffMetrics.half_days?.pm_count || 0} PM
+                </div>
+              </div>
+            </div>
+
+            {/* 4 Absences Table */}
+            <div className="border border-border rounded-xl overflow-hidden">
+              <div className="px-3 py-2 bg-rose-50/70 dark:bg-rose-950/20 border-b border-border font-bold text-rose-700 dark:text-rose-300">
+                Absences ({selectedStaffMetrics.absences?.total || 0} Total — Dates, Reason Code &amp; Excused vs Unexcused)
+              </div>
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="border-b border-border bg-muted/40 text-[10px] uppercase text-muted-foreground">
+                    <th className="py-2 px-3 text-left">Date</th>
+                    <th className="py-2 px-3 text-left">Reason Code</th>
+                    <th className="py-2 px-3 text-left">Status</th>
+                    <th className="py-2 px-3 text-left">Remarks</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border">
+                  {(selectedStaffMetrics.absences?.records || []).map((ab, idx) => (
+                    <tr key={idx}>
+                      <td className="py-2 px-3 font-mono font-bold whitespace-nowrap">{ab.date}</td>
+                      <td className="py-2 px-3 font-mono font-bold whitespace-nowrap">{ab.reason_code} — {ab.reason_label}</td>
+                      <td className="py-2 px-3 whitespace-nowrap">
+                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${
+                          ab.status === 'Excused'
+                            ? 'bg-sky-50 text-sky-700 border-sky-200 dark:bg-sky-950/40 dark:text-sky-300 dark:border-sky-800'
+                            : 'bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-950/40 dark:text-rose-300 dark:border-rose-800'
+                        }`}>{ab.status}</span>
+                      </td>
+                      <td className="py-2 px-3 text-muted-foreground">{ab.remarks || '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Lates & Undertime Grid */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div className="border border-border rounded-xl overflow-hidden">
+                <div className="px-3 py-2 bg-amber-50/70 dark:bg-amber-950/20 border-b border-border font-bold text-amber-700 dark:text-amber-300">
+                  Lates / Tardiness ({selectedStaffMetrics.lates?.frequency || 0} Late{(selectedStaffMetrics.lates?.frequency || 0) === 1 ? '' : 's'} · {selectedStaffMetrics.lates?.total_minutes || 0} mins)
+                </div>
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="border-b border-border bg-muted/40 text-[10px] uppercase text-muted-foreground">
+                      <th className="py-2 px-3 text-left">Date</th>
+                      <th className="py-2 px-3 text-left">Sched In</th>
+                      <th className="py-2 px-3 text-left">Check-In</th>
+                      <th className="py-2 px-3 text-right">Mins Late</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border">
+                    {(selectedStaffMetrics.lates?.records || []).length === 0 ? (
+                      <tr><td colSpan={4} className="py-3 text-center text-muted-foreground">No lates logged</td></tr>
+                    ) : (selectedStaffMetrics.lates?.records || []).map((lt, idx) => (
+                      <tr key={idx}>
+                        <td className="py-2 px-3 font-mono font-bold">{lt.date}</td>
+                        <td className="py-2 px-3 font-mono text-muted-foreground">{lt.scheduled_in}</td>
+                        <td className="py-2 px-3 font-mono font-bold text-rose-600">{lt.actual_in}</td>
+                        <td className="py-2 px-3 text-right font-mono font-bold text-amber-600">+{lt.minutes_late}m</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="border border-border rounded-xl overflow-hidden">
+                <div className="px-3 py-2 bg-orange-50/70 dark:bg-orange-950/20 border-b border-border font-bold text-orange-700 dark:text-orange-300">
+                  Undertime / Early Logouts ({selectedStaffMetrics.undertime?.frequency || 0} Early Out{(selectedStaffMetrics.undertime?.frequency || 0) === 1 ? '' : 's'} · {selectedStaffMetrics.undertime?.total_lost_minutes || 0} lost mins)
+                </div>
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="border-b border-border bg-muted/40 text-[10px] uppercase text-muted-foreground">
+                      <th className="py-2 px-3 text-left">Date</th>
+                      <th className="py-2 px-3 text-left">Sched Out</th>
+                      <th className="py-2 px-3 text-left">Logout</th>
+                      <th className="py-2 px-3 text-right">Lost Mins</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border">
+                    {(selectedStaffMetrics.undertime?.records || []).length === 0 ? (
+                      <tr><td colSpan={4} className="py-3 text-center text-muted-foreground">No undertime logged</td></tr>
+                    ) : (selectedStaffMetrics.undertime?.records || []).map((ut, idx) => (
+                      <tr key={idx}>
+                        <td className="py-2 px-3 font-mono font-bold">{ut.date}</td>
+                        <td className="py-2 px-3 font-mono text-muted-foreground">{ut.scheduled_out}</td>
+                        <td className="py-2 px-3 font-mono font-bold text-orange-600">{ut.actual_out}</td>
+                        <td className="py-2 px-3 text-right font-mono font-bold text-orange-600">-{ut.lost_minutes}m</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* Half-Day Shifts Table */}
+            <div className="border border-border rounded-xl overflow-hidden">
+              <div className="px-3 py-2 bg-indigo-50/70 dark:bg-indigo-950/20 border-b border-border font-bold text-indigo-700 dark:text-indigo-300">
+                Half-Day Shifts ({selectedStaffMetrics.half_days?.count || 0} Shifts · {Number(selectedStaffMetrics.half_days?.total_hours || 0).toFixed(1)}h Rendered)
+              </div>
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="border-b border-border bg-muted/40 text-[10px] uppercase text-muted-foreground">
+                    <th className="py-2 px-3 text-left">Date</th>
+                    <th className="py-2 px-3 text-left">Shift Type</th>
+                    <th className="py-2 px-3 text-left">Time In</th>
+                    <th className="py-2 px-3 text-left">Time Out</th>
+                    <th className="py-2 px-3 text-right">Hours Rendered</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border">
+                  {(selectedStaffMetrics.half_days?.records || []).length === 0 ? (
+                    <tr><td colSpan={5} className="py-3 text-center text-muted-foreground">No half-day shifts logged</td></tr>
+                  ) : (selectedStaffMetrics.half_days?.records || []).map((hd, idx) => (
+                    <tr key={idx}>
+                      <td className="py-2 px-3 font-mono font-bold">{hd.date}</td>
+                      <td className="py-2 px-3">
+                        <span className="px-2 py-0.5 rounded bg-indigo-50 text-indigo-700 border border-indigo-200 dark:bg-indigo-950/40 dark:text-indigo-300 dark:border-indigo-800 font-bold text-[10px]">
+                          {hd.shift_type} Half-Day
+                        </span>
+                      </td>
+                      <td className="py-2 px-3 font-mono">{hd.time_in}</td>
+                      <td className="py-2 px-3 font-mono">{hd.time_out}</td>
+                      <td className="py-2 px-3 text-right font-mono font-bold text-indigo-600">{Number(hd.hours_rendered || 4).toFixed(2)}h</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </Modal>
       )}
     </div>
   )

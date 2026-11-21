@@ -27,7 +27,7 @@ class CategoryController extends Controller
                     CategoryFramework::syncDatabase();
                 }
 
-                $query = Category::query()
+                $query = Category::with('branch:id,name,location')
                     ->orderBy('sort_order')
                     ->orderBy('id');
 
@@ -49,6 +49,8 @@ class CategoryController extends Controller
                         'slug' => $main->slug,
                         'sku_prefix' => $main->sku_prefix,
                         'scope' => $main->classification_scope,
+                        'branch_id' => $main->branch_id,
+                        'branch_name' => $main->branch?->name,
                         'is_active' => (bool) $main->is_active,
                         'groups' => $mainGroups->map(function ($grp) use ($subcategories) {
                             $grpSubs = $subcategories->where('parent_id', $grp->id)->values();
@@ -57,6 +59,8 @@ class CategoryController extends Controller
                                 'name' => $grp->name,
                                 'slug' => $grp->slug,
                                 'scope' => $grp->classification_scope,
+                                'branch_id' => $grp->branch_id,
+                                'branch_name' => $grp->branch?->name,
                                 'is_active' => (bool) $grp->is_active,
                                 'subcategories' => $grpSubs->map(function ($sub) {
                                     return [
@@ -64,6 +68,8 @@ class CategoryController extends Controller
                                         'name' => $sub->name,
                                         'slug' => $sub->slug,
                                         'scope' => $sub->classification_scope,
+                                        'branch_id' => $sub->branch_id,
+                                        'branch_name' => $sub->branch?->name,
                                         'is_active' => (bool) $sub->is_active,
                                     ];
                                 })->values()->all(),
@@ -80,6 +86,8 @@ class CategoryController extends Controller
                     'parent_id' => $r->parent_id,
                     'main_category' => $r->main_category,
                     'group_name' => $r->group_name,
+                    'branch_id' => $r->branch_id,
+                    'branch_name' => $r->branch?->name,
                     'sku_prefix' => $r->sku_prefix,
                     'scope' => $r->classification_scope,
                     'sort_order' => (int) $r->sort_order,
@@ -130,6 +138,7 @@ class CategoryController extends Controller
 
     private function formatRow(Category $category): array
     {
+        $category->loadMissing('branch:id,name,location');
         return [
             'id' => $category->id,
             'name' => $category->name,
@@ -138,11 +147,25 @@ class CategoryController extends Controller
             'parent_id' => $category->parent_id,
             'main_category' => $category->main_category,
             'group_name' => $category->group_name,
+            'branch_id' => $category->branch_id,
+            'branch_name' => $category->branch?->name,
             'sku_prefix' => $category->sku_prefix,
             'scope' => $category->classification_scope,
             'sort_order' => (int) $category->sort_order,
             'is_active' => (bool) $category->is_active,
         ];
+    }
+
+    private function resolveBranchId(Request $request): ?int
+    {
+        $raw = $request->input('branch_id');
+        if ($raw === null || $raw === '' || strcasecmp((string) $raw, 'all') === 0) {
+            return null;
+        }
+        if (is_numeric($raw) && \App\Models\BranchProfile::where('id', (int) $raw)->exists()) {
+            return (int) $raw;
+        }
+        return null;
     }
 
     private function uniqueSlug(string $base, ?int $ignoreId = null): string
@@ -169,6 +192,9 @@ class CategoryController extends Controller
             'main_category' => 'required|string|max:120',
             'parent_id' => 'nullable|integer|exists:categories,id',
             'group_name' => 'nullable|string|max:120',
+            'sku_prefix' => 'nullable|string|max:16',
+            'slug' => 'nullable|string|max:160',
+            'sort_order' => 'nullable|integer|min:0|max:9999',
             'classification_scope' => 'nullable|string|max:500',
             'is_active' => 'nullable|boolean',
         ]);
@@ -204,16 +230,26 @@ class CategoryController extends Controller
             }
         }
 
-        $nextOrder = ((int) Category::where('level', $level)->max('sort_order')) + 1;
+        $nextOrder = isset($validated['sort_order'])
+            ? (int) $validated['sort_order']
+            : (((int) Category::where('level', $level)->max('sort_order')) + 1);
+        $branchId = Schema::hasColumn('categories', 'branch_id') ? $this->resolveBranchId($request) : null;
+        $customPrefix = isset($validated['sku_prefix']) && trim($validated['sku_prefix']) !== ''
+            ? strtoupper(trim($validated['sku_prefix']))
+            : CategoryFramework::skuPrefix($mainName);
+        $slugBase = isset($validated['slug']) && trim($validated['slug']) !== ''
+            ? trim($validated['slug'])
+            : "{$mainName} {$groupName} {$name}";
 
         $category = Category::create([
             'name' => $name,
-            'slug' => $this->uniqueSlug("{$mainName} {$groupName} {$name}"),
+            'slug' => $this->uniqueSlug($slugBase),
             'level' => $level,
             'parent_id' => $parentId,
             'main_category' => $mainName,
             'group_name' => $groupName,
-            'sku_prefix' => CategoryFramework::skuPrefix($mainName),
+            'branch_id' => $branchId,
+            'sku_prefix' => $customPrefix,
             'classification_scope' => $validated['classification_scope'] ?? null,
             'sort_order' => $nextOrder,
             'is_active' => $request->has('is_active') ? (bool) $validated['is_active'] : true,
@@ -251,6 +287,9 @@ class CategoryController extends Controller
             'name' => 'required|string|max:120',
             'main_category' => 'nullable|string|max:120',
             'parent_id' => 'nullable|integer|exists:categories,id',
+            'sku_prefix' => 'nullable|string|max:16',
+            'slug' => 'nullable|string|max:160',
+            'sort_order' => 'nullable|integer|min:0|max:9999',
             'classification_scope' => 'nullable|string|max:500',
             'is_active' => 'nullable|boolean',
         ]);
@@ -271,6 +310,18 @@ class CategoryController extends Controller
 
             if ($request->has('is_active')) {
                 $updates['is_active'] = (bool) $validated['is_active'];
+            }
+
+            if ($request->has('branch_id') && Schema::hasColumn('categories', 'branch_id')) {
+                $updates['branch_id'] = $this->resolveBranchId($request);
+            }
+
+            if (array_key_exists('sort_order', $validated) && $validated['sort_order'] !== null) {
+                $updates['sort_order'] = (int) $validated['sort_order'];
+            }
+
+            if (isset($validated['slug']) && trim($validated['slug']) !== '') {
+                $updates['slug'] = $this->uniqueSlug(trim($validated['slug']), $category->id);
             }
 
             if ($category->level === 'main') {
@@ -301,18 +352,57 @@ class CategoryController extends Controller
                 }
             }
 
+            if (isset($validated['sku_prefix']) && trim($validated['sku_prefix']) !== '') {
+                $updates['sku_prefix'] = strtoupper(trim($validated['sku_prefix']));
+            }
+
             $category->update($updates);
 
+            if ($oldName !== $newName) {
+                Product::where('category', $oldName)->update(['category' => $newName]);
+            }
+
             if ($category->level === 'group') {
-                Category::where('parent_id', $category->id)->update([
+                $childUpdates = [
                     'group_name' => $newName,
                     'main_category' => $category->main_category,
                     'sku_prefix' => $category->sku_prefix,
-                ]);
-            } elseif ($category->level === 'main' && $oldName !== $newName) {
-                Category::where('main_category', $oldName)->where('id', '!=', $category->id)->update([
-                    'main_category' => $newName,
-                ]);
+                ];
+                if ($request->has('branch_id') && Schema::hasColumn('categories', 'branch_id')) {
+                    $childUpdates['branch_id'] = $category->branch_id;
+                }
+                Category::where('parent_id', $category->id)->update($childUpdates);
+            } elseif ($category->level === 'main') {
+                $mainUpdates = [];
+                if ($oldName !== $newName) {
+                    $mainUpdates['main_category'] = $newName;
+                }
+                if ($request->has('branch_id') && Schema::hasColumn('categories', 'branch_id')) {
+                    $mainUpdates['branch_id'] = $category->branch_id;
+                }
+                if (!empty($mainUpdates)) {
+                    Category::where('main_category', $oldName)->where('id', '!=', $category->id)->update($mainUpdates);
+                }
+            }
+
+            if ($request->has('branch_id')) {
+                $childCategoryNames = [];
+                if ($category->level === 'group') {
+                    $childCategoryNames = Category::where('parent_id', $category->id)->pluck('name')->all();
+                } elseif ($category->level === 'main') {
+                    $childCategoryNames = Category::where('main_category', $newName)->pluck('name')->all();
+                }
+                $affectedCategoryNames = array_values(array_unique(array_filter(array_merge(
+                    [$oldName, $newName],
+                    CategoryFramework::matchingCategories($newName),
+                    CategoryFramework::matchingCategories($oldName),
+                    $childCategoryNames
+                ))));
+                if (!empty($affectedCategoryNames)) {
+                    Product::whereIn('category', $affectedCategoryNames)->update([
+                        'branch_id' => $category->branch_id,
+                    ]);
+                }
             }
         });
 

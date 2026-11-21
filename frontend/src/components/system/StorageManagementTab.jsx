@@ -21,6 +21,8 @@ export default function StorageManagementTab({ onNavigateToBackups }) {
   const [sortBy, setSortBy] = useState('newest'); // 'newest' | 'oldest' | 'largest' | 'smallest'
   const [viewMode, setViewMode] = useState('grid'); // 'grid' | 'table'
   const [previewFile, setPreviewFile] = useState(null);
+  const [deletingPath, setDeletingPath] = useState(null);
+  const [deletingAll, setDeletingAll] = useState(false);
   const [page, setPage] = useState(1);
   const pageSize = 24;
 
@@ -86,6 +88,89 @@ export default function StorageManagementTab({ onNavigateToBackups }) {
     }
   };
 
+  const handleDeleteFile = async (file, e) => {
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+    if (!file?.relative_path || deletingPath) return;
+
+    const confirmed = await confirmAction({
+      title: 'Delete Media File?',
+      text: `Are you sure you want to permanently delete "${file.name}" (${file.size_formatted}) from ${file.category_label || file.folder}? This action cannot be undone.`,
+      confirmButtonText: 'Yes, Delete File',
+      cancelButtonText: 'Cancel',
+      icon: 'warning',
+    });
+
+    if (!confirmed) return;
+
+    setDeletingPath(file.relative_path);
+    try {
+      const response = await api.system.deleteStorageFile(file.relative_path);
+      if (previewFile?.relative_path === file.relative_path) {
+        setPreviewFile(null);
+      }
+      if (response?.storage) {
+        setStorage(response.storage);
+      } else {
+        loadStorage(true, undefined, true);
+      }
+      triggerDataSync('storage');
+      showToast(
+        `${response?.result?.message || 'File deleted.'} Reclaimed: ${response?.result?.reclaimed_formatted || file.size_formatted}`,
+        'success'
+      );
+    } catch (err) {
+      console.error('Failed to delete media file:', err);
+      showError('Delete Failed', err.message || 'Unable to delete the selected media file.');
+    } finally {
+      setDeletingPath(null);
+    }
+  };
+
+  const handleDeleteAllFiles = async () => {
+    if (deletingAll || deletingPath || filteredFiles.length === 0) return;
+
+    const targetPaths = filteredFiles.map(f => f.relative_path).filter(Boolean);
+    if (targetPaths.length === 0) return;
+
+    const activeCatLabel = selectedCategory === 'all'
+      ? 'All Categories'
+      : (uploads.categories?.[selectedCategory]?.label || selectedCategory);
+
+    const confirmed = await confirmAction({
+      title: `Delete All (${targetPaths.length}) Media Files?`,
+      text: `Are you sure you want to permanently delete all ${targetPaths.length} currently shown media file(s) under "${activeCatLabel}"? This action cannot be undone.`,
+      confirmButtonText: `Yes, Delete All (${targetPaths.length})`,
+      cancelButtonText: 'Cancel',
+      icon: 'warning',
+    });
+
+    if (!confirmed) return;
+
+    setDeletingAll(true);
+    try {
+      const response = await api.system.deleteStorageFiles(targetPaths);
+      setPreviewFile(null);
+      if (response?.storage) {
+        setStorage(response.storage);
+      } else {
+        loadStorage(true, undefined, true);
+      }
+      triggerDataSync('storage');
+      showToast(
+        `${response?.result?.message || `Deleted ${targetPaths.length} files.`} Reclaimed: ${response?.result?.reclaimed_formatted || '0 B'}`,
+        'success'
+      );
+    } catch (err) {
+      console.error('Failed to bulk delete media files:', err);
+      showError('Bulk Delete Failed', err.message || 'Unable to delete the selected media files.');
+    } finally {
+      setDeletingAll(false);
+    }
+  };
+
   const disk = storage?.disk || {};
   const breakdown = storage?.breakdown || {};
   const db = breakdown.database || {};
@@ -96,7 +181,6 @@ export default function StorageManagementTab({ onNavigateToBackups }) {
   const health = storage?.health || { status: 'optimal' };
   const env = storage?.server_environment || {};
 
-  const diskPercentage = disk.percentage || 0;
   const isHealthy = health.status === 'optimal';
   const isWarning = health.status === 'warning';
 
@@ -211,45 +295,7 @@ export default function StorageManagementTab({ onNavigateToBackups }) {
       </div>
 
       {/* ─── Top Level Storage Meters ─── */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        {/* Host Disk */}
-        <Card className="p-4 border border-border bg-card/60 backdrop-blur-xs relative overflow-hidden flex flex-col justify-between">
-          <div>
-            <div className="flex items-center justify-between mb-3">
-              <div className="flex items-center gap-2">
-                <div className="p-2 rounded-xl bg-blue-500/10 text-blue-600 dark:text-blue-400">
-                  <FiHardDrive className="w-5 h-5" />
-                </div>
-                <div>
-                  <span className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider block">Server Disk Partition</span>
-                  <div className="flex items-baseline gap-1.5">
-                    <span className="text-lg font-black font-mono text-foreground">{disk.percentage}%</span>
-                    <span className="text-[11px] font-semibold text-muted-foreground truncate max-w-[130px]" title={disk.partition_name}>
-                      ({disk.partition_name || 'Disk'})
-                    </span>
-                  </div>
-                </div>
-              </div>
-            </div>
-            <div className="h-2 w-full bg-muted rounded-full overflow-hidden mb-2">
-              <div
-                className={`h-full rounded-full transition-all duration-500 ${
-                  diskPercentage > 88 ? 'bg-rose-500' : diskPercentage > 75 ? 'bg-amber-500' : 'bg-blue-500'
-                }`}
-                style={{ width: `${Math.min(100, diskPercentage)}%` }}
-              />
-            </div>
-            <div className="flex justify-between text-[11px] font-mono text-muted-foreground">
-              <span>{disk.used_formatted} used</span>
-              <span>{disk.free_formatted} free</span>
-            </div>
-          </div>
-          <div className="mt-3 pt-2.5 border-t border-border/50 flex justify-between items-center text-[10px] text-muted-foreground">
-            <span>Capacity: <strong className="font-mono text-foreground">{disk.total_formatted}</strong></span>
-            <span>App: <strong className="font-mono text-foreground">{breakdown.app_total?.size_formatted || '0 B'}</strong></span>
-          </div>
-        </Card>
-
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         {/* Uploaded Media */}
         <Card className="p-4 border border-border bg-card/60 backdrop-blur-xs flex flex-col justify-between">
           <div>
@@ -602,6 +648,17 @@ export default function StorageManagementTab({ onNavigateToBackups }) {
               </div>
 
               <div className="flex items-center gap-2 self-end md:self-auto">
+                <button
+                  type="button"
+                  onClick={handleDeleteAllFiles}
+                  disabled={deletingAll || Boolean(deletingPath) || filteredFiles.length === 0}
+                  title={filteredFiles.length === 0 ? 'No files to delete' : `Delete all ${filteredFiles.length} shown files`}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-xl border border-rose-500/30 bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
+                >
+                  <FiTrash2 className="w-3.5 h-3.5" />
+                  <span>{deletingAll ? 'Deleting...' : `Delete All (${filteredFiles.length})`}</span>
+                </button>
+
                 <select
                   value={sortBy}
                   onChange={(e) => setSortBy(e.target.value)}
@@ -673,8 +730,27 @@ export default function StorageManagementTab({ onNavigateToBackups }) {
                         <FiFileText className="w-8 h-8 opacity-40" />
                       </div>
 
-                      <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity bg-black/60 backdrop-blur-xs text-white p-1 rounded-md text-[10px]">
-                        <FiEye className="w-3.5 h-3.5" />
+                      <div className="absolute top-2 right-2 flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setPreviewFile(file);
+                          }}
+                          title="Preview File"
+                          className="bg-black/60 hover:bg-black/80 backdrop-blur-xs text-white p-1.5 rounded-lg text-[10px] cursor-pointer"
+                        >
+                          <FiEye className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(e) => handleDeleteFile(file, e)}
+                          disabled={deletingPath === file.relative_path}
+                          title="Delete File"
+                          className="bg-rose-600/90 hover:bg-rose-600 backdrop-blur-xs text-white p-1.5 rounded-lg text-[10px] cursor-pointer disabled:opacity-50"
+                        >
+                          <FiTrash2 className="w-3.5 h-3.5" />
+                        </button>
                       </div>
                     </div>
 
@@ -688,8 +764,20 @@ export default function StorageManagementTab({ onNavigateToBackups }) {
                         </span>
                         <span className="font-mono font-medium">{file.size_formatted}</span>
                       </div>
-                      <div className="text-[9px] text-muted-foreground/80 font-mono truncate">
-                        {file.modified_at}
+                      <div className="flex items-center justify-between pt-1 border-t border-border/60">
+                        <span className="text-[9px] text-muted-foreground/80 font-mono truncate">
+                          {file.modified_at}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={(e) => handleDeleteFile(file, e)}
+                          disabled={deletingPath === file.relative_path}
+                          title="Delete File"
+                          className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 text-[10px] font-bold transition-colors cursor-pointer disabled:opacity-50"
+                        >
+                          <FiTrash2 className="w-3 h-3" />
+                          <span>Delete</span>
+                        </button>
                       </div>
                     </div>
                   </div>
@@ -771,6 +859,15 @@ export default function StorageManagementTab({ onNavigateToBackups }) {
                               >
                                 <FiExternalLink className="w-3.5 h-3.5" />
                               </a>
+                              <button
+                                type="button"
+                                onClick={(e) => handleDeleteFile(file, e)}
+                                disabled={deletingPath === file.relative_path}
+                                className="p-1.5 rounded-lg border border-rose-500/30 bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 cursor-pointer disabled:opacity-50"
+                                title="Delete File"
+                              >
+                                <FiTrash2 className="w-3.5 h-3.5" />
+                              </button>
                             </div>
                           </td>
                         </tr>
@@ -890,6 +987,15 @@ export default function StorageManagementTab({ onNavigateToBackups }) {
                 <span>Modified: <strong className="text-foreground">{previewFile.modified_at}</strong></span>
               </div>
               <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={(e) => handleDeleteFile(previewFile, e)}
+                  disabled={deletingPath === previewFile.relative_path}
+                  className="px-3 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-semibold text-xs flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                >
+                  <FiTrash2 className="w-3.5 h-3.5" />
+                  <span>{deletingPath === previewFile.relative_path ? 'Deleting...' : 'Delete File'}</span>
+                </button>
                 <a
                   href={previewFile.url}
                   target="_blank"

@@ -208,10 +208,24 @@ class AuthController extends Controller
             $defaultPosition = $role === 'Store Administrator' ? 'Manager (Store Admin)' : ($role === 'Administrator' ? 'Main Administrator' : 'Cashier (Employee)');
             $defaultDept = $role === 'Administrator' ? 'Administration' : ($role === 'Store Administrator' ? 'Store Admin' : 'Employee');
 
-            $inputSalary = (!$isAdminRole && $request->filled('basic_salary') && is_numeric($request->input('basic_salary')) && (float)$request->input('basic_salary') > 0)
-                ? (float)$request->input('basic_salary')
-                : 0.00;
-            $dailyRate = $inputSalary > 0 ? round($inputSalary / 26, 2) : 0.00;
+            $dailyInput = $request->input('daily_rate');
+            $salInput = $request->input('basic_salary');
+            if (!$isAdminRole && $dailyInput !== null && is_numeric($dailyInput) && (float)$dailyInput > 0) {
+                $dailyRate = (float)$dailyInput;
+                $inputSalary = round($dailyRate * 26, 2);
+            } elseif (!$isAdminRole && $salInput !== null && is_numeric($salInput) && (float)$salInput > 0) {
+                $val = (float)$salInput;
+                if ($val >= 2600) {
+                    $inputSalary = $val;
+                    $dailyRate = round($val / 26, 2);
+                } else {
+                    $dailyRate = $val;
+                    $inputSalary = round($val * 26, 2);
+                }
+            } else {
+                $inputSalary = 0.00;
+                $dailyRate = 0.00;
+            }
             $hourlyRate = $dailyRate > 0 ? round($dailyRate / 8, 2) : 0.00;
 
             $employee = \App\Models\Employee::where('email', $normalizedEmail)->first();

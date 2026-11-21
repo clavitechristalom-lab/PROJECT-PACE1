@@ -179,8 +179,9 @@ async function request(endpoint, options = {}) {
     }
   }
 
-  // Deduplicate identical in-flight GET requests
-  if (isGet && inFlightGets.has(endpoint) && !options.fresh) {
+  // Deduplicate identical in-flight GET requests (never reuse an already-aborted controller)
+  const existingCtrl = inFlightControllers.get(endpoint);
+  if (isGet && inFlightGets.has(endpoint) && !options.fresh && !existingCtrl?.signal?.aborted) {
     return inFlightGets.get(endpoint);
   }
 
@@ -190,6 +191,7 @@ async function request(endpoint, options = {}) {
       inFlightControllers.get(endpoint).abort();
     } catch (_) { }
     inFlightControllers.delete(endpoint);
+    inFlightGets.delete(endpoint);
   }
 
   const controller = new AbortController();
@@ -197,11 +199,21 @@ async function request(endpoint, options = {}) {
     inFlightControllers.set(endpoint, controller);
   }
 
+  const abortAndRelease = () => {
+    if (isGet) {
+      if (inFlightControllers.get(endpoint) === controller) {
+        inFlightControllers.delete(endpoint);
+      }
+      inFlightGets.delete(endpoint);
+    }
+    controller.abort();
+  };
+
   if (options.signal) {
     if (options.signal.aborted) {
-      controller.abort();
+      abortAndRelease();
     } else {
-      options.signal.addEventListener('abort', () => controller.abort(), { once: true });
+      options.signal.addEventListener('abort', abortAndRelease, { once: true });
     }
   }
 
@@ -277,7 +289,7 @@ async function request(endpoint, options = {}) {
     }
   })();
 
-  if (isGet) {
+  if (isGet && !controller.signal.aborted) {
     inFlightGets.set(endpoint, promise);
     // Attach .catch() on cleanup chain so rejected GETs don't trigger Uncaught (in promise)
     promise
@@ -742,6 +754,15 @@ export const api = {
       const qs = new URLSearchParams(cleanParams(params)).toString();
       return request(`/attendance/summary${qs ? `?${qs}` : ''}`, options);
     },
+    getPeriodMetrics: (params = {}, options = {}) => {
+      const qs = new URLSearchParams(cleanParams(params)).toString();
+      return request(`/attendance/period-metrics${qs ? `?${qs}` : ''}`, options);
+    },
+    simulatePeriod: (data = {}) =>
+      request('/attendance/simulate-period', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
     verifyQr: (data) =>
       request('/attendance/verify-qr', {
         method: 'POST',
@@ -997,6 +1018,16 @@ export const api = {
         method: 'POST',
         body: JSON.stringify({ action }),
       }),
+    deleteStorageFile: (relativePath) =>
+      request('/system/storage/delete-file', {
+        method: 'POST',
+        body: JSON.stringify({ relative_path: relativePath }),
+      }),
+    deleteStorageFiles: (relativePaths) =>
+      request('/system/storage/delete-file', {
+        method: 'POST',
+        body: JSON.stringify({ relative_paths: relativePaths }),
+      }),
     getPublicSettings: (options = {}) => request('/public/settings', options),
     saveSettings: (data) => {
       const isFormData = data instanceof FormData;
@@ -1124,7 +1155,7 @@ export const api = {
     delete: (id) => request(`/employee-letters/${id}`, { method: 'DELETE' }),
   },
 
-  search: (query) => request(`/search?q=${encodeURIComponent(query)}`),
+  search: (query, options = {}) => request(`/search?q=${encodeURIComponent(query)}`, options),
 };
 
 export default api;
