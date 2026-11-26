@@ -11,10 +11,15 @@ use App\Models\Payment;
 use App\Models\SaleTransaction;
 use App\Models\SaleItem;
 use App\Models\Product;
+use App\Models\Employee;
+use App\Models\User;
+use App\Models\BranchProfile;
 use App\Models\SystemLog;
 use App\Services\NotificationService;
+use App\Services\PaymentSettlementService;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Validation\ValidationException;
 
 class EWalletController extends Controller
 {
@@ -23,6 +28,62 @@ class EWalletController extends Controller
      */
     protected string $merchantQrString = '00020101021127830012com.p2pqrpay0111GXCHPHM2XXX02089996440303152170200000006560417DWQM4TK3JDO6S94595204601653036085802PH5913CH*******M C.6008Balulang6104123463042E79';
 
+    public function getCashCollectors(Request $request)
+    {
+        $user = $request->user();
+        $branchId = $request->query('branch_id');
+
+        if (!$branchId && $user) {
+            if ($user->role === 'Customer') {
+                $customerId = CustomerDashboardController::resolveCustomerId($user);
+                if ($customerId) {
+                    $branchId = Customer::where('customer_id', $customerId)->value('branch_id');
+                }
+            } elseif ($user->employee?->branch_id) {
+                $branchId = $user->employee->branch_id;
+            }
+        }
+
+        if (!$branchId && $request->filled('installment_id')) {
+            $inst = InstallmentAccount::with(['sale', 'customer'])->find($request->query('installment_id'));
+            $branchId = $inst?->sale?->branch_id ?? $inst?->customer?->branch_id;
+        }
+
+        $query = Employee::with(['branch:id,name', 'branchProfile:id,name', 'user:user_id,employee_id,username,role,is_active'])
+            ->where('status', 'Active')
+            ->where(function ($q) {
+                $q->whereRaw("LOWER(COALESCE(position, '')) LIKE '%collector%'")
+                    ->orWhereRaw("LOWER(COALESCE(department, '')) LIKE '%collector%'");
+            })
+            ->whereHas('user', function ($uq) {
+                $uq->where('role', 'Employee');
+            });
+
+        if ($branchId) {
+            $query->where('branch_id', $branchId);
+        }
+
+        $collectors = $query->orderBy('first_name')->orderBy('last_name')->get()->map(function ($emp) {
+            $fullName = trim("{$emp->first_name} {$emp->last_name}");
+            return [
+                'collector_id' => $emp->user?->user_id ? (int) $emp->user->user_id : null,
+                'employee_id' => (int) $emp->employee_id,
+                'employee_code' => $emp->employee_code,
+                'name' => $fullName,
+                'phone' => $emp->phone,
+                'position' => $emp->position,
+                'branch_id' => $emp->branch_id ? (int) $emp->branch_id : null,
+                'branch_name' => $emp->branch_name ?: BranchProfile::getNameById($emp->branch_id),
+            ];
+        })->filter(fn($c) => !empty($c['collector_id']))->values();
+
+        return response()->json([
+            'success' => true,
+            'collectors' => $collectors,
+            'branch_id' => $branchId ? (int) $branchId : null,
+        ]);
+    }
+
     /**
      * Step 1 -> Step 2: Initialize GCash / E-Wallet deposit or payment checkout session.
      */
@@ -30,7 +91,9 @@ class EWalletController extends Controller
     {
         $validated = $request->validate([
             'amount' => 'required|numeric|min:1',
-            'payment_method' => 'required|string', // GCash, Maya, BDO, etc.
+            'payment_method' => 'required|string',
+            'cash_channel' => 'nullable|string|in:store,collector',
+            'collector_id' => 'nullable|integer',
             'payment_type' => 'nullable|string|in:deposit,installment_payment,product_purchase,product_order,installment_order',
             'installment_id' => 'nullable|exists:installment_accounts,installment_id',
             'schedule_id' => 'nullable|exists:payment_schedule,schedule_id',
@@ -40,7 +103,6 @@ class EWalletController extends Controller
             'items.*.price' => 'nullable|numeric|min:0',
             'items.*.product_name' => 'nullable|string',
             'notes' => 'nullable|string',
-            // Customer Installment Options
             'payment_term' => 'nullable|string|in:full,installment',
             'installment_term_months' => 'nullable|integer|in:3,6,12',
             'downpayment_amount' => 'nullable|numeric|min:0',
@@ -53,10 +115,7 @@ class EWalletController extends Controller
         $customerId = null;
 
         if ($user) {
-            $customerId = $user->customer_id ?? $user->customer?->customer_id;
-            if (!$customerId) {
-                $customerId = Customer::where('email', $user->username)->value('customer_id');
-            }
+            $customerId = \App\Http\Controllers\CustomerDashboardController::resolveCustomerId($user);
         }
 
         // Generate unique, collision-free transaction reference code
@@ -105,6 +164,38 @@ class EWalletController extends Controller
             $schedule = PaymentSchedule::find($validated['schedule_id']);
         }
 
+        $isCashMethod = strtolower((string) $validated['payment_method']) === 'cash';
+        $cashChannel = $isCashMethod ? ($validated['cash_channel'] ?? 'store') : null;
+        $collectorId = null;
+
+        $customerObj = $customerId ? Customer::find($customerId) : null;
+        $targetBranchId = $installmentAccount?->sale?->branch_id
+            ?? $installmentAccount?->customer?->branch_id
+            ?? $customerObj?->branch_id;
+
+        if ($isCashMethod && $cashChannel === 'collector') {
+            if (empty($validated['collector_id'])) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Please select an assigned Collector for door-to-door cash payment.',
+                ], 422);
+            }
+            $collectorUser = User::with('employee')->find($validated['collector_id']);
+            if (!$collectorUser || !$collectorUser->isCollector()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Selected employee is not a valid Collector.',
+                ], 422);
+            }
+            if ($targetBranchId && $collectorUser->employee?->branch_id && (int) $collectorUser->employee->branch_id !== (int) $targetBranchId) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Selected Collector does not belong to the assigned store branch.',
+                ], 422);
+            }
+            $collectorId = (int) $collectorUser->user_id;
+        }
+
         $itemsForCheckout = [];
         if ($hasItems) {
             $itemsForCheckout = $validated['items'];
@@ -131,8 +222,6 @@ class EWalletController extends Controller
                     ? "Order of " . count($validated['items']) . " item(s) for ₱" . number_format($amount, 2) . " via {$validated['payment_method']}"
                     : "Payment of ₱" . number_format($amount, 2) . " via {$validated['payment_method']}"));
 
-        // Customer profile if available
-        $customerObj = $customerId ? Customer::find($customerId) : null;
         $customerInfo = null;
         if ($customerObj) {
             $customerInfo = [
@@ -155,6 +244,13 @@ class EWalletController extends Controller
                 'product_image_url' => $productImage,
             ],
         ];
+
+        if ($isCashMethod) {
+            $gatewayResponse['cash_channel'] = $cashChannel;
+            if ($collectorId) {
+                $gatewayResponse['collector_id'] = $collectorId;
+            }
+        }
 
         if ($hasItems) {
             $gatewayResponse['items'] = $validated['items'];
@@ -198,6 +294,8 @@ class EWalletController extends Controller
                 'currency' => $deposit->currency,
                 'payment_method' => $deposit->payment_method,
                 'payment_type' => $deposit->payment_type,
+                'cash_channel' => $cashChannel,
+                'collector_id' => $collectorId,
                 'status' => $deposit->status,
                 'checkout_url' => $deposit->checkout_url,
                 'checkout_session_id' => $deposit->checkout_session_id,
@@ -212,7 +310,7 @@ class EWalletController extends Controller
     /**
      * Poll payment status by transaction reference.
      */
-    public function checkStatus($reference)
+    public function checkStatus(Request $request, $reference)
     {
         $deposit = EWalletDeposit::with(['customer', 'installmentAccount', 'payment'])
             ->where('transaction_reference', $reference)
@@ -222,8 +320,21 @@ class EWalletController extends Controller
             return response()->json(['success' => false, 'message' => 'Transaction not found.'], 404);
         }
 
+        $authUser = $request->user('sanctum') ?? $request->user();
+        $canViewSensitiveDetails = false;
+        if ($authUser) {
+            if (in_array($authUser->role, ['Administrator', 'Admin', 'Store Administrator', 'Store Admin', 'Employee'], true)) {
+                $canViewSensitiveDetails = true;
+            } elseif ($authUser->role === 'Customer') {
+                $custId = CustomerDashboardController::resolveCustomerId($authUser);
+                if ((int) $authUser->user_id === (int) $deposit->user_id || ($custId && (int) $custId === (int) $deposit->customer_id)) {
+                    $canViewSensitiveDetails = true;
+                }
+            }
+        }
+
         $customerWalletBalance = null;
-        if ($deposit->customer_id) {
+        if ($canViewSensitiveDetails && $deposit->customer_id) {
             $customerWalletBalance = Customer::where('customer_id', $deposit->customer_id)->value('wallet_balance');
         }
 
@@ -234,20 +345,30 @@ class EWalletController extends Controller
             $proofUrl = asset('storage/' . $deposit->payment->proof_of_payment);
         }
 
-        $isPaid = in_array($deposit->status, ['paid', 'Completed', 'Successful']) || ($deposit->payment?->status === 'Completed');
-        $isPending = !$isPaid && ($deposit->payment_id || in_array($deposit->status, ['pending', 'pending_approval', 'pending_verification']));
+        $paymentStatus = $deposit->payment?->status;
+        $isPaid = in_array($deposit->status, ['paid', 'Completed', 'Successful'])
+            || ($paymentStatus && Payment::isSettledStatus($paymentStatus));
+        $isPending = !$isPaid && ($deposit->payment_id || in_array($deposit->status, ['pending', 'pending_approval', 'pending_verification', 'collected_by_collector']));
 
-        return response()->json([
+        $payload = [
             'success' => true,
             'status' => $isPaid ? 'paid' : ($isPending ? 'pending' : $deposit->status),
             'is_paid' => $isPaid,
             'is_pending' => $isPending,
-            'deposit' => $deposit,
-            'wallet_balance' => (float)($customerWalletBalance ?? 0),
-            'payment' => $deposit->payment,
+            'transaction_reference' => $deposit->transaction_reference,
+            'payment_method' => $deposit->payment_method,
+            'amount' => (float) $deposit->amount,
             'proof_of_payment_url' => $proofUrl,
             'customer_reference' => $deposit->customer_reference,
-        ]);
+        ];
+
+        if ($canViewSensitiveDetails) {
+            $payload['deposit'] = $deposit;
+            $payload['wallet_balance'] = (float) ($customerWalletBalance ?? 0);
+            $payload['payment'] = $deposit->payment;
+        }
+
+        return response()->json($payload);
     }
 
     /**
@@ -368,6 +489,16 @@ class EWalletController extends Controller
 
         $isCash = strtolower((string)$deposit->payment_method) === 'cash';
 
+        if ($request->boolean('auto_verify')) {
+            $authUser = $request->user('sanctum') ?? $request->user();
+            if (!$authUser || !in_array($authUser->role, ['Administrator', 'Admin', 'Store Administrator', 'Store Admin'], true)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => '403 Forbidden: Auto-verification is restricted to authorized administrators.',
+                ], 403);
+            }
+        }
+
         if (!$request->boolean('auto_verify') && !$isCash) {
             if (!$request->filled('customer_reference') && empty($deposit->customer_reference)) {
                 return response()->json([
@@ -386,6 +517,41 @@ class EWalletController extends Controller
 
         // Store customer transaction reference and proof of payment screenshot if provided
         $gatewayResp = $deposit->gateway_response ?? [];
+
+        $cashChannel = $isCash ? ($request->input('cash_channel') ?: ($gatewayResp['cash_channel'] ?? 'store')) : null;
+        if ($isCash && !in_array($cashChannel, ['store', 'collector'], true)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Invalid cash payment channel.',
+            ], 422);
+        }
+
+        $collectorId = null;
+        if ($isCash && $cashChannel === 'collector') {
+            $collectorId = $request->input('collector_id') ?: ($gatewayResp['collector_id'] ?? null);
+            $collectorUser = $collectorId ? User::with('employee')->find($collectorId) : null;
+            if (!$collectorUser || !$collectorUser->isCollector()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'A valid Collector from your store branch is required.',
+                ], 422);
+            }
+            $custBranch = $deposit->installmentAccount?->sale?->branch_id
+                ?? $deposit->installmentAccount?->customer?->branch_id
+                ?? $deposit->customer?->branch_id;
+            if ($custBranch && $collectorUser->employee?->branch_id && (int) $collectorUser->employee->branch_id !== (int) $custBranch) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Selected Collector does not belong to the customer store branch.',
+                ], 422);
+            }
+            $collectorId = (int) $collectorUser->user_id;
+            $gatewayResp['cash_channel'] = 'collector';
+            $gatewayResp['collector_id'] = $collectorId;
+        } elseif ($isCash) {
+            $gatewayResp['cash_channel'] = 'store';
+            unset($gatewayResp['collector_id']);
+        }
 
         if ($request->filled('customer_reference')) {
             $deposit->customer_reference = $request->input('customer_reference');
@@ -451,7 +617,21 @@ class EWalletController extends Controller
         }
 
         $customerRef = $deposit->customer_reference ?? ($gatewayResp['customer_reference'] ?? null);
-        $refNo = $customerRef ?: $deposit->transaction_reference;
+        $refNo = $isCash ? $deposit->transaction_reference : ($customerRef ?: $deposit->transaction_reference);
+        $receiptRef = $customerRef ?: null;
+        $initialStatus = ($isCash && $cashChannel === 'collector') ? Payment::STATUS_PENDING_COLLECTOR : Payment::STATUS_PENDING;
+        $paymentType = $deposit->installment_id ? 'installment' : 'product_cash';
+
+        if ($isCash && $cashChannel === 'collector') {
+            $notes = 'Customer door-to-door Cash payment submitted. Assigned to Collector for physical collection.' . ($customerRef ? " [Ref: {$customerRef}]" : '');
+            $responseMsg = 'Door-to-door cash payment request assigned to your branch Collector.';
+        } elseif ($isCash) {
+            $notes = 'Customer walk-in Cash payment submitted. Awaiting Cashier receipt at store counter.' . ($customerRef ? " [Ref: {$customerRef}]" : '');
+            $responseMsg = 'Walk-in cash payment submitted. Please proceed to the store Cashier counter to pay.';
+        } else {
+            $notes = "Customer {$deposit->payment_method} Payment submitted. Awaiting Store Admin receipt and confirmation." . ($customerRef ? " [Ref: {$customerRef}]" : '');
+            $responseMsg = 'Payment submitted successfully. Awaiting Store Admin receipt and verification.';
+        }
 
         if (!$payment) {
             $paymentCount = (Payment::max('payment_id') ?? 0) + 1;
@@ -462,50 +642,144 @@ class EWalletController extends Controller
             }
 
             $payment = Payment::create([
-                'installment_id'   => $deposit->installment_id,
-                'schedule_id'      => $deposit->schedule_id,
-                'receipt_no'       => $receiptNo,
-                'payment_date'     => now()->toDateString(),
-                'amount'           => (float)$deposit->amount,
-                'payment_method'   => $deposit->payment_method ?: 'GCash',
-                'reference_no'     => $refNo,
-                'received_by'      => null, // Not received yet - store admin must receive it
-                'notes'            => "Customer {$deposit->payment_method} Payment submitted. Awaiting Store Admin receipt and confirmation." . ($customerRef ? " [Ref: {$customerRef}]" : ""),
-                'status'           => 'Pending',
-                'proof_of_payment' => $deposit->proof_of_payment,
-                'created_at'       => now(),
+                'installment_id'    => $deposit->installment_id,
+                'schedule_id'       => $deposit->schedule_id,
+                'receipt_no'        => $receiptNo,
+                'payment_date'      => now()->toDateString(),
+                'amount'            => (float)$deposit->amount,
+                'payment_method'    => $deposit->payment_method ?: 'GCash',
+                'payment_type'      => $paymentType,
+                'cash_channel'      => $cashChannel,
+                'collector_id'      => $collectorId,
+                'reference_no'      => $refNo,
+                'receipt_reference' => $receiptRef,
+                'received_by'       => null,
+                'notes'             => $notes,
+                'status'            => $initialStatus,
+                'proof_of_payment'  => $deposit->proof_of_payment,
+                'created_at'        => now(),
             ]);
 
             $deposit->payment_id = $payment->payment_id;
         } else {
             $payment->update([
-                'reference_no'     => $refNo,
-                'proof_of_payment' => $deposit->proof_of_payment ?: $payment->proof_of_payment,
-                'status'           => 'Pending',
+                'cash_channel'      => $cashChannel ?? $payment->cash_channel,
+                'collector_id'      => $collectorId ?? $payment->collector_id,
+                'reference_no'      => $refNo,
+                'receipt_reference' => $receiptRef ?? $payment->receipt_reference,
+                'proof_of_payment'  => $deposit->proof_of_payment ?: $payment->proof_of_payment,
+                'status'            => $initialStatus,
             ]);
         }
 
         $deposit->status = 'pending';
         $deposit->save();
 
-        // Dispatch instant notification to Store Admins
-        NotificationService::sendToAdmins([
-            'type'         => 'payment_submitted',
-            'title'        => "New Pending {$deposit->payment_method} Payment",
-            'message'      => "Customer submitted payment of ₱" . number_format($deposit->amount, 2) . " ({$payment->receipt_no}) via {$deposit->payment_method}. Pending your receipt and verification.",
-            'module'       => 'Payments',
-            'related_id'   => $payment->payment_id,
-            'related_type' => 'App\Models\Payment',
-            'action_url'   => '/payments',
-            'priority'     => 'high',
-        ]);
+        $branchId = $payment->installmentAccount?->sale?->branch_id
+            ?? $payment->installmentAccount?->customer?->branch_id
+            ?? $deposit->customer?->branch_id;
+
+        if ($isCash && $cashChannel === 'collector' && $collectorId) {
+            NotificationService::sendToUser($collectorId, [
+                'type'         => 'collector_collection_assigned',
+                'title'        => 'New Door-to-Door Cash Collection Assigned',
+                'message'      => "Customer submitted door-to-door Cash collection {$refNo} (₱" . number_format($deposit->amount, 2) . ").",
+                'module'       => 'Payments',
+                'related_id'   => $payment->payment_id,
+                'related_type' => 'App\Models\Payment',
+                'action_url'   => '/employee/collect-cash',
+                'priority'     => 'high',
+            ]);
+            NotificationService::sendToStoreAdmins([
+                'type'         => 'payment_submitted',
+                'title'        => 'New Collector Cash Payment Scheduled',
+                'message'      => "Door-to-door Cash collection {$refNo} (₱" . number_format($deposit->amount, 2) . ") assigned to branch Collector.",
+                'module'       => 'Payments',
+                'related_id'   => $payment->payment_id,
+                'related_type' => 'App\Models\Payment',
+                'action_url'   => '/payments',
+                'priority'     => 'normal',
+            ], $branchId ? (string) $branchId : null);
+        } elseif ($isCash) {
+            $cashierUserIds = User::where('role', 'Employee')
+                ->whereHas('employee', function ($q) use ($branchId) {
+                    if ($branchId) {
+                        $q->where('branch_id', $branchId);
+                    }
+                    $q->where(function ($sub) {
+                        $sub->whereRaw("LOWER(COALESCE(position, '')) LIKE '%cashier%'")
+                            ->orWhereRaw("LOWER(COALESCE(department, '')) LIKE '%cashier%'");
+                    });
+                })
+                ->pluck('user_id');
+
+            foreach ($cashierUserIds as $cashierUid) {
+                NotificationService::sendToUser($cashierUid, [
+                    'type'         => 'walk_in_cash_submitted',
+                    'title'        => 'New Walk-In Cash Payment',
+                    'message'      => "Walk-in Cash payment {$refNo} (₱" . number_format($deposit->amount, 2) . ") awaiting counter confirmation.",
+                    'module'       => 'Payments',
+                    'related_id'   => $payment->payment_id,
+                    'related_type' => 'App\Models\Payment',
+                    'action_url'   => '/employee/receive-cash',
+                    'priority'     => 'high',
+                ]);
+            }
+
+            NotificationService::sendToStoreAdmins([
+                'type'         => 'payment_submitted',
+                'title'        => 'New Walk-In Cash Payment',
+                'message'      => "Walk-in Cash payment {$refNo} (₱" . number_format($deposit->amount, 2) . ") awaiting Cashier receipt.",
+                'module'       => 'Payments',
+                'related_id'   => $payment->payment_id,
+                'related_type' => 'App\Models\Payment',
+                'action_url'   => '/payments',
+                'priority'     => 'normal',
+            ], $branchId ? (string) $branchId : null);
+        } else {
+            NotificationService::sendToAdmins([
+                'type'         => 'payment_submitted',
+                'title'        => "New Pending {$deposit->payment_method} Payment",
+                'message'      => "Customer submitted payment of ₱" . number_format($deposit->amount, 2) . " ({$payment->receipt_no}) via {$deposit->payment_method}. Pending your receipt and verification.",
+                'module'       => 'Payments',
+                'related_id'   => $payment->payment_id,
+                'related_type' => 'App\Models\Payment',
+                'action_url'   => '/payments',
+                'priority'     => 'high',
+            ]);
+        }
+
+        PaymentSettlementService::invalidatePaymentCaches(['payments', 'installments', 'dashboard', 'transactions', 'notifications']);
+
+        $employeeTargets = [];
+        if ($isCash && $cashChannel === 'collector' && !empty($collectorId)) {
+            $employeeTargets[] = (int) $collectorId;
+        } elseif ($isCash && isset($cashierUserIds)) {
+            $employeeTargets = $cashierUserIds->map(fn($v) => (int) $v)->all();
+        }
+        $custIdForBroadcast = $payment->installmentAccount?->customer_id ?? $deposit->customer_id ?? null;
+        \App\Services\RealtimeBroadcaster::dispatch(new \App\Events\CashPaymentWorkflowUpdated([
+            'payment_id' => $payment->payment_id,
+            'receipt_no' => $payment->receipt_no,
+            'reference_no' => $refNo,
+            'amount' => (float) $deposit->amount,
+            'status' => $payment->status,
+            'payment_method' => $payment->payment_method,
+            'cash_channel' => $cashChannel,
+            'stage' => 'customer_submitted',
+            'actor_user_id' => $request->user()?->user_id ? (int) $request->user()->user_id : null,
+            'toast_title' => $isCash
+                ? ($cashChannel === 'collector' ? 'New Collector Cash Request' : 'New Walk-In Cash Payment')
+                : "New {$deposit->payment_method} Payment",
+            'toast_message' => "Payment {$refNo} (₱" . number_format((float) $deposit->amount, 2) . ") submitted.",
+        ], $branchId ? (int) $branchId : null, $custIdForBroadcast ? (int) $custIdForBroadcast : null, $employeeTargets));
 
         return response()->json([
             'success'              => true,
             'status'               => 'pending',
             'is_paid'              => false,
             'is_pending'           => true,
-            'message'              => 'Payment submitted successfully. Awaiting Store Admin receipt and verification.',
+            'message'              => $responseMsg,
             'deposit'              => $deposit,
             'payment'              => $payment,
             'proof_of_payment_url' => $deposit->proof_of_payment ? asset('storage/' . $deposit->proof_of_payment) : null,
@@ -608,9 +882,10 @@ class EWalletController extends Controller
             $remaining -= $apply;
         }
 
-        // Update installment totals & balance
-        $totalPaid = (float)$inst->payments()->sum('amount') + (float)$inst->down_payment;
-        $balance = max(0, round((float)$inst->total_payable - $totalPaid, 2));
+        $inst->unsetRelation('payments');
+        $fin = $inst->financialBreakdown();
+        $totalPaid = (float) $fin['paid'];
+        $balance = (float) $fin['balance'];
         $instStatus = $balance <= 0 ? 'Completed' : $inst->status;
 
         $inst->update([

@@ -17,6 +17,7 @@ class QrRequest extends Model
         'user_id',
         'employee_id',
         'role',
+        'branch_id',
         'branch',
         'department',
         'position',
@@ -50,6 +51,11 @@ class QrRequest extends Model
     public function employee()
     {
         return $this->belongsTo(Employee::class, 'employee_id', 'employee_id');
+    }
+
+    public function branchProfile()
+    {
+        return $this->belongsTo(BranchProfile::class, 'branch_id', 'id');
     }
 
     public function reviewedBy()

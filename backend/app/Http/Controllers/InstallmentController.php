@@ -12,6 +12,9 @@ use App\Models\Customer;
 use App\Models\Product;
 use App\Models\SystemLog;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Validation\ValidationException;
+use App\Services\AgentContributionService;
 use App\Services\NotificationService;
 
 class InstallmentController extends Controller
@@ -128,14 +131,22 @@ class InstallmentController extends Controller
         $productName = 'Multiple / Custom Items';
         $productCategory = '';
         $itemsCount = 0;
+        $saleItemsSummary = [];
         if ($inst->sale && $inst->sale->items && $inst->sale->items->isNotEmpty()) {
             $itemsCount = $inst->sale->items->count();
             $firstItem = $inst->sale->items->first();
             $productName = $firstItem->product ? $firstItem->product->product_name : 'Appliance / Furniture';
-            $productCategory = $firstItem->product ? ($firstItem->product->category ?: ($firstItem->product->category_group ?: ($firstItem->product->main_category ?: ''))) : '';
+            $productCategory = $firstItem->product ? ($firstItem->product->category ?: ($firstItem->product->category_group ?: ($firstItem->product->main_category ?: ''))) : ($firstItem->category_domain ?: '');
             if ($itemsCount > 1) {
                 $productName .= ' (+' . ($itemsCount - 1) . ' more)';
             }
+            $saleItemsSummary = $inst->sale->items->map(function ($it) {
+                return [
+                    'category_domain' => $it->category_domain ?: AgentContributionService::resolveCategoryDomain($it->product?->category),
+                    'category' => $it->product?->category ?: ($it->category_domain ?: ''),
+                    'line_total' => (float) $it->line_total,
+                ];
+            })->values()->all();
         }
 
         // Schedule progress counts
@@ -157,6 +168,8 @@ class InstallmentController extends Controller
             }
         }
 
+        $isOpenContract = strtolower(trim((string) $inst->frequency)) === 'open contract';
+
         return [
             'installment_id' => $inst->installment_id,
             'account_no' => $inst->account_no,
@@ -168,12 +181,21 @@ class InstallmentController extends Controller
             'customer_address' => $inst->customer ? $inst->customer->address : '',
             'product_name' => $productName,
             'product_category' => $productCategory,
+            'sale_items_summary' => $saleItemsSummary,
             'items_count' => $itemsCount,
             'branch_id' => $branchInfo['branch_id'],
             'branch' => $branchInfo['branch_name'],
             'branch_name' => $branchInfo['branch_name'],
             'sale_id' => $inst->sale_id,
             'invoice_no' => $inst->sale ? $inst->sale->invoice_no : 'N/A',
+            'has_agent' => (bool) ($inst->has_agent ?? $inst->sale?->has_agent ?? false),
+            'agent_id' => ($inst->agent_id ?? $inst->sale?->agent_id) ? (int) ($inst->agent_id ?? $inst->sale?->agent_id) : null,
+            'assigned_agent_id' => ($inst->agent_id ?? $inst->sale?->agent_id) ? (int) ($inst->agent_id ?? $inst->sale?->agent_id) : null,
+            'agent_name' => ($agentModel = $inst->agent ?: $inst->sale?->agent) ? trim("{$agentModel->first_name} {$agentModel->last_name}") : null,
+            'agent_code' => $agentModel?->employee_code ?? null,
+            'appliances_agent_contribution' => (float) ($inst->appliances_agent_contribution ?? $inst->sale?->appliances_agent_contribution ?? 0),
+            'furniture_agent_contribution' => (float) ($inst->furniture_agent_contribution ?? $inst->sale?->furniture_agent_contribution ?? 0),
+            'total_agent_contribution' => (float) ($inst->total_agent_contribution ?? $inst->sale?->total_agent_contribution ?? 0),
             'start_date' => $inst->start_date,
             'principal_amount' => (float)$inst->principal_amount,
             'down_payment' => (float)$inst->down_payment,
@@ -183,6 +205,7 @@ class InstallmentController extends Controller
             'total_payable' => $totalPayable,
             'installment_amount' => (float)$inst->installment_amount,
             'number_of_installments' => (int)$inst->number_of_installments,
+            'is_open_contract' => $isOpenContract,
             'paid_installments' => $paidTermsCount,
             'total_terms' => $totalTermsCount,
             'frequency' => $inst->frequency ?: 'Monthly',
@@ -210,7 +233,6 @@ class InstallmentController extends Controller
 
         // 1-2s Performance Cache: bypass if exporting CSV
         if (!$request->boolean('export_csv')) {
-            $fp = SyncController::computeFingerprint('installments');
             $cacheKey = 'pace_inst_idx_' . md5(json_encode([
                 'u' => $user ? $user->user_id : 0,
                 'r' => $user ? $user->role : '',
@@ -218,7 +240,8 @@ class InstallmentController extends Controller
                 's' => $request->query('search', ''),
                 'st' => $request->query('status', ''),
                 'd' => $today,
-            ])) . '_' . $fp;
+                'v' => Cache::get('pace_inst_cache_v', 0),
+            ]));
 
             $cached = \Illuminate\Support\Facades\Cache::get($cacheKey);
             if ($cached !== null) {
@@ -226,8 +249,8 @@ class InstallmentController extends Controller
             }
         }
 
-        // Automatically update overdue schedule statuses for accurate live data (throttled to once every 5 minutes)
-        if (\Illuminate\Support\Facades\Cache::add('sync_overdue_schedules_inst', true, 300)) {
+        // Automatically update overdue schedule statuses (shared 5-minute lock across Dashboard & Installments)
+        if (\Illuminate\Support\Facades\Cache::add('sync_overdue_schedules_global', true, 300)) {
             PaymentSchedule::where('due_date', '<', $today)
                 ->where('balance_due', '>', 0)
                 ->whereIn('status', ['Pending', 'Partially Paid'])
@@ -237,12 +260,14 @@ class InstallmentController extends Controller
         $query = InstallmentAccount::with([
             'customer:customer_id,customer_code,first_name,last_name,phone,email,address,branch_id,branch,allow_installment',
             'customer.branch:id,name',
-            'sale:sale_id,invoice_no,processed_by,branch_id',
+            'agent:employee_id,employee_code,first_name,last_name,position',
+            'sale:sale_id,invoice_no,processed_by,branch_id,has_agent,agent_id,appliances_agent_contribution,furniture_agent_contribution,total_agent_contribution',
             'sale.branch:id,name',
+            'sale.agent:employee_id,employee_code,first_name,last_name,position',
             'sale.processedBy:user_id,username,employee_id',
             'sale.processedBy.employee:employee_id,branch_id',
             'sale.processedBy.employee.branch:id,name',
-            'sale.items:sale_item_id,sale_id,product_id,quantity,unit_price,line_total',
+            'sale.items:sale_item_id,sale_id,product_id,quantity,unit_price,discount_amount,line_total,category_domain,agent_commission_rate,agent_contribution',
             'sale.items.product:product_id,product_name,product_code,category,image_url',
             'payments:payment_id,installment_id,amount,status,reference_no,notes',
             'paymentSchedules:schedule_id,installment_id,due_date,balance_due,amount_due,amount_paid,status'
@@ -251,6 +276,11 @@ class InstallmentController extends Controller
             'account_no',
             'customer_id',
             'sale_id',
+            'has_agent',
+            'agent_id',
+            'appliances_agent_contribution',
+            'furniture_agent_contribution',
+            'total_agent_contribution',
             'start_date',
             'principal_amount',
             'down_payment',
@@ -264,6 +294,7 @@ class InstallmentController extends Controller
             'notes'
         ])->where(function ($q) {
             $q->where('number_of_installments', '>', 0)
+              ->orWhere('frequency', 'Open Contract')
               ->orWhere('status', '!=', 'Completed');
         });
 
@@ -368,7 +399,7 @@ class InstallmentController extends Controller
         ];
 
         if (isset($cacheKey)) {
-            \Illuminate\Support\Facades\Cache::put($cacheKey, $payload, 3);
+            \Illuminate\Support\Facades\Cache::put($cacheKey, $payload, 30);
         }
 
         return response()->json($payload);
@@ -383,6 +414,17 @@ class InstallmentController extends Controller
         if ($user && $user->role === 'Administrator') {
             return response()->json(['success' => false, 'message' => 'Admin is not authorized to create installment.'], 403);
         }
+        if ($user && $user->role === 'Customer') {
+            return response()->json(['success' => false, 'message' => 'Unauthorized: Customers cannot create installment accounts directly.'], 403);
+        }
+        if ($user && $user->role === 'Employee') {
+            $pos = strtolower((string) ($user->employee?->position ?? ''));
+            $dept = strtolower((string) ($user->employee?->department ?? ''));
+            $isCashier = str_contains($pos, 'cashier') || str_contains($dept, 'cashier') || str_contains($pos, 'store admin');
+            if (!$isCashier) {
+                return response()->json(['success' => false, 'message' => 'Unauthorized: Only branch Cashiers or Store Admins can create installments.'], 403);
+            }
+        }
         $today = date('Y-m-d');
 
         $validated = $request->validate([
@@ -396,21 +438,42 @@ class InstallmentController extends Controller
             'product_id' => 'nullable|exists:products,product_id',
             'product_name' => 'nullable|string|max:255',
             'product_category' => 'nullable|string|max:120',
+            'quantity' => 'nullable|integer|min:1',
+            'unit_price' => 'nullable|numeric|min:0',
+            'discount' => 'nullable|numeric|min:0',
+            'discount_amount' => 'nullable|numeric|min:0',
+            'has_agent' => 'nullable|boolean',
+            'agent_id' => 'nullable|integer',
+            'assigned_agent_id' => 'nullable|integer',
             'principal_amount' => 'required|numeric|min:1',
             'down_payment' => 'nullable|numeric|min:0',
             'interest_rate' => 'nullable|numeric|min:0',
             'interest_amount' => 'nullable|numeric|min:0',
             'total_payable' => 'required|numeric|min:1',
-            'installment_amount' => 'required|numeric|min:1',
-            'number_of_installments' => 'required|integer|min:1|max:60',
-            'frequency' => 'nullable|string|in:Monthly,Bi-weekly,Weekly',
+            'installment_amount' => 'nullable|numeric|min:0',
+            'number_of_installments' => 'required|integer|min:0|max:60',
+            'is_open_contract' => 'nullable|boolean',
+            'frequency' => 'nullable|string|in:Monthly,Bi-weekly,Weekly,Open Contract',
             'start_date' => 'required|date',
             'due_date' => 'nullable|date',
             'status' => 'nullable|string|in:Active,Pending,Completed,Overdue,Cancelled',
             'notes' => 'nullable|string',
         ]);
 
-        $principalCheck = (float) $validated['principal_amount'];
+        $qty = max(1, (int) ($validated['quantity'] ?? 1));
+        $hasUnitPrice = isset($validated['unit_price']) && (float) $validated['unit_price'] > 0;
+        $grossLineTotal = $hasUnitPrice
+            ? round((float) $validated['unit_price'] * $qty, 2)
+            : round((float) $validated['principal_amount'], 2);
+        $rawItemDiscount = (float) ($validated['discount_amount'] ?? ($validated['discount'] ?? 0));
+        $itemDiscountCheck = round(min($grossLineTotal, max(0, $rawItemDiscount)), 2);
+        $principalCheck = max(0, round($grossLineTotal - $itemDiscountCheck, 2));
+        if ($principalCheck < 1) {
+            return response()->json([
+                'message' => 'Net product amount after discount must be at least ₱1.00.'
+            ], 422);
+        }
+
         $downCheck = isset($validated['down_payment']) ? (float) $validated['down_payment'] : 0.0;
         if ($downCheck >= $principalCheck) {
             return response()->json([
@@ -418,13 +481,12 @@ class InstallmentController extends Controller
             ], 422);
         }
 
-        return DB::transaction(function () use ($validated, $request, $user, $today) {
+        return DB::transaction(function () use ($validated, $request, $user, $today, $qty, $grossLineTotal, $itemDiscountCheck, $principalCheck, $hasUnitPrice) {
             $userBranch = $user && $user->employee ? $user->employee->branch_id : null;
             $userBranchName = $userBranch
                 ? (\App\Models\BranchProfile::where('id', $userBranch)->value('name') ?: null)
                 : null;
 
-            // 1. Resolve or Create Customer
             $customerId = $validated['customer_id'] ?? null;
             if (!$customerId) {
                 $custCount = (Customer::max('customer_id') ?? 0) + 1;
@@ -453,7 +515,6 @@ class InstallmentController extends Controller
                         'message' => 'Unauthorized: Selected customer belongs to another branch.'
                     ], 403);
                 }
-                // Optionally update contact details if provided
                 if (!empty($validated['phone']) || !empty($validated['address']) || !empty($validated['email'])) {
                     $customer->update(array_filter([
                         'phone' => $validated['phone'] ?? null,
@@ -463,26 +524,58 @@ class InstallmentController extends Controller
                 }
             }
 
-            $principal = (float)$validated['principal_amount'];
+            $principal = $principalCheck;
+            $unitPrice = $hasUnitPrice
+                ? round((float) $validated['unit_price'], 2)
+                : round($grossLineTotal / $qty, 2);
             $downPayment = isset($validated['down_payment']) ? (float)$validated['down_payment'] : 0.00;
             $interestRate = isset($validated['interest_rate']) ? (float)$validated['interest_rate'] : 0.00;
             $financedBase = max(0, $principal - $downPayment);
-            $interestAmount = isset($validated['interest_amount']) ? (float)$validated['interest_amount'] : round($financedBase * ($interestRate / 100), 2);
-            $totalPayable = isset($validated['total_payable']) ? (float)$validated['total_payable'] : round($principal + $interestAmount, 2);
-            $numInstallments = (int)$validated['number_of_installments'];
-            $frequency = $validated['frequency'] ?? 'Monthly';
+            $interestAmount = round($financedBase * ($interestRate / 100), 2);
+            $totalPayable = round($principal + $interestAmount, 2);
+            $rawNumInstallments = (int)$validated['number_of_installments'];
+            $isOpenContract = filter_var($validated['is_open_contract'] ?? false, FILTER_VALIDATE_BOOLEAN)
+                || strtolower(trim((string) ($validated['frequency'] ?? ''))) === 'open contract'
+                || $rawNumInstallments === 0;
+            $numInstallments = $isOpenContract ? 0 : max(1, $rawNumInstallments);
+            $frequency = $isOpenContract ? 'Open Contract' : ($validated['frequency'] ?? 'Monthly');
             $startDate = $validated['start_date'] ?? $today;
             $status = $validated['status'] ?? 'Active';
             $notes = $validated['notes'] ?? '';
-
-            // Calculate installment amount if missing
-            $installmentAmount = isset($validated['installment_amount'])
-                ? (float)$validated['installment_amount']
-                : round(max(0, $totalPayable - $downPayment) / max(1, $numInstallments), 2);
+            $installmentAmount = (!$isOpenContract && $numInstallments > 0)
+                ? round(max(0, $totalPayable - $downPayment) / $numInstallments, 2)
+                : 0.00;
 
             $effectiveBranchId = $customer->branch_id ?? $userBranch;
+            $agentSelection = AgentContributionService::resolveAgentSelection(
+                $request->all(),
+                $user,
+                $effectiveBranchId ? (int) $effectiveBranchId : null
+            );
+            $hasAgent = $agentSelection['has_agent'];
 
-            // 2. Create Sale Transaction (collision-safe invoice_no)
+            $productId = $validated['product_id'] ?? null;
+            $product = null;
+            if ($productId) {
+                $product = Product::lockForUpdate()->find($productId);
+                if ($user && in_array($user->role, ['Store Administrator', 'Store Admin'], true)) {
+                    if ($product && $product->branch_id && (int) $product->branch_id !== (int) $userBranch) {
+                        return response()->json([
+                            'message' => "Unauthorized: Product does not belong to your branch."
+                        ], 403);
+                    }
+                }
+            }
+
+            $resolvedCategory = ($product?->category) ?: ($validated['product_category'] ?? null);
+            $lineContrib = AgentContributionService::calculateLine($principal, $resolvedCategory, $hasAgent);
+            if ($hasAgent && $lineContrib['category_domain'] === null) {
+                throw ValidationException::withMessages([
+                    'product_category' => ['Please select an Appliances or Furniture category to calculate agent contribution.'],
+                ]);
+            }
+            $contribSummary = AgentContributionService::summarize([$lineContrib], $hasAgent);
+
             $saleCount = (SaleTransaction::max('sale_id') ?? 0) + 1;
             $invoiceNo = 'INV-' . date('Y') . '-' . str_pad($saleCount, 5, '0', STR_PAD_LEFT);
             while (SaleTransaction::where('invoice_no', $invoiceNo)->exists()) {
@@ -495,61 +588,42 @@ class InstallmentController extends Controller
                 'customer_id' => $customerId,
                 'branch_id' => $effectiveBranchId,
                 'processed_by' => $user ? $user->user_id : ($request->input('user_id') && \App\Models\User::where('user_id', $request->input('user_id'))->exists() ? $request->input('user_id') : \App\Models\User::value('user_id')),
+                'has_agent' => $hasAgent,
+                'agent_id' => $agentSelection['agent_id'],
+                'appliances_agent_contribution' => $contribSummary['appliances_agent_contribution'],
+                'furniture_agent_contribution' => $contribSummary['furniture_agent_contribution'],
+                'total_agent_contribution' => $contribSummary['total_agent_contribution'],
                 'sale_date' => $startDate . ' ' . date('H:i:s'),
-                'payment_method' => $numInstallments === 0 ? 'Cash' : 'Installment',
-                'subtotal' => $principal,
-                'discount_amount' => 0.00,
+                'payment_method' => (!$isOpenContract && $numInstallments === 0) ? 'Cash' : 'Installment',
+                'subtotal' => $grossLineTotal,
+                'discount_amount' => $itemDiscountCheck,
                 'total_amount' => $totalPayable,
                 'amount_paid' => $downPayment,
                 'balance_due' => max(0, $totalPayable - $downPayment),
                 'status' => ($downPayment >= $totalPayable) ? 'completed' : 'partially_paid',
-                'notes' => $numInstallments === 0 ? "Full Cash Payment. " . $notes : "Installment financing agreement ({$numInstallments} {$frequency} terms). " . $notes,
+                'notes' => $isOpenContract
+                    ? trim('Open Contract installment agreement (Flexible term). ' . $notes)
+                    : ($numInstallments === 0 ? "Full Cash Payment. " . $notes : "Installment financing agreement ({$numInstallments} {$frequency} terms). " . $notes),
             ]);
 
-            // 3. Attach Sale Line Item
-            $productId = $validated['product_id'] ?? null;
-            if ($productId) {
-                $product = Product::find($productId);
-
-                // Branch Validation: allow global catalog products (branch_id === null) or same-branch products
-                if ($user && in_array($user->role, ['Store Administrator', 'Store Admin'], true)) {
-                    if ($product && $product->branch_id && (int) $product->branch_id !== (int) $userBranch) {
-                        return response()->json([
-                            'message' => "Unauthorized: Product does not belong to your branch."
-                        ], 403);
-                    }
-                }
-
-                if ($product) {
-                    SaleItem::create([
-                        'sale_id' => $sale->sale_id,
-                        'product_id' => $productId,
-                        'quantity' => 1,
-                        'unit_price' => $principal,
-                        'discount_amount' => 0.00,
-                        'line_total' => $principal,
-                    ]);
-                    // Update product stock if available
-                    if ($product->stock_quantity > 0) {
-                        $product->decrement('stock_quantity', 1);
-                    }
-                }
-            } else {
-                // Fallback line item for custom product entry
-                $fallbackProd = Product::first();
-                if ($fallbackProd) {
-                    SaleItem::create([
-                        'sale_id' => $sale->sale_id,
-                        'product_id' => $fallbackProd->product_id,
-                        'quantity' => 1,
-                        'unit_price' => $principal,
-                        'discount_amount' => 0.00,
-                        'line_total' => $principal,
-                    ]);
+            $targetProductId = $product ? $product->product_id : Product::value('product_id');
+            if ($targetProductId) {
+                SaleItem::create([
+                    'sale_id' => $sale->sale_id,
+                    'product_id' => $targetProductId,
+                    'quantity' => $qty,
+                    'unit_price' => $unitPrice,
+                    'discount_amount' => $itemDiscountCheck,
+                    'line_total' => $principal,
+                    'category_domain' => $lineContrib['category_domain'],
+                    'agent_commission_rate' => $lineContrib['agent_commission_rate'],
+                    'agent_contribution' => $lineContrib['agent_contribution'],
+                ]);
+                if ($product && $product->stock_quantity > 0) {
+                    $product->decrement('stock_quantity', min($product->stock_quantity, $qty));
                 }
             }
 
-            // 4. Create Dedicated Installment Contract (collision-safe account_no)
             $accountCount = (InstallmentAccount::max('installment_id') ?? 0) + 1;
             $accountNo = 'ACC-' . date('Y') . '-' . str_pad($accountCount, 5, '0', STR_PAD_LEFT);
             while (InstallmentAccount::where('account_no', $accountNo)->exists()) {
@@ -561,6 +635,11 @@ class InstallmentController extends Controller
                 'account_no' => $accountNo,
                 'customer_id' => $customerId,
                 'sale_id' => $sale->sale_id,
+                'has_agent' => $hasAgent,
+                'agent_id' => $agentSelection['agent_id'],
+                'appliances_agent_contribution' => $contribSummary['appliances_agent_contribution'],
+                'furniture_agent_contribution' => $contribSummary['furniture_agent_contribution'],
+                'total_agent_contribution' => $contribSummary['total_agent_contribution'],
                 'start_date' => $startDate,
                 'principal_amount' => $principal,
                 'down_payment' => $downPayment,
@@ -628,7 +707,7 @@ class InstallmentController extends Controller
                 'user_id' => $user ? $user->user_id : $request->input('user_id'),
                 'action' => 'CREATE',
                 'module' => 'Installments',
-                'description' => "Created new customer installment {$accountNo} for {$custFullName} (Total: ₱" . number_format($totalPayable, 2) . ", Down: ₱" . number_format($downPayment, 2) . ", {$numInstallments} Mos)",
+                'description' => "Created new customer installment {$accountNo} for {$custFullName} (Total: ₱" . number_format($totalPayable, 2) . ", Down: ₱" . number_format($downPayment, 2) . ", " . ($isOpenContract ? 'Open Contract' : "{$numInstallments} Mos") . ")",
                 'ip_address' => $request->ip(),
                 'user_agent' => $request->userAgent(),
             ]);
@@ -645,13 +724,16 @@ class InstallmentController extends Controller
                 'priority' => 'normal',
             ]);
 
+            Cache::increment('pace_inst_cache_v');
+            Cache::increment('pace_sales_cache_v');
             SyncController::invalidateFingerprint(['installments', 'sales', 'payments', 'products', 'customers']);
 
-            // Load fresh relationships for formatting
             $account->load([
                 'customer',
                 'customer.branch:id,name',
+                'agent:employee_id,employee_code,first_name,last_name,position',
                 'sale.branch:id,name',
+                'sale.agent:employee_id,employee_code,first_name,last_name,position',
                 'sale.processedBy.employee',
                 'sale.processedBy.employee.branch:id,name',
                 'sale.items.product',
@@ -660,6 +742,26 @@ class InstallmentController extends Controller
             ]);
 
             $formatted = $this->formatAccount($account, $today);
+            $resolvedBranchId = $formatted['branch_id'] ?? ($account->sale?->branch_id ?? $customer->branch_id ?? null);
+
+            \App\Services\RealtimeBroadcaster::dispatch(new \App\Events\InstallmentContractCreated([
+                'installment_id' => $account->installment_id,
+                'account_no' => $accountNo,
+                'customer_name' => $custFullName,
+                'total_payable' => (float) $totalPayable,
+                'status' => $account->status,
+                'actor_user_id' => $user ? (int) $user->user_id : null,
+                'toast_title' => 'New Installment Contract',
+                'toast_message' => "Account {$accountNo} created for {$custFullName} (₱" . number_format($totalPayable, 2) . ").",
+            ], $resolvedBranchId ? (int) $resolvedBranchId : null, $account->customer_id ? (int) $account->customer_id : null));
+
+            if (!empty($product)) {
+                \App\Services\RealtimeBroadcaster::dispatch(new \App\Events\InventoryStockUpdated([
+                    'product_id' => $product->product_id ?? null,
+                    'action' => 'stock_decremented',
+                    'actor_user_id' => $user ? (int) $user->user_id : null,
+                ], $resolvedBranchId ? [(int) $resolvedBranchId] : []));
+            }
 
             return response()->json([
                 'message' => "Customer Installment {$accountNo} created successfully",
@@ -778,7 +880,9 @@ class InstallmentController extends Controller
         $relations = [
             'customer',
             'customer.branch:id,name',
+            'agent:employee_id,employee_code,first_name,last_name,position',
             'sale.branch:id,name',
+            'sale.agent:employee_id,employee_code,first_name,last_name,position',
             'sale.processedBy.employee',
             'sale.processedBy.employee.branch:id,name',
             'sale.items.product',
@@ -872,6 +976,9 @@ class InstallmentController extends Controller
                     'description' => $item->product ? $item->product->description : '',
                     'image_url' => $item->product && $item->product->image_url ? $item->product->image_url : null,
                     'category' => $item->product ? $item->product->category : '',
+                    'category_domain' => $item->category_domain ?: AgentContributionService::resolveCategoryDomain($item->product?->category),
+                    'agent_commission_rate' => (float) ($item->agent_commission_rate ?? 0),
+                    'agent_contribution' => (float) ($item->agent_contribution ?? 0),
                     'quantity' => (float)$item->quantity,
                     'unit_price' => (float)$item->unit_price,
                     'discount_amount' => (float)$item->discount_amount,
@@ -960,6 +1067,14 @@ class InstallmentController extends Controller
                 'sale_id' => $account->sale_id,
                 'invoice_no' => $account->sale ? $account->sale->invoice_no : 'N/A',
                 'sale_date' => $account->sale ? $account->sale->sale_date : $account->start_date,
+                'has_agent' => (bool) ($account->has_agent ?? $account->sale?->has_agent ?? false),
+                'agent_id' => ($account->agent_id ?? $account->sale?->agent_id) ? (int) ($account->agent_id ?? $account->sale?->agent_id) : null,
+                'assigned_agent_id' => ($account->agent_id ?? $account->sale?->agent_id) ? (int) ($account->agent_id ?? $account->sale?->agent_id) : null,
+                'agent_name' => ($showAgent = $account->agent ?: $account->sale?->agent) ? trim("{$showAgent->first_name} {$showAgent->last_name}") : null,
+                'agent_code' => $showAgent?->employee_code ?? null,
+                'appliances_agent_contribution' => (float) ($account->appliances_agent_contribution ?? $account->sale?->appliances_agent_contribution ?? 0),
+                'furniture_agent_contribution' => (float) ($account->furniture_agent_contribution ?? $account->sale?->furniture_agent_contribution ?? 0),
+                'total_agent_contribution' => (float) ($account->total_agent_contribution ?? $account->sale?->total_agent_contribution ?? 0),
                 'start_date' => $account->start_date,
                 'principal_amount' => (float)$account->principal_amount,
                 'down_payment' => (float)$account->down_payment,
@@ -969,6 +1084,7 @@ class InstallmentController extends Controller
                 'total_payable' => $totalPayable,
                 'installment_amount' => (float)$account->installment_amount,
                 'number_of_installments' => (int)$account->number_of_installments,
+                'is_open_contract' => strtolower(trim((string) $account->frequency)) === 'open contract',
                 'paid_installments' => $paidTermsCount,
                 'total_terms' => $totalTermsCount,
                 'frequency' => $account->frequency ?: 'Monthly',
@@ -998,18 +1114,30 @@ class InstallmentController extends Controller
     public function update(Request $request, $id)
     {
         $user = $request->user();
-        $account = InstallmentAccount::with('customer')->find($id);
+        if (!$user || !in_array($user->role, ['Administrator', 'Admin', 'Store Administrator', 'Store Admin'], true)) {
+            return response()->json(['message' => 'Unauthorized to update installment accounts.'], 403);
+        }
+
+        $account = InstallmentAccount::with(['customer', 'sale.processedBy.employee'])->find($id);
         if (!$account && is_numeric($id)) {
-            $account = InstallmentAccount::with('customer')->where('sale_id', $id)->first();
+            $account = InstallmentAccount::with(['customer', 'sale.processedBy.employee'])->where('sale_id', $id)->first();
         }
         if (!$account) {
-            $account = InstallmentAccount::with('customer')->where('account_no', $id)->first();
+            $account = InstallmentAccount::with(['customer', 'sale.processedBy.employee'])->where('account_no', $id)->first();
         }
         if (!$account) {
             return response()->json([
                 'success' => false,
                 'message' => "Installment account #{$id} was not found or has been removed."
             ], 404);
+        }
+
+        if (in_array($user->role, ['Store Administrator', 'Store Admin'], true)) {
+            $userBranch = $user->employee?->branch_id;
+            $accountBranch = $account->sale?->branch_id ?? $account->customer?->branch_id ?? $account->sale?->processedBy?->employee?->branch_id;
+            if (!$userBranch || !$accountBranch || (int) $userBranch !== (int) $accountBranch) {
+                return response()->json(['message' => 'Unauthorized access to installment in another branch.'], 403);
+            }
         }
 
         $validated = $request->validate([
@@ -1076,6 +1204,16 @@ class InstallmentController extends Controller
 
         SyncController::invalidateFingerprint(['installments', 'sales', 'payments', 'customers']);
 
+        $updBranchId = $account->sale?->branch_id ?? $account->customer?->branch_id ?? null;
+        \App\Services\RealtimeBroadcaster::dispatch(new \App\Events\InstallmentScheduleUpdated([
+            'installment_id' => $account->installment_id,
+            'account_no' => $account->account_no,
+            'status' => $account->status,
+            'actor_user_id' => $user ? (int) $user->user_id : null,
+            'toast_title' => 'Installment Updated',
+            'toast_message' => "Installment {$account->account_no} status updated to {$account->status}.",
+        ], $updBranchId ? (int) $updBranchId : null, $account->customer_id ? (int) $account->customer_id : null));
+
         return response()->json([
             'message' => "Installment {$account->account_no} updated successfully",
             'account' => $this->formatAccount($account, date('Y-m-d')),
@@ -1088,22 +1226,30 @@ class InstallmentController extends Controller
     public function destroy(Request $request, $id)
     {
         $user = $request->user();
-        if ($user && !in_array($user->role, ['Administrator', 'Store Administrator', 'Store Admin'])) {
+        if (!$user || !in_array($user->role, ['Administrator', 'Admin', 'Store Administrator', 'Store Admin'], true)) {
             return response()->json(['message' => 'Unauthorized. Only administrators can delete installments.'], 403);
         }
 
-        $account = InstallmentAccount::with(['sale', 'payments', 'paymentSchedules'])->find($id);
+        $account = InstallmentAccount::with(['customer', 'sale.processedBy.employee', 'payments', 'paymentSchedules'])->find($id);
         if (!$account && is_numeric($id)) {
-            $account = InstallmentAccount::with(['sale', 'payments', 'paymentSchedules'])->where('sale_id', $id)->first();
+            $account = InstallmentAccount::with(['customer', 'sale.processedBy.employee', 'payments', 'paymentSchedules'])->where('sale_id', $id)->first();
         }
         if (!$account) {
-            $account = InstallmentAccount::with(['sale', 'payments', 'paymentSchedules'])->where('account_no', $id)->first();
+            $account = InstallmentAccount::with(['customer', 'sale.processedBy.employee', 'payments', 'paymentSchedules'])->where('account_no', $id)->first();
         }
         if (!$account) {
             return response()->json([
                 'success' => false,
                 'message' => "Installment account #{$id} was not found or has been removed."
             ], 404);
+        }
+
+        if (in_array($user->role, ['Store Administrator', 'Store Admin'], true)) {
+            $userBranch = $user->employee?->branch_id;
+            $accountBranch = $account->sale?->branch_id ?? $account->customer?->branch_id ?? $account->sale?->processedBy?->employee?->branch_id;
+            if (!$userBranch || !$accountBranch || (int) $userBranch !== (int) $accountBranch) {
+                return response()->json(['message' => 'Unauthorized access to installment in another branch.'], 403);
+            }
         }
 
         return DB::transaction(function () use ($account, $user, $request) {

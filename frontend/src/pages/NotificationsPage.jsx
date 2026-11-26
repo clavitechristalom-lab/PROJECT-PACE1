@@ -161,7 +161,7 @@ export default function NotificationsPage() {
     }
   }
 
-  // Navigate to record
+  // Navigate to record with role-safe route normalization
   const handleItemClick = async (n) => {
     if (!n.is_read) {
       api.notifications.markAsRead(n.id).catch(() => {})
@@ -169,7 +169,28 @@ export default function NotificationsPage() {
       setUnreadCount(prev => Math.max(0, prev - 1))
     }
     if (n.action_url) {
-      navigate(n.action_url)
+      const role = String(user?.role || '').toLowerCase()
+      let target = n.action_url
+      if (role === 'customer') {
+        if (target.startsWith('/products')) {
+          const qs = target.includes('?') ? target.split('?')[1] : ''
+          const prodId = new URLSearchParams(qs).get('id')
+          target = prodId ? `/customer/dashboard?tab=products&product_id=${prodId}` : '/customer/dashboard?tab=products'
+        } else if (target.startsWith('/installments')) {
+          target = '/customer/dashboard?tab=installments'
+        } else if (target.startsWith('/payments')) {
+          target = '/customer/dashboard?tab=statements'
+        } else if (target === '/support') {
+          target = '/customer/dashboard?tab=support'
+        }
+      } else if (role === 'employee') {
+        if (target === '/payroll' || target.startsWith('/payroll?') || target === '/employee/payroll') {
+          target = '/employee/payslips'
+        }
+      } else if (target === '/support') {
+        target = '/admin/support'
+      }
+      navigate(target)
     }
   }
 

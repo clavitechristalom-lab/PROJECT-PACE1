@@ -10,18 +10,18 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': path.resolve(import.meta.dirname, './src'),
+      react: path.resolve(import.meta.dirname, './node_modules/react'),
+      'react-dom': path.resolve(import.meta.dirname, './node_modules/react-dom'),
     },
+    dedupe: ['react', 'react-dom'],
   },
   optimizeDeps: {
-    include: ['react', 'react-dom', 'react-router-dom', 'react-icons', 'react-icons/fi', 'sweetalert2', 'qrcode.react'],
+    include: ['react', 'react-dom', 'react-router-dom', 'react-icons', 'react-icons/fi', 'sweetalert2', 'qrcode.react', 'laravel-echo', 'pusher-js'],
   },
   server: {
     host: '0.0.0.0',
     port: 5173,
     allowedHosts: true,
-    hmr: {
-      clientPort: 443,
-    },
     proxy: {
       '/api': {
         target: 'http://127.0.0.1:8000',

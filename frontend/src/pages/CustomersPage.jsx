@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef } from 'react'
+import { useState, useEffect, useMemo, useRef, useDeferredValue } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import {
   FiUser, FiUsers, FiPlus, FiEdit, FiTrash2, FiEye, FiEyeOff, FiLock,
@@ -34,6 +34,7 @@ export default function CustomersPage({ branchFilter, embedded }) {
   })
   const [error, setError] = useState('')
   const [search, setSearch] = useState('')
+  const deferredSearch = useDeferredValue(search)
   const [statusFilter, setStatusFilter] = useState('All')
   const [selectedBranchFilter, setSelectedBranchFilter] = useState(branchFilter || 'All')
   const [page, setPage] = useState(1)
@@ -71,15 +72,22 @@ export default function CustomersPage({ branchFilter, embedded }) {
     }
   }
 
-  // Load branches list for branch assignment and dropdowns
+  // Load branches list on-demand (staggered behind primary customer list to avoid boot burst)
   useEffect(() => {
-    api.branches.getAll()
-      .then(res => {
-        const list = res?.branches || (Array.isArray(res) ? res : [])
-        setBranches(list)
-      })
-      .catch(() => {})
-  }, [])
+    if (branches.length > 0) return
+    const needsOnToolbar = !branchFilter || branchFilter === 'All'
+    const needsInModal = addModal || Boolean(editItem) || assignBranchModal
+    if (!needsOnToolbar && !needsInModal) return
+    const timer = setTimeout(() => {
+      api.branches.getAll()
+        .then(res => {
+          const list = res?.branches || (Array.isArray(res) ? res : [])
+          setBranches(list)
+        })
+        .catch(() => {})
+    }, needsInModal ? 0 : 120)
+    return () => clearTimeout(timer)
+  }, [branchFilter, addModal, editItem, assignBranchModal, branches.length])
 
   useEffect(() => {
     if (branchFilter && branchFilter !== 'All') {
@@ -362,8 +370,8 @@ export default function CustomersPage({ branchFilter, embedded }) {
   }
 
   const filtered = useMemo(() => {
-    return filterBySearch(customers, search, ['first_name', 'last_name', 'customer_code', 'phone', 'email', 'branch_name'])
-  }, [customers, search])
+    return filterBySearch(customers, deferredSearch, ['first_name', 'last_name', 'customer_code', 'phone', 'email', 'branch_name'])
+  }, [customers, deferredSearch])
 
   const total = filtered.length
   const paginated = filtered.slice((page - 1) * pageSize, page * pageSize)

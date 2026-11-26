@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef } from 'react'
+import { useState, useEffect, useMemo, useRef, useDeferredValue } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import {
   FiTrendingDown, FiCreditCard, FiUsers,
@@ -48,6 +48,7 @@ export default function PayrollPage() {
   })
   const [selectedPeriodId, setSelectedPeriodId] = useState('')
   const [search, setSearch] = useState('')
+  const deferredSearch = useDeferredValue(search)
   const [loading, setLoading] = useState(() => {
     return !sessionStorage.getItem('pace_cached_payroll')
   })
@@ -302,10 +303,14 @@ export default function PayrollPage() {
 
   useEffect(() => {
     loadData()
-    if (user?.role !== 'Employee') {
+  }, [])
+
+  // Lazy-load eligible employees strictly when opening a Payroll generation modal
+  useEffect(() => {
+    if ((workflowModal || generateModal) && employeeList.length === 0 && user?.role !== 'Employee') {
       loadEmployees()
     }
-  }, [])
+  }, [workflowModal, generateModal, user?.role])
 
   // On-demand click-driven synchronization
   const { sync: syncPayroll, isSyncing: isSyncingPayroll } = useRealtimeSync(
@@ -540,8 +545,8 @@ export default function PayrollPage() {
         return (!start && !end) || (start <= toDate || end <= toDate)
       })
     }
-    if (search.trim()) {
-      const tokens = search.toLowerCase().trim().split(/\s+/).filter(Boolean)
+    if (deferredSearch.trim()) {
+      const tokens = deferredSearch.toLowerCase().trim().split(/\s+/).filter(Boolean)
       list = list.filter(p => {
         const haystack = [
           p.employee_name,
@@ -559,7 +564,7 @@ export default function PayrollPage() {
       })
     }
     return list
-  }, [payroll, selectedPeriodId, branchFilter, filterStatus, fromDate, toDate, search])
+  }, [payroll, selectedPeriodId, branchFilter, filterStatus, fromDate, toDate, deferredSearch])
 
   const isManager = ['Administrator', 'Admin', 'Store Administrator', 'Store Admin'].includes(user?.role)
 
@@ -632,8 +637,8 @@ export default function PayrollPage() {
         return st === 'pending' ? (rowStatus === 'pending' || rowStatus === 'draft') : rowStatus === st
       })
     }
-    if (search.trim()) {
-      const tokens = search.toLowerCase().trim().split(/\s+/).filter(Boolean)
+    if (deferredSearch.trim()) {
+      const tokens = deferredSearch.toLowerCase().trim().split(/\s+/).filter(Boolean)
       list = list.filter(p => {
         const haystack = [
           p.employee_name, p.code, p.employee_code, p.department,
@@ -670,7 +675,7 @@ export default function PayrollPage() {
     })
 
     return { monthlyChartData: grouped, availableChartYears: sortedYears }
-  }, [payroll, branchFilter, filterStatus, search, chartYear])
+  }, [payroll, branchFilter, filterStatus, deferredSearch, chartYear])
 
   return (
     <div className="space-y-6">

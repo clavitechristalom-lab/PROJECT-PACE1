@@ -195,6 +195,17 @@ export default function LoginPage() {
   useEffect(() => {
     const fetchPublicData = async () => {
       try {
+        const boot = await api.system.getPublicBootstrap().catch(() => null)
+        if (boot && (Array.isArray(boot.appliances) || Array.isArray(boot.furniture))) {
+          setAppliances(boot.appliances || [])
+          setFurniture(boot.furniture || [])
+          if (Array.isArray(boot.categories?.tree) && boot.categories.tree.length > 0) {
+            setPublicCategoryTree(boot.categories.tree)
+          }
+          if (boot.settings) setSysSettings(boot.settings)
+          return
+        }
+
         const [appRes, furnRes, catRes, sRes] = await Promise.all([
           api.products.getPublicProducts({ category: 'Appliances' }),
           api.products.getPublicProducts({ category: 'Furniture' }),

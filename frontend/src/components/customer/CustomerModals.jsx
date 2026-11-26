@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Modal, LoadingState, EmptyState, Badge, StatusBadge, showToast, showSuccess, showError, showWarning, confirmDelete } from '../ui';
 import { api } from '../../lib/api';
 import { fmt, formatProductMeasurements } from '../../lib/utils';
-import { FiPackage, FiCalendar, FiClock, FiCreditCard, FiAlertCircle, FiCheckCircle, FiFileText, FiMessageCircle, FiChevronLeft, FiChevronRight, FiShoppingCart, FiX, FiTrash2, FiPrinter, FiSearch, FiRefreshCw, FiMaximize2, FiMinimize2, FiZoomIn } from 'react-icons/fi';
+import { FiPackage, FiCalendar, FiClock, FiCreditCard, FiAlertCircle, FiCheckCircle, FiFileText, FiMessageCircle, FiChevronLeft, FiChevronRight, FiShoppingCart, FiX, FiTrash2, FiPrinter, FiSearch, FiRefreshCw, FiMaximize2, FiMinimize2, FiZoomIn, FiUser, FiPhone, FiMail, FiMapPin, FiTag } from 'react-icons/fi';
 import { TbCurrencyPeso } from 'react-icons/tb';
 import { useAuth } from '../../context/AuthContext';
 import { triggerDataSync, useRealtimeSync, fastDeepEqual } from '../../lib/realtimeSync';
@@ -945,11 +945,21 @@ export function InstallmentAccountDetailsModal({ isOpen, onClose, installmentId 
   if (!isOpen) return null;
 
   const acc = accountData?.account || {};
+  const nextPayment = accountData?.next_payment || null;
   const saleItems = accountData?.sale_items || [];
   const schedules = accountData?.schedules || [];
   const payments = accountData?.payments || [];
   const item = saleItems.length > 0 ? saleItems[0] : null;
   const isFullPayment = acc.account_no?.startsWith('REQ') || Number(acc.number_of_installments) === 0;
+  const paidSchedulesCount = schedules.filter(s => s.status === 'Paid' || Number(s.balance_due) <= 0).length;
+  const overdueSchedulesCount = schedules.filter(s => s.status === 'Overdue').length;
+  const upcomingSchedulesCount = schedules.filter(s => s.status === 'Upcoming' || s.status === 'Due' || s.status === 'Pending' || s.status === 'Partially Paid').length;
+  const totalTermsCount = acc.total_terms || Math.max(Number(acc.number_of_installments || 0), schedules.length);
+  const progressPct = acc.progress_percentage !== undefined
+    ? Number(acc.progress_percentage)
+    : (Number(acc.total_payable) > 0 ? Math.min(100, Math.round((Number(acc.paid ?? acc.total_paid ?? 0) / Number(acc.total_payable)) * 1000) / 10) : 0);
+  const branchLabel = acc.branch?.name || (typeof acc.branch === 'string' ? acc.branch : '') || acc.branch_name || '—';
+  const isSettled = Number(acc.balance) <= 0;
 
   if (loading) {
     return (
@@ -985,145 +995,383 @@ export function InstallmentAccountDetailsModal({ isOpen, onClose, installmentId 
   }
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title="Installment & Product Details" size="xl">
-      <div className="space-y-6">
-        {/* Product Info Section */}
-        <div className="flex flex-col sm:flex-row gap-6 p-5 bg-slate-50 dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800">
-          {item && (item.image_url || item.image) ? (
-            <img
-              src={(item.image_url || item.image)?.includes('/storage/') ? (item.image_url || item.image).substring((item.image_url || item.image).indexOf('/storage/')) : (item.image_url || item.image)}
-              alt={item.product_name}
-              className="w-32 h-32 object-cover rounded-xl border border-border bg-white shrink-0 shadow-sm"
-              onError={(e) => { e.target.style.display = 'none'; }}
-            />
-          ) : (
-            <div className="w-32 h-32 bg-muted border border-border rounded-xl flex items-center justify-center shrink-0 shadow-sm">
-              <FiPackage className="w-10 h-10 text-slate-400" />
+    <Modal isOpen={isOpen} onClose={onClose} title="Installment & Product Details" size="xl" className="!max-w-5xl">
+      <div className="space-y-5">
+        {/* 1. Product & Contract Header Section */}
+        <div className="p-5 bg-slate-50 dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 space-y-4">
+          <div className="flex flex-col sm:flex-row gap-5">
+            {item && (item.image_url || item.image) ? (
+              <img
+                src={(item.image_url || item.image)?.includes('/storage/') ? (item.image_url || item.image).substring((item.image_url || item.image).indexOf('/storage/')) : (item.image_url || item.image)}
+                alt={item.product_name}
+                className="w-28 h-28 sm:w-32 sm:h-32 object-cover rounded-xl border border-border bg-white shrink-0 shadow-sm"
+                onError={(e) => { e.target.style.display = 'none'; }}
+              />
+            ) : (
+              <div className="w-28 h-28 sm:w-32 sm:h-32 bg-muted border border-border rounded-xl flex items-center justify-center shrink-0 shadow-sm">
+                <FiPackage className="w-10 h-10 text-slate-400" />
+              </div>
+            )}
+            <div className="flex-1 flex flex-col justify-between gap-2">
+              <div>
+                <div className="flex flex-wrap justify-between items-start gap-2 mb-1.5">
+                  <div>
+                    <h3 className="text-lg sm:text-xl font-bold text-slate-800 dark:text-slate-100 leading-tight">
+                      {item ? item.product_name : 'Multiple Items / Custom Product'}
+                    </h3>
+                    <div className="flex flex-wrap items-center gap-2 mt-1">
+                      {item?.product_code && (
+                        <span className="inline-flex items-center gap-1 text-[10px] font-mono font-semibold px-2 py-0.5 rounded-md bg-muted text-muted-foreground border border-border">
+                          <FiTag className="w-2.5 h-2.5" />
+                          <span>SKU: {item.product_code}</span>
+                        </span>
+                      )}
+                      {item?.category && (
+                        <span className="text-[10px] font-semibold px-2 py-0.5 rounded-md bg-primary/10 text-primary border border-primary/20">
+                          {item.category}
+                        </span>
+                      )}
+                      {saleItems.length > 1 && (
+                        <span className="text-[10px] font-semibold px-2 py-0.5 rounded-md bg-blue-500/10 text-blue-600 dark:text-blue-300 border border-blue-500/20">
+                          +{saleItems.length - 1} more item{saleItems.length - 1 > 1 ? 's' : ''}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  <StatusBadge status={isSettled ? 'Complete Payment' : acc.status} />
+                </div>
+
+                {item && item.description && (
+                  <p className="text-xs text-muted-foreground mt-1.5 leading-relaxed">
+                    {item.description}
+                  </p>
+                )}
+              </div>
+
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-2 text-xs pt-2 border-t border-slate-200/70 dark:border-slate-800">
+                <div className="text-slate-500">Account No: <span className="font-mono font-bold text-foreground">{acc.account_no}</span></div>
+                <div className="text-slate-500">Invoice No: <span className="font-mono font-semibold text-foreground">{acc.invoice_no || '—'}</span></div>
+                <div className="text-slate-500">Purchase Date: <span className="font-mono font-medium text-foreground">{acc.start_date || acc.sale_date || '—'}</span></div>
+                <div className="text-slate-500">Branch: <span className="font-medium text-foreground">{branchLabel}</span></div>
+                <div className="text-slate-500">Processed By: <span className="font-medium text-foreground">{acc.store_admin || 'System/Admin'}</span></div>
+                <div className="text-slate-500">Plan Terms: <span className="font-semibold text-foreground">{totalTermsCount} {acc.frequency || 'Monthly'}</span></div>
+              </div>
             </div>
-          )}
-          <div className="flex-1 flex flex-col justify-center">
-            <div className="flex justify-between items-start mb-2">
-              <h3 className="text-xl font-bold text-slate-800 dark:text-slate-100 leading-tight">
-                {item ? item.product_name : 'Multiple Items / Custom Product'}
-              </h3>
-              <StatusBadge status={Number(acc.balance) <= 0 ? 'Complete Payment' : acc.status} />
+          </div>
+
+          {/* Repayment Progress Bar */}
+          <div className="pt-3 border-t border-slate-200/70 dark:border-slate-800">
+            <div className="flex flex-wrap items-center justify-between gap-2 text-xs mb-1.5">
+              <span className="font-semibold text-muted-foreground">
+                Repayment Progress ({paidSchedulesCount} of {totalTermsCount} installments settled)
+              </span>
+              <span className="font-mono font-bold text-emerald-600 dark:text-emerald-400">
+                {progressPct}% Paid
+              </span>
+            </div>
+            <div className="w-full h-2.5 bg-slate-200 dark:bg-slate-800 rounded-full overflow-hidden">
+              <div
+                className="h-full rounded-full bg-gradient-to-r from-[#176B87] to-emerald-500 transition-all duration-500"
+                style={{ width: `${Math.min(100, Math.max(0, progressPct))}%` }}
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* 2. Customer Information & Next Amortization Due */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="p-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-[var(--card)] space-y-2.5">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+                <FiUser className="w-3.5 h-3.5 text-primary" />
+                <span>Customer Information</span>
+              </span>
+              {acc.customer_code && (
+                <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-muted text-muted-foreground">
+                  {acc.customer_code}
+                </span>
+              )}
+            </div>
+            <div className="text-sm font-bold text-foreground">{acc.customer_name || 'Customer'}</div>
+            <div className="space-y-1 text-xs text-muted-foreground">
+              <div className="flex items-center gap-2">
+                <FiPhone className="w-3.5 h-3.5 shrink-0 text-slate-400" />
+                <span className="font-mono text-foreground">{acc.customer_phone || '—'}</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <FiMail className="w-3.5 h-3.5 shrink-0 text-slate-400" />
+                <span className="truncate text-foreground">{acc.customer_email || '—'}</span>
+              </div>
+              <div className="flex items-start gap-2">
+                <FiMapPin className="w-3.5 h-3.5 shrink-0 mt-0.5 text-slate-400" />
+                <span className="text-foreground">{acc.customer_address || '—'}</span>
+              </div>
+            </div>
+          </div>
+
+          <div className={`p-4 rounded-xl border flex flex-col justify-between gap-2.5 ${
+            isSettled
+              ? 'border-emerald-200 dark:border-emerald-800 bg-emerald-50/60 dark:bg-emerald-950/20'
+              : nextPayment?.status === 'Overdue'
+                ? 'border-rose-200 dark:border-rose-800 bg-rose-50/60 dark:bg-rose-950/20'
+                : 'border-slate-200 dark:border-slate-800 bg-[var(--card)]'
+          }`}>
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+                <FiClock className="w-3.5 h-3.5 text-primary" />
+                <span>{isSettled ? 'Account Settlement' : 'Next Amortization Due'}</span>
+              </span>
+              {nextPayment && !isSettled && <StatusBadge status={nextPayment.status} />}
+              {isSettled && <StatusBadge status="Complete Payment" />}
             </div>
 
-            {item && item.description && (
-              <p className="text-sm text-muted-foreground mb-3 line-clamp-2">
-                {item.description}
-              </p>
+            {isSettled ? (
+              <div className="flex items-center gap-3 py-1">
+                <FiCheckCircle className="w-8 h-8 text-emerald-500 shrink-0" />
+                <div>
+                  <div className="text-sm font-bold text-emerald-700 dark:text-emerald-300">Fully Paid & Settled</div>
+                  <div className="text-xs text-muted-foreground">All {totalTermsCount} installment schedules have been completely settled.</div>
+                </div>
+              </div>
+            ) : nextPayment ? (
+              <div className="grid grid-cols-3 gap-3 pt-1">
+                <div>
+                  <div className="text-[10px] uppercase font-semibold text-muted-foreground">Installment</div>
+                  <div className="text-sm font-mono font-bold text-foreground mt-0.5">#{nextPayment.installment_no} / {totalTermsCount}</div>
+                </div>
+                <div>
+                  <div className="text-[10px] uppercase font-semibold text-muted-foreground">Due Date</div>
+                  <div className="text-sm font-mono font-bold text-foreground mt-0.5">{nextPayment.due_date}</div>
+                </div>
+                <div className="text-right">
+                  <div className="text-[10px] uppercase font-semibold text-muted-foreground">Amount Due</div>
+                  <div className={`text-sm font-mono font-black mt-0.5 ${nextPayment.status === 'Overdue' ? 'text-rose-600 dark:text-rose-400' : 'text-primary'}`}>
+                    {fmt(nextPayment.amount_due)}
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="text-xs text-muted-foreground py-2">No upcoming scheduled balance due.</div>
             )}
 
-            <div className="grid grid-cols-2 gap-y-2 text-sm mt-auto">
-              <div className="text-slate-500">Account No: <span className="font-mono font-bold text-foreground">{acc.account_no}</span></div>
-              <div className="text-slate-500">Purchase Date: <span className="font-medium text-foreground">{acc.start_date || acc.sale_date}</span></div>
-              <div className="text-slate-500">Branch: <span className="font-medium text-foreground">{acc.branch?.name || (typeof acc.branch === 'string' ? acc.branch : '') || '—'}</span></div>
-              <div className="text-slate-500">Processed By: <span className="font-medium text-foreground">{acc.store_admin || 'System/Admin'}</span></div>
+            {Number(acc.pending_payments_count) > 0 && (
+              <div className="text-[11px] font-semibold px-2.5 py-1.5 rounded-lg bg-amber-500/10 text-amber-700 dark:text-amber-300 border border-amber-500/20">
+                {acc.pending_payments_count} pending payment{Number(acc.pending_payments_count) > 1 ? 's' : ''} ({fmt(acc.pending_payments_amount)}) awaiting verification
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* 3. Full Financials & Financing Breakdown */}
+        <div className="space-y-3">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <div className="p-3 bg-[var(--card)] border border-slate-200 dark:border-slate-800 rounded-xl">
+              <div className="text-[11px] text-slate-500 uppercase font-semibold mb-1">Total Payable</div>
+              <div className="text-base font-mono font-bold text-slate-800 dark:text-slate-100">{fmt(acc.total_payable)}</div>
+            </div>
+            <div className="p-3 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-xl">
+              <div className="text-[11px] text-emerald-600 dark:text-emerald-400 uppercase font-semibold mb-1">Total Paid</div>
+              <div className="text-base font-mono font-bold text-emerald-700 dark:text-emerald-300">{fmt(acc.paid ?? acc.total_paid)}</div>
+            </div>
+            <div className="p-3 bg-rose-50 dark:bg-rose-900/20 border border-rose-200 dark:border-rose-800 rounded-xl">
+              <div className="text-[11px] text-rose-600 dark:text-rose-400 uppercase font-semibold mb-1">Remaining Balance</div>
+              <div className="text-base font-mono font-bold text-rose-700 dark:text-rose-300">{fmt(acc.balance)}</div>
+            </div>
+            <div className="p-3 bg-[#176B87]/5 border border-[#176B87]/20 rounded-xl">
+              <div className="text-[11px] text-[#176B87] dark:text-[#64ccc5] uppercase font-semibold mb-1">Monthly Pay</div>
+              <div className="text-base font-mono font-bold text-[#176B87] dark:text-[#64ccc5]">{fmt(acc.installment_amount)}</div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 p-3.5 rounded-xl bg-slate-50 dark:bg-slate-900/70 border border-slate-200 dark:border-slate-800 text-xs">
+            <div>
+              <div className="text-[10px] uppercase font-semibold text-muted-foreground">Principal / Cash Price</div>
+              <div className="font-mono font-bold text-foreground mt-0.5">{fmt(acc.principal_amount)}</div>
+            </div>
+            <div>
+              <div className="text-[10px] uppercase font-semibold text-muted-foreground">Down Payment</div>
+              <div className="font-mono font-bold text-emerald-600 dark:text-emerald-400 mt-0.5">{fmt(acc.down_payment)}</div>
+            </div>
+            <div>
+              <div className="text-[10px] uppercase font-semibold text-muted-foreground">Amount Financed</div>
+              <div className="font-mono font-bold text-foreground mt-0.5">
+                {fmt(acc.financed_amount ?? Math.max(0, Number(acc.principal_amount || 0) - Number(acc.down_payment || 0)))}
+              </div>
+            </div>
+            <div>
+              <div className="text-[10px] uppercase font-semibold text-muted-foreground">
+                Interest ({Number(acc.interest_rate || 0)}%)
+              </div>
+              <div className="font-mono font-bold text-amber-600 dark:text-amber-400 mt-0.5">{fmt(acc.interest_amount)}</div>
             </div>
           </div>
         </div>
 
-        {/* Financials Section */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3.5">
-          <div className="p-3 bg-[var(--card)] border border-slate-200 dark:border-slate-800 rounded-xl">
-            <div className="text-xs text-slate-500 uppercase font-semibold mb-1">Total Payable</div>
-            <div className="text-base font-mono font-bold text-slate-800 dark:text-slate-100">{fmt(acc.total_payable)}</div>
-          </div>
-          <div className="p-3 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-xl">
-            <div className="text-xs text-emerald-600 dark:text-emerald-400 uppercase font-semibold mb-1">Total Paid</div>
-            <div className="text-base font-mono font-bold text-emerald-700 dark:text-emerald-300">{fmt(acc.paid ?? acc.total_paid)}</div>
-          </div>
-          <div className="p-3 bg-rose-50 dark:bg-rose-900/20 border border-rose-200 dark:border-rose-800 rounded-xl">
-            <div className="text-xs text-rose-600 dark:text-rose-400 uppercase font-semibold mb-1">Remaining Balance</div>
-            <div className="text-base font-mono font-bold text-rose-700 dark:text-rose-300">{fmt(acc.balance)}</div>
-          </div>
-          <div className="p-3 bg-[#176B87]/5 border border-[#176B87]/20 rounded-xl">
-            <div className="text-xs text-[#176B87] dark:text-[#64ccc5] uppercase font-semibold mb-1">Monthly Pay</div>
-            <div className="text-base font-mono font-bold text-[#176B87] dark:text-[#64ccc5]">{fmt(acc.installment_amount)}</div>
-          </div>
-        </div>
-
-        {/* Tables Section */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 mt-2">
-          {/* Payment History */}
+        {/* 4. Itemized Purchased Products */}
+        {saleItems.length > 0 && (
           <div>
-            <h4 className="text-sm font-bold text-foreground mb-3">Payments Made (History)</h4>
-            <div className="overflow-y-auto border border-slate-200 dark:border-slate-800 rounded-xl max-h-[250px] shadow-sm">
-              <table className="w-full text-xs">
-                <thead className="bg-slate-50 dark:bg-slate-800/80 text-slate-500 sticky top-0">
-                  <tr>
-                    <th className="py-2.5 px-3 text-left font-semibold">Date</th>
-                    <th className="py-2.5 px-3 text-left font-semibold">Receipt</th>
-                    <th className="py-2.5 px-3 text-left font-semibold">Method</th>
-                    <th className="py-2.5 px-3 text-right font-semibold">Amount</th>
-                    <th className="py-2.5 px-3 text-center font-semibold">Action</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100 dark:divide-slate-800/50 bg-[var(--card)]">
-                  {payments.length === 0 ? (
-                    <tr>
-                      <td colSpan="5" className="py-6 text-center text-slate-400">No payments made yet.</td>
-                    </tr>
-                  ) : (
-                    payments.map(p => (
-                      <tr key={p.payment_id} className="hover:bg-slate-50 dark:hover:bg-slate-800/30">
-                        <td className="py-2.5 px-3 text-muted-foreground">{p.payment_date}</td>
-                        <td className="py-2.5 px-3 font-mono text-slate-500">{p.receipt_no}</td>
-                        <td className="py-2.5 px-3 text-muted-foreground">{p.payment_method}</td>
-                        <td className="py-2.5 px-3 text-right font-mono font-bold text-emerald-600 dark:text-emerald-400">{fmt(p.amount)}</td>
-                        <td className="py-2.5 px-3 text-center">
-                          <button
-                            onClick={() => setViewReceipt(p)}
-                            className="inline-flex items-center gap-1 px-2 py-1 text-[10px] rounded border border-border hover:bg-muted font-semibold cursor-pointer transition-colors text-muted-foreground"
-                          >
-                            <FiFileText className="w-3 h-3" />
-                            <span>Receipt</span>
-                          </button>
-                        </td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
-
-          {/* Payment Schedule */}
-          <div>
-            <h4 className="text-sm font-bold text-foreground mb-3">
-              Payment Schedule & Due Dates
+            <h4 className="text-sm font-bold text-foreground mb-2.5 flex items-center gap-2">
+              <FiShoppingCart className="w-4 h-4 text-primary" />
+              <span>Purchased Items ({saleItems.length})</span>
             </h4>
-            <div className="overflow-y-auto border border-slate-200 dark:border-slate-800 rounded-xl max-h-[250px] shadow-sm">
+            <div className="overflow-x-auto border border-slate-200 dark:border-slate-800 rounded-xl shadow-sm">
               <table className="w-full text-xs">
-                <thead className="bg-slate-50 dark:bg-slate-800/80 text-slate-500 sticky top-0">
+                <thead className="bg-slate-50 dark:bg-slate-800/80 text-slate-500">
                   <tr>
-                    <th className="py-2.5 px-3 text-left font-semibold">No.</th>
-                    <th className="py-2.5 px-3 text-left font-semibold">Due Date</th>
-                    <th className="py-2.5 px-3 text-left font-semibold">Status</th>
-                    <th className="py-2.5 px-3 text-right font-semibold">Amount Due</th>
+                    <th className="py-2.5 px-3 text-left font-semibold">Product</th>
+                    <th className="py-2.5 px-3 text-left font-semibold">Category</th>
+                    <th className="py-2.5 px-3 text-center font-semibold">Qty</th>
+                    <th className="py-2.5 px-3 text-right font-semibold">Unit Price</th>
+                    <th className="py-2.5 px-3 text-right font-semibold">Discount</th>
+                    <th className="py-2.5 px-3 text-right font-semibold">Line Total</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-800/50 bg-[var(--card)]">
-                  {schedules.length === 0 ? (
-                    <tr>
-                      <td colSpan="4" className="py-6 text-center text-slate-400">No schedules found.</td>
+                  {saleItems.map((si, idx) => (
+                    <tr key={si.product_id || idx} className="hover:bg-slate-50 dark:hover:bg-slate-800/30">
+                      <td className="py-2.5 px-3">
+                        <div className="font-semibold text-foreground">{si.product_name}</div>
+                        {si.product_code && <div className="text-[10px] font-mono text-muted-foreground">{si.product_code}</div>}
+                      </td>
+                      <td className="py-2.5 px-3 text-muted-foreground">{si.category || '—'}</td>
+                      <td className="py-2.5 px-3 text-center font-mono font-semibold text-foreground">{si.quantity}</td>
+                      <td className="py-2.5 px-3 text-right font-mono text-muted-foreground">{fmt(si.unit_price)}</td>
+                      <td className="py-2.5 px-3 text-right font-mono text-rose-500">
+                        {Number(si.discount_amount) > 0 ? `-${fmt(si.discount_amount)}` : '—'}
+                      </td>
+                      <td className="py-2.5 px-3 text-right font-mono font-bold text-foreground">{fmt(si.line_total)}</td>
                     </tr>
-                  ) : (
-                    schedules.map(s => (
-                      <tr key={s.schedule_id} className="hover:bg-slate-50 dark:hover:bg-slate-800/30">
-                        <td className="py-2.5 px-3 font-mono text-slate-500">{s.installment_no}</td>
-                        <td className="py-2.5 px-3 text-muted-foreground">{s.status === 'Paid' && s.paid_date ? s.paid_date : s.due_date}</td>
-                        <td className="py-2.5 px-3"><StatusBadge status={s.status} /></td>
-                        <td className="py-2.5 px-3 text-right font-mono font-bold text-slate-700 dark:text-slate-200">{fmt(s.amount_due)}</td>
-                      </tr>
-                    ))
-                  )}
+                  ))}
                 </tbody>
               </table>
             </div>
           </div>
+        )}
+
+        {/* 5. Full Detailed Payment Schedule & Due Dates */}
+        <div>
+          <div className="flex flex-wrap items-center justify-between gap-2 mb-2.5">
+            <h4 className="text-sm font-bold text-foreground flex items-center gap-2">
+              <FiCalendar className="w-4 h-4 text-primary" />
+              <span>Payment Schedule & Due Dates ({schedules.length})</span>
+            </h4>
+            <div className="flex flex-wrap items-center gap-1.5 text-[10px] font-bold">
+              <span className="px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+                {paidSchedulesCount} Paid
+              </span>
+              {overdueSchedulesCount > 0 && (
+                <span className="px-2 py-0.5 rounded-full bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20">
+                  {overdueSchedulesCount} Overdue
+                </span>
+              )}
+              {upcomingSchedulesCount > 0 && (
+                <span className="px-2 py-0.5 rounded-full bg-slate-500/10 text-muted-foreground border border-border">
+                  {upcomingSchedulesCount} Upcoming
+                </span>
+              )}
+            </div>
+          </div>
+          <div className="overflow-x-auto overflow-y-auto border border-slate-200 dark:border-slate-800 rounded-xl max-h-[280px] shadow-sm">
+            <table className="w-full text-xs min-w-[600px]">
+              <thead className="bg-slate-50 dark:bg-slate-800/80 text-slate-500 sticky top-0 z-10">
+                <tr>
+                  <th className="py-2.5 px-3 text-left font-semibold">Installment #</th>
+                  <th className="py-2.5 px-3 text-left font-semibold">Due Date</th>
+                  <th className="py-2.5 px-3 text-left font-semibold">Paid Date</th>
+                  <th className="py-2.5 px-3 text-right font-semibold">Amount Due</th>
+                  <th className="py-2.5 px-3 text-right font-semibold">Amount Paid</th>
+                  <th className="py-2.5 px-3 text-right font-semibold">Balance Due</th>
+                  <th className="py-2.5 px-3 text-center font-semibold">Status</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 dark:divide-slate-800/50 bg-[var(--card)]">
+                {schedules.length === 0 ? (
+                  <tr>
+                    <td colSpan="7" className="py-6 text-center text-slate-400">No schedules found.</td>
+                  </tr>
+                ) : (
+                  schedules.map(s => (
+                    <tr
+                      key={s.schedule_id}
+                      className={`hover:bg-slate-50 dark:hover:bg-slate-800/30 ${s.status === 'Overdue' ? 'bg-rose-500/5' : ''}`}
+                    >
+                      <td className="py-2.5 px-3 font-mono font-semibold text-foreground">#{s.installment_no}</td>
+                      <td className="py-2.5 px-3 font-mono text-muted-foreground">{s.due_date || '—'}</td>
+                      <td className="py-2.5 px-3 font-mono text-emerald-600 dark:text-emerald-400">{s.paid_date || '—'}</td>
+                      <td className="py-2.5 px-3 text-right font-mono font-semibold text-foreground">{fmt(s.amount_due)}</td>
+                      <td className="py-2.5 px-3 text-right font-mono font-semibold text-emerald-600 dark:text-emerald-400">{fmt(s.amount_paid)}</td>
+                      <td className={`py-2.5 px-3 text-right font-mono font-bold ${s.status === 'Overdue' ? 'text-rose-600 dark:text-rose-400' : 'text-foreground'}`}>
+                        {fmt(s.balance_due)}
+                      </td>
+                      <td className="py-2.5 px-3 text-center"><StatusBadge status={s.status} /></td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
         </div>
+
+        {/* 6. Full Detailed Payments Made (History) */}
+        <div>
+          <div className="flex flex-wrap items-center justify-between gap-2 mb-2.5">
+            <h4 className="text-sm font-bold text-foreground flex items-center gap-2">
+              <FiCreditCard className="w-4 h-4 text-primary" />
+              <span>Payments Made (History) ({payments.length})</span>
+            </h4>
+            <span className="text-xs font-mono font-bold text-emerald-600 dark:text-emerald-400">
+              Total Collected: {fmt(acc.paid ?? acc.total_paid)}
+            </span>
+          </div>
+          <div className="overflow-x-auto overflow-y-auto border border-slate-200 dark:border-slate-800 rounded-xl max-h-[260px] shadow-sm">
+            <table className="w-full text-xs min-w-[600px]">
+              <thead className="bg-slate-50 dark:bg-slate-800/80 text-slate-500 sticky top-0 z-10">
+                <tr>
+                  <th className="py-2.5 px-3 text-left font-semibold">Date</th>
+                  <th className="py-2.5 px-3 text-left font-semibold">Receipt #</th>
+                  <th className="py-2.5 px-3 text-left font-semibold">Method & Reference</th>
+                  <th className="py-2.5 px-3 text-left font-semibold">Received By</th>
+                  <th className="py-2.5 px-3 text-center font-semibold">Status</th>
+                  <th className="py-2.5 px-3 text-right font-semibold">Amount</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 dark:divide-slate-800/50 bg-[var(--card)]">
+                {payments.length === 0 ? (
+                  <tr>
+                    <td colSpan="6" className="py-6 text-center text-slate-400">No payments made yet.</td>
+                  </tr>
+                ) : (
+                  payments.map(p => (
+                    <tr key={p.payment_id} className="hover:bg-slate-50 dark:hover:bg-slate-800/30">
+                      <td className="py-2.5 px-3 font-mono text-muted-foreground whitespace-nowrap">{p.payment_date}</td>
+                      <td className="py-2.5 px-3 font-mono font-semibold text-foreground whitespace-nowrap">{p.receipt_no}</td>
+                      <td className="py-2.5 px-3">
+                        <div className="font-medium text-foreground">{p.payment_method || 'Cash'}</div>
+                        {p.reference_no && (
+                          <div className="text-[10px] font-mono text-muted-foreground">Ref: {p.reference_no}</div>
+                        )}
+                        {p.notes && (
+                          <div className="text-[10px] text-muted-foreground line-clamp-1" title={p.notes}>{p.notes}</div>
+                        )}
+                      </td>
+                      <td className="py-2.5 px-3 text-muted-foreground">{p.received_by || 'Staff'}</td>
+                      <td className="py-2.5 px-3 text-center"><StatusBadge status={p.status || 'Completed'} /></td>
+                      <td className="py-2.5 px-3 text-right font-mono font-bold text-emerald-600 dark:text-emerald-400 whitespace-nowrap">{fmt(p.amount)}</td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        {/* 7. Account Notes (if any) */}
+        {acc.notes && (
+          <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-xs">
+            <div className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-1">Account Remarks / Notes</div>
+            <div className="text-foreground whitespace-pre-wrap">{acc.notes}</div>
+          </div>
+        )}
       </div>
 
       {/* OFFICIAL RECEIPT MODAL */}

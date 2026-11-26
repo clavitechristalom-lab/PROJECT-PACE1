@@ -41,15 +41,19 @@ class SearchController extends Controller
         }
 
         $role = $user->role;
-        $isAdmin = ($role === 'Administrator');
+        $isAdmin = in_array($role, ['Administrator', 'Admin'], true);
         $isStoreAdmin = in_array($role, ['Store Administrator', 'Store Admin'], true);
         $isEmployee = ($role === 'Employee');
+        $isCustomer = ($role === 'Customer');
+        $canonicalRole = $isAdmin ? 'Administrator' : ($isStoreAdmin ? 'Store Administrator' : $role);
         $userBranch = ($user->employee && $user->employee->branch_id) ? $user->employee->branch_id : null;
+        $customerId = $isCustomer ? CustomerDashboardController::resolveCustomerId($user) : null;
 
         $cacheKey = 'global_search_' . md5(json_encode([
             'r' => $role,
             'b' => $userBranch,
             'e' => $isEmployee ? $user->employee_id : 0,
+            'c' => $customerId ?: 0,
             'q' => strtolower($q),
         ]));
 
@@ -62,16 +66,17 @@ class SearchController extends Controller
 
         // ─── 0. SYSTEM NAVIGATION MODULE SHORTCUTS ──────────────────────────────
         $modules = [
-            ['title' => 'Dashboard', 'subtitle' => 'System Overview & Analytics', 'keywords' => ['dashboard', 'home', 'stats', 'analytics', 'overview', 'kpi'], 'route' => $isEmployee ? '/employee/dashboard' : '/dashboard', 'icon' => '📊', 'module' => 'Navigation', 'roles' => ['Administrator', 'Store Administrator', 'Employee']],
-            ['title' => 'Products & Inventory', 'subtitle' => 'Stock Management, Appliances & Furniture', 'keywords' => ['product', 'products', 'inventory', 'stock', 'appliances', 'furniture', 'items', 'catalog'], 'route' => '/products', 'icon' => '📦', 'module' => 'Navigation', 'roles' => ['Administrator', 'Store Administrator']],
+            ['title' => 'Dashboard', 'subtitle' => 'System Overview & Analytics', 'keywords' => ['dashboard', 'home', 'stats', 'analytics', 'overview', 'kpi'], 'route' => $isCustomer ? '/customer/dashboard' : ($isEmployee ? '/employee/dashboard' : '/dashboard'), 'icon' => '📊', 'module' => 'Navigation', 'roles' => ['Administrator', 'Store Administrator', 'Employee', 'Customer']],
+            ['title' => 'Products & Inventory', 'subtitle' => 'Stock Management, Appliances & Furniture', 'keywords' => ['product', 'products', 'inventory', 'stock', 'appliances', 'furniture', 'items', 'catalog'], 'route' => $isCustomer ? '/customer/dashboard?tab=products' : '/products', 'icon' => '📦', 'module' => 'Navigation', 'roles' => ['Administrator', 'Store Administrator', 'Customer']],
             ['title' => 'Customer Management', 'subtitle' => 'Client Profiles & Credit Ledger', 'keywords' => ['customer', 'customers', 'client', 'clients', 'debtor', 'borrower', 'accounts'], 'route' => '/customers', 'icon' => '👤', 'module' => 'Navigation', 'roles' => ['Administrator', 'Store Administrator']],
             ['title' => 'Sales Transactions', 'subtitle' => 'Cash & Invoiced Transactions Ledger', 'keywords' => ['sale', 'sales', 'transaction', 'transactions', 'pos', 'cashier', 'order', 'orders'], 'route' => '/transactions', 'icon' => '💳', 'module' => 'Navigation', 'roles' => ['Administrator', 'Store Administrator']],
-            ['title' => 'Installment', 'subtitle' => 'Active Loans, Terms & Payment Schedules', 'keywords' => ['installment', 'installments', 'loan', 'loans', 'credit', 'amortization', 'monthly plan'], 'route' => '/installments', 'icon' => '📑', 'module' => 'Navigation', 'roles' => ['Administrator', 'Store Administrator']],
-            ['title' => 'Payment Records', 'subtitle' => 'Official Receipts & Collections', 'keywords' => ['payment', 'payments', 'receipt', 'receipts', 'collection', 'collections', 'cash in'], 'route' => '/payments', 'icon' => '💵', 'module' => 'Navigation', 'roles' => ['Administrator', 'Store Administrator']],
-            ['title' => 'Employee Management', 'subtitle' => 'Personnel Profiles, QR Badges & PINs', 'keywords' => ['employee', 'employees', 'staff', 'personnel', 'hr', 'worker', 'workers', 'team', 'qr badge'], 'route' => '/employees', 'icon' => '👥', 'module' => 'Navigation', 'roles' => ['Administrator']],
+            ['title' => 'Installment', 'subtitle' => $isCustomer ? 'Your Installment Accounts & Due Dates' : 'Active Loans, Terms & Payment Schedules', 'keywords' => ['installment', 'installments', 'loan', 'loans', 'credit', 'amortization', 'monthly plan'], 'route' => $isCustomer ? '/customer/dashboard?tab=installments' : '/installments', 'icon' => '📑', 'module' => 'Navigation', 'roles' => ['Administrator', 'Store Administrator', 'Customer']],
+            ['title' => 'Payment Records', 'subtitle' => 'Official Receipts & Collections', 'keywords' => ['payment', 'payments', 'receipt', 'receipts', 'collection', 'collections', 'cash in'], 'route' => $isCustomer ? '/customer/dashboard?tab=statements' : '/payments', 'icon' => '💵', 'module' => 'Navigation', 'roles' => ['Administrator', 'Store Administrator', 'Customer']],
+            ['title' => 'Customer Support', 'subtitle' => 'Support Tickets & Inquiries', 'keywords' => ['support', 'help', 'ticket', 'message', 'messages', 'inquiry'], 'route' => $isCustomer ? '/customer/dashboard?tab=support' : '/admin/support', 'icon' => '💬', 'module' => 'Navigation', 'roles' => ['Administrator', 'Store Administrator', 'Customer']],
+            ['title' => 'Employee Management', 'subtitle' => 'Personnel Profiles, QR Badges & PINs', 'keywords' => ['employee', 'employees', 'staff', 'personnel', 'hr', 'worker', 'workers', 'team', 'qr badge'], 'route' => '/employees', 'icon' => '👥', 'module' => 'Navigation', 'roles' => ['Administrator', 'Store Administrator']],
             ['title' => 'Attendance Records', 'subtitle' => 'Time In, Time Out & Verification Station', 'keywords' => ['attendance', 'time in', 'time out', 'timesheet', 'clock in', 'clock out', 'tardy', 'present', 'absent', 'punch', 'qr scanner', 'terminal'], 'route' => $isEmployee ? '/employee/attendance' : '/attendance', 'icon' => '⏱️', 'module' => 'Navigation', 'roles' => ['Administrator', 'Store Administrator', 'Employee']],
             ['title' => 'Excuse Letter', 'subtitle' => 'Employee Absence & Leave Requests Management', 'keywords' => ['excuse', 'letter', 'leave', 'sick leave', 'vacation', 'maternity', 'important matter', 'absence', 'excuse letter'], 'route' => $isEmployee ? '/employee/excuse-letter' : '/admin/excuse-letters', 'icon' => '📝', 'module' => 'Navigation', 'roles' => ['Administrator', 'Store Administrator', 'Employee']],
-            ['title' => 'Payroll & Payslips', 'subtitle' => 'Salary Periods, 13th Month & Contributions', 'keywords' => ['payroll', 'payslip', 'payslips', 'salary', 'compensation', 'wage', 'wages', '13th month', 'deductions', 'sss', 'philhealth', 'pagibig'], 'route' => $isEmployee ? '/employee/payroll' : '/payroll', 'icon' => '💰', 'module' => 'Navigation', 'roles' => ['Administrator', 'Employee']],
+            ['title' => 'Payroll & Payslips', 'subtitle' => 'Salary Periods, 13th Month & Contributions', 'keywords' => ['payroll', 'payslip', 'payslips', 'salary', 'compensation', 'wage', 'wages', '13th month', 'deductions', 'sss', 'philhealth', 'pagibig'], 'route' => $isEmployee ? '/employee/payslips' : '/payroll', 'icon' => '💰', 'module' => 'Navigation', 'roles' => ['Administrator', 'Employee']],
             ['title' => 'Reports & Audits', 'subtitle' => 'Financial Summaries & Export Center', 'keywords' => ['report', 'reports', 'export', 'summary', 'audit', 'financial report', 'sales report'], 'route' => '/reports', 'icon' => '📈', 'module' => 'Navigation', 'roles' => ['Administrator', 'Store Administrator']],
             ['title' => 'User Management', 'subtitle' => 'System Accounts, Passwords & Permissions', 'keywords' => ['user', 'users', 'account', 'accounts', 'login', 'admin account', 'permission', 'roles'], 'route' => '/users', 'icon' => '🔑', 'module' => 'Navigation', 'roles' => ['Administrator']],
             ['title' => 'System Audit Logs', 'subtitle' => 'Activity Tracking & Security Trail', 'keywords' => ['log', 'logs', 'audit', 'system log', 'history', 'security log', 'activity'], 'route' => '/system-logs', 'icon' => '📜', 'module' => 'Navigation', 'roles' => ['Administrator']],
@@ -81,7 +86,7 @@ class SearchController extends Controller
 
         $lowerQ = strtolower($q);
         foreach ($modules as $mod) {
-            if (!in_array($role, $mod['roles'])) continue;
+            if (!in_array($canonicalRole, $mod['roles'], true)) continue;
             $matched = (stripos($mod['title'], $q) !== false) || (stripos($mod['subtitle'], $q) !== false);
             if (!$matched) {
                 foreach ($mod['keywords'] as $kw) {
@@ -253,7 +258,15 @@ class SearchController extends Controller
         if ($isAdmin || $isStoreAdmin) {
             $salesQuery = SaleTransaction::with('customer');
             if (!$isAdmin) {
-                $salesQuery->whereHas('processedBy.employee', fn($eq) => $eq->where('branch_id', $userBranch));
+                $salesQuery->where(function ($sq) use ($userBranch) {
+                    if ($userBranch) {
+                        $sq->where('branch_id', $userBranch)
+                           ->orWhereHas('customer', fn($cq) => $cq->where('branch_id', $userBranch))
+                           ->orWhereHas('processedBy.employee', fn($eq) => $eq->where('branch_id', $userBranch));
+                    } else {
+                        $sq->whereRaw('1 = 0');
+                    }
+                });
             }
             $sales = $salesQuery->where(function($query) use ($q) {
                 $query->where('invoice_no', 'like', "%{$q}%")
@@ -289,7 +302,15 @@ class SearchController extends Controller
         if ($isAdmin || $isStoreAdmin) {
             $instQuery = InstallmentAccount::with('customer');
             if (!$isAdmin) {
-                $instQuery->whereHas('sale.processedBy.employee', fn($eq) => $eq->where('branch_id', $userBranch));
+                $instQuery->where(function ($iq) use ($userBranch) {
+                    if ($userBranch) {
+                        $iq->whereHas('sale', fn($sq) => $sq->where('branch_id', $userBranch))
+                           ->orWhereHas('customer', fn($cq) => $cq->where('branch_id', $userBranch))
+                           ->orWhereHas('sale.processedBy.employee', fn($eq) => $eq->where('branch_id', $userBranch));
+                    } else {
+                        $iq->whereRaw('1 = 0');
+                    }
+                });
             }
             $installments = $instQuery->where(function($query) use ($q) {
                 $query->where('account_no', 'like', "%{$q}%")
@@ -322,9 +343,18 @@ class SearchController extends Controller
 
         // ─── 6. PAYMENTS & RECEIPTS (Admins & Store Admins) ─────────────────────
         if ($isAdmin || $isStoreAdmin) {
-            $paymentQuery = Payment::with(['installmentAccount.customer']);
+            $paymentQuery = Payment::with(['installmentAccount.customer', 'sale.customer']);
             if (!$isAdmin) {
-                $paymentQuery->whereHas('installmentAccount.sale.processedBy.employee', fn($eq) => $eq->where('branch_id', $userBranch));
+                $paymentQuery->where(function ($pq) use ($userBranch) {
+                    if ($userBranch) {
+                        $pq->whereHas('sale', fn($sq) => $sq->where('branch_id', $userBranch))
+                           ->orWhereHas('installmentAccount.sale', fn($sq) => $sq->where('branch_id', $userBranch))
+                           ->orWhereHas('installmentAccount.customer', fn($cq) => $cq->where('branch_id', $userBranch))
+                           ->orWhereHas('installmentAccount.sale.processedBy.employee', fn($eq) => $eq->where('branch_id', $userBranch));
+                    } else {
+                        $pq->whereRaw('1 = 0');
+                    }
+                });
             }
             $payments = $paymentQuery->where(function($query) use ($q) {
                 $query->where('receipt_no', 'like', "%{$q}%")
@@ -342,7 +372,7 @@ class SearchController extends Controller
             ->get();
 
             foreach ($payments as $pay) {
-                $cust = $pay->installmentAccount?->customer;
+                $cust = $pay->installmentAccount?->customer ?? $pay->sale?->customer;
                 $custName = $cust ? trim("{$cust->first_name} {$cust->last_name}") : 'Customer';
                 $results[] = [
                     'id' => 'pay_rec_' . $pay->payment_id,
@@ -359,7 +389,87 @@ class SearchController extends Controller
             }
         }
 
+        // ─── 6B. CUSTOMER SELF-SERVICE SEARCH (Products, Own Installments/Sales) ──
+        if ($isCustomer) {
+            $custBranchId = $customerId ? \App\Models\Customer::where('customer_id', $customerId)->value('branch_id') : null;
+            $cProds = Product::select(['product_id', 'product_code', 'product_name', 'category', 'brand', 'unit_price', 'stock_quantity', 'branch_id'])
+                ->where('status', 'Active')
+                ->when($custBranchId, fn($pq) => $pq->where(fn($b) => $b->where('branch_id', $custBranchId)->orWhereNull('branch_id')))
+                ->where(function ($query) use ($q) {
+                    $query->where('product_name', 'like', "%{$q}%")
+                          ->orWhere('product_code', 'like', "%{$q}%")
+                          ->orWhere('category', 'like', "%{$q}%")
+                          ->orWhere('brand', 'like', "%{$q}%");
+                })
+                ->limit(6)
+                ->get();
+
+            foreach ($cProds as $prod) {
+                $results[] = [
+                    'id' => 'cprod_' . $prod->product_id,
+                    'record_id' => $prod->product_id,
+                    'type' => 'product',
+                    'module' => 'Products',
+                    'title' => $prod->product_name,
+                    'subtitle' => "{$prod->category}" . ($prod->brand ? " · {$prod->brand}" : ''),
+                    'description' => "Price: ₱" . number_format($prod->unit_price, 2) . " · Stock: {$prod->stock_quantity}",
+                    'url' => "/customer/dashboard?tab=products&product_id={$prod->product_id}",
+                    'route' => "/customer/dashboard?tab=products&product_id={$prod->product_id}",
+                    'icon' => '📦',
+                ];
+            }
+
+            if ($customerId) {
+                $cInsts = InstallmentAccount::where('customer_id', $customerId)
+                    ->where(function ($query) use ($q) {
+                        $query->where('account_no', 'like', "%{$q}%")
+                              ->orWhere('status', 'like', "%{$q}%");
+                    })
+                    ->limit(5)
+                    ->get();
+                foreach ($cInsts as $inst) {
+                    $results[] = [
+                        'id' => 'cinst_' . $inst->installment_id,
+                        'record_id' => $inst->installment_id,
+                        'type' => 'installment',
+                        'module' => 'Installments',
+                        'title' => "Account #{$inst->account_no}",
+                        'subtitle' => "Status: {$inst->status} · ₱" . number_format($inst->installment_amount, 2) . "/mo",
+                        'description' => "Total Payable: ₱" . number_format($inst->total_payable, 2),
+                        'url' => '/customer/dashboard?tab=installments',
+                        'route' => '/customer/dashboard?tab=installments',
+                        'icon' => '📑',
+                    ];
+                }
+
+                $cPays = Payment::whereHas('installmentAccount', fn($iq) => $iq->where('customer_id', $customerId))
+                    ->orWhereHas('sale', fn($sq) => $sq->where('customer_id', $customerId))
+                    ->where(function ($query) use ($q) {
+                        $query->where('receipt_no', 'like', "%{$q}%")
+                              ->orWhere('reference_no', 'like', "%{$q}%")
+                              ->orWhere('payment_method', 'like', "%{$q}%");
+                    })
+                    ->limit(5)
+                    ->get();
+                foreach ($cPays as $pay) {
+                    $results[] = [
+                        'id' => 'cpay_' . $pay->payment_id,
+                        'record_id' => $pay->payment_id,
+                        'type' => 'payment',
+                        'module' => 'Payments',
+                        'title' => "Payment Receipt #{$pay->receipt_no}",
+                        'subtitle' => "₱" . number_format($pay->amount, 2) . " · {$pay->payment_method}",
+                        'description' => "Status: {$pay->status} · Date: {$pay->payment_date}",
+                        'url' => '/customer/dashboard?tab=statements',
+                        'route' => '/customer/dashboard?tab=statements',
+                        'icon' => '💵',
+                    ];
+                }
+            }
+        }
+
         // ─── 7. ATTENDANCE RECORDS ──────────────────────────────────────────────
+        if ($isAdmin || $isStoreAdmin || $isEmployee) {
         $attendanceQuery = Attendance::with('employee');
         if ($isAdmin) {
             // All attendances across business
@@ -402,47 +512,46 @@ class SearchController extends Controller
         }
 
         // ─── 8. PAYROLL & PAYSLIPS ──────────────────────────────────────────────
-        $payrollQuery = Payroll::with(['employee', 'payrollPeriod']);
-        if ($isAdmin) {
-            // All payrolls
-        } elseif ($isStoreAdmin) {
-            $payrollQuery->whereHas('employee', fn($eq) => $eq->where('branch_id', $userBranch));
-        } else {
-            // Employee: own payslips only
-            $payrollQuery->where('employee_id', $user->employee_id ?: 0);
-        }
-
-        $payrollQuery->where(function($query) use ($q, $isAdmin, $isStoreAdmin) {
-            $query->where('status', 'like', "%{$q}%")
-                  ->orWhereHas('payrollPeriod', function($sub) use ($q) {
-                      $sub->where('period_name', 'like', "%{$q}%");
-                  });
-            if ($isAdmin || $isStoreAdmin) {
-                $query->orWhereHas('employee', function($sub) use ($q) {
-                    $sub->where('first_name', 'like', "%{$q}%")
-                        ->orWhere('last_name', 'like', "%{$q}%")
-                        ->orWhere('employee_code', 'like', "%{$q}%");
-                });
+        if ($isAdmin || $isEmployee) {
+            $payrollQuery = Payroll::with(['employee', 'payrollPeriod']);
+            if (!$isAdmin) {
+                $payrollQuery->where('employee_id', $user->employee_id ?: 0);
             }
-        });
 
-        $payrolls = $payrollQuery->latest('payroll_id')->limit(6)->get();
-        foreach ($payrolls as $pay) {
-            $emp = $pay->employee;
-            $empName = $emp ? trim("{$emp->first_name} {$emp->last_name} ({$emp->employee_code})") : 'Employee';
-            $periodName = $pay->payrollPeriod?->period_name ?: 'Regular Period';
-            $results[] = [
-                'id' => 'pay_' . $pay->payroll_id,
-                'record_id' => $pay->payroll_id,
-                'type' => 'payroll',
-                'module' => 'Payroll',
-                'title' => "Payslip: {$periodName}",
-                'subtitle' => ($isAdmin || $isStoreAdmin) ? "Employee: {$empName}" : "Your Payslip Record",
-                'description' => "Net Pay: ₱" . number_format((float) $pay->net_pay, 2) . " · Basic: ₱" . number_format((float) ($pay->basic_salary ?? 0), 2) . " · Status: {$pay->status}",
-                'url' => $isAdmin ? "/payroll?id={$pay->payroll_id}" : "/employee/payroll",
-                'route' => $isAdmin ? "/payroll?id={$pay->payroll_id}" : "/employee/payroll",
-                'icon' => '💰',
-            ];
+            $payrollQuery->where(function($query) use ($q, $isAdmin) {
+                $query->where('status', 'like', "%{$q}%")
+                      ->orWhereHas('payrollPeriod', function($sub) use ($q) {
+                          $sub->where('period_name', 'like', "%{$q}%");
+                      });
+                if ($isAdmin) {
+                    $query->orWhereHas('employee', function($sub) use ($q) {
+                        $sub->where('first_name', 'like', "%{$q}%")
+                            ->orWhere('last_name', 'like', "%{$q}%")
+                            ->orWhere('employee_code', 'like', "%{$q}%");
+                    });
+                }
+            });
+
+            $payrolls = $payrollQuery->latest('payroll_id')->limit(6)->get();
+            foreach ($payrolls as $pay) {
+                $emp = $pay->employee;
+                $empName = $emp ? trim("{$emp->first_name} {$emp->last_name} ({$emp->employee_code})") : 'Employee';
+                $periodName = $pay->payrollPeriod?->period_name ?: 'Regular Period';
+                $payUrl = $isAdmin ? "/payroll?id={$pay->payroll_id}" : "/employee/payslips";
+                $results[] = [
+                    'id' => 'pay_' . $pay->payroll_id,
+                    'record_id' => $pay->payroll_id,
+                    'type' => 'payroll',
+                    'module' => 'Payroll',
+                    'title' => "Payslip: {$periodName}",
+                    'subtitle' => $isAdmin ? "Employee: {$empName}" : "Your Payslip Record",
+                    'description' => "Net Pay: ₱" . number_format((float) $pay->net_pay, 2) . " · Basic: ₱" . number_format((float) ($pay->basic_salary ?? 0), 2) . " · Status: {$pay->status}",
+                    'url' => $payUrl,
+                    'route' => $payUrl,
+                    'icon' => '💰',
+                ];
+            }
+        }
         }
 
         // ─── 9. USERS (Administrator Only) ──────────────────────────────────────

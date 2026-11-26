@@ -9,8 +9,14 @@ class SaleItem extends Model
     public $timestamps = false; // As per SQL, this only has a "created_at" timestamp
 
     protected $fillable = [
-        'sale_id', 'product_id', 'quantity', 'unit_price', 
-        'discount_amount', 'line_total'
+        'sale_id', 'product_id', 'quantity', 'unit_price',
+        'discount_amount', 'line_total',
+        'category_domain', 'agent_commission_rate', 'agent_contribution'
+    ];
+
+    protected $casts = [
+        'agent_commission_rate' => 'decimal:2',
+        'agent_contribution' => 'decimal:2',
     ];
 
     protected $appends = ['discount', 'total_price'];

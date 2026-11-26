@@ -53,7 +53,7 @@ class CarouselImageController extends Controller
 
         if ($request->hasFile('image')) {
             $request->validate([
-                'image' => 'image|mimes:jpeg,png,jpg,gif,webp|max:2048',
+                'image' => 'image|mimes:jpeg,png,jpg,gif,webp|max:10240',
             ]);
             
             // Delete old file if exists

@@ -16,7 +16,10 @@ class SupportMessageController extends Controller
         $query = SupportMessage::with('customer')->orderBy('created_at', 'desc');
         
         if ($user && $user->role === 'Customer') {
-            $query->where('customer_id', $user->customer_id);
+            $custId = CustomerDashboardController::resolveCustomerId($user);
+            $query->where('customer_id', $custId ?: -1);
+        } elseif ($user && !in_array($user->role, ['Administrator', 'Admin', 'Store Administrator', 'Store Admin'], true)) {
+            return response()->json(['messages' => []]);
         }
 
         $messages = $query->get();
@@ -35,7 +38,7 @@ class SupportMessageController extends Controller
         $formattedMessage = "From: {$validated['name']} ({$validated['email']})\n\n{$validated['message']}";
 
         $msg = SupportMessage::create([
-            'customer_id' => \App\Models\Customer::first()->customer_id ?? null,
+            'customer_id' => null,
             'topic' => $validated['topic'],
             'message' => $formattedMessage,
             'status' => 'Pending',
@@ -46,7 +49,7 @@ class SupportMessageController extends Controller
             'title' => 'New Public Support Message',
             'message' => "{$validated['name']} sent a support message regarding '{$msg->topic}'.",
             'module' => 'Support',
-            'action_url' => '/support',
+            'action_url' => '/admin/support',
             'priority' => 'normal',
         ];
 
@@ -64,21 +67,22 @@ class SupportMessageController extends Controller
         ]);
 
         $user = $request->user();
+        $resolvedCustomerId = $user ? CustomerDashboardController::resolveCustomerId($user) : null;
         
         $msg = SupportMessage::create([
-            'customer_id' => $user->customer ? $user->customer->customer_id : (\App\Models\Customer::first()->customer_id ?? null), // Fallback if admin testing
+            'customer_id' => $resolvedCustomerId,
             'topic' => $validated['topic'],
             'message' => $validated['message'],
         ]);
 
-        $customerName = $msg->customer ? "{$msg->customer->first_name} {$msg->customer->last_name}" : 'A customer';
+        $customerName = $msg->customer ? "{$msg->customer->first_name} {$msg->customer->last_name}" : ($user->username ?? 'A customer');
 
         $notificationData = [
             'type' => 'support_message',
             'title' => 'New Support Message',
             'message' => "{$customerName} sent a support message regarding '{$msg->topic}'.",
             'module' => 'Support',
-            'action_url' => '/support',
+            'action_url' => '/admin/support',
             'priority' => 'normal',
         ];
 
@@ -106,6 +110,15 @@ class SupportMessageController extends Controller
         $msg = SupportMessage::findOrFail($id);
         $user = $request->user();
         $isCustomer = $user && $user->role === 'Customer';
+
+        if ($isCustomer) {
+            $custId = CustomerDashboardController::resolveCustomerId($user);
+            if (!$custId || (int) $msg->customer_id !== (int) $custId) {
+                return response()->json(['message' => 'Unauthorized to update this conversation.'], 403);
+            }
+        } elseif ($user && !in_array($user->role, ['Administrator', 'Admin', 'Store Administrator', 'Store Admin'], true)) {
+            return response()->json(['message' => 'Unauthorized to update support conversations.'], 403);
+        }
 
         if ($request->has('new_message')) {
             $history = $msg->chat_history ?? [];
@@ -136,7 +149,7 @@ class SupportMessageController extends Controller
                     'title' => 'New Customer Message',
                     'message' => "{$customerName} sent a message in conversation '{$msg->topic}'.",
                     'module' => 'Support',
-                    'action_url' => '/support',
+                    'action_url' => '/admin/support',
                     'priority' => 'normal',
                 ];
                 NotificationService::sendToAdmins($notifData);
@@ -149,7 +162,7 @@ class SupportMessageController extends Controller
                         'title' => 'New Support Message',
                         'message' => 'An admin has sent a message in your conversation "' . $msg->topic . '".',
                         'module' => 'Support',
-                        'action_url' => '/customer/dashboard',
+                        'action_url' => '/customer/dashboard?tab=support',
                         'priority' => 'normal',
                     ]);
                 }
@@ -178,10 +191,13 @@ class SupportMessageController extends Controller
         // For simplicity, relying on Auth logic similar to update() if needed,
         // but since both Customer and Admin can delete it, we'll check if the user is a customer
         $user = auth()->user();
-        if ($user->role === 'Customer') {
-            if ($msg->customer_id != $user->customer_id) {
+        if ($user && $user->role === 'Customer') {
+            $custId = CustomerDashboardController::resolveCustomerId($user);
+            if (!$custId || (int) $msg->customer_id !== (int) $custId) {
                 return response()->json(['message' => 'Unauthorized to delete this message'], 403);
             }
+        } elseif ($user && !in_array($user->role, ['Administrator', 'Admin', 'Store Administrator', 'Store Admin'], true)) {
+            return response()->json(['message' => 'Unauthorized to delete support messages'], 403);
         }
 
         $msg->delete();

@@ -33,9 +33,8 @@ class PayrollController extends Controller
             self::autoFinalizeWeeklyPaydayCutoff();
         }
 
-        // 1-2s Performance Cache: bypass if exporting CSV
+        // Versioned 45s Performance Cache: bypass if exporting CSV
         if (!$request->boolean('export_csv')) {
-            $fp = SyncController::computeFingerprint('payroll');
             $cacheKey = 'pace_payr_idx_' . md5(json_encode([
                 'u' => $user ? $user->user_id : 0,
                 'r' => $user ? $user->role : '',
@@ -46,7 +45,8 @@ class PayrollController extends Controller
                 'q' => $request->query('search', ''),
                 'df' => $request->query('from_date', ''),
                 'dt' => $request->query('to_date', ''),
-            ])) . '_' . $fp;
+                'v' => SyncController::moduleVersion('payroll'),
+            ]));
 
             $cached = Cache::get($cacheKey);
             if ($cached !== null) {
@@ -155,7 +155,9 @@ class PayrollController extends Controller
             });
         }
 
-        $records = $query->orderByDesc('payroll_id')->get()->map(function ($p) {
+        $hasPayslipsTable = \Illuminate\Support\Facades\Schema::hasTable('payslips');
+
+        $records = $query->orderByDesc('payroll_id')->get()->map(function ($p) use ($hasPayslipsTable) {
             $emp = $p->employee;
             $approver = $p->approvedBy;
             $approverName = $approver ? ($approver->employee ? "{$approver->employee->first_name} {$approver->employee->last_name}" : $approver->username) : '';
@@ -193,11 +195,9 @@ class PayrollController extends Controller
             $taxDed = (float) $p->deductions->where('deduction_type', 'Withholding Tax')->sum('amount');
 
             $syncedPayslip = $p->relationLoaded('payslip') ? $p->payslip : null;
-            if (!$syncedPayslip) {
+            if (!$syncedPayslip && $hasPayslipsTable) {
                 try {
-                    if (\Illuminate\Support\Facades\Schema::hasTable('payslips')) {
-                        $syncedPayslip = \App\Models\Payslip::syncFromPayroll($p);
-                    }
+                    $syncedPayslip = \App\Models\Payslip::syncFromPayroll($p);
                 } catch (\Throwable $e) {}
             }
 
@@ -354,7 +354,7 @@ class PayrollController extends Controller
         ];
 
         if (isset($cacheKey)) {
-            Cache::put($cacheKey, $res, 2);
+            Cache::put($cacheKey, $res, 45);
         }
 
         return response()->json($res);
@@ -1300,6 +1300,18 @@ class PayrollController extends Controller
 
         SyncController::invalidateFingerprint(['payroll', 'dashboard']);
 
+        $affectedBranchIds = $activeEmployees->pluck('branch_id')->filter()->unique()->values()->all();
+        $affectedUserIds = \App\Models\User::whereIn('employee_id', $activeEmployees->pluck('employee_id')->all())->pluck('user_id')->all();
+        \App\Services\RealtimeBroadcaster::dispatch(new \App\Events\PayrollGenerated([
+            'period_id' => $period->period_id,
+            'period_name' => $period->period_name,
+            'count' => $totalProcessed,
+            'action' => 'generated',
+            'actor_user_id' => $user ? (int) $user->user_id : null,
+            'toast_title' => 'Payroll Generated',
+            'toast_message' => "Payroll generated for {$period->period_name} ({$totalProcessed} employees).",
+        ], $affectedBranchIds, $affectedUserIds));
+
         return response()->json([
             'success' => true,
             'message' => "Weekly payroll successfully generated for {$period->period_name}: {$totalProcessed} employee(s) processed{$skipNote}.",
@@ -1481,6 +1493,14 @@ class PayrollController extends Controller
         $user = $request->user();
         $payroll = Payroll::with(['employee', 'period'])->findOrFail($id);
 
+        if ($user && in_array($user->role, ['Store Administrator', 'Store Admin'], true)) {
+            $userBranch = $user->employee?->branch_id;
+            $empBranch = $payroll->employee?->branch_id;
+            if (!$userBranch || ($empBranch && (int) $userBranch !== (int) $empBranch)) {
+                return response()->json(['message' => 'Unauthorized: Cannot approve payroll outside your branch.'], 403);
+            }
+        }
+
         if ($payroll->status === 'Paid') {
             return response()->json(['message' => 'This payroll is already marked as Paid.'], 422);
         }
@@ -1501,11 +1521,22 @@ class PayrollController extends Controller
             'module' => 'Payroll',
             'related_id' => $payroll->payroll_id,
             'related_type' => 'App\Models\Payroll',
-            'action_url' => '/payroll',
+            'action_url' => '/employee/payslips',
             'priority' => 'normal',
         ]);
 
         SyncController::invalidateFingerprint(['payroll', 'dashboard']);
+
+        $empUserId = \App\Models\User::where('employee_id', $payroll->employee_id)->value('user_id');
+        \App\Services\RealtimeBroadcaster::dispatch(new \App\Events\PayrollGenerated([
+            'payroll_id' => $payroll->payroll_id,
+            'period_name' => $periodName,
+            'status' => 'Approved',
+            'action' => 'approved',
+            'actor_user_id' => $user ? (int) $user->user_id : null,
+            'toast_title' => 'Payroll Approved',
+            'toast_message' => "{$periodName} payroll has been approved.",
+        ], $payroll->employee?->branch_id ? [(int) $payroll->employee->branch_id] : [], $empUserId ? [(int) $empUserId] : []));
 
         return response()->json(['message' => 'Payroll approved successfully', 'payroll' => $payroll]);
     }
@@ -1519,7 +1550,16 @@ class PayrollController extends Controller
      */
     public function markPaid(Request $request, int|string $id)
     {
+        $user = $request->user();
         $payroll = Payroll::with(['employee.branch', 'period', 'deductions', 'approvedBy.employee'])->findOrFail($id);
+
+        if ($user && in_array($user->role, ['Store Administrator', 'Store Admin'], true)) {
+            $userBranch = $user->employee?->branch_id;
+            $empBranch = $payroll->employee?->branch_id;
+            if (!$userBranch || ($empBranch && (int) $userBranch !== (int) $empBranch)) {
+                return response()->json(['message' => 'Unauthorized: Cannot disburse payroll outside your branch.'], 403);
+            }
+        }
 
         $request->validate([
             'payout_method' => 'nullable|string|max:100',
@@ -1593,11 +1633,22 @@ class PayrollController extends Controller
             'module' => 'Payroll',
             'related_id' => $payroll->payroll_id,
             'related_type' => 'App\Models\Payroll',
-            'action_url' => '/payroll',
+            'action_url' => '/employee/payslips',
             'priority' => 'normal',
         ]);
 
         SyncController::invalidateFingerprint(['payroll', 'dashboard']);
+
+        $paidEmpUserId = \App\Models\User::where('employee_id', $payroll->employee_id)->value('user_id');
+        \App\Services\RealtimeBroadcaster::dispatch(new \App\Events\PayrollGenerated([
+            'payroll_id' => $payroll->payroll_id,
+            'period_name' => $payroll->period?->period_name ?: 'Payroll Period',
+            'status' => 'Paid',
+            'action' => 'paid',
+            'actor_user_id' => $user ? (int) $user->user_id : null,
+            'toast_title' => 'Payroll Released',
+            'toast_message' => 'Your payroll has been marked as Paid.',
+        ], $payroll->employee?->branch_id ? [(int) $payroll->employee->branch_id] : [], $paidEmpUserId ? [(int) $paidEmpUserId] : []));
 
         return response()->json([
             'message' => 'Payroll marked as Paid',

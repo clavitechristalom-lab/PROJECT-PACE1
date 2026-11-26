@@ -1,24 +1,4 @@
-import { fmt, fmtDate } from '../../lib/utils'
-
-function formatClockTime(val) {
-  if (!val || val === '—') return '—'
-  const match = String(val).trim().match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?$/)
-  if (!match) return String(val)
-  const h = Number(match[1])
-  const m = match[2]
-  if (Number.isNaN(h)) return String(val)
-  const suffix = h >= 12 ? 'PM' : 'AM'
-  const h12 = h % 12 || 12
-  return `${String(h12).padStart(2, '0')}:${m} ${suffix}`
-}
-
-function getStockStatus(qty) {
-  const n = Number(qty || 0)
-  if (n <= 0) return 'Out of Stock'
-  if (n === 1) return 'Low Stock'
-  if (n <= 4) return 'Medium Stock'
-  return 'High Stock'
-}
+import { fmt } from '../../lib/utils'
 
 function SectionHeading({ number, title, badgeText }) {
   return (
@@ -53,10 +33,17 @@ function MetricsStrip({ items }) {
   )
 }
 
+function pct(part, total) {
+  const t = Number(total || 0)
+  if (t <= 0) return '0.0%'
+  return `${((Number(part || 0) / t) * 100).toFixed(1)}%`
+}
+
 /**
  * Dedicated Print / PDF view for Reports & Analytics Center.
- * Renders an official list-style contents summary plus full detailed lists
- * across active report modules (omitting Payroll Report when hidePayroll is true).
+ * Renders a concise, executive-level summarized report across all active
+ * modules (omitting Payroll when hidePayroll is true) without dumping
+ * raw line-by-line tables.
  */
 export default function ReportsPrintView({
   printData = {},
@@ -80,27 +67,104 @@ export default function ReportsPrintView({
   const products = inventoryData.products || []
   const accounts = installmentsData.accounts || []
 
-  const totalUnits = products.reduce((sum, p) => sum + Number(p.stock_quantity || 0), 0)
+  // Employees aggregates
+  const totalEmployees = employeesData.total_employees ?? employees.length
   const totalEmpSalaryBase = employees.reduce((sum, e) => sum + Number(e.basic_salary || 0), 0)
-  const totalAttRegHours = attendance.reduce((sum, a) => sum + Number(a.regular_hours || 0), 0)
-  const totalInstPayable = accounts.reduce((sum, a) => sum + Number(a.total_payable || 0), 0)
-  const totalInstPaid = accounts.reduce((sum, a) => sum + Number(a.paid || 0), 0)
-  const totalInstBalance = accounts.reduce((sum, a) => sum + Number(a.balance || 0), 0)
+  const payTypeBreakdown = Object.values(
+    employees.reduce((acc, e) => {
+      const key = e.pay_type || 'Monthly'
+      if (!acc[key]) acc[key] = { label: key, count: 0, base: 0 }
+      acc[key].count += 1
+      acc[key].base += Number(e.basic_salary || 0)
+      return acc
+    }, {})
+  ).sort((a, b) => b.count - a.count)
 
+  // Attendance aggregates
+  const totalAttLogs = attendanceData.total_records ?? attendance.length
+  const totalAttRegHours = attendance.reduce((sum, a) => sum + Number(a.regular_hours || 0), 0)
+  const totalAttOtHours = Number(attendanceData.total_overtime ?? attendance.reduce((sum, a) => sum + Number(a.overtime_hours || 0), 0))
+  const totalAttHours = Number(attendanceData.total_hours ?? attendance.reduce((sum, a) => sum + Number(a.total_hours || 0), 0))
+
+  const attendanceByStatus = Object.values(
+    attendance.reduce((acc, a) => {
+      const st = a.status || 'Unknown'
+      if (!acc[st]) acc[st] = { status: st, count: 0, reg: 0, ot: 0, total: 0 }
+      acc[st].count += 1
+      acc[st].reg += Number(a.regular_hours || 0)
+      acc[st].ot += Number(a.overtime_hours || 0)
+      acc[st].total += Number(a.total_hours || 0)
+      return acc
+    }, {})
+  ).sort((a, b) => b.count - a.count)
+
+  // Payroll aggregates (by period)
+  const totalPayslips = payrollData.total_records ?? payrolls.length
+  const payrollByPeriod = Object.values(
+    payrolls.reduce((acc, p) => {
+      const key = p.period_name || 'Unspecified Period'
+      if (!acc[key]) {
+        acc[key] = { period: key, count: 0, basic: 0, overtime: 0, allowance: 0, gross: 0, deductions: 0, net: 0 }
+      }
+      acc[key].count += 1
+      acc[key].basic += Number(p.basic_salary || 0)
+      acc[key].overtime += Number(p.overtime_pay || 0)
+      acc[key].allowance += Number(p.allowance || 0)
+      acc[key].gross += Number(p.gross_pay || 0)
+      acc[key].deductions += Number(p.total_deductions || 0)
+      acc[key].net += Number(p.net_pay || 0)
+      return acc
+    }, {})
+  )
+
+  // Sales aggregates (by payment method & monthly trend)
+  const totalSalesAmt = Number(salesData.total_sales ?? sales.reduce((sum, s) => sum + Number(s.total_amount || 0), 0))
+  const salesByMethod = Object.values(
+    sales.reduce((acc, s) => {
+      const m = s.payment_method || 'Other'
+      if (!acc[m]) acc[m] = { method: m, count: 0, total: 0 }
+      acc[m].count += 1
+      acc[m].total += Number(s.total_amount || 0)
+      return acc
+    }, {})
+  ).sort((a, b) => b.total - a.total)
+
+  // Inventory aggregates (by category)
+  const totalProducts = inventoryData.total_products ?? products.length
+  const totalUnits = products.reduce((sum, p) => sum + Number(p.stock_quantity || 0), 0)
+  const totalInvValue = Number(inventoryData.total_value ?? products.reduce((sum, p) => sum + Number(p.unit_price || 0) * Number(p.stock_quantity || 0), 0))
   const inventoryCategories = Object.values(
     products.reduce((acc, p) => {
       const cat = p.category || 'Uncategorized'
       if (!acc[cat]) {
-        acc[cat] = { category: cat, count: 0, units: 0, valuation: 0 }
+        acc[cat] = { category: cat, count: 0, units: 0, low: 0, out: 0, valuation: 0 }
       }
       const qty = Number(p.stock_quantity || 0)
       const val = Number(p.unit_price || 0) * qty
       acc[cat].count += 1
       acc[cat].units += qty
+      if (qty <= 0) acc[cat].out += 1
+      else if (qty === 1) acc[cat].low += 1
       acc[cat].valuation += val
       return acc
     }, {})
-  )
+  ).sort((a, b) => b.valuation - a.valuation)
+
+  // Installments aggregates (by status)
+  const totalInstPayable = accounts.reduce((sum, a) => sum + Number(a.total_payable || 0), 0)
+  const totalInstPaid = accounts.reduce((sum, a) => sum + Number(a.paid || 0), 0)
+  const totalInstBalance = Number(installmentsData.total_balance ?? accounts.reduce((sum, a) => sum + Number(a.balance || 0), 0))
+  const installmentsByStatus = Object.values(
+    accounts.reduce((acc, a) => {
+      const st = a.status || 'Active'
+      if (!acc[st]) acc[st] = { status: st, count: 0, payable: 0, paid: 0, balance: 0 }
+      acc[st].count += 1
+      acc[st].payable += Number(a.total_payable || 0)
+      acc[st].paid += Number(a.paid || 0)
+      acc[st].balance += Number(a.balance || 0)
+      return acc
+    }, {})
+  ).sort((a, b) => b.balance - a.balance)
 
   const companyName = companySettings?.company_name || 'Z-LICZ Furniture & Appliances Trading'
   const companySub = [companySettings?.address, companySettings?.phone, companySettings?.email]
@@ -132,43 +196,43 @@ export default function ReportsPrintView({
   const baseContents = [
     {
       key: 'employees',
-      title: 'Employees Report',
-      summary: `${employeesData.total_employees ?? employees.length} Registered • ${employeesData.active_employees ?? 0} Active • ${employeesData.inactive_employees ?? 0} Inactive • ${employeesData.verified_employees ?? 0} Verified`,
-      metric: `${employeesData.total_employees ?? employees.length} Employees`,
+      title: 'Employees Summary',
+      summary: `${totalEmployees} Registered • ${employeesData.active_employees ?? 0} Active • ${employeesData.inactive_employees ?? 0} Inactive • ${employeesData.verified_employees ?? 0} Verified`,
+      metric: `${totalEmployees} Staff`,
     },
     {
       key: 'attendance',
-      title: 'Attendance Report',
-      summary: `${attendanceData.total_records ?? attendance.length} Logs • Present: ${attendanceData.present_count ?? 0} • Late: ${attendanceData.late_count ?? 0} • Half Day: ${attendanceData.half_day_count ?? 0} • Absent: ${attendanceData.absent_count ?? 0}`,
-      metric: `${Number(attendanceData.total_hours || 0).toFixed(2)} hrs`,
+      title: 'Attendance Summary',
+      summary: `${totalAttLogs} Logs • Present: ${attendanceData.present_count ?? 0} • Late: ${attendanceData.late_count ?? 0} • Half Day: ${attendanceData.half_day_count ?? 0} • Absent: ${attendanceData.absent_count ?? 0}`,
+      metric: `${totalAttHours.toFixed(2)} hrs`,
     },
     ...(!hidePayroll
       ? [
           {
             key: 'payroll',
-            title: 'Payroll Report',
-            summary: `${payrollData.total_records ?? payrolls.length} Payslips • Gross: ${fmt(payrollData.total_gross || 0)} • Deductions: -${fmt(payrollData.total_deductions || 0)}`,
+            title: 'Payroll Summary',
+            summary: `${totalPayslips} Payslips • Gross: ${fmt(payrollData.total_gross || 0)} • Deductions: -${fmt(payrollData.total_deductions || 0)}`,
             metric: fmt(payrollData.total_net || 0),
           },
         ]
       : []),
     {
       key: 'sales',
-      title: 'Sales & Revenue',
+      title: 'Sales & Revenue Summary',
       summary: `${sales.length} Invoices • Cash: ${fmt(salesData.cash_sales || 0)} • Installment: ${fmt(salesData.installment_sales || 0)}`,
-      metric: fmt(salesData.total_sales || 0),
+      metric: fmt(totalSalesAmt),
     },
     {
       key: 'inventory',
-      title: 'Inventory Valuation',
-      summary: `${inventoryData.total_products ?? products.length} Products • ${totalUnits} Units • Low Stock: ${inventoryData.low_stock_count ?? 0} • Out of Stock: ${inventoryData.out_of_stock_count ?? 0}`,
-      metric: fmt(inventoryData.total_value || 0),
+      title: 'Inventory Valuation Summary',
+      summary: `${totalProducts} SKUs • ${totalUnits} Units • Low Stock: ${inventoryData.low_stock_count ?? 0} • Out of Stock: ${inventoryData.out_of_stock_count ?? 0}`,
+      metric: fmt(totalInvValue),
     },
     {
       key: 'installments',
-      title: 'Installments & Aging',
+      title: 'Installments & Receivables Summary',
       summary: `${accounts.length} Accounts • Active: ${installmentsData.active_accounts ?? 0} • Overdue: ${installmentsData.overdue_accounts ?? 0} • Completed: ${installmentsData.completed_accounts ?? 0}`,
-      metric: fmt(installmentsData.total_balance || 0),
+      metric: fmt(totalInstBalance),
     },
   ]
 
@@ -183,7 +247,7 @@ export default function ReportsPrintView({
   }, {})
 
   return (
-    <div className="reports-print-document w-full bg-white text-slate-900 font-sans text-[11px] leading-snug space-y-5">
+    <div className="reports-print-document w-full bg-white text-slate-900 font-sans text-[11px] leading-snug space-y-4">
       {/* OFFICIAL HEADER & DOCUMENT METADATA */}
       <div className="border-b-2 border-[#1e3a5f] pb-3 flex flex-col sm:flex-row sm:justify-between sm:items-start gap-3">
         <div>
@@ -195,13 +259,13 @@ export default function ReportsPrintView({
             style={{ color: '#1e3a5f' }}
           >
             {hidePayroll && filters.branch && filters.branch !== 'All'
-              ? `${filters.branch} — Branch Operational & Analytics Report`
-              : 'Reports & Analytics Center — Detailed Report'}
+              ? `${filters.branch} — Branch Summary Report`
+              : 'Reports & Analytics — Executive Summary'}
           </h1>
           <p className="text-[11px] text-slate-600 mt-0.5">
             {hidePayroll
-              ? `Comprehensive Operational, Workforce, Sales, Inventory & Receivables List for ${filters.branch && filters.branch !== 'All' ? filters.branch : 'Assigned Branch'}`
-              : 'Comprehensive Operational, Workforce, Payroll, Sales, Inventory & Receivables List'}
+              ? `Consolidated Operational, Workforce, Sales, Inventory & Receivables Summary for ${filters.branch && filters.branch !== 'All' ? filters.branch : 'Assigned Branch'}`
+              : 'Consolidated Organization-Wide Operational, Workforce, Payroll, Sales, Inventory & Receivables Summary'}
           </p>
           {companySub && (
             <p className="text-[10px] text-slate-500 mt-1">{companySub}</p>
@@ -246,13 +310,13 @@ export default function ReportsPrintView({
         </table>
       </div>
 
-      {/* CONTENTS / REPORT INDEX LIST */}
+      {/* EXECUTIVE OVERVIEW */}
       <div className="print-avoid-break border border-slate-300">
         <div
           className="print-exact px-3 py-1.5 text-white text-[11px] font-bold uppercase tracking-wider"
           style={{ backgroundColor: '#1e3a5f' }}
         >
-          Report Contents &amp; Executive List Summary
+          Executive Overview
         </div>
         <ol className="divide-y divide-slate-200 m-0 p-0 list-none">
           {contentsRows.map((row) => (
@@ -273,16 +337,16 @@ export default function ReportsPrintView({
         </ol>
       </div>
 
-      {/* SECTION 1: EMPLOYEES REPORT */}
-      <section className="space-y-0">
+      {/* SECTION 1: EMPLOYEES SUMMARY */}
+      <section className="print-avoid-break space-y-0">
         <SectionHeading
           number={sectionNumberMap.employees}
-          title="Employees Report"
-          badgeText={`${employees.length} Record${employees.length === 1 ? '' : 's'}`}
+          title="Employees Summary"
+          badgeText={`${totalEmployees} Employee${totalEmployees === 1 ? '' : 's'}`}
         />
         <MetricsStrip
           items={[
-            { label: 'Total Employees', value: employeesData.total_employees ?? employees.length },
+            { label: 'Total Employees', value: totalEmployees },
             { label: 'Active / Inactive', value: `${employeesData.active_employees ?? 0} / ${employeesData.inactive_employees ?? 0}` },
             { label: 'Verified Accounts', value: `${employeesData.verified_employees ?? 0} Verified` },
             { label: 'Combined Monthly Base', value: fmt(totalEmpSalaryBase) },
@@ -292,7 +356,7 @@ export default function ReportsPrintView({
         {(employeesData.by_department?.length > 0 ||
           employeesData.by_branch?.length > 0 ||
           employeesData.by_position?.length > 0) && (
-          <div className="print-avoid-break grid grid-cols-3 border-x border-b border-slate-300 divide-x divide-slate-300 bg-white text-[10px]">
+          <div className="grid grid-cols-3 border-x border-b border-slate-300 divide-x divide-slate-300 bg-white text-[10px]">
             <div className="p-2">
               <div className="font-bold uppercase text-slate-600 text-[9px] mb-1">
                 By Department
@@ -335,133 +399,86 @@ export default function ReportsPrintView({
           </div>
         )}
 
-        <table className="w-full text-[9.5px] border-x border-b border-slate-300">
-          <thead>
-            <tr className="bg-slate-100 print-exact border-b border-slate-300 text-slate-700 uppercase font-bold text-[8.5px]">
-              <th className="py-1.5 px-1.5 text-center border-r border-slate-200 w-6">#</th>
-              <th className="py-1.5 px-1.5 text-left border-r border-slate-200">Code</th>
-              <th className="py-1.5 px-1.5 text-left border-r border-slate-200">Employee Name</th>
-              <th className="py-1.5 px-1.5 text-left border-r border-slate-200">Department</th>
-              <th className="py-1.5 px-1.5 text-left border-r border-slate-200">Position</th>
-              <th className="py-1.5 px-1.5 text-left border-r border-slate-200">Branch</th>
-              <th className="py-1.5 px-1.5 text-left border-r border-slate-200">Pay Type</th>
-              <th className="py-1.5 px-1.5 text-right border-r border-slate-200">Basic Salary</th>
-              <th className="py-1.5 px-1.5 text-center border-r border-slate-200">Hire Date</th>
-              <th className="py-1.5 px-1.5 text-center border-r border-slate-200">Verified</th>
-              <th className="py-1.5 px-1.5 text-center">Status</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-200">
-            {employees.length > 0 ? (
-              employees.map((emp, idx) => (
-                <tr key={emp.employee_id || idx} className={idx % 2 === 1 ? 'bg-slate-50/70 print-exact' : ''}>
-                  <td className="py-1 px-1.5 text-center font-mono text-slate-500 border-r border-slate-200">{idx + 1}</td>
-                  <td className="py-1 px-1.5 font-mono font-bold border-r border-slate-200 whitespace-nowrap">{emp.employee_code}</td>
-                  <td className="py-1 px-1.5 font-semibold border-r border-slate-200">{emp.name}</td>
-                  <td className="py-1 px-1.5 border-r border-slate-200">{emp.department || '—'}</td>
-                  <td className="py-1 px-1.5 border-r border-slate-200">{emp.position || '—'}</td>
-                  <td className="py-1 px-1.5 border-r border-slate-200">{emp.branch || '—'}</td>
-                  <td className="py-1 px-1.5 border-r border-slate-200">{emp.pay_type || 'Monthly'}</td>
-                  <td className="py-1 px-1.5 text-right font-mono font-semibold border-r border-slate-200 whitespace-nowrap">{fmt(emp.basic_salary)}</td>
-                  <td className="py-1 px-1.5 text-center font-mono border-r border-slate-200 whitespace-nowrap">{emp.hire_date ? fmtDate(emp.hire_date) : '—'}</td>
-                  <td className="py-1 px-1.5 text-center border-r border-slate-200">{emp.verified ? 'Verified' : 'Unverified'}</td>
-                  <td className="py-1 px-1.5 text-center font-semibold">{emp.status || '—'}</td>
-                </tr>
-              ))
-            ) : (
-              <tr>
-                <td colSpan={11} className="py-3 px-3 text-center italic text-slate-500">
-                  No employee records found matching the selected filters.
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
+        {payTypeBreakdown.length > 0 && (
+          <div className="border-x border-b border-slate-300 bg-slate-50/60 print-exact px-3 py-1.5 text-[10px]">
+            <span className="font-bold uppercase text-slate-600 text-[9px] mr-2">Pay Structure:</span>
+            {payTypeBreakdown.map((pt) => (
+              <span key={pt.label} className="inline-block mr-4">
+                <strong>{pt.label}</strong>: {pt.count} staff ({fmt(pt.base)})
+              </span>
+            ))}
+          </div>
+        )}
       </section>
 
-      {/* SECTION 2: ATTENDANCE REPORT */}
-      <section className="space-y-0">
+      {/* SECTION 2: ATTENDANCE SUMMARY */}
+      <section className="print-avoid-break space-y-0">
         <SectionHeading
           number={sectionNumberMap.attendance}
-          title="Attendance Report"
-          badgeText={`${attendance.length} Log${attendance.length === 1 ? '' : 's'}`}
+          title="Attendance Summary"
+          badgeText={`${totalAttLogs} Log${totalAttLogs === 1 ? '' : 's'}`}
         />
         <MetricsStrip
           items={[
             { label: 'Present / Late', value: `${attendanceData.present_count ?? 0} Present / ${attendanceData.late_count ?? 0} Late` },
             { label: 'Half Day / Absent', value: `${attendanceData.half_day_count ?? 0} Half Day / ${attendanceData.absent_count ?? 0} Absent` },
-            { label: 'Regular / OT Hours', value: `${totalAttRegHours.toFixed(2)}h Reg / ${Number(attendanceData.total_overtime || 0).toFixed(2)}h OT` },
-            { label: 'Total Rendered Hours', value: `${Number(attendanceData.total_hours || 0).toFixed(2)} hrs` },
+            { label: 'Regular / OT Hours', value: `${totalAttRegHours.toFixed(2)}h Reg / ${totalAttOtHours.toFixed(2)}h OT` },
+            { label: 'Total Rendered Hours', value: `${totalAttHours.toFixed(2)} hrs` },
           ]}
         />
-        <table className="w-full text-[9.5px] border-x border-b border-slate-300">
+        <table className="w-full text-[10px] border-x border-b border-slate-300">
           <thead>
-            <tr className="bg-slate-100 print-exact border-b border-slate-300 text-slate-700 uppercase font-bold text-[8.5px]">
-              <th className="py-1.5 px-1.5 text-center border-r border-slate-200 w-6">#</th>
-              <th className="py-1.5 px-1.5 text-left border-r border-slate-200">Date</th>
-              <th className="py-1.5 px-1.5 text-left border-r border-slate-200">Code</th>
-              <th className="py-1.5 px-1.5 text-left border-r border-slate-200">Employee Name</th>
-              <th className="py-1.5 px-1.5 text-left border-r border-slate-200">Branch / Dept</th>
-              <th className="py-1.5 px-1.5 text-center border-r border-slate-200">Time In</th>
-              <th className="py-1.5 px-1.5 text-center border-r border-slate-200">Time Out</th>
-              <th className="py-1.5 px-1.5 text-right border-r border-slate-200">Reg Hrs</th>
-              <th className="py-1.5 px-1.5 text-right border-r border-slate-200">OT</th>
-              <th className="py-1.5 px-1.5 text-right border-r border-slate-200">Total</th>
-              <th className="py-1.5 px-1.5 text-left border-r border-slate-200">Verification</th>
-              <th className="py-1.5 px-1.5 text-center">Status</th>
+            <tr className="bg-slate-100 print-exact border-b border-slate-300 text-slate-700 uppercase font-bold text-[9px]">
+              <th className="py-1.5 px-2 text-left border-r border-slate-200">Status Category</th>
+              <th className="py-1.5 px-2 text-center border-r border-slate-200">Logs</th>
+              <th className="py-1.5 px-2 text-center border-r border-slate-200">Share</th>
+              <th className="py-1.5 px-2 text-right border-r border-slate-200">Regular Hours</th>
+              <th className="py-1.5 px-2 text-right border-r border-slate-200">Overtime Hours</th>
+              <th className="py-1.5 px-2 text-right">Total Hours</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-200">
-            {attendance.length > 0 ? (
-              attendance.map((a, idx) => (
-                <tr key={a.attendance_id || idx} className={idx % 2 === 1 ? 'bg-slate-50/70 print-exact' : ''}>
-                  <td className="py-1 px-1.5 text-center font-mono text-slate-500 border-r border-slate-200">{idx + 1}</td>
-                  <td className="py-1 px-1.5 font-mono border-r border-slate-200 whitespace-nowrap">{a.attendance_date}</td>
-                  <td className="py-1 px-1.5 font-mono font-bold border-r border-slate-200 whitespace-nowrap">{a.employee_code}</td>
-                  <td className="py-1 px-1.5 font-semibold border-r border-slate-200">{a.employee_name}</td>
-                  <td className="py-1 px-1.5 border-r border-slate-200">
-                    {[a.branch, a.department].filter(Boolean).join(' • ') || '—'}
-                  </td>
-                  <td className="py-1 px-1.5 text-center font-mono border-r border-slate-200 whitespace-nowrap">{formatClockTime(a.time_in)}</td>
-                  <td className="py-1 px-1.5 text-center font-mono border-r border-slate-200 whitespace-nowrap">{formatClockTime(a.time_out)}</td>
-                  <td className="py-1 px-1.5 text-right font-mono border-r border-slate-200">{Number(a.regular_hours || 0).toFixed(2)}h</td>
-                  <td className="py-1 px-1.5 text-right font-mono border-r border-slate-200">{Number(a.overtime_hours || 0).toFixed(2)}h</td>
-                  <td className="py-1 px-1.5 text-right font-mono font-bold border-r border-slate-200">{Number(a.total_hours || 0).toFixed(2)}h</td>
-                  <td className="py-1 px-1.5 border-r border-slate-200">{String(a.verification_method || '—').replace(/\s*\(Authorized by Employee\)/gi, '').trim()}</td>
-                  <td className="py-1 px-1.5 text-center font-semibold">{a.status || '—'}</td>
+            {attendanceByStatus.length > 0 ? (
+              attendanceByStatus.map((row, idx) => (
+                <tr key={row.status} className={idx % 2 === 1 ? 'bg-slate-50/70 print-exact' : ''}>
+                  <td className="py-1 px-2 font-semibold border-r border-slate-200">{row.status}</td>
+                  <td className="py-1 px-2 text-center font-mono border-r border-slate-200">{row.count}</td>
+                  <td className="py-1 px-2 text-center font-mono text-slate-600 border-r border-slate-200">{pct(row.count, totalAttLogs)}</td>
+                  <td className="py-1 px-2 text-right font-mono border-r border-slate-200">{row.reg.toFixed(2)}h</td>
+                  <td className="py-1 px-2 text-right font-mono border-r border-slate-200">{row.ot.toFixed(2)}h</td>
+                  <td className="py-1 px-2 text-right font-mono font-bold">{row.total.toFixed(2)}h</td>
                 </tr>
               ))
             ) : (
               <tr>
-                <td colSpan={12} className="py-3 px-3 text-center italic text-slate-500">
+                <td colSpan={6} className="py-2.5 px-3 text-center italic text-slate-500">
                   No attendance logs found matching the selected filters.
                 </td>
               </tr>
             )}
           </tbody>
-          {attendance.length > 0 && (
+          {attendanceByStatus.length > 0 && (
             <tfoot>
-              <tr className="bg-slate-100 print-exact border-t border-slate-300 font-bold text-[9.5px]">
-                <td colSpan={7} className="py-1.5 px-1.5 text-right uppercase text-slate-700 border-r border-slate-200">
-                  Totals ({attendance.length} Records)
-                </td>
-                <td className="py-1.5 px-1.5 text-right font-mono border-r border-slate-200">{totalAttRegHours.toFixed(2)}h</td>
-                <td className="py-1.5 px-1.5 text-right font-mono border-r border-slate-200">{Number(attendanceData.total_overtime || 0).toFixed(2)}h</td>
-                <td className="py-1.5 px-1.5 text-right font-mono border-r border-slate-200">{Number(attendanceData.total_hours || 0).toFixed(2)}h</td>
-                <td colSpan={2} className="py-1.5 px-1.5"></td>
+              <tr className="bg-slate-100 print-exact border-t border-slate-300 font-bold text-[10px]">
+                <td className="py-1.5 px-2 uppercase text-slate-700 border-r border-slate-200">Total</td>
+                <td className="py-1.5 px-2 text-center font-mono border-r border-slate-200">{totalAttLogs}</td>
+                <td className="py-1.5 px-2 text-center font-mono border-r border-slate-200">100.0%</td>
+                <td className="py-1.5 px-2 text-right font-mono border-r border-slate-200">{totalAttRegHours.toFixed(2)}h</td>
+                <td className="py-1.5 px-2 text-right font-mono border-r border-slate-200">{totalAttOtHours.toFixed(2)}h</td>
+                <td className="py-1.5 px-2 text-right font-mono">{totalAttHours.toFixed(2)}h</td>
               </tr>
             </tfoot>
           )}
         </table>
       </section>
 
-      {/* SECTION 3: PAYROLL REPORT (Administrator only — hidden for Store Admin) */}
+      {/* SECTION 3: PAYROLL SUMMARY (Administrator only — hidden for Store Admin) */}
       {!hidePayroll && (
-        <section className="space-y-0">
+        <section className="print-avoid-break space-y-0">
           <SectionHeading
             number={sectionNumberMap.payroll}
-            title="Payroll Report"
-            badgeText={`${payrolls.length} Payslip${payrolls.length === 1 ? '' : 's'}`}
+            title="Payroll Summary"
+            badgeText={`${totalPayslips} Payslip${totalPayslips === 1 ? '' : 's'}`}
           />
           <MetricsStrip
             items={[
@@ -471,65 +488,49 @@ export default function ReportsPrintView({
               { label: 'Net Disbursed', value: fmt(payrollData.total_net || 0) },
             ]}
           />
-          <table className="w-full text-[9.5px] border-x border-b border-slate-300">
+          <table className="w-full text-[10px] border-x border-b border-slate-300">
             <thead>
-              <tr className="bg-slate-100 print-exact border-b border-slate-300 text-slate-700 uppercase font-bold text-[8.5px]">
-                <th className="py-1.5 px-1.5 text-center border-r border-slate-200 w-6">#</th>
-                <th className="py-1.5 px-1.5 text-left border-r border-slate-200">Payroll Period</th>
-                <th className="py-1.5 px-1.5 text-left border-r border-slate-200">Employee</th>
-                <th className="py-1.5 px-1.5 text-left border-r border-slate-200">Branch / Dept</th>
-                <th className="py-1.5 px-1.5 text-right border-r border-slate-200">Basic Pay</th>
-                <th className="py-1.5 px-1.5 text-right border-r border-slate-200">OT Pay</th>
-                <th className="py-1.5 px-1.5 text-right border-r border-slate-200">Allowances</th>
-                <th className="py-1.5 px-1.5 text-right border-r border-slate-200">Gross Pay</th>
-                <th className="py-1.5 px-1.5 text-right border-r border-slate-200">Deductions</th>
-                <th className="py-1.5 px-1.5 text-right border-r border-slate-200">Net Pay</th>
-                <th className="py-1.5 px-1.5 text-center">Status</th>
+              <tr className="bg-slate-100 print-exact border-b border-slate-300 text-slate-700 uppercase font-bold text-[9px]">
+                <th className="py-1.5 px-2 text-left border-r border-slate-200">Payroll Period</th>
+                <th className="py-1.5 px-2 text-center border-r border-slate-200">Payslips</th>
+                <th className="py-1.5 px-2 text-right border-r border-slate-200">Basic Pay</th>
+                <th className="py-1.5 px-2 text-right border-r border-slate-200">OT &amp; Allowances</th>
+                <th className="py-1.5 px-2 text-right border-r border-slate-200">Gross Pay</th>
+                <th className="py-1.5 px-2 text-right border-r border-slate-200">Deductions</th>
+                <th className="py-1.5 px-2 text-right">Net Pay</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-200">
-              {payrolls.length > 0 ? (
-                payrolls.map((p, idx) => (
-                  <tr key={p.payroll_id || idx} className={idx % 2 === 1 ? 'bg-slate-50/70 print-exact' : ''}>
-                    <td className="py-1 px-1.5 text-center font-mono text-slate-500 border-r border-slate-200">{idx + 1}</td>
-                    <td className="py-1 px-1.5 font-mono text-[9px] border-r border-slate-200">{p.period_name}</td>
-                    <td className="py-1 px-1.5 border-r border-slate-200">
-                      <span className="font-semibold">{p.employee_name}</span>
-                      {p.employee_code ? <span className="text-slate-500 font-mono text-[8.5px] ml-1">({p.employee_code})</span> : null}
-                    </td>
-                    <td className="py-1 px-1.5 border-r border-slate-200">
-                      {[p.branch, p.department].filter(Boolean).join(' • ') || '—'}
-                    </td>
-                    <td className="py-1 px-1.5 text-right font-mono border-r border-slate-200 whitespace-nowrap">{fmt(p.basic_salary)}</td>
-                    <td className="py-1 px-1.5 text-right font-mono border-r border-slate-200 whitespace-nowrap">{fmt(p.overtime_pay)}</td>
-                    <td className="py-1 px-1.5 text-right font-mono border-r border-slate-200 whitespace-nowrap">{fmt(p.allowance)}</td>
-                    <td className="py-1 px-1.5 text-right font-mono font-semibold border-r border-slate-200 whitespace-nowrap">{fmt(p.gross_pay)}</td>
-                    <td className="py-1 px-1.5 text-right font-mono text-rose-700 border-r border-slate-200 whitespace-nowrap">-{fmt(p.total_deductions)}</td>
-                    <td className="py-1 px-1.5 text-right font-mono font-bold border-r border-slate-200 whitespace-nowrap">{fmt(p.net_pay)}</td>
-                    <td className="py-1 px-1.5 text-center font-semibold">{p.status || '—'}</td>
+              {payrollByPeriod.length > 0 ? (
+                payrollByPeriod.map((row, idx) => (
+                  <tr key={row.period} className={idx % 2 === 1 ? 'bg-slate-50/70 print-exact' : ''}>
+                    <td className="py-1 px-2 font-semibold border-r border-slate-200">{row.period}</td>
+                    <td className="py-1 px-2 text-center font-mono border-r border-slate-200">{row.count}</td>
+                    <td className="py-1 px-2 text-right font-mono border-r border-slate-200 whitespace-nowrap">{fmt(row.basic)}</td>
+                    <td className="py-1 px-2 text-right font-mono border-r border-slate-200 whitespace-nowrap">{fmt(row.overtime + row.allowance)}</td>
+                    <td className="py-1 px-2 text-right font-mono font-semibold border-r border-slate-200 whitespace-nowrap">{fmt(row.gross)}</td>
+                    <td className="py-1 px-2 text-right font-mono text-rose-700 border-r border-slate-200 whitespace-nowrap">-{fmt(row.deductions)}</td>
+                    <td className="py-1 px-2 text-right font-mono font-bold whitespace-nowrap">{fmt(row.net)}</td>
                   </tr>
                 ))
               ) : (
                 <tr>
-                  <td colSpan={11} className="py-3 px-3 text-center italic text-slate-500">
+                  <td colSpan={7} className="py-2.5 px-3 text-center italic text-slate-500">
                     No payroll records found matching the selected filters.
                   </td>
                 </tr>
               )}
             </tbody>
-            {payrolls.length > 0 && (
+            {payrollByPeriod.length > 0 && (
               <tfoot>
-                <tr className="bg-slate-100 print-exact border-t border-slate-300 font-bold text-[9.5px]">
-                  <td colSpan={4} className="py-1.5 px-1.5 text-right uppercase text-slate-700 border-r border-slate-200">
-                    Totals ({payrolls.length} Payslips)
-                  </td>
-                  <td className="py-1.5 px-1.5 text-right font-mono border-r border-slate-200 whitespace-nowrap">{fmt(payrollData.total_basic || 0)}</td>
-                  <td className="py-1.5 px-1.5 text-right font-mono border-r border-slate-200 whitespace-nowrap">{fmt(payrollData.total_overtime || 0)}</td>
-                  <td className="py-1.5 px-1.5 text-right font-mono border-r border-slate-200 whitespace-nowrap">{fmt(payrollData.total_allowance || 0)}</td>
-                  <td className="py-1.5 px-1.5 text-right font-mono border-r border-slate-200 whitespace-nowrap">{fmt(payrollData.total_gross || 0)}</td>
-                  <td className="py-1.5 px-1.5 text-right font-mono text-rose-700 border-r border-slate-200 whitespace-nowrap">-{fmt(payrollData.total_deductions || 0)}</td>
-                  <td className="py-1.5 px-1.5 text-right font-mono border-r border-slate-200 whitespace-nowrap">{fmt(payrollData.total_net || 0)}</td>
-                  <td className="py-1.5 px-1.5"></td>
+                <tr className="bg-slate-100 print-exact border-t border-slate-300 font-bold text-[10px]">
+                  <td className="py-1.5 px-2 uppercase text-slate-700 border-r border-slate-200">Total</td>
+                  <td className="py-1.5 px-2 text-center font-mono border-r border-slate-200">{totalPayslips}</td>
+                  <td className="py-1.5 px-2 text-right font-mono border-r border-slate-200 whitespace-nowrap">{fmt(payrollData.total_basic || 0)}</td>
+                  <td className="py-1.5 px-2 text-right font-mono border-r border-slate-200 whitespace-nowrap">{fmt(Number(payrollData.total_overtime || 0) + Number(payrollData.total_allowance || 0))}</td>
+                  <td className="py-1.5 px-2 text-right font-mono border-r border-slate-200 whitespace-nowrap">{fmt(payrollData.total_gross || 0)}</td>
+                  <td className="py-1.5 px-2 text-right font-mono text-rose-700 border-r border-slate-200 whitespace-nowrap">-{fmt(payrollData.total_deductions || 0)}</td>
+                  <td className="py-1.5 px-2 text-right font-mono whitespace-nowrap">{fmt(payrollData.total_net || 0)}</td>
                 </tr>
               </tfoot>
             )}
@@ -537,16 +538,16 @@ export default function ReportsPrintView({
         </section>
       )}
 
-      {/* SALES & REVENUE */}
-      <section className="space-y-0">
+      {/* SALES & REVENUE SUMMARY */}
+      <section className="print-avoid-break space-y-0">
         <SectionHeading
           number={sectionNumberMap.sales}
-          title="Sales & Revenue"
+          title="Sales & Revenue Summary"
           badgeText={`${sales.length} Invoice${sales.length === 1 ? '' : 's'}`}
         />
         <MetricsStrip
           items={[
-            { label: 'Total Sales Revenue', value: fmt(salesData.total_sales || 0) },
+            { label: 'Total Sales Revenue', value: fmt(totalSalesAmt) },
             { label: 'Cash Sales', value: fmt(salesData.cash_sales || 0) },
             { label: 'Installment Sales', value: fmt(salesData.installment_sales || 0) },
             { label: 'Avg Ticket Size', value: fmt(salesData.avg_transaction || 0) },
@@ -554,8 +555,8 @@ export default function ReportsPrintView({
         />
 
         {salesData.trend?.length > 0 && (
-          <div className="print-avoid-break border-x border-b border-slate-300 bg-white px-3 py-1.5 text-[10px]">
-            <span className="font-bold uppercase text-slate-600 text-[9px] mr-2">Monthly Summary:</span>
+          <div className="border-x border-b border-slate-300 bg-white px-3 py-1.5 text-[10px]">
+            <span className="font-bold uppercase text-slate-600 text-[9px] mr-2">Monthly Trend:</span>
             {salesData.trend.map((t, i) => (
               <span key={t.month || i} className="inline-block mr-3">
                 <strong>{t.month}</strong>: {t.transactions} tx ({fmt(t.sales)})
@@ -567,141 +568,112 @@ export default function ReportsPrintView({
         <table className="w-full text-[10px] border-x border-b border-slate-300">
           <thead>
             <tr className="bg-slate-100 print-exact border-b border-slate-300 text-slate-700 uppercase font-bold text-[9px]">
-              <th className="py-1.5 px-2 text-center border-r border-slate-200 w-7">#</th>
-              <th className="py-1.5 px-2 text-left border-r border-slate-200">Invoice No</th>
-              <th className="py-1.5 px-2 text-left border-r border-slate-200">Sale Date</th>
-              <th className="py-1.5 px-2 text-left border-r border-slate-200">Customer Name</th>
               <th className="py-1.5 px-2 text-left border-r border-slate-200">Payment Method</th>
-              <th className="py-1.5 px-2 text-right border-r border-slate-200">Total Amount</th>
-              <th className="py-1.5 px-2 text-center">Status</th>
+              <th className="py-1.5 px-2 text-center border-r border-slate-200">Invoices</th>
+              <th className="py-1.5 px-2 text-center border-r border-slate-200">Revenue Share</th>
+              <th className="py-1.5 px-2 text-right">Total Revenue</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-200">
-            {sales.length > 0 ? (
-              sales.map((s, idx) => (
-                <tr key={s.sale_id || idx} className={idx % 2 === 1 ? 'bg-slate-50/70 print-exact' : ''}>
-                  <td className="py-1 px-2 text-center font-mono text-slate-500 border-r border-slate-200">{idx + 1}</td>
-                  <td className="py-1 px-2 font-mono font-bold border-r border-slate-200 whitespace-nowrap">{s.invoice_no}</td>
-                  <td className="py-1 px-2 font-mono border-r border-slate-200 whitespace-nowrap">{s.sale_date}</td>
-                  <td className="py-1 px-2 font-semibold border-r border-slate-200">{s.customer_name}</td>
-                  <td className="py-1 px-2 border-r border-slate-200">{s.payment_method}</td>
-                  <td className="py-1 px-2 text-right font-mono font-bold border-r border-slate-200 whitespace-nowrap">{fmt(s.total_amount)}</td>
-                  <td className="py-1 px-2 text-center font-semibold">{s.status || '—'}</td>
+            {salesByMethod.length > 0 ? (
+              salesByMethod.map((row, idx) => (
+                <tr key={row.method} className={idx % 2 === 1 ? 'bg-slate-50/70 print-exact' : ''}>
+                  <td className="py-1 px-2 font-semibold border-r border-slate-200">{row.method}</td>
+                  <td className="py-1 px-2 text-center font-mono border-r border-slate-200">{row.count}</td>
+                  <td className="py-1 px-2 text-center font-mono text-slate-600 border-r border-slate-200">{pct(row.total, totalSalesAmt)}</td>
+                  <td className="py-1 px-2 text-right font-mono font-bold whitespace-nowrap">{fmt(row.total)}</td>
                 </tr>
               ))
             ) : (
               <tr>
-                <td colSpan={7} className="py-3 px-3 text-center italic text-slate-500">
+                <td colSpan={4} className="py-2.5 px-3 text-center italic text-slate-500">
                   No sales transactions recorded for the selected filters.
                 </td>
               </tr>
             )}
           </tbody>
-          {sales.length > 0 && (
+          {salesByMethod.length > 0 && (
             <tfoot>
               <tr className="bg-slate-100 print-exact border-t border-slate-300 font-bold text-[10px]">
-                <td colSpan={5} className="py-1.5 px-2 text-right uppercase text-slate-700 border-r border-slate-200">
-                  Total Sales ({sales.length} Invoices)
-                </td>
-                <td className="py-1.5 px-2 text-right font-mono border-r border-slate-200 whitespace-nowrap">{fmt(salesData.total_sales || 0)}</td>
-                <td className="py-1.5 px-2"></td>
+                <td className="py-1.5 px-2 uppercase text-slate-700 border-r border-slate-200">Total Sales</td>
+                <td className="py-1.5 px-2 text-center font-mono border-r border-slate-200">{sales.length}</td>
+                <td className="py-1.5 px-2 text-center font-mono border-r border-slate-200">100.0%</td>
+                <td className="py-1.5 px-2 text-right font-mono whitespace-nowrap">{fmt(totalSalesAmt)}</td>
               </tr>
             </tfoot>
           )}
         </table>
       </section>
 
-      {/* INVENTORY VALUATION */}
-      <section className="space-y-0">
+      {/* INVENTORY VALUATION SUMMARY */}
+      <section className="print-avoid-break space-y-0">
         <SectionHeading
           number={sectionNumberMap.inventory}
-          title="Inventory Valuation"
-          badgeText={`${products.length} Product${products.length === 1 ? '' : 's'}`}
+          title="Inventory Valuation Summary"
+          badgeText={`${totalProducts} SKU${totalProducts === 1 ? '' : 's'} • ${totalUnits} Units`}
         />
         <MetricsStrip
           items={[
-            { label: 'Total Products / Units', value: `${inventoryData.total_products ?? products.length} SKUs • ${totalUnits} Units` },
-            { label: 'Total Stock Valuation', value: fmt(inventoryData.total_value || 0) },
+            { label: 'Total Products / Units', value: `${totalProducts} SKUs • ${totalUnits} Units` },
+            { label: 'Total Stock Valuation', value: fmt(totalInvValue) },
             { label: 'Low Stock (Qty = 1)', value: `${inventoryData.low_stock_count ?? 0} Item(s)` },
             { label: 'Out of Stock (Qty <= 0)', value: `${inventoryData.out_of_stock_count ?? 0} Item(s)` },
           ]}
         />
 
-        {inventoryCategories.length > 0 && (
-          <div className="print-avoid-break border-x border-b border-slate-300 bg-white px-3 py-1.5 text-[10px]">
-            <span className="font-bold uppercase text-slate-600 text-[9px] mr-2">Category Breakdown:</span>
-            {inventoryCategories.map((c) => (
-              <span key={c.category} className="inline-block mr-3">
-                <strong>{c.category}</strong>: {c.count} SKU / {c.units} units ({fmt(c.valuation)})
-              </span>
-            ))}
-          </div>
-        )}
-
         <table className="w-full text-[10px] border-x border-b border-slate-300">
           <thead>
             <tr className="bg-slate-100 print-exact border-b border-slate-300 text-slate-700 uppercase font-bold text-[9px]">
-              <th className="py-1.5 px-2 text-center border-r border-slate-200 w-7">#</th>
-              <th className="py-1.5 px-2 text-left border-r border-slate-200">SKU Code</th>
-              <th className="py-1.5 px-2 text-left border-r border-slate-200">Product Name</th>
-              <th className="py-1.5 px-2 text-left border-r border-slate-200">Brand / Category</th>
-              <th className="py-1.5 px-2 text-right border-r border-slate-200">Cost Price</th>
-              <th className="py-1.5 px-2 text-right border-r border-slate-200">Unit Price</th>
-              <th className="py-1.5 px-2 text-center border-r border-slate-200">Stock Qty</th>
-              <th className="py-1.5 px-2 text-right border-r border-slate-200">Total Valuation</th>
-              <th className="py-1.5 px-2 text-center">Stock Status</th>
+              <th className="py-1.5 px-2 text-left border-r border-slate-200">Product Category</th>
+              <th className="py-1.5 px-2 text-center border-r border-slate-200">SKUs</th>
+              <th className="py-1.5 px-2 text-center border-r border-slate-200">Units in Stock</th>
+              <th className="py-1.5 px-2 text-center border-r border-slate-200">Low / Out</th>
+              <th className="py-1.5 px-2 text-center border-r border-slate-200">Value Share</th>
+              <th className="py-1.5 px-2 text-right">Total Valuation</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-200">
-            {products.length > 0 ? (
-              products.map((p, idx) => {
-                const qty = Number(p.stock_quantity || 0)
-                const unitPrice = Number(p.unit_price || 0)
-                const valuation = unitPrice * qty
-                return (
-                  <tr key={p.product_id || idx} className={idx % 2 === 1 ? 'bg-slate-50/70 print-exact' : ''}>
-                    <td className="py-1 px-2 text-center font-mono text-slate-500 border-r border-slate-200">{idx + 1}</td>
-                    <td className="py-1 px-2 font-mono font-bold border-r border-slate-200 whitespace-nowrap">{p.product_code}</td>
-                    <td className="py-1 px-2 font-semibold border-r border-slate-200">{p.product_name}</td>
-                    <td className="py-1 px-2 border-r border-slate-200">
-                      {[p.brand, p.category].filter(Boolean).join(' • ') || '—'}
-                    </td>
-                    <td className="py-1 px-2 text-right font-mono border-r border-slate-200 whitespace-nowrap">{fmt(p.cost_price)}</td>
-                    <td className="py-1 px-2 text-right font-mono border-r border-slate-200 whitespace-nowrap">{fmt(unitPrice)}</td>
-                    <td className="py-1 px-2 text-center font-mono font-bold border-r border-slate-200">{qty}</td>
-                    <td className="py-1 px-2 text-right font-mono font-bold border-r border-slate-200 whitespace-nowrap">{fmt(valuation)}</td>
-                    <td className="py-1 px-2 text-center font-semibold whitespace-nowrap">{getStockStatus(qty)}</td>
-                  </tr>
-                )
-              })
+            {inventoryCategories.length > 0 ? (
+              inventoryCategories.map((c, idx) => (
+                <tr key={c.category} className={idx % 2 === 1 ? 'bg-slate-50/70 print-exact' : ''}>
+                  <td className="py-1 px-2 font-semibold border-r border-slate-200">{c.category}</td>
+                  <td className="py-1 px-2 text-center font-mono border-r border-slate-200">{c.count}</td>
+                  <td className="py-1 px-2 text-center font-mono font-bold border-r border-slate-200">{c.units}</td>
+                  <td className="py-1 px-2 text-center font-mono text-slate-600 border-r border-slate-200">{c.low} / {c.out}</td>
+                  <td className="py-1 px-2 text-center font-mono text-slate-600 border-r border-slate-200">{pct(c.valuation, totalInvValue)}</td>
+                  <td className="py-1 px-2 text-right font-mono font-bold whitespace-nowrap">{fmt(c.valuation)}</td>
+                </tr>
+              ))
             ) : (
               <tr>
-                <td colSpan={9} className="py-3 px-3 text-center italic text-slate-500">
+                <td colSpan={6} className="py-2.5 px-3 text-center italic text-slate-500">
                   No inventory products recorded.
                 </td>
               </tr>
             )}
           </tbody>
-          {products.length > 0 && (
+          {inventoryCategories.length > 0 && (
             <tfoot>
               <tr className="bg-slate-100 print-exact border-t border-slate-300 font-bold text-[10px]">
-                <td colSpan={6} className="py-1.5 px-2 text-right uppercase text-slate-700 border-r border-slate-200">
-                  Total Inventory Valuation ({products.length} SKUs)
-                </td>
+                <td className="py-1.5 px-2 uppercase text-slate-700 border-r border-slate-200">Total Inventory</td>
+                <td className="py-1.5 px-2 text-center font-mono border-r border-slate-200">{products.length}</td>
                 <td className="py-1.5 px-2 text-center font-mono border-r border-slate-200">{totalUnits}</td>
-                <td className="py-1.5 px-2 text-right font-mono border-r border-slate-200 whitespace-nowrap">{fmt(inventoryData.total_value || 0)}</td>
-                <td className="py-1.5 px-2"></td>
+                <td className="py-1.5 px-2 text-center font-mono border-r border-slate-200">
+                  {inventoryData.low_stock_count ?? 0} / {inventoryData.out_of_stock_count ?? 0}
+                </td>
+                <td className="py-1.5 px-2 text-center font-mono border-r border-slate-200">100.0%</td>
+                <td className="py-1.5 px-2 text-right font-mono whitespace-nowrap">{fmt(totalInvValue)}</td>
               </tr>
             </tfoot>
           )}
         </table>
       </section>
 
-      {/* INSTALLMENTS & AGING */}
-      <section className="space-y-0">
+      {/* INSTALLMENTS & AGING SUMMARY */}
+      <section className="print-avoid-break space-y-0">
         <SectionHeading
           number={sectionNumberMap.installments}
-          title="Installments & Aging"
+          title="Installments & Receivables Summary"
           badgeText={`${accounts.length} Account${accounts.length === 1 ? '' : 's'}`}
         />
         <MetricsStrip
@@ -709,54 +681,49 @@ export default function ReportsPrintView({
             { label: 'Active Accounts', value: `${installmentsData.active_accounts ?? 0}` },
             { label: 'Overdue Accounts', value: `${installmentsData.overdue_accounts ?? 0}` },
             { label: 'Completed Accounts', value: `${installmentsData.completed_accounts ?? 0}` },
-            { label: 'Outstanding Balance', value: fmt(installmentsData.total_balance || 0) },
+            { label: 'Outstanding Balance', value: fmt(totalInstBalance) },
           ]}
         />
         <table className="w-full text-[10px] border-x border-b border-slate-300">
           <thead>
             <tr className="bg-slate-100 print-exact border-b border-slate-300 text-slate-700 uppercase font-bold text-[9px]">
-              <th className="py-1.5 px-2 text-center border-r border-slate-200 w-7">#</th>
-              <th className="py-1.5 px-2 text-left border-r border-slate-200">Account No</th>
-              <th className="py-1.5 px-2 text-left border-r border-slate-200">Customer Name</th>
-              <th className="py-1.5 px-2 text-left border-r border-slate-200">Frequency</th>
+              <th className="py-1.5 px-2 text-left border-r border-slate-200">Account Status</th>
+              <th className="py-1.5 px-2 text-center border-r border-slate-200">Accounts</th>
               <th className="py-1.5 px-2 text-right border-r border-slate-200">Total Payable</th>
               <th className="py-1.5 px-2 text-right border-r border-slate-200">Paid to Date</th>
               <th className="py-1.5 px-2 text-right border-r border-slate-200">Balance Due</th>
-              <th className="py-1.5 px-2 text-center">Status</th>
+              <th className="py-1.5 px-2 text-center">Collection Rate</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-200">
-            {accounts.length > 0 ? (
-              accounts.map((a, idx) => (
-                <tr key={a.installment_id || idx} className={idx % 2 === 1 ? 'bg-slate-50/70 print-exact' : ''}>
-                  <td className="py-1 px-2 text-center font-mono text-slate-500 border-r border-slate-200">{idx + 1}</td>
-                  <td className="py-1 px-2 font-mono font-bold border-r border-slate-200 whitespace-nowrap">{a.account_no}</td>
-                  <td className="py-1 px-2 font-semibold border-r border-slate-200">{a.customer_name}</td>
-                  <td className="py-1 px-2 border-r border-slate-200">{a.frequency || 'Monthly'}</td>
-                  <td className="py-1 px-2 text-right font-mono border-r border-slate-200 whitespace-nowrap">{fmt(a.total_payable)}</td>
-                  <td className="py-1 px-2 text-right font-mono border-r border-slate-200 whitespace-nowrap">{fmt(a.paid)}</td>
-                  <td className="py-1 px-2 text-right font-mono font-bold border-r border-slate-200 whitespace-nowrap">{fmt(a.balance)}</td>
-                  <td className="py-1 px-2 text-center font-semibold">{a.status || '—'}</td>
+            {installmentsByStatus.length > 0 ? (
+              installmentsByStatus.map((row, idx) => (
+                <tr key={row.status} className={idx % 2 === 1 ? 'bg-slate-50/70 print-exact' : ''}>
+                  <td className="py-1 px-2 font-semibold border-r border-slate-200">{row.status}</td>
+                  <td className="py-1 px-2 text-center font-mono border-r border-slate-200">{row.count}</td>
+                  <td className="py-1 px-2 text-right font-mono border-r border-slate-200 whitespace-nowrap">{fmt(row.payable)}</td>
+                  <td className="py-1 px-2 text-right font-mono text-emerald-700 border-r border-slate-200 whitespace-nowrap">{fmt(row.paid)}</td>
+                  <td className="py-1 px-2 text-right font-mono font-bold border-r border-slate-200 whitespace-nowrap">{fmt(row.balance)}</td>
+                  <td className="py-1 px-2 text-center font-mono text-slate-600">{pct(row.paid, row.payable)}</td>
                 </tr>
               ))
             ) : (
               <tr>
-                <td colSpan={8} className="py-3 px-3 text-center italic text-slate-500">
+                <td colSpan={6} className="py-2.5 px-3 text-center italic text-slate-500">
                   No installment receivable accounts recorded.
                 </td>
               </tr>
             )}
           </tbody>
-          {accounts.length > 0 && (
+          {installmentsByStatus.length > 0 && (
             <tfoot>
               <tr className="bg-slate-100 print-exact border-t border-slate-300 font-bold text-[10px]">
-                <td colSpan={4} className="py-1.5 px-2 text-right uppercase text-slate-700 border-r border-slate-200">
-                  Totals ({accounts.length} Accounts)
-                </td>
+                <td className="py-1.5 px-2 uppercase text-slate-700 border-r border-slate-200">Total Receivables</td>
+                <td className="py-1.5 px-2 text-center font-mono border-r border-slate-200">{accounts.length}</td>
                 <td className="py-1.5 px-2 text-right font-mono border-r border-slate-200 whitespace-nowrap">{fmt(totalInstPayable)}</td>
-                <td className="py-1.5 px-2 text-right font-mono border-r border-slate-200 whitespace-nowrap">{fmt(totalInstPaid)}</td>
+                <td className="py-1.5 px-2 text-right font-mono text-emerald-700 border-r border-slate-200 whitespace-nowrap">{fmt(totalInstPaid)}</td>
                 <td className="py-1.5 px-2 text-right font-mono border-r border-slate-200 whitespace-nowrap">{fmt(totalInstBalance)}</td>
-                <td className="py-1.5 px-2"></td>
+                <td className="py-1.5 px-2 text-center font-mono">{pct(totalInstPaid, totalInstPayable)}</td>
               </tr>
             </tfoot>
           )}
@@ -768,7 +735,7 @@ export default function ReportsPrintView({
         <div className="max-w-md">
           <p className="font-bold text-slate-800 uppercase text-[9px] mb-1">System Verification Note</p>
           <p className="leading-relaxed">
-            System-generated report from {companyName || 'Z-LICZ Furniture & Appliances Trading'}. All lists reflect live database records as of {generatedAt}.
+            System-generated summary report from {companyName || 'Z-LICZ Furniture & Appliances Trading'}. Figures reflect live aggregated database records as of {generatedAt}.
           </p>
         </div>
         <div className="pt-4 min-w-[220px]">
@@ -781,4 +748,3 @@ export default function ReportsPrintView({
     </div>
   )
 }
-

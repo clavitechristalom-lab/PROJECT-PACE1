@@ -45,12 +45,14 @@ export default function EmployeePinVerificationModal({ request, onClose, onSucce
   const [verifying, setVerifying] = useState(false)
   const [error, setError] = useState('')
 
+  const activeRequestId = request?.scan_log_id || request?.id || null
+
   useEffect(() => {
-    // Reset state when request changes
+    // Reset state only when switching to a different verification request
     setEnteredPin('')
     setError('')
     setShowPin(false)
-  }, [request])
+  }, [activeRequestId])
 
   if (!request) return null
 
@@ -70,20 +72,20 @@ export default function EmployeePinVerificationModal({ request, onClose, onSucce
 
   const handleVerify = async () => {
     if (enteredPin.length < 4) return
-    
+
     setVerifying(true)
     setError('')
-    
+
     try {
       const res = await api.attendance.approveVerification({
-        scan_log_id: request.id,
+        scan_log_id: activeRequestId,
         pin: enteredPin
       })
-      
+
       if (res.success) {
         playTone('success')
         showToast(res.message || 'Attendance Authorized Successfully', 'success')
-        onSuccess(request.id)
+        onSuccess(activeRequestId, res)
       } else {
         throw new Error(res.message || 'Verification failed')
       }
@@ -113,7 +115,7 @@ export default function EmployeePinVerificationModal({ request, onClose, onSucce
             <FiX className="w-4 h-4" />
           </button>
         )}
-        
+
         <div className="p-6 sm:p-8 space-y-5">
           <div className="text-center space-y-1.5 border-b border-border pb-4">
             <h2 className="text-lg sm:text-xl font-black text-foreground flex items-center justify-center gap-2 uppercase tracking-wide">
@@ -131,8 +133,8 @@ export default function EmployeePinVerificationModal({ request, onClose, onSucce
             <div className="flex-1 min-w-0">
               <p className="text-[10px] font-bold text-muted-foreground uppercase">Requested By</p>
               <p className="text-sm font-bold text-foreground truncate">
-                {request.scanned_by?.employee ? 
-                  `${request.scanned_by.employee.first_name} ${request.scanned_by.employee.last_name}` : 
+                {request.scanned_by?.employee ?
+                  `${request.scanned_by.employee.first_name} ${request.scanned_by.employee.last_name}` :
                   'Store Admin'}
               </p>
             </div>
@@ -229,9 +231,9 @@ export default function EmployeePinVerificationModal({ request, onClose, onSucce
             >
               Cancel
             </Btn>
-            <Btn 
-              variant="primary" 
-              onClick={handleVerify} 
+            <Btn
+              variant="primary"
+              onClick={handleVerify}
               disabled={enteredPin.length < 4 || verifying}
               icon={verifying ? null : <FiCheck />}
             >

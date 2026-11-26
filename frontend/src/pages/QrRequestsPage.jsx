@@ -3,19 +3,21 @@ import {
   FiCheckCircle, FiXCircle, FiAlertTriangle, FiShield,
   FiClock, FiRefreshCw, FiSearch, FiFilter, FiUser,
   FiCheck, FiX, FiInfo, FiLayers, FiFileText, FiCamera,
-  FiMapPin, FiMail, FiPhone, FiLock, FiAlertCircle
+  FiMapPin, FiMail, FiPhone, FiLock, FiAlertCircle, FiTrash2
 } from 'react-icons/fi'
 import { api } from '../lib/api'
 import { useRealtimeSync, triggerDataSync } from '../lib/realtimeSync'
 import {
   Card, StatCard, Badge, StatusBadge, SearchBar, TabBar,
-  Table, TR, TD, TableSkeleton, EmptyState, Btn, Modal, showToast, PageHeader, Pagination, showLoading, closeLoading
+  Table, TR, TD, TableSkeleton, EmptyState, Btn, Modal, showToast, PageHeader, Pagination, showLoading, closeLoading, confirmDelete
 } from '../components/ui'
 import { useAuth } from '../context/AuthContext'
+import QrMonitoringModal from '../components/attendance/QrMonitoringModal'
 
 export default function QrRequestsPage() {
   const { user } = useAuth()
   const isAdmin = user?.role === 'Administrator'
+  const [qrMonitoringOpen, setQrMonitoringOpen] = useState(false)
 
   const [loading, setLoading] = useState(true)
   const [requests, setRequests] = useState([])
@@ -238,6 +240,35 @@ export default function QrRequestsPage() {
     }
   }
 
+  const handleDeleteRequest = async (reqItem) => {
+    if (!reqItem?.request_id) return
+    const confirmed = await confirmDelete(
+      reqItem.request_code || 'this QR request',
+      `Are you sure you want to permanently delete QR request ${reqItem.request_code} for ${reqItem.name}? This action cannot be undone.`
+    )
+    if (!confirmed) return
+
+    showLoading('Deleting QR request...')
+    try {
+      const res = await api.qrRequests.delete(reqItem.request_id)
+      if (res?.success) {
+        showToast(res.message || `QR request ${reqItem.request_code} deleted successfully.`, 'success')
+        if (selectedRequest?.request_id === reqItem.request_id) {
+          setReviewModalOpen(false)
+          setSelectedRequest(null)
+        }
+        triggerDataSync('qr_requests')
+        await loadData(false)
+      } else {
+        showToast(res?.message || 'Failed to delete QR request', 'error')
+      }
+    } catch (err) {
+      showToast(err?.message || 'Failed to delete QR request', 'error')
+    } finally {
+      closeLoading()
+    }
+  }
+
   if (!isAdmin) {
     return (
       <div className="min-h-[70vh] flex flex-col items-center justify-center p-6 text-center">
@@ -257,6 +288,16 @@ export default function QrRequestsPage() {
       <PageHeader
         title="QR Attendance Request Management"
         subtitle="Review account information, perform 7-point security verification, and issue permanent attendance QR badges."
+        action={
+          <Btn
+            variant="primary"
+            size="sm"
+            onClick={() => setQrMonitoringOpen(true)}
+            icon={<FiCamera className="w-4 h-4" />}
+          >
+            QR Monitoring
+          </Btn>
+        }
       />
 
       {/* 5 Real Database Metric Cards */}
@@ -464,13 +505,24 @@ export default function QrRequestsPage() {
                           </Badge>
                         </td>
                         <td className="py-3 px-4 text-center">
-                          <Btn
-                            variant="outline"
-                            size="xs"
-                            onClick={() => openReviewModal(r)}
-                          >
-                            Audit Details
-                          </Btn>
+                          <div className="flex items-center justify-center gap-1.5">
+                            <Btn
+                              variant="outline"
+                              size="xs"
+                              onClick={() => openReviewModal(r)}
+                            >
+                              Audit Details
+                            </Btn>
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteRequest(r)}
+                              className="inline-flex items-center justify-center w-7 h-7 rounded-lg border border-border hover:bg-rose-500/10 hover:border-rose-500/40 text-rose-500 hover:text-rose-600 transition-colors cursor-pointer shrink-0"
+                              title="Delete QR Request"
+                              aria-label="Delete QR Request"
+                            >
+                              <FiTrash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     ))}
@@ -526,13 +578,24 @@ export default function QrRequestsPage() {
                           </Badge>
                         </td>
                         <td className="py-3 px-4 text-center">
-                          <Btn
-                            variant={r.status === 'APPROVED' ? 'outline' : 'primary'}
-                            size="xs"
-                            onClick={() => openReviewModal(r)}
-                          >
-                            {r.status === 'APPROVED' ? 'View Details' : 'Review'}
-                          </Btn>
+                          <div className="flex items-center justify-center gap-1.5">
+                            <Btn
+                              variant={r.status === 'APPROVED' ? 'outline' : 'primary'}
+                              size="xs"
+                              onClick={() => openReviewModal(r)}
+                            >
+                              {r.status === 'APPROVED' ? 'View Details' : 'Review'}
+                            </Btn>
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteRequest(r)}
+                              className="inline-flex items-center justify-center w-7 h-7 rounded-lg border border-border hover:bg-rose-500/10 hover:border-rose-500/40 text-rose-500 hover:text-rose-600 transition-colors cursor-pointer shrink-0"
+                              title="Delete QR Request"
+                              aria-label="Delete QR Request"
+                            >
+                              <FiTrash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     ))}
@@ -955,6 +1018,13 @@ export default function QrRequestsPage() {
           </div>
         </Modal>
       )}
+
+      {/* QR ATTENDANCE MONITORING MODAL */}
+      <QrMonitoringModal
+        open={qrMonitoringOpen}
+        isOpen={qrMonitoringOpen}
+        onClose={() => setQrMonitoringOpen(false)}
+      />
     </div>
   )
 }

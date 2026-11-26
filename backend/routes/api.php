@@ -25,6 +25,8 @@ use App\Http\Controllers\SyncController;
 use App\Http\Controllers\EWalletController;
 use App\Http\Controllers\PayslipController;
 use App\Http\Controllers\StatementController;
+use App\Http\Controllers\CollectorCollectionController;
+use App\Http\Controllers\CashierWalkInController;
 
 // ─── Authentication (Public) ──────────────────────────────────────────────────
 Route::get('/login', function () {
@@ -38,10 +40,6 @@ Route::post('/login/resend-otp', [AuthController::class, 'resendLoginOtp'])->mid
 Route::post('/send-otp', [AuthController::class, 'resendLoginOtp'])->middleware('throttle:60,1');
 Route::post('/send_otp', [AuthController::class, 'resendLoginOtp'])->middleware('throttle:60,1');
 Route::post('/register', [AuthController::class, 'register']);
-Route::post('/create_user', [AuthController::class, 'createUser'])->middleware('throttle:60,1');
-Route::post('/create-user', [AuthController::class, 'createUser'])->middleware('throttle:60,1');
-Route::match(['post', 'put'], '/update_user', [SystemController::class, 'updateUserDirect'])->middleware('throttle:60,1');
-Route::match(['post', 'put'], '/update-user', [SystemController::class, 'updateUserDirect'])->middleware('throttle:60,1');
 Route::get('/registration-options', [AuthController::class, 'registrationOptions']);
 Route::post('/forgot-password/send-otp', [AuthController::class, 'sendOtp'])->middleware('throttle:60,1');
 Route::post('/forgot-password', [AuthController::class, 'sendOtp'])->middleware('throttle:60,1');
@@ -52,6 +50,7 @@ Route::post('/reset_password', [AuthController::class, 'resetPassword'])->middle
 Route::get('/public/products', [ProductController::class, 'indexPublic']);
 Route::get('/public/categories', [CategoryController::class, 'index']);
 Route::get('/public/settings', [SystemController::class, 'settings']);
+Route::get('/public/bootstrap', [SystemController::class, 'publicBootstrap']);
 Route::post('/public/support-messages', [\App\Http\Controllers\SupportMessageController::class, 'storePublic']);
 
 Route::post('/logout', [AuthController::class, 'logout']);
@@ -77,11 +76,15 @@ Route::middleware('auth:sanctum')->group(function () {
     // Branches
     Route::get('/branches', [BranchController::class, 'index']);
     Route::get('/branches/{id}', [BranchController::class, 'show']);
-    Route::post('/branches', [BranchController::class, 'store']);
-    Route::put('/branches/{id}', [BranchController::class, 'update']);
-    Route::post('/branches/{id}', [BranchController::class, 'update']);
-    Route::delete('/branches/{id}', [BranchController::class, 'destroy']);
-    Route::post('/branches/{id}/image', [BranchController::class, 'uploadImage']);
+    Route::middleware('role:Administrator,Admin')->group(function () {
+        Route::post('/branches', [BranchController::class, 'store']);
+        Route::delete('/branches/{id}', [BranchController::class, 'destroy']);
+    });
+    Route::middleware('role:Administrator,Admin,Store Administrator,Store Admin')->group(function () {
+        Route::put('/branches/{id}', [BranchController::class, 'update']);
+        Route::post('/branches/{id}', [BranchController::class, 'update']);
+        Route::post('/branches/{id}/image', [BranchController::class, 'uploadImage']);
+    });
 
     Route::get('/search', [SearchController::class, 'search']);
 
@@ -90,6 +93,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/transactions/export', [TransactionController::class, 'exportTransactionsCsv']);
 
     // ─── Dashboard ──────────────────────────────────────────────────────────────
+    Route::get('/dashboard/overview', [DashboardController::class, 'overview']);
     Route::get('/dashboard/stats', [DashboardController::class, 'stats']);
     Route::get('/dashboard/business-performance', [DashboardController::class, 'businessPerformance']);
     Route::get('/dashboard/branch-comparison', [DashboardController::class, 'branchComparison']);
@@ -122,6 +126,9 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::put('/customers/{id}/allow-installment', [CustomerController::class, 'toggleInstallment']);
 
     // ─── Sales ──────────────────────────────────────────────────────────────────
+    Route::middleware('role:Administrator,Admin,Store Administrator,Store Admin,Employee,Staff')->group(function () {
+        Route::get('/sales-agents', [SaleController::class, 'agents']);
+    });
     Route::get('/sales', [SaleController::class, 'index']);
     Route::get('/sales/{id}', [SaleController::class, 'show']);
     Route::post('/sales', [SaleController::class, 'store']);
@@ -148,7 +155,22 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // ─── E-Wallet Deposits & Checkout (Sanctum Authenticated) ───────────────────
     Route::post('/payments/ewallet/checkout', [EWalletController::class, 'createCheckout']);
+    Route::get('/payments/cash/collectors', [EWalletController::class, 'getCashCollectors']);
     Route::get('/customer/wallet', [EWalletController::class, 'getWalletInfo']);
+
+    // ─── Collector Department (Door-to-Door Cash Collection) ──────────────────
+    Route::middleware(['role:Employee', 'employee.dept:collector'])->prefix('collector')->group(function () {
+        Route::get('/collections', [CollectorCollectionController::class, 'index']);
+        Route::get('/installment-accounts', [CollectorCollectionController::class, 'installmentAccounts']);
+        Route::post('/customer-pay', [CollectorCollectionController::class, 'customerPay']);
+        Route::post('/collections/{id}/collect', [CollectorCollectionController::class, 'collect']);
+    });
+
+    // ─── Cashier Department (Walk-In / Store Cash Counter) ────────────────────
+    Route::middleware(['role:Employee', 'employee.dept:cashier'])->prefix('cashier')->group(function () {
+        Route::get('/walk-in-payments', [CashierWalkInController::class, 'index']);
+        Route::post('/walk-in-payments/{id}/confirm', [CashierWalkInController::class, 'confirm']);
+    });
 
     // ─── Employee Self-Service (Employee Role / Scoped) ─────────────────────────
     Route::get('/employee/me', [EmployeeController::class, 'me']);
@@ -196,6 +218,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/admin/qr-requests/{id}/review', [QrRequestController::class, 'review']);
         Route::post('/admin/qr-requests/{id}/approve', [QrRequestController::class, 'approve']);
         Route::post('/admin/qr-requests/{id}/reject', [QrRequestController::class, 'reject']);
+        Route::delete('/admin/qr-requests/{id}', [QrRequestController::class, 'destroy']);
     });
 
     // ─── Employee Management (Role-based access is handled in the controller) ────────
@@ -212,6 +235,8 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/employees/{id}/qr/disable', [EmployeeController::class, 'disableQr']);
         Route::post('/employees/{id}/qr/enable', [EmployeeController::class, 'enableQr']);
         Route::post('/employees/{id}/qr/toggle', [EmployeeController::class, 'toggleQr']);
+        Route::delete('/employees/{id}/qr', [EmployeeController::class, 'deleteQr']);
+        Route::post('/employees/{id}/qr/delete', [EmployeeController::class, 'deleteQr']);
         Route::post('/employees/{id}/pin', [EmployeeController::class, 'setPin']);
         Route::post('/employees/{id}/verify', [EmployeeController::class, 'verifyEmployee']);
         Route::post('/employees/{id}/unverify', [EmployeeController::class, 'unverifyEmployee']);
@@ -260,15 +285,27 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::apiResource('statements', StatementController::class);
 
     // ─── Reports ────────────────────────────────────────────────────────────────
-    Route::get('/reports/employees', [ReportController::class, 'employees']);
-    Route::get('/reports/sales', [ReportController::class, 'sales']);
-    Route::get('/reports/inventory', [ReportController::class, 'inventory']);
-    Route::get('/reports/installments', [ReportController::class, 'installments']);
-    Route::get('/reports/payroll', [ReportController::class, 'payroll']);
-    Route::get('/reports/attendance', [ReportController::class, 'attendance']);
+    Route::middleware('role:Administrator,Admin,Store Administrator,Store Admin')->group(function () {
+        Route::get('/reports/employees', [ReportController::class, 'employees']);
+        Route::get('/reports/sales', [ReportController::class, 'sales']);
+        Route::get('/reports/inventory', [ReportController::class, 'inventory']);
+        Route::get('/reports/installments', [ReportController::class, 'installments']);
+        Route::get('/reports/submissions', [ReportController::class, 'index']);
+        Route::post('/reports/submissions', [ReportController::class, 'store']);
+        Route::get('/reports/submissions/{id}', [ReportController::class, 'show']);
+        Route::put('/reports/submissions/{id}', [ReportController::class, 'update']);
+        Route::post('/reports/submissions/{id}/submit', [ReportController::class, 'submit']);
+        Route::post('/reports/submissions/{id}/review', [ReportController::class, 'review'])->middleware('role:Administrator,Admin');
+    });
+    Route::get('/reports/payroll', [ReportController::class, 'payroll'])->middleware('role:Administrator,Admin,Employee');
+    Route::get('/reports/attendance', [ReportController::class, 'attendance'])->middleware('role:Administrator,Admin,Store Administrator,Store Admin,Employee');
 
     // ─── System & Admin (Administrator Role Only) ────────────────────────────────
     Route::middleware('role:Administrator')->group(function () {
+        Route::post('/create_user', [AuthController::class, 'createUser']);
+        Route::post('/create-user', [AuthController::class, 'createUser']);
+        Route::match(['post', 'put'], '/update_user', [SystemController::class, 'updateUserDirect']);
+        Route::match(['post', 'put'], '/update-user', [SystemController::class, 'updateUserDirect']);
         Route::get('/users', [SystemController::class, 'users']);
         Route::get('/users/{id}', [SystemController::class, 'showUser']);
         Route::post('/users', [SystemController::class, 'storeUser']);

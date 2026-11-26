@@ -42,12 +42,28 @@ class NotificationService
         $notif = self::createForUserId($userId, $data);
         SyncController::invalidateFingerprint('notifications');
 
+        $targetUser = User::select(['user_id', 'role', 'customer_id'])->find($userId);
+        if ($targetUser) {
+            if ($targetUser->role === 'Customer' && $targetUser->customer_id) {
+                RealtimeBroadcaster::dispatch(new \App\Events\SystemNotificationCreated([
+                    'notification_id' => $notif->notification_id ?? $notif->id,
+                    'title' => $notif->title,
+                    'message' => $notif->message,
+                    'module' => $notif->module,
+                ], null, (int) $targetUser->customer_id, null, false));
+            } else {
+                RealtimeBroadcaster::dispatch(new \App\Events\SystemNotificationCreated([
+                    'notification_id' => $notif->notification_id ?? $notif->id,
+                    'title' => $notif->title,
+                    'message' => $notif->message,
+                    'module' => $notif->module,
+                ], (int) $userId, null, null, false));
+            }
+        }
+
         return $notif;
     }
 
-    /**
-     * Send a notification to all active Administrators.
-     */
     public static function sendToAdmins(array $data): array
     {
         $adminIds = User::where('role', 'Administrator')
@@ -60,14 +76,16 @@ class NotificationService
 
         if (!empty($created)) {
             SyncController::invalidateFingerprint('notifications');
+            RealtimeBroadcaster::dispatch(new \App\Events\SystemNotificationCreated([
+                'title' => $data['title'] ?? 'Notification',
+                'message' => $data['message'] ?? '',
+                'module' => $data['module'] ?? 'System',
+            ], null, null, null, true));
         }
 
         return $created;
     }
 
-    /**
-     * Send a notification to Store Administrators (optionally filtered by branch).
-     */
     public static function sendToStoreAdmins(array $data, ?string $branch = null): array
     {
         $query = User::whereIn('role', ['Store Administrator', 'Store Admin']);
@@ -87,6 +105,22 @@ class NotificationService
 
         if (!empty($created)) {
             SyncController::invalidateFingerprint('notifications');
+            $branchInt = ($branch && is_numeric($branch)) ? (int) $branch : null;
+            if ($branchInt) {
+                RealtimeBroadcaster::dispatch(new \App\Events\SystemNotificationCreated([
+                    'title' => $data['title'] ?? 'Notification',
+                    'message' => $data['message'] ?? '',
+                    'module' => $data['module'] ?? 'System',
+                ], null, null, $branchInt, false));
+            } else {
+                foreach ($storeAdminIds as $adminId) {
+                    RealtimeBroadcaster::dispatch(new \App\Events\SystemNotificationCreated([
+                        'title' => $data['title'] ?? 'Notification',
+                        'message' => $data['message'] ?? '',
+                        'module' => $data['module'] ?? 'System',
+                    ], (int) $adminId, null, null, false));
+                }
+            }
         }
 
         return $created;
@@ -127,12 +161,16 @@ class NotificationService
         $notif = self::createForUserId($userId, $data);
         SyncController::invalidateFingerprint('notifications');
 
+        RealtimeBroadcaster::dispatch(new \App\Events\SystemNotificationCreated([
+            'notification_id' => $notif->notification_id ?? $notif->id,
+            'title' => $notif->title,
+            'message' => $notif->message,
+            'module' => $notif->module,
+        ], (int) $userId, null, null, false));
+
         return $notif;
     }
 
-    /**
-     * Send a notification to Customers (optionally filtered by branch).
-     */
     public static function sendToCustomers(array $data, ?string $branchId = null): array
     {
         $query = User::where('role', 'Customer');
@@ -157,9 +195,6 @@ class NotificationService
         return $created;
     }
 
-    /**
-     * Send a notification to the user account linked to a specific customer.
-     */
     public static function sendToCustomer($customerId, array $data): ?Notification
     {
         if (!$customerId) return null;
@@ -171,6 +206,13 @@ class NotificationService
 
         $notif = self::createForUserId($userId, $data);
         SyncController::invalidateFingerprint('notifications');
+
+        RealtimeBroadcaster::dispatch(new \App\Events\SystemNotificationCreated([
+            'notification_id' => $notif->notification_id ?? $notif->id,
+            'title' => $notif->title,
+            'message' => $notif->message,
+            'module' => $notif->module,
+        ], null, (int) $customerId, null, false));
 
         return $notif;
     }

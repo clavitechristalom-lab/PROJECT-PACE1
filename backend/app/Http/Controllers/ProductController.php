@@ -36,24 +36,29 @@ class ProductController extends Controller
     private static function nextSkuForDomain(string $categoryOrDomain): string
     {
         $targetDomain = self::resolveSkuDomain($categoryOrDomain);
-        $usedNumbers = [];
+        $fp = SyncController::computeFingerprint('products');
+        $cacheKey = 'pace_sku_domain_' . strtolower($targetDomain) . '_' . $fp;
 
-        foreach (Product::select('product_code', 'category')->get() as $item) {
-            if (self::resolveSkuDomain($item->category) !== $targetDomain) {
-                continue;
+        return Cache::remember($cacheKey, 60, function () use ($targetDomain) {
+            $usedNumbers = [];
+
+            foreach (Product::select('product_code', 'category')->get() as $item) {
+                if (self::resolveSkuDomain($item->category) !== $targetDomain) {
+                    continue;
+                }
+                $raw = trim((string) $item->product_code);
+                if (preg_match('/^(\d+)$/', $raw, $m)) {
+                    $usedNumbers[(int) $m[1]] = true;
+                }
             }
-            $raw = trim((string) $item->product_code);
-            if (preg_match('/^(\d+)$/', $raw, $m)) {
-                $usedNumbers[(int) $m[1]] = true;
+
+            $next = 1;
+            while (isset($usedNumbers[$next])) {
+                $next++;
             }
-        }
 
-        $next = 1;
-        while (isset($usedNumbers[$next])) {
-            $next++;
-        }
-
-        return str_pad((string) $next, 3, '0', STR_PAD_LEFT);
+            return str_pad((string) $next, 3, '0', STR_PAD_LEFT);
+        });
     }
 
     public function indexPublic(Request $request)
@@ -80,9 +85,8 @@ class ProductController extends Controller
     {
         $user = $request->user();
 
-        // 1-2s Performance Cache: bypass if exporting CSV
+        // Versioned 45s Performance Cache: bypass if exporting CSV
         if (!$request->boolean('export_csv')) {
-            $fp = SyncController::computeFingerprint('products');
             $cacheKey = 'pace_prod_idx_' . md5(json_encode([
                 'u' => $user ? $user->user_id : 0,
                 'r' => $user ? $user->role : '',
@@ -91,7 +95,8 @@ class ProductController extends Controller
                 'st' => $request->query('status', ''),
                 'ss' => $request->query('stock_status', ''),
                 'b' => $request->query('branch', $request->query('branch_id', '')),
-            ])) . '_' . $fp;
+                'v' => SyncController::moduleVersion('products'),
+            ]));
 
             $cached = Cache::get($cacheKey);
             if ($cached !== null) {
@@ -225,7 +230,7 @@ class ProductController extends Controller
         ];
 
         if (isset($cacheKey)) {
-            Cache::put($cacheKey, $res, 2);
+            Cache::put($cacheKey, $res, 45);
         }
 
         return response()->json($res);
@@ -243,6 +248,9 @@ class ProductController extends Controller
     public function store(Request $request)
     {
         $user = $request->user();
+        if (!$user || !in_array($user->role, ['Administrator', 'Admin', 'Store Administrator', 'Store Admin'], true)) {
+            return response()->json(['message' => 'Unauthorized to create products.'], 403);
+        }
 
         if ($request->has('branch_id') && ($request->input('branch_id') === 'all' || $request->input('branch_id') === '')) {
             $request->merge(['branch_id' => null]);
@@ -299,12 +307,10 @@ class ProductController extends Controller
         if ($user && in_array($user->role, ['Store Administrator', 'Store Admin'])) {
             $employee = \App\Models\Employee::where('employee_id', $user->employee_id)->first();
             if (!$employee || !$employee->branch_id) {
-                return response()->json(['message' => 'Store Administrator is not assigned to any branch. (DEBUG: user_id=' . $user->user_id . ', employee_id=' . $user->employee_id . ', has_employee=' . ($employee ? 'yes' : 'no') . ')'], 403);
+                return response()->json(['message' => 'Store Administrator is not assigned to any branch.'], 403);
             }
-            $validated['branch_id'] = array_key_exists('branch_id', $validated) && $validated['branch_id'] === null
-                ? null
-                : $employee->branch_id;
-        } elseif ($user && $user->role === 'Administrator') {
+            $validated['branch_id'] = $employee->branch_id;
+        } elseif ($user && in_array($user->role, ['Administrator', 'Admin'], true)) {
             if (empty($validated['branch_id']) || $validated['branch_id'] === 'all') {
                 $validated['branch_id'] = null;
             }
@@ -361,6 +367,17 @@ class ProductController extends Controller
         \App\Services\NotificationService::sendToStoreAdmins($notificationData, $product->branch_id);
         \App\Services\NotificationService::sendToCustomers($notificationData, $product->branch_id);
 
+        SyncController::invalidateFingerprint(['products', 'sales', 'dashboard']);
+
+        \App\Services\RealtimeBroadcaster::dispatch(new \App\Events\InventoryStockUpdated([
+            'product_id' => $product->product_id,
+            'product_code' => $product->product_code,
+            'product_name' => $product->product_name,
+            'stock_quantity' => (int) $product->stock_quantity,
+            'action' => 'created',
+            'actor_user_id' => $user ? (int) $user->user_id : null,
+        ], $product->branch_id ? [(int) $product->branch_id] : \App\Models\BranchProfile::pluck('id')->all()));
+
         return response()->json([
             'message' => 'Product created successfully',
             'product' => $product,
@@ -369,20 +386,24 @@ class ProductController extends Controller
 
     public function update(Request $request, $id)
     {
+        $user = $request->user();
+        if (!$user || !in_array($user->role, ['Administrator', 'Admin', 'Store Administrator', 'Store Admin'], true)) {
+            return response()->json(['message' => 'Unauthorized to update products.'], 403);
+        }
+
         $product = Product::find($id);
         if (!$product) {
             return response()->json(['message' => 'The requested product was not found or has been removed.'], 404);
         }
-        $user = $request->user();
 
         if ($request->has('branch_id') && ($request->input('branch_id') === 'all' || $request->input('branch_id') === '')) {
             $request->merge(['branch_id' => null]);
         }
 
-        if ($user && in_array($user->role, ['Store Administrator', 'Store Admin'])) {
+        if ($user && in_array($user->role, ['Store Administrator', 'Store Admin'], true)) {
             $employee = \App\Models\Employee::where('employee_id', $user->employee_id)->first();
-            if (!$employee || ($product->branch_id !== null && (int) $employee->branch_id !== (int) $product->branch_id)) {
-                return response()->json(['message' => 'Unauthorized to update product from another branch.'], 403);
+            if (!$employee || !$employee->branch_id || $product->branch_id === null || (int) $employee->branch_id !== (int) $product->branch_id) {
+                return response()->json(['message' => 'Unauthorized to update global or another branch\'s product.'], 403);
             }
         }
 
@@ -490,6 +511,15 @@ class ProductController extends Controller
 
         SyncController::invalidateFingerprint(['products', 'sales', 'dashboard']);
 
+        \App\Services\RealtimeBroadcaster::dispatch(new \App\Events\InventoryStockUpdated([
+            'product_id' => $product->product_id,
+            'product_code' => $product->product_code,
+            'product_name' => $product->product_name,
+            'stock_quantity' => (int) $product->stock_quantity,
+            'action' => 'updated',
+            'actor_user_id' => $user ? (int) $user->user_id : null,
+        ], $product->branch_id ? [(int) $product->branch_id] : \App\Models\BranchProfile::pluck('id')->all()));
+
         return response()->json([
             'message' => 'Product updated successfully',
             'product' => $product,
@@ -498,20 +528,26 @@ class ProductController extends Controller
 
     public function destroy(Request $request, $id)
     {
+        $user = $request->user();
+        if (!$user || !in_array($user->role, ['Administrator', 'Admin', 'Store Administrator', 'Store Admin'], true)) {
+            return response()->json(['message' => 'Unauthorized to delete products.'], 403);
+        }
+
         $product = Product::find($id);
         if (!$product) {
             return response()->json(['message' => 'The requested product was not found or already deleted.'], 404);
         }
-        $user = $request->user();
 
-        if ($user && in_array($user->role, ['Store Administrator', 'Store Admin'])) {
-            if (!$user->employee || $user->employee->branch_id !== $product->branch_id) {
-                return response()->json(['message' => 'Unauthorized to delete product from another branch.'], 403);
+        if (in_array($user->role, ['Store Administrator', 'Store Admin'], true)) {
+            if (!$user->employee || !$user->employee->branch_id || $product->branch_id === null || (int) $user->employee->branch_id !== (int) $product->branch_id) {
+                return response()->json(['message' => 'Unauthorized to delete global or another branch\'s product.'], 403);
             }
         }
 
         $name = $product->product_name;
         $code = $product->product_code;
+        $deletedBranchId = $product->branch_id;
+        $deletedProdId = $product->product_id;
 
         $product->delete();
 
@@ -525,6 +561,14 @@ class ProductController extends Controller
         ]);
 
         SyncController::invalidateFingerprint(['products', 'sales', 'dashboard']);
+
+        \App\Services\RealtimeBroadcaster::dispatch(new \App\Events\InventoryStockUpdated([
+            'product_id' => $deletedProdId,
+            'product_code' => $code,
+            'product_name' => $name,
+            'action' => 'deleted',
+            'actor_user_id' => $user ? (int) $user->user_id : null,
+        ], $deletedBranchId ? [(int) $deletedBranchId] : \App\Models\BranchProfile::pluck('id')->all()));
 
         return response()->json(['message' => 'Product deleted successfully']);
     }

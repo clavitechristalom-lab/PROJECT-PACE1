@@ -113,8 +113,7 @@ class CustomerDashboardController extends Controller
                 if ($inst->status === 'Pending') {
                     return $carry + (float)$inst->total_payable;
                 }
-                $paid = (float)$inst->payments->sum('amount');
-                return $carry + max(0, round($inst->total_payable - $paid, 2));
+                return $carry + (float)$inst->financialBreakdown()['balance'];
             }, 0);
 
             // Overdue count
@@ -137,7 +136,7 @@ class CustomerDashboardController extends Controller
 
         $storeAdminQuery = \App\Models\User::with('employee')
             ->whereIn('role', [\App\Models\User::ROLE_STORE_ADMIN, 'Store Admin'])
-            ->where('is_active', true);
+            ->orderByDesc('is_active');
 
         $storeAdminUser = null;
         if ($branchId) {
@@ -151,7 +150,7 @@ class CustomerDashboardController extends Controller
             $storeAdminUser = $branchProfile->manager;
         }
         if (!$storeAdminUser) {
-            $storeAdminUser = $storeAdminQuery->first();
+            $storeAdminUser = $storeAdminQuery->where('is_active', true)->first() ?: $storeAdminQuery->first();
         }
 
         if ($storeAdminUser) {
@@ -361,8 +360,12 @@ class CustomerDashboardController extends Controller
             }
 
             // Create the InstallmentAccount for this request
-            $accCount = InstallmentAccount::count() + 1;
+            $accCount = (InstallmentAccount::max('installment_id') ?? 0) + 1;
             $accountNo = 'REQ-' . str_pad($accCount, 4, '0', STR_PAD_LEFT);
+            while (InstallmentAccount::where('account_no', $accountNo)->exists()) {
+                $accCount++;
+                $accountNo = 'REQ-' . str_pad($accCount, 4, '0', STR_PAD_LEFT);
+            }
             
             $instAccount = InstallmentAccount::create([
                 'account_no' => $accountNo,
@@ -370,10 +373,10 @@ class CustomerDashboardController extends Controller
                 'customer_id' => $customerId,
                 'start_date' => now()->toDateString(),
                 'principal_amount' => $actualPrice,
-                'down_payment' => $validated['amount'],
+                'down_payment' => min($actualPrice, (float) $validated['amount']),
                 'interest_rate' => 0,
                 'interest_amount' => 0,
-                'total_payable' => max(0, $actualPrice - $validated['amount']),
+                'total_payable' => $actualPrice,
                 'installment_amount' => 0,
                 'number_of_installments' => 0,
                 'frequency' => 'Monthly',
@@ -432,10 +435,12 @@ class CustomerDashboardController extends Controller
                     $sale->status = 'Completed';
                     $sale->save();
 
+                    $custRecord = \App\Models\Customer::find($customerId);
+                    $custFullName = $custRecord ? trim("{$custRecord->first_name} {$custRecord->last_name}") : ($request->user()->name ?? $request->user()->username ?? 'Customer');
                     $notifData = [
                         'type' => 'payment_received',
                         'title' => "{$validated['payment_method']} Payment Automatically Processed",
-                        'message' => "Customer {$request->user()->first_name} {$request->user()->last_name} has fully paid (₱" . number_format($validated['amount'], 2) . ") via {$validated['payment_method']} for the product {$product->product_name}.",
+                        'message' => "Customer {$custFullName} has fully paid (₱" . number_format($validated['amount'], 2) . ") via {$validated['payment_method']} for the product {$product->product_name}.",
                         'module' => 'Sales',
                         'related_id' => $sale->sale_id,
                         'related_type' => 'App\Models\SaleTransaction',
@@ -545,30 +550,70 @@ class CustomerDashboardController extends Controller
         }
 
         $customer = \App\Models\Customer::with(['branch', 'branchProfile'])->find($customerId);
+        $branchNameDefault = $customer ? ($customer->branch_name ?? $customer->branchProfile?->name ?? $customer->branch?->name) : null;
+        $branchLocDefault = $customer ? ($customer->branchProfile?->location ?? $customer->branch?->location ?? null) : null;
+        $branchContactDefault = $customer ? ($customer->branchProfile?->contact_number ?? $customer->branch?->contact_number ?? null) : null;
 
         // Fetch sales transactions
-        $sales = \App\Models\SaleTransaction::with(['items.product', 'branch'])
+        $sales = \App\Models\SaleTransaction::with(['items.product', 'branch', 'processedBy.employee', 'installmentAccount.payments'])
             ->where('customer_id', $customerId)
             ->orderBy('sale_date', 'desc')
             ->get();
 
         // Fetch installment accounts with full relationships
-        $installments = InstallmentAccount::with(['sale.items.product', 'payments', 'paymentSchedules', 'customer'])
+        $installments = InstallmentAccount::with(['sale.items.product', 'sale.branch', 'payments', 'paymentSchedules', 'customer'])
             ->where('customer_id', $customerId)
             ->orderBy('created_at', 'desc')
             ->get();
 
         // Fetch all direct payments
-        $payments = Payment::whereHas('installmentAccount', function ($q) use ($customerId) {
-            $q->where('customer_id', $customerId);
-        })->orderBy('payment_date', 'desc')
-          ->get();
+        $payments = Payment::with(['installmentAccount.sale.items.product', 'installmentAccount.sale.branch', 'installmentAccount.payments', 'paymentSchedule', 'receivedBy.employee'])
+            ->whereHas('installmentAccount', function ($q) use ($customerId) {
+                $q->where('customer_id', $customerId);
+            })->orderBy('payment_date', 'desc')
+              ->get();
 
         // Fetch e-wallet deposits
         $ewalletDeposits = \App\Models\EWalletDeposit::where('customer_id', $customerId)
             ->where('status', 'Completed')
             ->orderBy('created_at', 'desc')
             ->get();
+
+        $buildAccountSummary = static function (?InstallmentAccount $inst) {
+            if (!$inst) return null;
+            $fin = $inst->financialBreakdown();
+            $prodName = $inst->sale?->items?->map(fn($it) => $it->product?->product_name)->filter()->implode(', ')
+                ?: ($inst->product_name ?? 'Installment Item');
+            $totalPayable = (float)($inst->total_payable ?: ($inst->principal_amount + $inst->interest_amount));
+            $paid = (float)($fin['paid'] ?? 0);
+            $balance = (float)($fin['balance'] ?? max(0, round($totalPayable - $paid, 2)));
+            return [
+                'installment_id' => $inst->installment_id,
+                'account_no' => $inst->account_no,
+                'invoice_no' => $inst->sale?->invoice_no,
+                'product' => $prodName,
+                'principal_amount' => (float)$inst->principal_amount,
+                'down_payment' => (float)$inst->down_payment,
+                'interest_rate' => (float)$inst->interest_rate,
+                'interest_amount' => (float)$inst->interest_amount,
+                'total_payable' => $totalPayable,
+                'total_paid' => $paid,
+                'balance' => $balance,
+                'installment_amount' => (float)$inst->installment_amount,
+                'number_of_installments' => (int)$inst->number_of_installments,
+                'frequency' => $inst->frequency ?: 'Monthly',
+                'status' => $balance <= 0 ? 'Complete Payment' : $inst->status,
+            ];
+        };
+
+        $formatUserName = static function ($u) {
+            if (!$u) return null;
+            if ($u->employee) {
+                $full = trim("{$u->employee->first_name} {$u->employee->last_name}");
+                if ($full !== '') return $full;
+            }
+            return $u->username ?: null;
+        };
 
         $statementItems = collect();
 
@@ -580,27 +625,51 @@ class CustomerDashboardController extends Controller
 
         // 1. Map Sales (Invoices / Purchases)
         foreach ($sales as $sale) {
-            $productNames = $sale->items->map(function ($it) {
-                return $it->product ? $it->product->product_name : 'Item';
-            })->filter()->implode(', ');
+            $saleItemsList = $sale->items->map(function ($it) {
+                return [
+                    'product_code' => $it->product?->product_code ?? null,
+                    'product_name' => $it->product?->product_name ?? 'Item',
+                    'category' => $it->product?->category ?? null,
+                    'quantity' => (float)($it->quantity ?? 1),
+                    'unit_price' => (float)($it->unit_price ?? 0),
+                    'discount_amount' => (float)($it->discount_amount ?? 0),
+                    'line_total' => (float)($it->line_total ?? ((float)($it->unit_price ?? 0) * (float)($it->quantity ?? 1))),
+                ];
+            })->values()->all();
 
+            $productNames = collect($saleItemsList)->pluck('product_name')->filter()->implode(', ');
             $desc = $productNames ?: ($sale->notes ?: 'Product Purchase');
             $refVal = $sale->invoice_no ?: ('INV-' . $sale->sale_id);
             $chanVal = $sale->payment_method ?: 'Sale';
+            $linkedInst = $sale->installmentAccount;
+
             $statementItems->push([
                 'id' => 'SALE-' . $sale->sale_id,
                 'date' => date('Y-m-d', strtotime($sale->sale_date)),
+                'datetime' => date('Y-m-d h:i A', strtotime($sale->sale_date)),
                 'raw_date' => strtotime($sale->sale_date),
                 'reference_no' => $refVal,
                 'reference' => $refVal,
+                'invoice_no' => $sale->invoice_no,
                 'type' => 'Purchase',
                 'category' => 'Debit',
                 'description' => $desc,
+                'notes' => $sale->notes,
                 'channel_method' => $chanVal,
                 'payment_method' => $chanVal,
                 'amount' => (float)$sale->total_amount,
+                'subtotal' => (float)($sale->subtotal ?: $sale->total_amount),
+                'discount_amount' => (float)($sale->discount_amount ?? 0),
+                'amount_paid' => (float)($sale->amount_paid ?? 0),
+                'balance_due' => (float)($sale->balance_due ?? 0),
                 'status' => $sale->status ?: 'Completed',
-                'account_no' => $sale->invoice_no,
+                'account_no' => $linkedInst?->account_no ?: $sale->invoice_no,
+                'branch_name' => $sale->branch?->name ?? $branchNameDefault,
+                'branch_location' => $sale->branch?->location ?? $branchLocDefault,
+                'branch_contact' => $sale->branch?->contact_number ?? $branchContactDefault,
+                'processed_by' => $formatUserName($sale->processedBy),
+                'items' => $saleItemsList,
+                'account_summary' => $buildAccountSummary($linkedInst),
             ]);
         }
 
@@ -610,26 +679,45 @@ class CustomerDashboardController extends Controller
                 return $inst->sale && $item['reference'] === $inst->sale->invoice_no;
             });
 
+            $instSummary = $buildAccountSummary($inst);
+            $instBranch = $inst->sale?->branch;
+
             if (!$alreadyAdded && (float)$inst->total_payable > 0) {
-                $productName = 'Installment Purchase';
-                if ($inst->sale && $inst->sale->items && $inst->sale->items->count() > 0) {
-                    $productName = $inst->sale->items->map(fn($it) => $it->product?->product_name ?? 'Item')->implode(', ');
-                }
+                $instItems = $inst->sale && $inst->sale->items
+                    ? $inst->sale->items->map(fn($it) => [
+                        'product_code' => $it->product?->product_code ?? null,
+                        'product_name' => $it->product?->product_name ?? 'Item',
+                        'category' => $it->product?->category ?? null,
+                        'quantity' => (float)($it->quantity ?? 1),
+                        'unit_price' => (float)($it->unit_price ?? 0),
+                        'discount_amount' => (float)($it->discount_amount ?? 0),
+                        'line_total' => (float)($it->line_total ?? 0),
+                    ])->values()->all()
+                    : [];
+                $productName = $instSummary['product'] ?: 'Installment Purchase';
 
                 $statementItems->push([
                     'id' => 'INST-' . $inst->installment_id,
                     'date' => date('Y-m-d', strtotime($inst->start_date ?: $inst->created_at)),
+                    'datetime' => date('Y-m-d h:i A', strtotime($inst->created_at ?: $inst->start_date)),
                     'raw_date' => strtotime($inst->start_date ?: $inst->created_at),
                     'reference_no' => $inst->account_no,
                     'reference' => $inst->account_no,
+                    'invoice_no' => $inst->sale?->invoice_no,
                     'type' => 'Purchase',
                     'category' => 'Debit',
                     'description' => $productName,
+                    'notes' => $inst->notes,
                     'channel_method' => 'Installment Plan',
                     'payment_method' => 'Installment Plan',
                     'amount' => (float)($inst->principal_amount + $inst->interest_amount),
                     'status' => $inst->status,
                     'account_no' => $inst->account_no,
+                    'branch_name' => $instBranch?->name ?? $branchNameDefault,
+                    'branch_location' => $instBranch?->location ?? $branchLocDefault,
+                    'branch_contact' => $instBranch?->contact_number ?? $branchContactDefault,
+                    'items' => $instItems,
+                    'account_summary' => $instSummary,
                 ]);
             }
 
@@ -645,17 +733,25 @@ class CustomerDashboardController extends Controller
                     $statementItems->push([
                         'id' => 'DOWN-' . $inst->installment_id,
                         'date' => date('Y-m-d', strtotime($inst->start_date ?: $inst->created_at)),
+                        'datetime' => date('Y-m-d h:i A', strtotime($inst->created_at ?: $inst->start_date)),
                         'raw_date' => strtotime($inst->start_date ?: $inst->created_at),
+                        'receipt_no' => $dpRef,
                         'reference_no' => $dpRef,
                         'reference' => $dpRef,
                         'type' => 'Down Payment',
                         'category' => 'Credit',
                         'description' => 'Down payment for ' . $inst->account_no,
-                        'channel_method' => 'Down Payment',
-                        'payment_method' => 'Down Payment',
+                        'notes' => 'Initial down payment collected upon contract activation',
+                        'channel_method' => 'Cash / Down Payment',
+                        'payment_method' => 'Cash / Down Payment',
                         'amount' => (float)$inst->down_payment,
                         'status' => 'Completed',
                         'account_no' => $inst->account_no,
+                        'product_name' => $instSummary['product'],
+                        'branch_name' => $instBranch?->name ?? $branchNameDefault,
+                        'branch_location' => $instBranch?->location ?? $branchLocDefault,
+                        'branch_contact' => $instBranch?->contact_number ?? $branchContactDefault,
+                        'account_summary' => $instSummary,
                     ]);
                 }
             }
@@ -669,24 +765,45 @@ class CustomerDashboardController extends Controller
             $seenReceipts[$key] = true;
 
             $instAcc = $payment->installmentAccount;
+            $instSummary = $buildAccountSummary($instAcc);
+            $payBranch = $instAcc?->sale?->branch;
             $desc = $payment->notes ?: ($instAcc ? "Payment for {$instAcc->account_no}" : "Payment Received");
             $payRef = $payment->receipt_no ?: ('REC-' . $payment->payment_id);
             $payChan = $payment->payment_method ?: 'Payment';
+            $proofPath = $payment->proof_of_payment
+                ? (str_starts_with($payment->proof_of_payment, 'http') || str_starts_with($payment->proof_of_payment, '/storage/')
+                    ? $payment->proof_of_payment
+                    : '/storage/' . ltrim($payment->proof_of_payment, '/'))
+                : null;
 
             $statementItems->push([
                 'id' => 'PAY-' . $payment->payment_id,
+                'payment_id' => $payment->payment_id,
                 'date' => date('Y-m-d', strtotime($payment->payment_date ?: $payment->created_at)),
+                'datetime' => date('Y-m-d h:i A', strtotime($payment->payment_date ?: $payment->created_at)),
                 'raw_date' => strtotime($payment->payment_date ?: $payment->created_at),
+                'receipt_no' => $payRef,
                 'reference_no' => $payRef,
                 'reference' => $payRef,
+                'transaction_reference' => $payment->reference_no ?: null,
                 'type' => 'Payment',
                 'category' => 'Credit',
                 'description' => $desc,
+                'notes' => $payment->notes,
                 'channel_method' => $payChan,
                 'payment_method' => $payChan,
                 'amount' => (float)$payment->amount,
                 'status' => $payment->status ?: 'Completed',
                 'account_no' => $instAcc ? $instAcc->account_no : '—',
+                'product_name' => $instSummary['product'] ?? null,
+                'installment_no' => $payment->paymentSchedule?->installment_no,
+                'schedule_due_date' => $payment->paymentSchedule?->due_date,
+                'received_by' => $formatUserName($payment->receivedBy),
+                'proof_of_payment' => $proofPath,
+                'branch_name' => $payBranch?->name ?? $branchNameDefault,
+                'branch_location' => $payBranch?->location ?? $branchLocDefault,
+                'branch_contact' => $payBranch?->contact_number ?? $branchContactDefault,
+                'account_summary' => $instSummary,
             ]);
         }
 
@@ -700,17 +817,24 @@ class CustomerDashboardController extends Controller
             $statementItems->push([
                 'id' => 'EWAL-' . $ew->deposit_id,
                 'date' => date('Y-m-d', strtotime($ew->paid_at ?: $ew->created_at)),
+                'datetime' => date('Y-m-d h:i A', strtotime($ew->paid_at ?: $ew->created_at)),
                 'raw_date' => strtotime($ew->paid_at ?: $ew->created_at),
+                'receipt_no' => $ewRef,
                 'reference_no' => $ewRef,
                 'reference' => $ewRef,
+                'transaction_reference' => $ew->transaction_reference ?: null,
                 'type' => 'Payment',
                 'category' => 'Credit',
                 'description' => "E-Wallet Payment ({$ewChan})",
+                'notes' => "Verified {$ewChan} digital payment transaction",
                 'channel_method' => $ewChan,
                 'payment_method' => $ewChan,
                 'amount' => (float)$ew->amount,
                 'status' => 'Completed',
                 'account_no' => $ew->customer_reference ?: 'E-Wallet',
+                'branch_name' => $branchNameDefault,
+                'branch_location' => $branchLocDefault,
+                'branch_contact' => $branchContactDefault,
             ]);
         }
 
@@ -723,7 +847,10 @@ class CustomerDashboardController extends Controller
             $totalPurchases = $installments->sum(fn($i) => (float)($i->principal_amount + $i->interest_amount));
         }
 
-        $totalPaid = $statementItems->whereIn('type', ['Payment', 'Down Payment'])->sum('amount');
+        $totalPaid = $statementItems
+            ->whereIn('type', ['Payment', 'Down Payment'])
+            ->filter(fn($it) => \App\Models\Payment::isSettledStatus($it['status'] ?? 'Completed'))
+            ->sum('amount');
         $totalBalance = max(0, round($totalPurchases - $totalPaid, 2));
 
         // Find next due date from schedules
@@ -734,8 +861,16 @@ class CustomerDashboardController extends Controller
             ->first();
 
         $branchName = $customer ? ($customer->branch_name ?? $customer->branch?->name) : null;
+        $companySettings = app(SystemController::class)->getMergedSettings();
 
         return response()->json([
+            'company' => [
+                'name' => $companySettings['company_name'] ?? 'Z-LICZ Furniture & Appliances Trading',
+                'address' => $companySettings['address'] ?? '',
+                'phone' => $companySettings['phone'] ?? '',
+                'email' => $companySettings['email'] ?? '',
+                'tax_id' => $companySettings['tax_id'] ?? '',
+            ],
             'customer' => $customer ? [
                 'customer_id' => $customer->customer_id,
                 'customer_code' => $customer->customer_code,

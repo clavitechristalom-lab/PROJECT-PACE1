@@ -397,8 +397,16 @@ export default function ExcuseLetterPage({ embedded = false }) {
       showToast('Please select both From Date and To Date', 'error')
       return
     }
+    if (formData.to_date < formData.from_date) {
+      showToast('To Date must be on or after From Date', 'error')
+      return
+    }
     if (!formData.message?.trim()) {
       showToast('Letter content cannot be empty', 'error')
+      return
+    }
+    if (attachmentFile && attachmentFile.size > 10 * 1024 * 1024) {
+      showToast('Attachment file size must not exceed 10 MB', 'error')
       return
     }
 
@@ -409,7 +417,7 @@ export default function ExcuseLetterPage({ embedded = false }) {
       payload.append('title', `${formData.category} (${formData.from_date} to ${formData.to_date})`)
       payload.append('start_date', formData.from_date)
       payload.append('end_date', formData.to_date)
-      payload.append('reason', formData.reason || formData.category)
+      payload.append('reason', (formData.reason || formData.category).slice(0, 1000))
       payload.append('letter_body', formData.message)
       if (attachmentFile) {
         payload.append('attachment', attachmentFile)
@@ -432,18 +440,6 @@ export default function ExcuseLetterPage({ embedded = false }) {
         <PageHeader
           title="Create Excuse / Leave Letter"
           subtitle="Draft, auto-generate, and submit formal business letters to Z-LICZ Management & HR"
-          action={
-            <div className="flex items-center gap-2">
-              <Btn
-                variant="outline"
-                size="sm"
-                onClick={() => navigate('/employee/dashboard')}
-                icon={<FiArrowLeft className="w-4 h-4" />}
-              >
-                Back to Dashboard
-              </Btn>
-            </div>
-          }
         />
       )}
 

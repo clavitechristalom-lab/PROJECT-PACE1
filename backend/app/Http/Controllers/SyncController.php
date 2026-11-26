@@ -25,19 +25,48 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
 class SyncController extends Controller
 {
     /**
+     * Per-request memoized module cache version tokens so repeated reads in one HTTP
+     * cycle don't pay redundant file-cache disk I/O.
+     *
+     * @var array<string, string>
+     */
+    private static array $versionMemo = [];
+
+    /**
+     * Fast module cache version key bumped whenever the module (or global) mutates.
+     */
+    public static function moduleVersion(string $module): string
+    {
+        $mod = strtolower(trim($module)) ?: 'all';
+        if (isset(self::$versionMemo[$mod])) {
+            return self::$versionMemo[$mod];
+        }
+        $ver = (string) Cache::get("pace_mod_ver_{$mod}", '0');
+        $cnt = (int) Cache::get("pace_mod_counter_{$mod}", 0);
+        return self::$versionMemo[$mod] = "{$cnt}_{$ver}";
+    }
+
+    /**
      * Bump database mutation counter and invalidate sync caches.
      * Supports strictly individual module invalidation so unrelated modules keep their caches warm.
      */
     public static function bumpMutation(string|array|null $module = null): void
     {
+        $ver = sprintf('%.6F', microtime(true));
+
         if ($module === null) {
+            self::$versionMemo = [];
             Cache::increment('pace_mutation_counter');
-            Cache::put('pace_db_mutation_version', microtime(true), 86400);
+            Cache::put('pace_db_mutation_version', $ver, 86400);
             Cache::forget('pace_unified_fingerprint');
             Cache::forget('pace_dash_charts');
             Cache::forget('pace_dash_branch_comparison');
             Cache::forget('pace_dash_recent');
+            Cache::forget('pace_dash_alerts_admin');
             Cache::forget('pace_storage_overview');
+            Cache::forget('pace_merged_settings');
+            Cache::forget('pace_public_bootstrap');
+            \App\Services\CategoryFramework::clearLookupCache();
             return;
         }
 
@@ -55,8 +84,8 @@ class SyncController extends Controller
             return;
         }
 
-        $ver = microtime(true);
         foreach (array_keys($normalized) as $mod) {
+            unset(self::$versionMemo[$mod]);
             Cache::increment("pace_mod_counter_{$mod}");
             Cache::put("pace_mod_ver_{$mod}", $ver, 86400);
             Cache::forget("pace_fp_{$mod}");
@@ -65,9 +94,17 @@ class SyncController extends Controller
                 Cache::forget('pace_dash_charts');
                 Cache::forget('pace_dash_branch_comparison');
                 Cache::forget('pace_dash_recent');
+                Cache::forget('pace_dash_alerts_admin');
             }
             if ($mod === 'storage' || $mod === 'system') {
                 Cache::forget('pace_storage_overview');
+            }
+            if (in_array($mod, ['system', 'settings', 'branches', 'products', 'customers', 'users', 'categories'], true)) {
+                Cache::forget('pace_merged_settings');
+                Cache::forget('pace_public_bootstrap');
+            }
+            if ($mod === 'categories') {
+                \App\Services\CategoryFramework::clearLookupCache();
             }
         }
     }
@@ -91,9 +128,9 @@ class SyncController extends Controller
             $mod = strtolower(trim($module));
             if ($mod !== '' && $mod !== 'all' && $mod !== 'global') {
                 $modCounter = (int) Cache::get("pace_mod_counter_{$mod}", 0);
-                $modVersion = (int) Cache::get("pace_mod_ver_{$mod}", 0);
+                $modVersion = (string) Cache::get("pace_mod_ver_{$mod}", '');
 
-                if ($modCounter > 0 && $modVersion > 0) {
+                if ($modCounter > 0 && $modVersion !== '') {
                     return (int) crc32("{$mod}_{$modCounter}_{$modVersion}");
                 }
 
@@ -184,9 +221,9 @@ class SyncController extends Controller
         }
 
         $mutationCounter = (int) Cache::get('pace_mutation_counter', 0);
-        $mutationVersion = (int) Cache::get('pace_db_mutation_version', 0);
+        $mutationVersion = (string) Cache::get('pace_db_mutation_version', '');
 
-        if ($mutationCounter > 0 && $mutationVersion > 0) {
+        if ($mutationCounter > 0 && $mutationVersion !== '') {
             return (int) crc32("{$mutationCounter}_{$mutationVersion}");
         }
 

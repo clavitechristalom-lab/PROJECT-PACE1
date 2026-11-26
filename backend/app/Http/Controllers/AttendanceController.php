@@ -31,9 +31,8 @@ class AttendanceController extends Controller
     {
         $user = $request->user();
 
-        // 1-2s Performance Cache: bypass if exporting CSV
+        // Versioned 45s Performance Cache (instant invalidation via SyncController::moduleVersion): bypass if exporting CSV
         if (!$request->boolean('export_csv')) {
-            $fp = SyncController::computeFingerprint('attendance');
             $cacheKey = 'pace_att_idx_' . md5(json_encode([
                 'u' => $user ? $user->user_id : 0,
                 'r' => $user ? $user->role : '',
@@ -45,7 +44,8 @@ class AttendanceController extends Controller
                 's' => $request->query('search', ''),
                 'dept' => $request->query('department', ''),
                 'st' => $request->query('status', ''),
-            ])) . '_' . $fp;
+                'v' => SyncController::moduleVersion('attendance'),
+            ]));
 
             $cached = Cache::get($cacheKey);
             if ($cached !== null) {
@@ -227,7 +227,7 @@ class AttendanceController extends Controller
         ];
 
         if (isset($cacheKey)) {
-            Cache::put($cacheKey, $res, 2);
+            Cache::put($cacheKey, $res, 45);
         }
 
         return response()->json($res);
@@ -520,7 +520,7 @@ class AttendanceController extends Controller
 
         // 4. Branch Security: Verify employee belongs to Store Admin's authorized branch
         $employeeBranch = !empty($employee->branch_id) ? trim((string)$employee->branch_id) : null;
-        if (strcasecmp((string)$employeeBranch, (string)$storeAdminBranch) !== 0) {
+        if (!$storeAdminBranch || !$employeeBranch || strcasecmp((string)$employeeBranch, (string)$storeAdminBranch) !== 0) {
             $empBranchStr = $employee->branch_name ?? (is_object($employee->branch) ? $employee->branch->name : ((string)$employee->branch ?: 'Unassigned'));
             AttendanceScanLog::create([
                 'employee_id' => $employee->employee_id,
@@ -575,7 +575,6 @@ class AttendanceController extends Controller
             'ip_address' => $request->ip(),
         ]);
 
-        // Trigger Notification to Employee
         if ($employee->user) {
             $storeAdminName = $user->employee ? trim("{$user->employee->first_name} {$user->employee->last_name}") : $user->username;
             \App\Services\NotificationService::sendToUser($employee->user->user_id, [
@@ -589,6 +588,18 @@ class AttendanceController extends Controller
                 'priority' => 'high',
             ]);
         }
+
+        \App\Services\RealtimeBroadcaster::dispatch(new \App\Events\AttendanceLogged([
+            'scan_log_id' => $log->scan_id ?? $log->id,
+            'employee_id' => $employee->employee_id,
+            'employee_name' => trim("{$employee->first_name} {$employee->last_name}"),
+            'status' => 'PENDING',
+            'stage' => 'pending_verification',
+            'actor_user_id' => (int) $user->user_id,
+        ], $employee->branch_id ? (int) $employee->branch_id : null, array_filter([
+            $employee->user?->user_id ? (int) $employee->user->user_id : null,
+            (int) $user->user_id,
+        ])));
 
         $today = date('Y-m-d');
         $record = \App\Models\Attendance::where('employee_id', $employee->employee_id)
@@ -624,6 +635,8 @@ class AttendanceController extends Controller
             'scan_log_id' => $log->scan_id ?? $log->id,
             'employee' => [
                 'employee_id' => $employee->employee_id,
+                'user_id' => $empUser ? $empUser->user_id : null,
+                'branch_id' => $employee->branch_id,
                 'employee_code' => $employee->employee_code,
                 'name' => "{$employee->first_name} {$employee->last_name}",
                 'department' => $employee->department,
@@ -669,9 +682,9 @@ class AttendanceController extends Controller
             return response()->json(['success' => false, 'message' => 'Invalid or unrecognized QR code.'], 404);
         }
 
-        // Branch Validation
+        // Branch Validation (must both belong to a valid matching branch)
         $employeeBranch = !empty($employee->branch_id) ? trim((string)$employee->branch_id) : null;
-        if (strcasecmp((string)$employeeBranch, (string)$storeAdminBranch) !== 0) {
+        if (!$storeAdminBranch || !$employeeBranch || strcasecmp((string)$employeeBranch, (string)$storeAdminBranch) !== 0) {
             return response()->json([
                 'success' => false,
                 'message' => 'This employee does not belong to your authorized branch.'
@@ -687,21 +700,12 @@ class AttendanceController extends Controller
             ], 423);
         }
 
-        $isSelfScan = ($user && $user->employee_id && (int)$user->employee_id === (int)$employee->employee_id);
-        $empPosition = strtolower(trim((string)$employee->position));
-        $isManager = str_contains($empPosition, 'manager')
-            || str_contains($empPosition, 'store admin')
-            || str_contains($empPosition, 'administrator')
-            || ($employee->user && in_array($employee->user->role, ['Store Administrator', 'Store Admin', 'Administrator', 'Super Admin']));
-
         if (empty($employee->attendance_pin)) {
-            // Auto-initialize PIN if manager or standard PIN format (4 to 6 digits)
-            if ($isSelfScan || $isManager || (strlen($pin) >= 4 && strlen($pin) <= 6)) {
-                $employee->attendance_pin = \Illuminate\Support\Facades\Hash::make($pin);
-                $employee->save();
-            } else {
-                return response()->json(['success' => false, 'message' => 'Your secure Attendance PIN has not been set. Please update it in your profile settings.'], 422);
-            }
+            return response()->json([
+                'success' => false,
+                'pin_not_set' => true,
+                'message' => 'Your secure Attendance PIN has not been set. Please configure your PIN in Profile Settings or Employee Management first.',
+            ], 422);
         }
 
         // Find the pending scan log
@@ -726,9 +730,8 @@ class AttendanceController extends Controller
             ]);
         }
 
-        // Verify PIN (matches employee attendance PIN or user password)
-        $pinMatches = \Illuminate\Support\Facades\Hash::check($pin, $employee->attendance_pin)
-            || ($isSelfScan && \Illuminate\Support\Facades\Hash::check($pin, $user->password));
+        // Verify PIN strictly against employee's configured attendance_pin
+        $pinMatches = \Illuminate\Support\Facades\Hash::check($pin, $employee->attendance_pin);
 
         if (!$pinMatches) {
             $employee->pin_failed_attempts = ($employee->pin_failed_attempts ?? 0) + 1;
@@ -798,9 +801,13 @@ class AttendanceController extends Controller
                 'user_agent'  => $request->userAgent(),
             ]);
             SyncController::invalidateFingerprint(['attendance', 'employees', 'dashboard']);
-            \App\Http\Controllers\PayrollController::recalculateDraftPayrollForEmployee($employee);
-            
             \Illuminate\Support\Facades\DB::commit();
+
+            try {
+                \App\Http\Controllers\PayrollController::recalculateDraftPayrollForEmployee($employee);
+            } catch (\Throwable $e) {
+                \Illuminate\Support\Facades\Log::warning("Draft payroll recalculation error for employee {$employee->employee_id}: " . $e->getMessage());
+            }
 
             return response()->json([
                 'success' => true,
@@ -980,20 +987,64 @@ class AttendanceController extends Controller
     // ─── NEW FLOW: Employee Approves Verification ───────────────────────────────
     public function checkVerification(Request $request, $id)
     {
+        $user = $request->user('sanctum') ?? $request->user();
         $log = AttendanceScanLog::with('employee')->findOrFail($id);
+
+        if ($user && in_array($user->role, ['Store Administrator', 'Store Admin'], true)) {
+            $userBranch = $user->employee && !empty($user->employee->branch_id) ? trim((string)$user->employee->branch_id) : null;
+            $empBranch = $log->employee && !empty($log->employee->branch_id) ? trim((string)$log->employee->branch_id) : null;
+            $sameScanner = (int)$log->scanned_by === (int)$user->user_id;
+            $sameBranch = $userBranch && $empBranch && strcasecmp($userBranch, $empBranch) === 0;
+            if (!$sameScanner && !$sameBranch) {
+                return response()->json(['success' => false, 'message' => 'Unauthorized access to scan verification from another branch.'], 403);
+            }
+        } elseif ($user && $user->role === 'Employee' && (int)$log->employee_id !== (int)$user->employee_id) {
+            return response()->json(['success' => false, 'message' => 'Unauthorized verification lookup.'], 403);
+        }
+
         $scanTime = $log->created_at ? \Carbon\Carbon::parse($log->created_at) : now();
+        $actionName = str_replace('ATTENDANCE_', '', (string) ($log->action_type ?? ''));
+        $attendanceRecord = null;
+        if ($log->status === 'SUCCESS' && $log->employee_id) {
+            $attendanceRecord = \App\Models\Attendance::where('employee_id', $log->employee_id)
+                ->where('attendance_date', $scanTime->format('Y-m-d'))
+                ->first();
+        }
+        $isPinVerified = (bool) $log->pin_verified;
+
         return response()->json([
             'status' => $log->status,
             'action' => $log->action_type,
             'log' => $log,
-            'time' => $scanTime->format('h:i A')
+            'time' => $scanTime->format('h:i A'),
+            'date' => $scanTime->format('Y-m-d'),
+            'total_hours' => $attendanceRecord ? $attendanceRecord->total_hours : null,
+            'overtime_hours' => $attendanceRecord ? $attendanceRecord->overtime_hours : null,
+            'verification_type' => $isPinVerified ? 'PIN' : 'FACE_RECOGNITION',
+            'face_verified' => !$isPinVerified,
+            'message' => $log->status === 'SUCCESS'
+                ? 'Attendance verified and recorded (' . str_replace('_', ' ', $actionName ?: 'ATTENDANCE') . ').'
+                : null,
         ]);
     }
 
     public function pendingVerifications(Request $request)
     {
         $user = $request->user();
-        if (!$user || !$user->employee) {
+        $employee = $user ? $user->employee : null;
+        $empId = $user ? ($user->employee_id ?: ($employee ? $employee->employee_id : null)) : null;
+        if (!$user || !$empId) {
+            return response()->json(['pending' => []]);
+        }
+
+        $pending = AttendanceScanLog::with('scannedBy.employee')
+            ->where('employee_id', $empId)
+            ->where('status', 'PENDING')
+            ->where('created_at', '>=', now()->subMinutes(5))
+            ->orderBy('created_at', 'desc')
+            ->get();
+
+        if ($pending->isEmpty()) {
             return response()->json(['pending' => []]);
         }
 
@@ -1011,20 +1062,15 @@ class AttendanceController extends Controller
             }
         }
 
-        $pending = AttendanceScanLog::with('scannedBy.employee')
-            ->where('employee_id', $user->employee_id)
-            ->where('status', 'PENDING')
-            ->where('created_at', '>=', now()->subMinutes(5)) // Only look at recent ones
-            ->orderBy('created_at', 'desc')
-            ->get()
-            ->map(function ($item) use ($faceBiometricUrl, $faceBiometricBase64, $user) {
-                $item->face_biometric_image = $faceBiometricUrl;
-                $item->face_biometric_base64 = $faceBiometricBase64;
-                $item->has_registered_face = !empty($faceBiometricUrl);
-                $item->employee_code = $user->employee ? $user->employee->employee_code : null;
-                $item->employee_name = $user->employee ? trim("{$user->employee->first_name} {$user->employee->last_name}") : $user->name;
-                return $item;
-            });
+        $pending = $pending->map(function ($item) use ($faceBiometricUrl, $faceBiometricBase64, $user, $employee) {
+            $item->scan_log_id = $item->id;
+            $item->face_biometric_image = $faceBiometricUrl;
+            $item->face_biometric_base64 = $faceBiometricBase64;
+            $item->has_registered_face = !empty($faceBiometricUrl);
+            $item->employee_code = $employee ? $employee->employee_code : null;
+            $item->employee_name = $employee ? trim("{$employee->first_name} {$employee->last_name}") : $user->name;
+            return $item;
+        });
 
         return response()->json([
             'pending' => $pending,
@@ -1042,18 +1088,31 @@ class AttendanceController extends Controller
         }
 
         $targetUser = $user;
+        $targetEmployee = $user->employee;
         $employeeId = $request->query('employee_id');
-        if ($employeeId && in_array($user->role, ['Store Administrator', 'Store Admin', 'Admin', 'Super Admin', 'Human Resources'])) {
-            $foundEmployee = Employee::with('user')->find($employeeId);
-            if ($foundEmployee && $foundEmployee->user) {
-                $targetUser = $foundEmployee->user;
+        if ($employeeId && (int)$employeeId !== (int)$user->employee_id) {
+            if (!in_array($user->role, ['Administrator', 'Store Administrator', 'Store Admin'], true)) {
+                return response()->json(['success' => false, 'message' => 'Unauthorized'], 403);
             }
+            $foundEmployee = Employee::with('user')->find($employeeId);
+            if (!$foundEmployee) {
+                return response()->json(['success' => false, 'message' => 'Employee not found'], 404);
+            }
+            if (in_array($user->role, ['Store Administrator', 'Store Admin'], true)) {
+                $userBranch = $user->employee && !empty($user->employee->branch_id) ? trim((string)$user->employee->branch_id) : null;
+                $empBranch = !empty($foundEmployee->branch_id) ? trim((string)$foundEmployee->branch_id) : null;
+                if (!$userBranch || !$empBranch || strcasecmp($userBranch, $empBranch) !== 0) {
+                    return response()->json(['success' => false, 'message' => 'Unauthorized cross-branch access'], 403);
+                }
+            }
+            $targetEmployee = $foundEmployee;
+            $targetUser = $foundEmployee->user;
         }
 
-        $employee = $targetUser->employee;
+        $employee = $targetEmployee;
         $faceBiometricUrl = null;
         $faceBiometricBase64 = null;
-        if ($targetUser->face_biometric_image) {
+        if ($targetUser && $targetUser->face_biometric_image) {
             $faceBiometricUrl = str_starts_with($targetUser->face_biometric_image, 'http')
                 ? $targetUser->face_biometric_image
                 : url(Storage::url($targetUser->face_biometric_image));
@@ -1068,8 +1127,8 @@ class AttendanceController extends Controller
         return response()->json([
             'success' => true,
             'employee_id' => $employee ? $employee->employee_id : null,
-            'employee_code' => $employee ? $employee->employee_code : 'EMP-016',
-            'name' => $employee ? trim("{$employee->first_name} {$employee->last_name}") : $targetUser->name,
+            'employee_code' => $employee ? $employee->employee_code : null,
+            'name' => $employee ? trim("{$employee->first_name} {$employee->last_name}") : ($targetUser ? $targetUser->name : 'Employee'),
             'face_biometric_image' => $faceBiometricUrl,
             'face_biometric_base64' => $faceBiometricBase64,
             'has_registered_face' => !empty($faceBiometricUrl),
@@ -1093,12 +1152,15 @@ class AttendanceController extends Controller
         ]);
 
         $targetEmployeeId = $user->employee_id ?: ($user->employee ? $user->employee->employee_id : null);
-        $isStoreAdmin = in_array($user->role, ['Store Administrator', 'Store Admin', 'Admin', 'Super Admin']);
+        $isStoreAdmin = in_array($user->role, ['Store Administrator', 'Store Admin'], true);
+        $isAdmin = $user->role === 'Administrator';
 
         $query = AttendanceScanLog::with('employee.user')->where('id', $validated['scan_log_id'])
             ->where('status', 'PENDING');
 
-        if ($isStoreAdmin) {
+        if ($isAdmin) {
+            // Administrator can inspect/approve within system rules
+        } elseif ($isStoreAdmin) {
             $query->where(function ($q) use ($targetEmployeeId, $user) {
                 if ($targetEmployeeId) {
                     $q->where('employee_id', $targetEmployeeId);
@@ -1106,7 +1168,7 @@ class AttendanceController extends Controller
                 $q->orWhere('scanned_by', $user->user_id);
             });
         } else {
-            $query->where('employee_id', $targetEmployeeId);
+            $query->where('employee_id', $targetEmployeeId ?: -1);
         }
 
         $log = $query->first();
@@ -1115,15 +1177,19 @@ class AttendanceController extends Controller
             return response()->json(['success' => false, 'message' => 'Pending request not found or expired.'], 404);
         }
 
-        $employee = $log->employee ?: $user->employee;
-        $empUser = ($employee && $employee->user) ? $employee->user : $user;
+        $employee = $log->employee;
+        if (!$employee) {
+            return response()->json(['success' => false, 'message' => 'Employee record not found for scan log.'], 404);
+        }
+        $empUser = $employee->user;
         $isFace = $request->boolean('face_verified') || $request->input('verification_type') === 'FACE_RECOGNITION';
 
         if ($isFace) {
-            // Strict Face ID match check: If explicitly marked false or face not registered, reject
-            $isFaceMatched = $request->has('face_matched') ? $request->boolean('face_matched') : true;
+            // Strict Face ID match check: must explicitly match employee's enrolled Face ID with passing confidence
+            $isFaceMatched = $request->boolean('face_matched', false);
+            $confidence = $validated['confidence'] ?? null;
             $faceBiometricImage = $empUser ? $empUser->face_biometric_image : null;
-            if (!$isFaceMatched || empty($faceBiometricImage)) {
+            if (!$isFaceMatched || empty($faceBiometricImage) || $confidence === null || (float)$confidence < 58) {
                 $log->update(['status' => 'FAILED', 'action_type' => 'FACE_VERIFICATION_FAILED', 'failure_reason' => 'Face does not match registered Face ID. Access denied.']);
                 return response()->json([
                     'success' => false,
@@ -1148,16 +1214,14 @@ class AttendanceController extends Controller
             }
 
             if (empty($employee->attendance_pin)) {
-                if (strlen($validated['pin']) >= 4 && strlen($validated['pin']) <= 6) {
-                    $employee->attendance_pin = \Illuminate\Support\Facades\Hash::make($validated['pin']);
-                    $employee->save();
-                } else {
-                    return response()->json(['success' => false, 'message' => 'Your secure Attendance PIN has not been set. Please update it in your profile settings.'], 422);
-                }
+                return response()->json([
+                    'success' => false,
+                    'pin_not_set' => true,
+                    'message' => 'Your secure Attendance PIN has not been set. Please update it in your profile settings.',
+                ], 422);
             }
 
-            $pinValid = ($employee->attendance_pin && \Illuminate\Support\Facades\Hash::check($validated['pin'], $employee->attendance_pin))
-                || ($empUser && $empUser->password && \Illuminate\Support\Facades\Hash::check($validated['pin'], $empUser->password));
+            $pinValid = \Illuminate\Support\Facades\Hash::check($validated['pin'], $employee->attendance_pin);
 
             if (!$pinValid) {
                 $employee->pin_failed_attempts = ($employee->pin_failed_attempts ?? 0) + 1;
@@ -1179,11 +1243,8 @@ class AttendanceController extends Controller
         }
 
         // ─── ATTENDANCE BELONGS TO THE SCANNED EMPLOYEE ───
-        $storeAdminUser = \App\Models\User::with('employee')->find($log->scanned_by);
-        
         $scanTime = $log->created_at ? \Carbon\Carbon::parse($log->created_at) : now();
         $today = $scanTime->format('Y-m-d');
-        $now = $scanTime->format('H:i:s');
         $timeStr = $scanTime->format('h:i A');
 
         $record = \App\Models\Attendance::where('employee_id', $employee->employee_id)
@@ -1199,49 +1260,78 @@ class AttendanceController extends Controller
         $methodLabel = $isFace ? 'QR + Face Recognition' : 'QR + PIN';
         $scanStatus = $isFace ? 'QR_FACE_VERIFIED' : 'QR_PIN_VERIFIED';
 
-        if ($action === 'TIME_IN') {
-            $record = new \App\Models\Attendance();
-            $record->employee_id = $employee->employee_id;
-            $record->scanned_by = $log->scanned_by;
-            $record->qr_scan_in = $scanStatus;
-            $record->verification_method = $methodLabel;
-            $record->verified_by_name = "{$employee->first_name} {$employee->last_name}";
-            $record->device_info = $log->device_info;
-            $record->ip_address = $log->ip_address;
-        } elseif ($action === 'TIME_OUT') {
-            $record->qr_scan_out = $scanStatus;
-            $record->verification_method = $methodLabel;
-            $record->verified_by_name = "{$employee->first_name} {$employee->last_name}";
-        }
-        AttendanceSchedule::applyAction($record, $action, $scanTime);
+        \Illuminate\Support\Facades\DB::transaction(function () use ($record, $action, $employee, $log, $scanStatus, $methodLabel, $scanTime, $isFace, $user, $request, $timeStr) {
+            if ($action === 'TIME_IN') {
+                $record = new \App\Models\Attendance();
+                $record->employee_id = $employee->employee_id;
+                $record->scanned_by = $log->scanned_by;
+                $record->qr_scan_in = $scanStatus;
+                $record->verification_method = $methodLabel;
+                $record->verified_by_name = "{$employee->first_name} {$employee->last_name}";
+                $record->device_info = $log->device_info;
+                $record->ip_address = $log->ip_address;
+            } elseif ($action === 'TIME_OUT') {
+                $record->qr_scan_out = $scanStatus;
+                $record->verification_method = $methodLabel;
+                $record->verified_by_name = "{$employee->first_name} {$employee->last_name}";
+            }
+            AttendanceSchedule::applyAction($record, $action, $scanTime);
 
-        // Update Log
-        $log->update([
-            'status' => 'SUCCESS',
-            'action_type' => 'ATTENDANCE_' . $action,
-            'pin_verified' => true
-        ]);
+            // Update Log (pin_verified is true ONLY for PIN verification)
+            $log->update([
+                'status' => 'SUCCESS',
+                'action_type' => 'ATTENDANCE_' . $action,
+                'pin_verified' => !$isFace
+            ]);
 
-        // Real-time Audit Trail in SystemLog
-        SystemLog::create([
-            'user_id'     => $user->user_id,
-            'action'      => 'ATTENDANCE_' . strtoupper($action),
-            'module'      => 'Attendance',
-            'description' => "Attendance self-authorized: {$employee->first_name} {$employee->last_name} ({$employee->employee_code}) - " . str_replace('_', ' ', $action) . " at {$timeStr}",
-            'ip_address'  => $request->ip(),
-            'user_agent'  => $request->userAgent(),
-        ]);
+            // Real-time Audit Trail in SystemLog
+            SystemLog::create([
+                'user_id'     => $user->user_id,
+                'action'      => 'ATTENDANCE_' . strtoupper($action),
+                'module'      => 'Attendance',
+                'description' => "Attendance self-authorized: {$employee->first_name} {$employee->last_name} ({$employee->employee_code}) - " . str_replace('_', ' ', $action) . " at {$timeStr}",
+                'ip_address'  => $request->ip(),
+                'user_agent'  => $request->userAgent(),
+            ]);
+        });
         SyncController::invalidateFingerprint(['attendance', 'employees', 'dashboard']);
 
-        // Immediately recalculate active weekly draft payroll for this employee
         try {
             \App\Http\Controllers\PayrollController::recalculateDraftPayrollForEmployee($employee);
         } catch (\Throwable $e) {
             \Illuminate\Support\Facades\Log::warning("Draft payroll recalculation error for employee {$employee->employee_id}: " . $e->getMessage());
         }
 
+        \App\Services\RealtimeBroadcaster::dispatch(new \App\Events\AttendanceLogged([
+            'scan_log_id' => $log->id,
+            'employee_id' => $employee->employee_id,
+            'employee_code' => $employee->employee_code,
+            'employee_name' => trim("{$employee->first_name} {$employee->last_name}"),
+            'action' => $action,
+            'status' => 'SUCCESS',
+            'stage' => 'authorized',
+            'verification_method' => $isFace ? 'Face Recognition' : 'PIN',
+            'actor_user_id' => (int) $user->user_id,
+            'toast_title' => 'Attendance Logged',
+            'toast_message' => trim("{$employee->first_name} {$employee->last_name}") . ' completed ' . str_replace('_', ' ', $action) . '.',
+        ], $employee->branch_id ? (int) $employee->branch_id : null, array_filter([
+            $empUser?->user_id ? (int) $empUser->user_id : null,
+            $log->scanned_by ? (int) $log->scanned_by : null,
+        ])));
+
+        $updatedAttendance = \App\Models\Attendance::where('employee_id', $employee->employee_id)
+            ->where('attendance_date', $today)
+            ->first();
+
         return response()->json([
             'success' => true,
+            'action' => $action,
+            'time' => $timeStr,
+            'date' => $today,
+            'total_hours' => $updatedAttendance ? $updatedAttendance->total_hours : null,
+            'overtime_hours' => $updatedAttendance ? $updatedAttendance->overtime_hours : null,
+            'verification_type' => $isFace ? 'FACE_RECOGNITION' : 'PIN',
+            'face_verified' => $isFace,
             'message' => 'Attendance authorized successfully.'
         ]);
     }
@@ -1261,11 +1351,26 @@ class AttendanceController extends Controller
         $logId = $validated['scan_log_id'];
         $reason = $validated['reason'] ?? 'Attendance authorization cancelled by employee.';
 
-        $isStoreAdmin = in_array($user->role, ['Store Administrator', 'Store Admin', 'Administrator']);
-        $query = AttendanceScanLog::where('id', $logId);
+        $isAdmin = $user->role === 'Administrator';
+        $isStoreAdmin = in_array($user->role, ['Store Administrator', 'Store Admin'], true);
+        $query = AttendanceScanLog::with('employee')
+            ->where('id', $logId)
+            ->where('status', 'PENDING');
 
-        if (!$isStoreAdmin && $user->employee_id) {
-            $query->where('employee_id', $user->employee_id);
+        if ($isAdmin) {
+        } elseif ($isStoreAdmin) {
+            $userBranch = $user->employee && !empty($user->employee->branch_id) ? trim((string)$user->employee->branch_id) : null;
+            $query->where(function ($q) use ($user, $userBranch) {
+                $q->where('scanned_by', $user->user_id);
+                if ($user->employee_id) {
+                    $q->orWhere('employee_id', $user->employee_id);
+                }
+                if ($userBranch) {
+                    $q->orWhereHas('employee', fn($eq) => $eq->where('branch_id', $userBranch));
+                }
+            });
+        } else {
+            $query->where('employee_id', $user->employee_id ?: -1);
         }
 
         $log = $query->first();
@@ -1277,7 +1382,14 @@ class AttendanceController extends Controller
             ]);
 
             SyncController::invalidateFingerprint(['attendance', 'employees', 'dashboard']);
-            \App\Http\Controllers\PayrollController::recalculateDraftPayrollForEmployee($employee);
+            $employee = $log->employee ?: ($user->employee_id ? Employee::find($user->employee_id) : null);
+            if ($employee) {
+                try {
+                    \App\Http\Controllers\PayrollController::recalculateDraftPayrollForEmployee($employee);
+                } catch (\Throwable $e) {
+                    \Illuminate\Support\Facades\Log::warning("Draft payroll recalculation error on verification cancel: " . $e->getMessage());
+                }
+            }
 
             try {
                 SystemLog::create([
@@ -1289,6 +1401,19 @@ class AttendanceController extends Controller
                     'user_agent'  => $request->userAgent(),
                 ]);
             } catch (\Throwable $e) {}
+
+            $empUserId = $employee ? \App\Models\User::where('employee_id', $employee->employee_id)->value('user_id') : null;
+            \App\Services\RealtimeBroadcaster::dispatch(new \App\Events\AttendanceLogged([
+                'scan_log_id' => $log->id,
+                'employee_id' => $employee?->employee_id,
+                'status' => 'FAILED',
+                'stage' => 'rejected',
+                'failure_reason' => $reason,
+                'actor_user_id' => (int) $user->user_id,
+            ], $employee?->branch_id ? (int) $employee->branch_id : null, array_filter([
+                $empUserId ? (int) $empUserId : null,
+                $log->scanned_by ? (int) $log->scanned_by : null,
+            ])));
 
             return response()->json([
                 'success' => true,
@@ -1336,13 +1461,20 @@ class AttendanceController extends Controller
             AttendancePeriodSimulator::simulatePeriod($startDate, $endDate, false);
         }
 
-        $data = AttendancePeriodSimulator::calculatePeriodMetrics(
-            $startDate,
-            $endDate,
-            $branchFilter,
-            $roleFilter,
-            $employeeIdFilter
-        );
+        $attFp = SyncController::computeFingerprint('attendance');
+        $metricsCacheKey = 'pace_att_period_' . md5(json_encode([
+            $startDate, $endDate, $branchFilter, $roleFilter, $employeeIdFilter, $attFp
+        ]));
+
+        $data = Cache::remember($metricsCacheKey, 10, function () use ($startDate, $endDate, $branchFilter, $roleFilter, $employeeIdFilter) {
+            return AttendancePeriodSimulator::calculatePeriodMetrics(
+                $startDate,
+                $endDate,
+                $branchFilter,
+                $roleFilter,
+                $employeeIdFilter
+            );
+        });
 
         return response()->json([
             'success' => true,
@@ -1370,6 +1502,7 @@ class AttendanceController extends Controller
         $force = (bool) $request->boolean('force', false);
 
         $simResult = AttendancePeriodSimulator::simulatePeriod($startDate, $endDate, $force);
+        SyncController::invalidateFingerprint(['attendance', 'employees']);
 
         try {
             SystemLog::create([
@@ -1384,7 +1517,7 @@ class AttendanceController extends Controller
 
         $branchFilter = $request->input('branch');
         $roleFilter = $request->input('role');
-        if ($user->role === 'Store Admin' && empty($branchFilter)) {
+        if (in_array($user->role, ['Store Admin', 'Store Administrator'], true) && empty($branchFilter)) {
             $emp = Employee::find($user->employee_id);
             if ($emp && $emp->branch_id) {
                 $branchFilter = (string) $emp->branch_id;

@@ -18,16 +18,16 @@ class CustomerController extends Controller
     {
         $user = auth()->user();
 
-        // 1-2s Performance Cache: bypass if exporting CSV
+        // Versioned 45s Performance Cache: bypass if exporting CSV
         if (!$request->boolean('export_csv')) {
-            $fp = SyncController::computeFingerprint('customers');
             $cacheKey = 'pace_cust_idx_' . md5(json_encode([
                 'u' => $user ? $user->user_id : 0,
                 'r' => $user ? $user->role : '',
                 's' => $request->query('search', ''),
                 'st' => $request->query('status', ''),
                 'b' => $request->query('branch', ''),
-            ])) . '_' . $fp;
+                'v' => SyncController::moduleVersion('customers'),
+            ]));
 
             $cached = Cache::get($cacheKey);
             if ($cached !== null) {
@@ -40,7 +40,7 @@ class CustomerController extends Controller
         $query = Customer::with([
             'installmentAccounts' => function ($q) {
                 $q->select(['installment_id', 'customer_id', 'status', 'down_payment', 'total_payable'])
-                  ->withSum('payments', 'amount');
+                  ->with('payments:payment_id,installment_id,amount,status,reference_no,notes');
             },
             'branch:id,name',
             'user:user_id,customer_id,is_active',
@@ -133,9 +133,8 @@ class CustomerController extends Controller
 
             $totalBalance = 0;
             foreach ($c->installmentAccounts->whereIn('status', ['Active', 'Overdue']) as $inst) {
-                $paid = (float)($inst->payments_sum_amount ?? 0) + (float)$inst->down_payment;
-                $balance = max(0, (float)$inst->total_payable - $paid);
-                $totalBalance += $balance;
+                $fin = $inst->financialBreakdown();
+                $totalBalance += (float) $fin['balance'];
             }
 
             return [
@@ -170,7 +169,7 @@ class CustomerController extends Controller
         ];
 
         if (isset($cacheKey)) {
-            Cache::put($cacheKey, $res, 2);
+            Cache::put($cacheKey, $res, 45);
         }
 
         return response()->json($res);
@@ -182,19 +181,19 @@ class CustomerController extends Controller
         User::syncSessionStatuses($user, 'customers');
 
         // Customer can only see their own data
-        if ($user && $user->role === 'Customer' && $user->customer_id != $id) {
+        if ($user && $user->role === 'Customer' && (int) CustomerDashboardController::resolveCustomerId($user) !== (int) $id) {
             return response()->json(['message' => 'Unauthorized access'], 403);
         }
 
         // Store Admin can only see customers in their branch (or unassigned)
-        if ($user && $user->role === 'Store Administrator') {
+        if ($user && in_array($user->role, ['Store Administrator', 'Store Admin'], true)) {
             $adminBranch = $user->employee ? $user->employee->branch_id : null;
             $customer = Customer::find($id);
             if (!$customer) {
                 return response()->json(['message' => 'Customer not found'], 404);
             }
             // Reject if customer belongs to a DIFFERENT branch
-            if ($customer->branch_id !== null && $customer->branch_id != $adminBranch) {
+            if ($customer->branch_id !== null && $adminBranch !== null && (int) $customer->branch_id !== (int) $adminBranch) {
                 return response()->json(['message' => 'Access denied: customer belongs to a different branch.'], 403);
             }
         }
@@ -225,8 +224,9 @@ class CustomerController extends Controller
         });
 
         $installments = $customer->installmentAccounts->map(function ($inst) {
-            $paid    = (float)$inst->payments->sum('amount') + (float)$inst->down_payment;
-            $balance = max(0, (float)$inst->total_payable - $paid);
+            $fin     = $inst->financialBreakdown();
+            $paid    = (float) $fin['paid'];
+            $balance = (float) $fin['balance'];
 
             return [
                 'installment_id'         => $inst->installment_id,
@@ -312,6 +312,11 @@ class CustomerController extends Controller
 
     public function store(Request $request)
     {
+        $user = auth()->user();
+        if ($user && !in_array($user->role, ['Administrator', 'Admin', 'Store Administrator', 'Store Admin'], true)) {
+            return response()->json(['message' => 'Unauthorized to create customer records.'], 403);
+        }
+
         $validated = $request->validate([
             'customer_code' => 'nullable|string|unique:customers,customer_code',
             'first_name'    => 'required|string|max:255',
@@ -358,8 +363,13 @@ class CustomerController extends Controller
         }
 
         if (empty($validated['customer_code'])) {
-            $count = Customer::count() + 1;
-            $validated['customer_code'] = 'CUS-' . str_pad($count, 3, '0', STR_PAD_LEFT);
+            $count = (Customer::max('customer_id') ?? 0) + 1;
+            $custCode = 'CUS-' . str_pad($count, 3, '0', STR_PAD_LEFT);
+            while (Customer::where('customer_code', $custCode)->exists()) {
+                $count++;
+                $custCode = 'CUS-' . str_pad($count, 3, '0', STR_PAD_LEFT);
+            }
+            $validated['customer_code'] = $custCode;
         }
 
         $customer = Customer::create($validated);
@@ -406,7 +416,18 @@ class CustomerController extends Controller
 
     public function update(Request $request, $id)
     {
+        $user = auth()->user();
+        if ($user && !in_array($user->role, ['Administrator', 'Admin', 'Store Administrator', 'Store Admin'], true)) {
+            return response()->json(['message' => 'Unauthorized to update customer records.'], 403);
+        }
+
         $customer = Customer::findOrFail($id);
+        if ($user && in_array($user->role, ['Store Administrator', 'Store Admin'], true)) {
+            $adminBranch = $user->employee?->branch_id ?? $user->branch_id ?? null;
+            if ($customer->branch_id !== null && $adminBranch !== null && (int) $customer->branch_id !== (int) $adminBranch) {
+                return response()->json(['message' => 'Access denied: customer belongs to a different branch.'], 403);
+            }
+        }
 
         $validated = $request->validate([
             'customer_code' => "required|string|unique:customers,customer_code,{$id},customer_id",
@@ -513,7 +534,18 @@ class CustomerController extends Controller
 
     public function destroy(Request $request, $id)
     {
+        $user = $request->user() ?? auth()->user();
+        if ($user && !in_array($user->role, ['Administrator', 'Admin', 'Store Administrator', 'Store Admin'], true)) {
+            return response()->json(['message' => 'Unauthorized to delete customer records.'], 403);
+        }
+
         $customer = Customer::findOrFail($id);
+        if ($user && in_array($user->role, ['Store Administrator', 'Store Admin'], true)) {
+            $adminBranch = $user->employee?->branch_id ?? $user->branch_id ?? null;
+            if ($customer->branch_id !== null && $adminBranch !== null && (int) $customer->branch_id !== (int) $adminBranch) {
+                return response()->json(['message' => 'Access denied: customer belongs to a different branch.'], 403);
+            }
+        }
         $name = "{$customer->first_name} {$customer->last_name}";
         $code = $customer->customer_code;
 

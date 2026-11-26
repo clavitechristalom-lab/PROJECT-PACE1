@@ -3,6 +3,7 @@ import { HashRouter, Routes, Route, Navigate, useLocation } from 'react-router-d
 import { AuthProvider, useAuth } from './context/AuthContext'
 import { ToastContainer, ErrorBoundary, Spinner } from './components/ui'
 import { triggerDataSync } from './lib/realtimeSync'
+import { getEmployeeSubRole, isCollectorUser, isCashierUser } from './lib/employeeDepartment'
 import AppShell from './components/layout/AppShell'
 import LoginPage from './pages/LoginPage'
 
@@ -25,14 +26,6 @@ const lazyRetry = (factory, retries = 2, delay = 400) => {
                 attempt(attemptsLeft - 1)
               }, delay)
             } else {
-              const reloadKey = 'pace_chunk_failed_reload'
-              const lastReload = sessionStorage.getItem(reloadKey)
-              const now = Date.now()
-              if (!lastReload || now - parseInt(lastReload, 10) > 8000) {
-                sessionStorage.setItem(reloadKey, now.toString())
-                window.location.reload()
-                return
-              }
               reject(err)
             }
           })
@@ -73,6 +66,8 @@ const BranchesPage = lazyRetry(() => import('./pages/BranchesPage'))
 const CarouselPage = lazyRetry(() => import('./pages/CarouselPage'))
 const StoreSettingsPage = lazyRetry(() => import('./pages/StoreSettingsPage'))
 const StoreAdminProfilePage = lazyRetry(() => import('./pages/StoreAdminProfilePage'))
+const CollectorCollectionsPage = lazyRetry(() => import('./pages/CollectorCashPage'))
+const CashierReceiveCashPage = lazyRetry(() => import('./pages/CashierReceiveCashPage'))
 
 // Synchronize initial URL hash with browser pathname or saved route if needed
 if (typeof window !== 'undefined') {
@@ -105,15 +100,23 @@ function getDefaultDashboard(role) {
   return '/dashboard'
 }
 
-function canUserAccessPath(role, path) {
+function canUserAccessPath(userOrRole, path) {
   if (!path || path === '/' || path === '/login') return false
   const cleanPath = path.split('?')[0]
+  const userObj = userOrRole && typeof userOrRole === 'object' ? userOrRole : null
+  const role = userObj ? userObj.role : userOrRole
   const r = (role || '').trim().toLowerCase()
 
   if (r === 'customer') {
     return cleanPath.startsWith('/customer') || cleanPath === '/notifications' || cleanPath === '/profile'
   }
   if (r === 'employee') {
+    if (cleanPath === '/employee/collect-cash' || cleanPath.startsWith('/employee/collect-cash/')) {
+      return isCollectorUser(userObj)
+    }
+    if (cleanPath === '/employee/receive-cash' || cleanPath.startsWith('/employee/receive-cash/')) {
+      return isCashierUser(userObj)
+    }
     return cleanPath.startsWith('/employee') || cleanPath === '/notifications' || cleanPath === '/profile'
   }
   if (r === 'store administrator' || r === 'store admin') {
@@ -198,7 +201,7 @@ function SupportRouteDispatcher() {
   return <Navigate to={getDefaultDashboard(user.role)} replace />
 }
 
-function RequireAuth({ children, roles }) {
+function RequireAuth({ children, roles, departments }) {
   const { user, checkingAuth } = useAuth()
   const location = useLocation()
 
@@ -218,6 +221,14 @@ function RequireAuth({ children, roles }) {
     }
   }
 
+  if (departments) {
+    const subRole = getEmployeeSubRole(user)
+    const allowedDepts = departments.map(d => d.trim().toLowerCase())
+    if (!subRole || !allowedDepts.includes(subRole)) {
+      return <Navigate to={getDefaultDashboard(user.role)} replace />
+    }
+  }
+
   return children
 }
 
@@ -230,7 +241,7 @@ function PublicRoute({ children }) {
 
   if (user) {
     const saved = sessionStorage.getItem('pace_last_path')
-    if (saved && canUserAccessPath(user.role, saved)) {
+    if (saved && canUserAccessPath(user, saved)) {
       return <Navigate to={saved} replace />
     }
     return <Navigate to={getDefaultDashboard(user.role)} replace />
@@ -248,7 +259,7 @@ function RootRedirect() {
 
   if (user) {
     const saved = sessionStorage.getItem('pace_last_path')
-    if (saved && canUserAccessPath(user.role, saved)) {
+    if (saved && canUserAccessPath(user, saved)) {
       return <Navigate to={saved} replace />
     }
     return <Navigate to={getDefaultDashboard(user.role)} replace />
@@ -258,10 +269,92 @@ function RootRedirect() {
 }
 
 function AppRoutes() {
+  const { user } = useAuth()
+
+  // Defer idle-time JS chunk preloading cleanly per role so startup & initial figures never contend
+  useEffect(() => {
+    if (!user) return
+    const role = user.role
+    let loaders = []
+    if (role === 'Customer') {
+      loaders = [
+        () => import('./pages/CustomerDashboard'),
+        () => import('./pages/NotificationsPage'),
+      ]
+    } else if (role === 'Employee') {
+      loaders = [
+        () => import('./pages/AttendancePage'),
+        () => import('./pages/PayrollPage'),
+        () => import('./pages/ExcuseLetterPage'),
+        () => import('./pages/NotificationsPage'),
+      ]
+    } else if (role === 'Store Administrator' || role === 'Store Admin') {
+      loaders = [
+        () => import('./pages/AttendancePage'),
+        () => import('./pages/QrScannerPage'),
+        () => import('./pages/EmployeesPage'),
+        () => import('./pages/SalesPage'),
+        () => import('./pages/PaymentsPage'),
+        () => import('./pages/InstallmentsPage'),
+        () => import('./pages/ProductsPage'),
+        () => import('./pages/ReportsPage'),
+      ]
+    } else if (role === 'Administrator') {
+      loaders = [
+        () => import('./pages/ProductsPage'),
+        () => import('./pages/CustomersPage'),
+        () => import('./pages/SalesPage'),
+        () => import('./pages/InstallmentsPage'),
+        () => import('./pages/PaymentsPage'),
+        () => import('./pages/EmployeesPage'),
+        () => import('./pages/AttendancePage'),
+        () => import('./pages/PayrollPage'),
+        () => import('./pages/ReportsPage'),
+        () => import('./pages/QrRequestsPage'),
+      ]
+    }
+
+    let cancelled = false
+    let idx = 0
+    let idleId = null
+    let timerId = null
+
+    const runNext = () => {
+      if (cancelled || idx >= loaders.length) return
+      const fn = loaders[idx++]
+      Promise.resolve()
+        .then(fn)
+        .catch(() => { })
+        .finally(() => {
+          if (!cancelled && idx < loaders.length) {
+            timerId = setTimeout(scheduleNext, 220)
+          }
+        })
+    }
+
+    const scheduleNext = () => {
+      if (cancelled || idx >= loaders.length) return
+      if (typeof window !== 'undefined' && typeof window.requestIdleCallback === 'function') {
+        idleId = window.requestIdleCallback(runNext, { timeout: 2500 })
+      } else {
+        timerId = setTimeout(runNext, 220)
+      }
+    }
+
+    timerId = setTimeout(scheduleNext, 1800)
+    return () => {
+      cancelled = true
+      if (timerId) clearTimeout(timerId)
+      if (idleId && typeof window !== 'undefined' && typeof window.cancelIdleCallback === 'function') {
+        window.cancelIdleCallback(idleId)
+      }
+    }
+  }, [user?.role])
+
   return (
     <>
       <RoutePersistenceTracker />
-      <Suspense fallback={<FullPageLoader />}>
+      <Suspense fallback={null}>
         <Routes>
           <Route
             path="/login"
@@ -335,9 +428,10 @@ function AppRoutes() {
             <Route path="/excuse-letters" element={<Navigate to="/admin/excuse-letters" replace />} />
             <Route path="/message-reports" element={<RequireAuth roles={['Administrator', 'Store Administrator', 'Store Admin']}><SupportPage /></RequireAuth>} />
             <Route path="/admin/support" element={<RequireAuth roles={['Administrator', 'Store Administrator', 'Store Admin']}><SupportPage /></RequireAuth>} />
-            <Route path="/support" element={<RequireAuth roles={['Administrator', 'Store Administrator', 'Store Admin']}><SupportPage /></RequireAuth>} />
             <Route path="/notifications" element={<RequireAuth><NotificationsPage /></RequireAuth>} />
             <Route path="/employee/dashboard" element={<RequireAuth roles={['Employee']}><EmployeeDashboard /></RequireAuth>} />
+            <Route path="/employee/collect-cash" element={<RequireAuth roles={['Employee']} departments={['collector']}><CollectorCollectionsPage /></RequireAuth>} />
+            <Route path="/employee/receive-cash" element={<RequireAuth roles={['Employee']} departments={['cashier']}><CashierReceiveCashPage /></RequireAuth>} />
             <Route path="/employee/attendance" element={<RequireAuth roles={['Employee']}><AttendancePage /></RequireAuth>} />
             <Route path="/employee/payroll" element={<Navigate to="/employee/payslips" replace />} />
             <Route path="/employee/payslips" element={<RequireAuth roles={['Employee']}><PayrollPage /></RequireAuth>} />

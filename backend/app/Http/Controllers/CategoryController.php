@@ -11,17 +11,18 @@ use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
 
 class CategoryController extends Controller
 {
     public function index(Request $request)
     {
-        $fp = SyncController::computeFingerprint('categories');
         $mainFilter = trim((string) $request->query('main_category', ''));
         $includeInactive = $request->boolean('include_inactive') && $request->user() !== null;
-        $cacheKey = 'pace_categories_' . md5($mainFilter . '|' . ($includeInactive ? 'all' : 'active')) . '_' . $fp;
+        $catVer = SyncController::moduleVersion('categories');
+        $cacheKey = 'pace_categories_' . md5($mainFilter . '|' . ($includeInactive ? 'all' : 'active') . '|' . $catVer);
 
-        $payload = Cache::remember($cacheKey, 2, function () use ($mainFilter, $includeInactive) {
+        $payload = Cache::remember($cacheKey, 60, function () use ($mainFilter, $includeInactive) {
             if (Schema::hasTable('categories')) {
                 if (!Category::exists()) {
                     CategoryFramework::syncDatabase();
@@ -127,11 +128,21 @@ class CategoryController extends Controller
         return response()->json($payload);
     }
 
-    private function authorizeManage(Request $request)
+    private function authorizeManage(Request $request, ?Category $category = null)
     {
         $user = $request->user();
-        if (!$user || !in_array($user->role, ['Administrator', 'Store Administrator', 'Store Admin'], true)) {
+        if (!$user || !in_array($user->role, ['Administrator', 'Admin', 'Store Administrator', 'Store Admin'], true)) {
             return response()->json(['message' => 'Unauthorized to modify categories.'], 403);
+        }
+
+        if (in_array($user->role, ['Store Administrator', 'Store Admin'], true)) {
+            $userBranchId = $user->employee?->branch_id;
+            if (!$userBranchId) {
+                return response()->json(['message' => 'Store Administrator is not assigned to any branch.'], 403);
+            }
+            if ($category && ((int) ($category->branch_id ?? 0) !== (int) $userBranchId)) {
+                return response()->json(['message' => 'Unauthorized to modify global or another branch\'s categories.'], 403);
+            }
         }
         return null;
     }
@@ -158,6 +169,11 @@ class CategoryController extends Controller
 
     private function resolveBranchId(Request $request): ?int
     {
+        $user = $request->user();
+        if ($user && in_array($user->role, ['Store Administrator', 'Store Admin'], true)) {
+            return $user->employee?->branch_id ? (int) $user->employee->branch_id : null;
+        }
+
         $raw = $request->input('branch_id');
         if ($raw === null || $raw === '' || strcasecmp((string) $raw, 'all') === 0) {
             return null;
@@ -180,6 +196,121 @@ class CategoryController extends Controller
         return $candidate;
     }
 
+    private function resolveSkuDomain(?string $categoryOrDomain): string
+    {
+        $resolved = CategoryFramework::resolveHierarchy($categoryOrDomain);
+        return $resolved['main_category'] ?: ($resolved['sku_prefix'] ?: 'PRD');
+    }
+
+    private function attachMultipleProducts(Category $category, Request $request, array $newProducts, array $assignProductIds): array
+    {
+        $user = $request->user();
+        $isStoreAdmin = $user && in_array($user->role, ['Store Administrator', 'Store Admin'], true);
+        $userBranchId = $isStoreAdmin ? ($user->employee?->branch_id ? (int) $user->employee->branch_id : null) : null;
+        $targetBranchId = $isStoreAdmin ? $userBranchId : $category->branch_id;
+
+        $createdProducts = [];
+        $assignedCount = 0;
+
+        if (!empty($newProducts)) {
+            $targetDomain = $category->main_category ?: $this->resolveSkuDomain($category->name);
+
+            $usedNumericSkus = [];
+            $usedCodesLower = [];
+            foreach (Product::select('product_code', 'category')->get() as $existing) {
+                if ($this->resolveSkuDomain($existing->category) !== $targetDomain) {
+                    continue;
+                }
+                $rawCode = trim((string) $existing->product_code);
+                if ($rawCode !== '') {
+                    $usedCodesLower[strtolower($rawCode)] = true;
+                }
+                if (preg_match('/^(\d+)$/', $rawCode, $m)) {
+                    $usedNumericSkus[(int) $m[1]] = true;
+                }
+            }
+
+            $nextSkuNum = 1;
+            $allocateNextSku = static function () use (&$nextSkuNum, &$usedNumericSkus, &$usedCodesLower): string {
+                while (true) {
+                    $candidate = str_pad((string) $nextSkuNum, 3, '0', STR_PAD_LEFT);
+                    $lower = strtolower($candidate);
+                    $taken = isset($usedNumericSkus[$nextSkuNum]) || isset($usedCodesLower[$lower]);
+                    $nextSkuNum++;
+                    if (!$taken) {
+                        $usedNumericSkus[(int) $candidate] = true;
+                        $usedCodesLower[$lower] = true;
+                        return $candidate;
+                    }
+                }
+            };
+
+            foreach ($newProducts as $idx => $item) {
+                $prodName = trim((string) ($item['product_name'] ?? ''));
+                if ($prodName === '') {
+                    continue;
+                }
+
+                $rawCode = trim((string) ($item['product_code'] ?? ''));
+                if ($rawCode !== '') {
+                    $lower = strtolower($rawCode);
+                    if (isset($usedCodesLower[$lower])) {
+                        throw ValidationException::withMessages([
+                            "new_products.{$idx}.product_code" => ["Product code '{$rawCode}' is already taken in {$targetDomain}."],
+                        ]);
+                    }
+                    $usedCodesLower[$lower] = true;
+                    if (preg_match('/^(\d+)$/', $rawCode, $m)) {
+                        $usedNumericSkus[(int) $m[1]] = true;
+                    }
+                    $productCode = $rawCode;
+                } else {
+                    $productCode = $allocateNextSku();
+                }
+
+                $created = Product::create([
+                    'branch_id' => $targetBranchId,
+                    'product_code' => $productCode,
+                    'product_name' => $prodName,
+                    'category' => $category->name,
+                    'brand' => isset($item['brand']) && trim((string) $item['brand']) !== '' ? trim((string) $item['brand']) : null,
+                    'description' => isset($item['description']) && trim((string) $item['description']) !== '' ? trim((string) $item['description']) : null,
+                    'unit_price' => (float) ($item['unit_price'] ?? 0),
+                    'cost_price' => isset($item['cost_price']) && $item['cost_price'] !== '' ? (float) $item['cost_price'] : 0,
+                    'stock_quantity' => isset($item['stock_quantity']) && $item['stock_quantity'] !== '' ? max(0, (int) $item['stock_quantity']) : 0,
+                    'reorder_level' => 0,
+                    'unit' => isset($item['unit']) && trim((string) $item['unit']) !== '' ? trim((string) $item['unit']) : 'unit',
+                    'dimension_unit' => 'cm',
+                    'weight_unit' => 'kg',
+                    'status' => in_array(($item['status'] ?? 'Active'), ['Active', 'Inactive'], true) ? $item['status'] : 'Active',
+                ]);
+
+                $createdProducts[] = $created;
+            }
+        }
+
+        $cleanAssignIds = array_values(array_unique(array_filter(array_map('intval', $assignProductIds), static fn ($v) => $v > 0)));
+        if (!empty($cleanAssignIds)) {
+            $assignQuery = Product::whereIn('product_id', $cleanAssignIds);
+            if ($isStoreAdmin && $userBranchId) {
+                $assignQuery->where(function ($q) use ($userBranchId) {
+                    $q->where('branch_id', $userBranchId)->orWhereNull('branch_id');
+                });
+            }
+            $assignUpdates = ['category' => $category->name];
+            if ($targetBranchId !== null) {
+                $assignUpdates['branch_id'] = $targetBranchId;
+            }
+            $assignedCount = $assignQuery->update($assignUpdates);
+        }
+
+        return [
+            'created_products' => $createdProducts,
+            'created_count' => count($createdProducts),
+            'assigned_count' => $assignedCount,
+        ];
+    }
+
     public function store(Request $request)
     {
         if ($denied = $this->authorizeManage($request)) {
@@ -197,6 +328,18 @@ class CategoryController extends Controller
             'sort_order' => 'nullable|integer|min:0|max:9999',
             'classification_scope' => 'nullable|string|max:500',
             'is_active' => 'nullable|boolean',
+            'new_products' => 'nullable|array|max:100',
+            'new_products.*.product_name' => 'required|string|max:255',
+            'new_products.*.product_code' => 'nullable|string|max:255',
+            'new_products.*.brand' => 'nullable|string|max:255',
+            'new_products.*.description' => 'nullable|string',
+            'new_products.*.unit_price' => 'required|numeric|min:0',
+            'new_products.*.cost_price' => 'nullable|numeric|min:0',
+            'new_products.*.stock_quantity' => 'nullable|integer|min:0',
+            'new_products.*.unit' => 'nullable|string|max:50',
+            'new_products.*.status' => 'nullable|string|in:Active,Inactive',
+            'assign_product_ids' => 'nullable|array|max:500',
+            'assign_product_ids.*' => 'integer|exists:products,product_id',
         ]);
 
         $name = trim($validated['name']);
@@ -241,46 +384,84 @@ class CategoryController extends Controller
             ? trim($validated['slug'])
             : "{$mainName} {$groupName} {$name}";
 
-        $category = Category::create([
-            'name' => $name,
-            'slug' => $this->uniqueSlug($slugBase),
-            'level' => $level,
-            'parent_id' => $parentId,
-            'main_category' => $mainName,
-            'group_name' => $groupName,
-            'branch_id' => $branchId,
-            'sku_prefix' => $customPrefix,
-            'classification_scope' => $validated['classification_scope'] ?? null,
-            'sort_order' => $nextOrder,
-            'is_active' => $request->has('is_active') ? (bool) $validated['is_active'] : true,
-        ]);
+        $result = DB::transaction(function () use (
+            $name, $slugBase, $level, $parentId, $mainName, $groupName, $branchId, $customPrefix, $validated, $nextOrder, $request
+        ) {
+            $category = Category::create([
+                'name' => $name,
+                'slug' => $this->uniqueSlug($slugBase),
+                'level' => $level,
+                'parent_id' => $parentId,
+                'main_category' => $mainName,
+                'group_name' => $groupName,
+                'branch_id' => $branchId,
+                'sku_prefix' => $customPrefix,
+                'classification_scope' => $validated['classification_scope'] ?? null,
+                'sort_order' => $nextOrder,
+                'is_active' => $request->has('is_active') ? (bool) $validated['is_active'] : true,
+            ]);
+
+            CategoryFramework::clearLookupCache();
+
+            $attached = $this->attachMultipleProducts(
+                $category,
+                $request,
+                $validated['new_products'] ?? [],
+                $validated['assign_product_ids'] ?? []
+            );
+
+            return [
+                'category' => $category,
+                'attached' => $attached,
+            ];
+        });
+
+        $category = $result['category'];
+        $attached = $result['attached'];
+        $createdCount = $attached['created_count'];
+        $assignedCount = $attached['assigned_count'];
+
+        $descExtra = [];
+        if ($createdCount > 0) {
+            $descExtra[] = "{$createdCount} new product(s)";
+        }
+        if ($assignedCount > 0) {
+            $descExtra[] = "{$assignedCount} assigned product(s)";
+        }
+        $extraText = !empty($descExtra) ? ' with ' . implode(' and ', $descExtra) : '';
 
         SystemLog::create([
             'user_id' => $request->user()?->user_id,
             'action' => 'CREATE',
             'module' => 'Categories',
-            'description' => "Created category: {$category->name} ({$category->level})",
+            'description' => "Created category: {$category->name} ({$category->level}){$extraText}",
             'ip_address' => $request->ip(),
             'user_agent' => $request->userAgent(),
         ]);
 
+        CategoryFramework::clearLookupCache();
         SyncController::bumpMutation(['categories', 'products']);
 
         return response()->json([
-            'message' => 'Category created successfully',
+            'message' => "Category created successfully{$extraText}",
             'category' => $this->formatRow($category),
+            'created_products_count' => $createdCount,
+            'assigned_products_count' => $assignedCount,
         ], 201);
     }
 
     public function update(Request $request, $id)
     {
-        if ($denied = $this->authorizeManage($request)) {
-            return $denied;
-        }
-
         $category = Category::find($id);
         if (!$category) {
+            if ($denied = $this->authorizeManage($request)) {
+                return $denied;
+            }
             return response()->json(['message' => 'Category not found.'], 404);
+        }
+
+        if ($denied = $this->authorizeManage($request, $category)) {
+            return $denied;
         }
 
         $validated = $request->validate([
@@ -292,6 +473,18 @@ class CategoryController extends Controller
             'sort_order' => 'nullable|integer|min:0|max:9999',
             'classification_scope' => 'nullable|string|max:500',
             'is_active' => 'nullable|boolean',
+            'new_products' => 'nullable|array|max:100',
+            'new_products.*.product_name' => 'required|string|max:255',
+            'new_products.*.product_code' => 'nullable|string|max:255',
+            'new_products.*.brand' => 'nullable|string|max:255',
+            'new_products.*.description' => 'nullable|string',
+            'new_products.*.unit_price' => 'required|numeric|min:0',
+            'new_products.*.cost_price' => 'nullable|numeric|min:0',
+            'new_products.*.stock_quantity' => 'nullable|integer|min:0',
+            'new_products.*.unit' => 'nullable|string|max:50',
+            'new_products.*.status' => 'nullable|string|in:Active,Inactive',
+            'assign_product_ids' => 'nullable|array|max:500',
+            'assign_product_ids.*' => 'integer|exists:products,product_id',
         ]);
 
         $oldName = $category->name;
@@ -300,7 +493,7 @@ class CategoryController extends Controller
             ? trim($validated['main_category'])
             : $category->main_category;
 
-        DB::transaction(function () use ($category, $validated, $request, $oldName, $newName, $newMain) {
+        $attached = DB::transaction(function () use ($category, $validated, $request, $oldName, $newName, $newMain) {
             $updates = [
                 'name' => $newName,
                 'classification_scope' => array_key_exists('classification_scope', $validated)
@@ -404,36 +597,62 @@ class CategoryController extends Controller
                     ]);
                 }
             }
+
+            CategoryFramework::clearLookupCache();
+
+            return $this->attachMultipleProducts(
+                $category,
+                $request,
+                $validated['new_products'] ?? [],
+                $validated['assign_product_ids'] ?? []
+            );
         });
 
         $category->refresh();
+
+        $createdCount = $attached['created_count'];
+        $assignedCount = $attached['assigned_count'];
+        $descExtra = [];
+        if ($createdCount > 0) {
+            $descExtra[] = "{$createdCount} new product(s)";
+        }
+        if ($assignedCount > 0) {
+            $descExtra[] = "{$assignedCount} assigned product(s)";
+        }
+        $extraText = !empty($descExtra) ? ' with ' . implode(' and ', $descExtra) : '';
 
         SystemLog::create([
             'user_id' => $request->user()?->user_id,
             'action' => 'UPDATE',
             'module' => 'Categories',
-            'description' => "Updated category: {$category->name}",
+            'description' => "Updated category: {$category->name}{$extraText}",
             'ip_address' => $request->ip(),
             'user_agent' => $request->userAgent(),
         ]);
 
+        CategoryFramework::clearLookupCache();
         SyncController::bumpMutation(['categories', 'products']);
 
         return response()->json([
-            'message' => 'Category updated successfully',
+            'message' => "Category updated successfully{$extraText}",
             'category' => $this->formatRow($category),
+            'created_products_count' => $createdCount,
+            'assigned_products_count' => $assignedCount,
         ]);
     }
 
     public function toggleStatus(Request $request, $id)
     {
-        if ($denied = $this->authorizeManage($request)) {
-            return $denied;
-        }
-
         $category = Category::find($id);
         if (!$category) {
+            if ($denied = $this->authorizeManage($request)) {
+                return $denied;
+            }
             return response()->json(['message' => 'Category not found.'], 404);
+        }
+
+        if ($denied = $this->authorizeManage($request, $category)) {
+            return $denied;
         }
 
         $category->is_active = !$category->is_active;
@@ -458,13 +677,16 @@ class CategoryController extends Controller
 
     public function destroy(Request $request, $id)
     {
-        if ($denied = $this->authorizeManage($request)) {
-            return $denied;
-        }
-
         $category = Category::find($id);
         if (!$category) {
+            if ($denied = $this->authorizeManage($request)) {
+                return $denied;
+            }
             return response()->json(['message' => 'Category not found.'], 404);
+        }
+
+        if ($denied = $this->authorizeManage($request, $category)) {
+            return $denied;
         }
 
         $childIds = Category::where('parent_id', $category->id)->pluck('id')->all();

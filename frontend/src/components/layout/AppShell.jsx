@@ -10,6 +10,7 @@ import {
 } from 'react-icons/fi'
 import { LuBuilding2 } from 'react-icons/lu'
 import { useAuth } from '../../context/AuthContext'
+import { useRealtimeConnection } from '../../context/RealtimeSyncContext'
 import { NotificationBell, showToast, Spinner } from '../ui'
 import { api } from '../../lib/api'
 import { triggerDataSync } from '../../lib/realtimeSync'
@@ -18,7 +19,8 @@ import { useTheme } from '../../context/ThemeContext'
 import CompanyConfigurationModal, { resolveLogoUrl } from '../CompanyConfigurationModal'
 import EmployeePinVerificationModal from '../attendance/EmployeePinVerificationModal'
 import FaceRecognitionAttendanceModal from '../attendance/FaceRecognitionAttendanceModal'
-import { TbCurrencyPeso } from 'react-icons/tb'
+import { TbCurrencyPeso, TbCashBanknoteMove, TbCashRegister } from 'react-icons/tb'
+import { isCollectorUser, isCashierUser } from '../../lib/employeeDepartment'
 
 const icons = {
   dashboard: <FiHome className="w-4 h-4 flex-shrink-0" />,
@@ -29,6 +31,8 @@ const icons = {
   installment: <FiCreditCard className="w-4 h-4 flex-shrink-0" />,
   schedule: <FiCalendar className="w-4 h-4 flex-shrink-0" />,
   payments: <TbCurrencyPeso className="w-4 h-4 flex-shrink-0" />,
+  collectCash: <TbCashBanknoteMove className="w-4 h-4 flex-shrink-0" />,
+  receiveCash: <TbCashRegister className="w-4 h-4 flex-shrink-0" />,
   employees: <FiUsers className="w-4 h-4 flex-shrink-0" />,
   payroll: <TbCurrencyPeso className="w-4 h-4 flex-shrink-0" />,
   attendance: <FiClock className="w-4 h-4 flex-shrink-0" />,
@@ -71,14 +75,26 @@ function isNavPathActive(itemPath, location, subPaths = []) {
   return false
 }
 
-function navByRole(role, onOpenConfig, pendingLettersCount = 0) {
+function navByRole(roleOrUser, onOpenConfig, pendingLettersCount = 0) {
+  const userObj = roleOrUser && typeof roleOrUser === 'object' ? roleOrUser : null
+  const role = userObj ? userObj.role : roleOrUser
+
   if (role === 'Employee') {
-    return [
+    const empItems = [
       { label: 'My Dashboard', path: '/employee/dashboard', icon: icons.dashboard },
+    ]
+    if (isCollectorUser(userObj)) {
+      empItems.push({ label: 'Collect Cash', path: '/employee/collect-cash', icon: icons.collectCash })
+    }
+    if (isCashierUser(userObj)) {
+      empItems.push({ label: 'Receive Cash', path: '/employee/receive-cash', icon: icons.receiveCash })
+    }
+    empItems.push(
       { label: 'My Attendance QR', path: '/employee/attendance', icon: icons.attendance },
       { label: 'My Payslips', path: '/employee/payslips', icon: icons.payslip },
       { label: 'Create Excuse / Leave Letter', path: '/employee/excuse-letter', icon: icons.logs },
-    ]
+    )
+    return empItems
   }
 
   if (role === 'Customer') {
@@ -147,12 +163,13 @@ function navByRole(role, onOpenConfig, pendingLettersCount = 0) {
   if (isAdmin) {
     base.push(payroll)
   } else if (isStoreAdmin) {
-    // Store Admins only see their branch employees
+    // Store Admins see their branch staff, QR scanner, and store settings
     base.push({
-      label: 'Branch Staff',
+      label: 'Branch Operations',
       icon: icons.employees,
       items: [
-        { label: 'Employees & QR', path: '/employees', icon: icons.employees }
+        { label: 'Employees & QR', path: '/employees', icon: icons.employees },
+        { label: 'QR Attendance Scanner', path: '/store-admin/attendance/scanner', icon: icons.qr },
       ],
     })
   }
@@ -231,14 +248,26 @@ function SidebarGroup({ group, collapsed }) {
   )
 }
 
-function getCollapsedRailItems(role, onOpenConfig, pendingLettersCount = 0) {
+function getCollapsedRailItems(roleOrUser, onOpenConfig, pendingLettersCount = 0) {
+  const userObj = roleOrUser && typeof roleOrUser === 'object' ? roleOrUser : null
+  const role = userObj ? userObj.role : roleOrUser
+
   if (role === 'Employee') {
-    return [
+    const rail = [
       { label: 'My Dashboard', path: '/employee/dashboard', icon: <FiHome className="w-5 h-5" /> },
+    ]
+    if (isCollectorUser(userObj)) {
+      rail.push({ label: 'Collect Cash', path: '/employee/collect-cash', icon: <TbCashBanknoteMove className="w-5 h-5" /> })
+    }
+    if (isCashierUser(userObj)) {
+      rail.push({ label: 'Receive Cash', path: '/employee/receive-cash', icon: <TbCashRegister className="w-5 h-5" /> })
+    }
+    rail.push(
       { label: 'My Attendance QR', path: '/employee/attendance', icon: <FiClock className="w-5 h-5" /> },
       { label: 'My Payslips', path: '/employee/payslips', icon: <FiFileText className="w-5 h-5" /> },
       { label: 'Create Excuse / Leave Letter', path: '/employee/excuse-letter', icon: <FiFileText className="w-5 h-5" /> },
-    ]
+    )
+    return rail
   }
 
   if (role === 'Customer') {
@@ -253,6 +282,7 @@ function getCollapsedRailItems(role, onOpenConfig, pendingLettersCount = 0) {
   }
 
   const isAdmin = role === 'Administrator'
+  const isStoreAdmin = role === 'Store Administrator' || role === 'Store Admin'
 
   const items = [
     // 1. Dashboard Home
@@ -290,6 +320,8 @@ function getCollapsedRailItems(role, onOpenConfig, pendingLettersCount = 0) {
 
     // 14. Payroll & HR (Peso)
     items.push({ label: 'Payroll & HR', path: '/payroll', icon: <TbCurrencyPeso className="w-5 h-5 stroke-[2.2]" /> })
+  } else if (isStoreAdmin) {
+    items.push({ label: 'QR Attendance Scanner', path: '/store-admin/attendance/scanner', icon: <FiCamera className="w-5 h-5" /> })
   }
 
   // 15. Attendance (Clock)
@@ -353,11 +385,10 @@ function SidebarStoreAdminProfile({ user, collapsed = false, onNavigate }) {
           onClick={() => onNavigate?.()}
           title={`Employee Profile — ${displayName}`}
           aria-label="Employee Profile"
-          className={({ isActive }) => `relative w-11 h-11 rounded-[14px] font-bold text-xs flex items-center justify-center shadow-md transition-all cursor-pointer active:scale-95 group overflow-visible ${
-            isActive
-              ? 'bg-gradient-to-br from-blue-600 to-indigo-700 text-white ring-2 ring-blue-400/70 shadow-blue-600/35'
-              : 'bg-gradient-to-br from-blue-600 to-indigo-700 text-white hover:brightness-110'
-          }`}
+          className={({ isActive }) => `relative w-11 h-11 rounded-[14px] font-bold text-xs flex items-center justify-center shadow-md transition-all cursor-pointer active:scale-95 group overflow-visible ${isActive
+            ? 'bg-gradient-to-br from-blue-600 to-indigo-700 text-white ring-2 ring-blue-400/70 shadow-blue-600/35'
+            : 'bg-gradient-to-br from-blue-600 to-indigo-700 text-white hover:brightness-110'
+            }`}
         >
           {user?.profile_image ? (
             <img src={user.profile_image} alt={displayName} className="w-full h-full object-cover rounded-[14px]" />
@@ -377,19 +408,17 @@ function SidebarStoreAdminProfile({ user, collapsed = false, onNavigate }) {
       <NavLink
         to="/store-admin/profile"
         onClick={() => onNavigate?.()}
-        className={({ isActive }) => `w-full flex items-center gap-2.5 px-2.5 py-2 rounded-xl border transition-all cursor-pointer text-left shadow-2xs group ${
-          isActive
-            ? 'bg-gradient-to-r from-blue-600 via-blue-600 to-indigo-700 border-blue-400/40 text-white shadow-md shadow-blue-950/30'
-            : 'border-blue-500/20 bg-white/85 dark:bg-[#0c1b3a]/90 hover:bg-blue-50 dark:hover:bg-blue-500/15'
-        }`}
+        className={({ isActive }) => `w-full flex items-center gap-2.5 px-2.5 py-2 rounded-xl border transition-all cursor-pointer text-left shadow-2xs group ${isActive
+          ? 'bg-gradient-to-r from-blue-600 via-blue-600 to-indigo-700 border-blue-400/40 text-white shadow-md shadow-blue-950/30'
+          : 'border-blue-500/20 bg-white/85 dark:bg-[#0c1b3a]/90 hover:bg-blue-50 dark:hover:bg-blue-500/15'
+          }`}
       >
         {({ isActive }) => (
           <>
-            <div className={`w-9 h-9 rounded-full flex items-center justify-center text-xs font-bold overflow-hidden shadow-xs shrink-0 border ${
-              isActive
-                ? 'bg-white/20 border-white/40 text-white'
-                : 'bg-gradient-to-br from-blue-600 to-indigo-700 border-blue-400/30 text-white'
-            }`}>
+            <div className={`w-9 h-9 rounded-full flex items-center justify-center text-xs font-bold overflow-hidden shadow-xs shrink-0 border ${isActive
+              ? 'bg-white/20 border-white/40 text-white'
+              : 'bg-gradient-to-br from-blue-600 to-indigo-700 border-blue-400/30 text-white'
+              }`}>
               {user?.profile_image ? (
                 <img src={user.profile_image} alt={displayName} className="w-full h-full object-cover" />
               ) : (
@@ -436,13 +465,13 @@ function Sidebar({ collapsed, settings, mobileOpen, onCloseMobile, onOpenConfig 
     return () => { isMounted = false }
   }, [user])
 
-  const navItems = user ? navByRole(user.role, onOpenConfig, pendingLettersCount) : []
-  const railItems = user ? getCollapsedRailItems(user.role, onOpenConfig, pendingLettersCount) : []
+  const navItems = user ? navByRole(user, onOpenConfig, pendingLettersCount) : []
+  const railItems = user ? getCollapsedRailItems(user, onOpenConfig, pendingLettersCount) : []
 
   if (!user) return null
 
-  const companyName = settings?.company_name || 'Z-LICZ'
-  const siteName = 'Z-LICZ Appliances'
+  const companyName = settings?.site_name || settings?.company_name || 'Z-LICZ'
+  const siteName = settings?.site_name || settings?.company_name || 'Z-LICZ Appliances'
 
   const isItemActive = (item) => {
     if (item.action) return false
@@ -465,11 +494,10 @@ function Sidebar({ collapsed, settings, mobileOpen, onCloseMobile, onOpenConfig 
             <div className="brand-logo-shell relative flex flex-col items-center justify-center px-3 py-4 sm:py-5 border-b flex-shrink-0 overflow-hidden transition-colors duration-200">
               <button
                 onClick={onCloseMobile}
-                className={`absolute top-3 right-3 p-1.5 rounded-lg cursor-pointer transition-colors z-10 ${
-                  isLogoDark
-                    ? 'text-slate-400 hover:text-white hover:bg-slate-800/60'
-                    : 'text-slate-500 hover:text-slate-900 hover:bg-slate-100'
-                }`}
+                className={`absolute top-3 right-3 p-1.5 rounded-lg cursor-pointer transition-colors z-10 ${isLogoDark
+                  ? 'text-slate-400 hover:text-white hover:bg-slate-800/60'
+                  : 'text-slate-500 hover:text-slate-900 hover:bg-slate-100'
+                  }`}
                 aria-label="Close menu"
               >
                 <FiX className="w-5 h-5" />
@@ -509,7 +537,7 @@ function Sidebar({ collapsed, settings, mobileOpen, onCloseMobile, onOpenConfig 
                       return `flex items-center gap-2.5 px-3 py-2 text-xs rounded-xl transition-all cursor-pointer ${active
                         ? 'bg-gradient-to-r from-blue-600 via-blue-600 to-indigo-700 text-white font-bold shadow-md shadow-blue-950/40 border border-blue-400/30'
                         : 'text-slate-700 dark:text-blue-100/70 hover:bg-blue-500/10 hover:text-blue-950 dark:hover:text-white'
-                      }`
+                        }`
                     }}
                   >
                     {() => {
@@ -659,7 +687,7 @@ function Sidebar({ collapsed, settings, mobileOpen, onCloseMobile, onOpenConfig 
                     return `flex items-center gap-2.5 px-3 py-2 text-xs rounded-xl transition-all cursor-pointer ${active
                       ? 'bg-gradient-to-r from-blue-600 via-blue-600 to-indigo-700 text-white font-bold shadow-md shadow-blue-950/40 border border-blue-400/30'
                       : 'text-slate-700 dark:text-blue-100/70 hover:bg-blue-500/10 hover:text-blue-950 dark:hover:text-white'
-                    }`
+                      }`
                   }}
                 >
                   {() => {
@@ -856,18 +884,16 @@ function Header({
       <div className="flex items-center gap-2 sm:gap-3 min-w-0 shrink-0">
         <button
           onClick={onToggle}
-          className={`w-8 h-8 rounded-xl border flex items-center justify-center transition-colors cursor-pointer shrink-0 ${
-            isHeaderDark
-              ? 'border-blue-500/20 bg-[#071328] text-blue-200 hover:bg-blue-500/20 hover:text-white'
-              : 'border-slate-300/80 bg-white/75 text-blue-800 hover:bg-white hover:text-blue-950'
-          }`}
+          className={`w-8 h-8 rounded-xl border flex items-center justify-center transition-colors cursor-pointer shrink-0 ${isHeaderDark
+            ? 'border-blue-500/20 bg-[#071328] text-blue-200 hover:bg-blue-500/20 hover:text-white'
+            : 'border-slate-300/80 bg-white/75 text-blue-800 hover:bg-white hover:text-blue-950'
+            }`}
           aria-label="Toggle sidebar"
         >
           <FiMenu className="w-4 h-4" />
         </button>
-        <h1 className={`text-xs sm:text-sm font-bold truncate tracking-wide max-w-[100px] sm:max-w-[180px] md:max-w-xs ${
-          isHeaderDark ? 'text-white' : 'text-slate-900'
-        }`}>{title}</h1>
+        <h1 className={`text-xs sm:text-sm font-bold truncate tracking-wide max-w-[100px] sm:max-w-[180px] md:max-w-xs ${isHeaderDark ? 'text-white' : 'text-slate-900'
+          }`}>{title}</h1>
       </div>
 
       {/* Center: Live Global Search Bar */}
@@ -884,15 +910,13 @@ function Header({
             onFocus={() => setSearchOpen(true)}
             onKeyDown={handleSearchKeyDown}
             placeholder="Search records across system..."
-            className={`w-full h-9 pl-9 pr-8 text-xs rounded-xl border transition-all focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-500 ${
-              isHeaderDark
-                ? 'border-blue-500/25 bg-[#071328] text-slate-50 placeholder:text-blue-300/40'
-                : 'border-slate-300/80 bg-white/75 text-slate-900 placeholder:text-slate-500'
-            }`}
+            className={`w-full h-9 pl-9 pr-8 text-xs rounded-xl border transition-all focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-500 ${isHeaderDark
+              ? 'border-blue-500/25 bg-[#071328] text-slate-50 placeholder:text-blue-300/40'
+              : 'border-slate-300/80 bg-white/75 text-slate-900 placeholder:text-slate-500'
+              }`}
           />
-          <div className={`absolute left-3 top-2.5 pointer-events-none ${
-            isHeaderDark ? 'text-blue-400' : 'text-blue-600'
-          }`}>
+          <div className={`absolute left-3 top-2.5 pointer-events-none ${isHeaderDark ? 'text-blue-400' : 'text-blue-600'
+            }`}>
             {isSearching ? (
               <svg className="animate-spin w-4 h-4 text-blue-500" fill="none" viewBox="0 0 24 24">
                 <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
@@ -1008,11 +1032,10 @@ function Header({
             setTimeout(() => searchInputRef.current?.focus(), 100)
           }}
           title="Search system"
-          className={`sm:hidden w-8 h-8 flex items-center justify-center rounded-xl border transition-colors cursor-pointer text-base shadow-2xs shrink-0 focus:outline-none ${
-            isHeaderDark
-              ? 'border-blue-500/25 bg-[#071328] hover:bg-blue-500/20 text-blue-100'
-              : 'border-slate-300/80 bg-white/75 hover:bg-white text-blue-900'
-          }`}
+          className={`sm:hidden w-8 h-8 flex items-center justify-center rounded-xl border transition-colors cursor-pointer text-base shadow-2xs shrink-0 focus:outline-none ${isHeaderDark
+            ? 'border-blue-500/25 bg-[#071328] hover:bg-blue-500/20 text-blue-100'
+            : 'border-slate-300/80 bg-white/75 hover:bg-white text-blue-900'
+            }`}
         >
           <FiSearch className="w-4 h-4" />
         </button>
@@ -1021,11 +1044,10 @@ function Header({
         <button
           onClick={toggleMode}
           title={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
-          className={`w-8 h-8 sm:w-9 sm:h-9 flex items-center justify-center rounded-xl border transition-colors cursor-pointer text-base shadow-2xs shrink-0 focus:outline-none ${
-            isHeaderDark
-              ? 'border-blue-500/25 bg-[#071328] hover:bg-blue-500/20 text-blue-100'
-              : 'border-slate-300/80 bg-white/75 hover:bg-white text-blue-900'
-          }`}
+          className={`w-8 h-8 sm:w-9 sm:h-9 flex items-center justify-center rounded-xl border transition-colors cursor-pointer text-base shadow-2xs shrink-0 focus:outline-none ${isHeaderDark
+            ? 'border-blue-500/25 bg-[#071328] hover:bg-blue-500/20 text-blue-100'
+            : 'border-slate-300/80 bg-white/75 hover:bg-white text-blue-900'
+            }`}
         >
           {isDark ? (
             <FiSun className="w-4 h-4 text-amber-500 drop-shadow-[0_0_6px_rgba(245,158,11,0.5)]" />
@@ -1053,11 +1075,10 @@ function Header({
         <div className="relative shrink-0" ref={userRef}>
           <button
             onClick={() => setUserOpen(o => !o)}
-            className={`flex items-center gap-1.5 p-1 sm:px-2.5 sm:py-1.5 rounded-xl border transition-colors cursor-pointer shadow-2xs shrink-0 focus:outline-none ${
-              isHeaderDark
-                ? 'border-blue-500/25 bg-[#071328] hover:bg-blue-500/20'
-                : 'border-slate-300/80 bg-white/75 hover:bg-white'
-            }`}
+            className={`flex items-center gap-1.5 p-1 sm:px-2.5 sm:py-1.5 rounded-xl border transition-colors cursor-pointer shadow-2xs shrink-0 focus:outline-none ${isHeaderDark
+              ? 'border-blue-500/25 bg-[#071328] hover:bg-blue-500/20'
+              : 'border-slate-300/80 bg-white/75 hover:bg-white'
+              }`}
           >
             <div className="w-7 h-7 rounded-full bg-gradient-to-br from-blue-600 to-indigo-700 border border-blue-400/30 flex items-center justify-center text-white text-xs font-bold overflow-hidden shadow-xs shrink-0">
               {isStoreAdm ? (
@@ -1070,17 +1091,14 @@ function Header({
             </div>
             <div className="hidden sm:block text-left">
               {isStoreAdm ? (
-                <div className={`text-xs font-semibold leading-tight ${
-                  isHeaderDark ? 'text-slate-100' : 'text-slate-900'
-                }`}>Store Admin</div>
+                <div className={`text-xs font-semibold leading-tight ${isHeaderDark ? 'text-slate-100' : 'text-slate-900'
+                  }`}>Store Admin</div>
               ) : (
                 <>
-                  <div className={`text-xs font-semibold leading-tight ${
-                    isHeaderDark ? 'text-slate-100' : 'text-slate-900'
-                  }`}>{user?.name ? user.name.split(' ')[0] : 'User'}</div>
-                  <div className={`text-[10px] font-mono leading-tight ${
-                    isHeaderDark ? 'text-blue-300/80' : 'text-blue-700'
-                  }`}>{user?.role}</div>
+                  <div className={`text-xs font-semibold leading-tight ${isHeaderDark ? 'text-slate-100' : 'text-slate-900'
+                    }`}>{user?.name ? user.name.split(' ')[0] : 'User'}</div>
+                  <div className={`text-[10px] font-mono leading-tight ${isHeaderDark ? 'text-blue-300/80' : 'text-blue-700'
+                    }`}>{user?.role}</div>
                 </>
               )}
             </div>
@@ -1160,6 +1178,9 @@ const ROUTE_TITLES = {
   '/settings': 'Settings',
   '/store-settings': 'Store Settings',
   '/employee/dashboard': 'My Dashboard',
+  '/employee/collect-cash': 'Collect Cash',
+  '/employee/receive-cash': 'Receive Cash',
+  '/employee/excuse-letter': 'Create Excuse / Leave Letter',
   '/employee/notifications': 'Notification Center',
   '/employee/attendance': 'My Attendance',
   '/employee/payroll': 'My Payroll',
@@ -1168,7 +1189,8 @@ const ROUTE_TITLES = {
 }
 
 export default function AppShell() {
-  const { user } = useAuth()
+  const { user, logout } = useAuth()
+  const { connected: wsConnected } = useRealtimeConnection()
   const [collapsed, setCollapsed] = useState(() => {
     return user?.role === 'Customer'
   })
@@ -1177,11 +1199,22 @@ export default function AppShell() {
   const [unreadCount, setUnreadCount] = useState(0)
   const [pendingVerification, setPendingVerification] = useState(null)
   const [authVerificationMode, setAuthVerificationMode] = useState('face') // 'face' | 'pin'
-  const [appSettings, setAppSettings] = useState(null)
+  const [appSettings, setAppSettings] = useState(() => {
+    try {
+      const raw = sessionStorage.getItem('pace_cached_app_settings')
+      if (!raw) return null
+      const parsed = JSON.parse(raw)
+      if (parsed?.ts && Date.now() - parsed.ts < 300000 && parsed.data) {
+        return parsed.data
+      }
+    } catch (_) { }
+    return null
+  })
+  const [maintenanceBlocked, setMaintenanceBlocked] = useState(null)
   const [configOpen, setConfigOpen] = useState(false)
   const latestNotifIdRef = useRef(null)
   const isLoadingDataRef = useRef(false)
-  const settingsLoadedRef = useRef(false)
+  const settingsLoadedRef = useRef(Boolean(appSettings))
   const cancelledVerifIdsRef = useRef(new Set())
   const location = useLocation()
   const navigate = useNavigate()
@@ -1252,13 +1285,21 @@ export default function AppShell() {
       const activePending = pRes.pending.filter(item => !cancelledVerifIdsRef.current.has(item.id))
       if (activePending.length > 0) {
         const item = activePending[0]
-        setAuthVerificationMode(item.has_registered_face ? 'face' : 'pin')
-        setPendingVerification(prev => (!prev || prev.id !== item.id ? item : prev))
+        setPendingVerification(prev => {
+          // Keep any manually-opened Store Admin terminal modal intact
+          if (prev?.isManualTrigger) return prev
+          // Only set initial verification mode when opening a NEW request, never overwrite user's PIN/Face choice on 5s polls
+          if (!prev || prev.id !== item.id) {
+            setAuthVerificationMode(item.has_registered_face ? 'face' : 'pin')
+            return item
+          }
+          return prev
+        })
       } else {
-        setPendingVerification(null)
+        setPendingVerification(prev => (prev?.isManualTrigger ? prev : null))
       }
     } else {
-      setPendingVerification(null)
+      setPendingVerification(prev => (prev?.isManualTrigger ? prev : null))
     }
   }
 
@@ -1270,6 +1311,8 @@ export default function AppShell() {
     } catch (_) { }
   }
 
+  const pendingVerifInFlightRef = useRef(false)
+  const queuedVerifCheckRef = useRef(false)
   const loadPendingVerificationsOnly = async () => {
     if (!user) return
     const checkVerifications =
@@ -1277,10 +1320,23 @@ export default function AppShell() {
       user.role === 'Store Administrator' ||
       user.role === 'Store Admin'
     if (!checkVerifications) return
+    if (pendingVerifInFlightRef.current) {
+      queuedVerifCheckRef.current = true
+      return
+    }
+    pendingVerifInFlightRef.current = true
+    queuedVerifCheckRef.current = false
     try {
       const pRes = await api.attendance.pendingVerifications()
       applyPendingVerificationsPayload(pRes)
     } catch (_) { }
+    finally {
+      pendingVerifInFlightRef.current = false
+      if (queuedVerifCheckRef.current) {
+        queuedVerifCheckRef.current = false
+        loadPendingVerificationsOnly()
+      }
+    }
   }
 
   const loadData = async (options = {}) => {
@@ -1294,23 +1350,24 @@ export default function AppShell() {
         user.role === 'Store Administrator' ||
         user.role === 'Store Admin'
 
-      const [notifTask, settingsTask, verifTask] = await Promise.allSettled([
-        api.notifications.getLatest({ limit: 30 }),
-        shouldLoadSettings ? api.system.getSettings() : Promise.resolve(null),
-        checkVerifications ? api.attendance.pendingVerifications() : Promise.resolve(null),
-      ])
+      // Sequential staggered boot loads so active page figures never contend with shell chrome fetches
+      const notifRes = await api.notifications.getLatest({ limit: 30 }).catch(() => null)
+      if (notifRes) applyNotificationsPayload(notifRes)
 
-      if (notifTask.status === 'fulfilled' && notifTask.value) {
-        applyNotificationsPayload(notifTask.value)
+      if (shouldLoadSettings) {
+        const settingsRes = await api.system.getSettings().catch(() => null)
+        if (settingsRes) {
+          setAppSettings(prev => fastDeepEqual(prev, settingsRes) ? prev : settingsRes)
+          settingsLoadedRef.current = true
+          try {
+            sessionStorage.setItem('pace_cached_app_settings', JSON.stringify({ ts: Date.now(), data: settingsRes }))
+          } catch (_) { }
+        }
       }
 
-      if (shouldLoadSettings && settingsTask.status === 'fulfilled' && settingsTask.value) {
-        setAppSettings(prev => fastDeepEqual(prev, settingsTask.value) ? prev : settingsTask.value)
-        settingsLoadedRef.current = true
-      }
-
-      if (checkVerifications && verifTask.status === 'fulfilled' && verifTask.value) {
-        applyPendingVerificationsPayload(verifTask.value)
+      if (checkVerifications) {
+        const verifRes = await api.attendance.pendingVerifications().catch(() => null)
+        if (verifRes) applyPendingVerificationsPayload(verifRes)
       }
     } finally {
       isLoadingDataRef.current = false
@@ -1318,14 +1375,13 @@ export default function AppShell() {
   }
 
   useEffect(() => {
-    settingsLoadedRef.current = false
-    loadData({ includeSettings: true })
-
     if (!user) return
-    const interval = setInterval(() => {
-      loadPendingVerificationsOnly()
-    }, 2500)
-    return () => clearInterval(interval)
+    const bootTimer = setTimeout(() => {
+      loadData({ includeSettings: !settingsLoadedRef.current })
+    }, 450)
+    return () => {
+      clearTimeout(bootTimer)
+    }
   }, [user])
 
   useEffect(() => {
@@ -1335,6 +1391,53 @@ export default function AppShell() {
     const handleVerifSync = () => {
       loadPendingVerificationsOnly()
     }
+    const handleScanUpdate = (e) => {
+      const detail = e?.detail || {}
+      const reqId = detail.scan_log_id || detail.id
+      if (detail.stage === 'pending_verification' || detail.status === 'PENDING') {
+        loadPendingVerificationsOnly()
+      } else if (
+        reqId &&
+        (detail.stage === 'rejected' || detail.stage === 'authorized' || detail.status === 'FAILED' || detail.status === 'CANCELLED' || detail.status === 'SUCCESS')
+      ) {
+        setPendingVerification(prev => {
+          const prevId = prev?.scan_log_id || prev?.id
+          if (prevId && Number(prevId) === Number(reqId)) {
+            return null
+          }
+          return prev
+        })
+      }
+    }
+    const handleCrossTabPing = (msg) => {
+      if (!msg || typeof msg !== 'object') return
+      const reqId = msg.scan_log_id || msg.id
+      if (msg.stage === 'pending_verification' || msg.status === 'PENDING') {
+        loadPendingVerificationsOnly()
+      } else if (
+        reqId &&
+        (msg.stage === 'rejected' || msg.stage === 'authorized' || msg.status === 'FAILED' || msg.status === 'CANCELLED' || msg.status === 'SUCCESS')
+      ) {
+        setPendingVerification(prev => {
+          const prevId = prev?.scan_log_id || prev?.id
+          if (prevId && Number(prevId) === Number(reqId)) {
+            return null
+          }
+          return prev
+        })
+      }
+    }
+    const handleStoragePing = (e) => {
+      if (e.key !== 'pace_pending_verif_ping' || !e.newValue) return
+      try {
+        handleCrossTabPing(JSON.parse(e.newValue))
+      } catch (_) { }
+    }
+    const handleFocusOrVisible = () => {
+      if (typeof document === 'undefined' || document.visibilityState === 'visible') {
+        loadPendingVerificationsOnly()
+      }
+    }
     const handleReturnToQr = (e) => {
       const reqId = e?.detail?.requestId
       if (reqId) {
@@ -1342,39 +1445,114 @@ export default function AppShell() {
       }
       setPendingVerification(null)
     }
+    let bc = null
+    try {
+      if (typeof BroadcastChannel !== 'undefined') {
+        bc = new BroadcastChannel('pace_attendance_verifications')
+        bc.onmessage = (ev) => handleCrossTabPing(ev?.data)
+      }
+    } catch (_) { }
+
     window.addEventListener('pace:notifications-sync', handleNotifSync)
     window.addEventListener('pace:verifications-sync', handleVerifSync)
+    window.addEventListener('pace:sync:attendance', handleVerifSync)
+    window.addEventListener('pace:attendance-scan-update', handleScanUpdate)
     window.addEventListener('pace:return-to-qr-scan', handleReturnToQr)
+    window.addEventListener('storage', handleStoragePing)
+    window.addEventListener('focus', handleFocusOrVisible)
+    document.addEventListener('visibilitychange', handleFocusOrVisible)
     const handleTriggerFaceAuth = (e) => {
       const detail = e?.detail || { id: 0, scanned_by: { employee: { first_name: 'Store', last_name: 'Admin' } } }
       if (detail.id && cancelledVerifIdsRef.current.has(detail.id)) return
-      setAuthVerificationMode('face')
-      setPendingVerification(detail)
+      setAuthVerificationMode(detail.initialMode === 'pin' ? 'pin' : 'face')
+      setPendingVerification({ ...detail, isManualTrigger: true })
     }
     window.addEventListener('pace:trigger-face-auth', handleTriggerFaceAuth)
     return () => {
+      if (bc) {
+        try { bc.close() } catch (_) { }
+      }
       window.removeEventListener('pace:notifications-sync', handleNotifSync)
       window.removeEventListener('pace:verifications-sync', handleVerifSync)
+      window.removeEventListener('pace:sync:attendance', handleVerifSync)
+      window.removeEventListener('pace:attendance-scan-update', handleScanUpdate)
       window.removeEventListener('pace:return-to-qr-scan', handleReturnToQr)
+      window.removeEventListener('storage', handleStoragePing)
+      window.removeEventListener('focus', handleFocusOrVisible)
+      document.removeEventListener('visibilitychange', handleFocusOrVisible)
       window.removeEventListener('pace:trigger-face-auth', handleTriggerFaceAuth)
     }
   }, [user])
 
   useEffect(() => {
+    if (!user || wsConnected || pendingVerification) return
+    const isEmployeeRole = user.role === 'Employee'
+    const isStoreAdminRole = user.role === 'Store Administrator' || user.role === 'Store Admin'
+    if (!isEmployeeRole && !isStoreAdminRole) return
+
+    let stopped = false
+    let timer = null
+    const intervalMs = location.pathname.startsWith('/employee/attendance') ? 1500 : 2800
+
+    const scheduleCheck = () => {
+      if (stopped) return
+      timer = setTimeout(async () => {
+        if (stopped) return
+        if (typeof document === 'undefined' || document.visibilityState === 'visible') {
+          await loadPendingVerificationsOnly()
+        }
+        scheduleCheck()
+      }, intervalMs)
+    }
+
+    scheduleCheck()
+
+    return () => {
+      stopped = true
+      if (timer) clearTimeout(timer)
+    }
+  }, [user, wsConnected, pendingVerification, location.pathname])
+
+  useEffect(() => {
     const handleSettingsUpdated = (e) => {
       if (e.detail) {
-        setAppSettings(prev => ({ ...(prev || {}), ...e.detail }))
+        setAppSettings(prev => {
+          const next = { ...(prev || {}), ...e.detail }
+          try {
+            sessionStorage.setItem('pace_cached_app_settings', JSON.stringify({ ts: Date.now(), data: next }))
+          } catch (_) { }
+          return next
+        })
+        if (e.detail.maintenance_mode === false) {
+          setMaintenanceBlocked(null)
+        }
+      }
+    }
+    const handleMaintenanceMode = (e) => {
+      const detail = e?.detail || {}
+      if (detail.active) {
+        setMaintenanceBlocked({
+          message: detail.message || 'The system is currently in Maintenance Mode. Access is temporarily suspended for non-admin users.',
+          site_name: detail.site_name || appSettings?.site_name || appSettings?.company_name || 'Z-LICZ Appliances',
+        })
+      } else {
+        setMaintenanceBlocked(null)
       }
     }
     window.addEventListener('system:settingsUpdated', handleSettingsUpdated)
-    return () => window.removeEventListener('system:settingsUpdated', handleSettingsUpdated)
-  }, [])
+    window.addEventListener('system:maintenanceMode', handleMaintenanceMode)
+    return () => {
+      window.removeEventListener('system:settingsUpdated', handleSettingsUpdated)
+      window.removeEventListener('system:maintenanceMode', handleMaintenanceMode)
+    }
+  }, [appSettings?.site_name, appSettings?.company_name])
 
   useEffect(() => {
-    if (appSettings?.company_name) {
-      document.title = `${appSettings.company_name} | ${pageTitle}`
+    const titleName = appSettings?.site_name || appSettings?.company_name
+    if (titleName) {
+      document.title = `${titleName} | ${pageTitle}`
     }
-  }, [appSettings?.company_name, pageTitle])
+  }, [appSettings?.site_name, appSettings?.company_name, pageTitle])
 
   const handleMarkAllRead = async () => {
     try {
@@ -1405,20 +1583,94 @@ export default function AppShell() {
     }
 
     if (notif.action_url) {
+      const role = String(user?.role || '').toLowerCase()
       let finalUrl = notif.action_url;
-      if (user?.role === 'Customer' && finalUrl.startsWith('/products?id=')) {
-        finalUrl = finalUrl.replace('/products?id=', '/customer/dashboard?product_id=');
+      if (role === 'customer') {
+        if (finalUrl.startsWith('/products')) {
+          const qs = finalUrl.includes('?') ? finalUrl.split('?')[1] : ''
+          const prodId = new URLSearchParams(qs).get('id')
+          finalUrl = prodId ? `/customer/dashboard?tab=products&product_id=${prodId}` : '/customer/dashboard?tab=products'
+        } else if (finalUrl.startsWith('/installments')) {
+          finalUrl = '/customer/dashboard?tab=installments'
+        } else if (finalUrl.startsWith('/payments')) {
+          finalUrl = '/customer/dashboard?tab=statements'
+        } else if (finalUrl === '/support') {
+          finalUrl = '/customer/dashboard?tab=support'
+        }
+      } else if (role === 'employee') {
+        if (finalUrl === '/payroll' || finalUrl.startsWith('/payroll?') || finalUrl === '/employee/payroll') {
+          finalUrl = '/employee/payslips'
+        }
+      } else if (finalUrl === '/support') {
+        finalUrl = '/admin/support'
       }
       navigate(finalUrl)
     }
   }
 
   const roleRaw = (user?.role || 'user').toLowerCase()
+  const isSystemAdmin = roleRaw === 'administrator' || roleRaw === 'admin'
+  const isMaintenanceActive = Boolean(appSettings?.maintenance_mode || maintenanceBlocked)
+  const isDebugActive = Boolean(appSettings?.debug_mode)
+  const activeSiteName = maintenanceBlocked?.site_name || appSettings?.site_name || appSettings?.company_name || 'Z-LICZ Appliances'
   const roleClass = roleRaw.includes('store')
     ? 'role-store-admin role-store-administrator'
     : roleRaw.includes('admin')
       ? 'role-admin role-administrator'
       : `role-${roleRaw.replace(/\s+/g, '-')}`
+
+  if (!isSystemAdmin && isMaintenanceActive) {
+    return (
+      <div className="min-h-screen flex items-center justify-center p-6 bg-slate-50 dark:bg-[#081026] text-foreground">
+        <div className="max-w-md w-full rounded-2xl border border-border bg-card shadow-xl p-8 text-center space-y-4">
+          <div className="w-16 h-16 mx-auto rounded-2xl bg-blue-500/10 border border-blue-500/30 flex items-center justify-center text-blue-500">
+            <FiShield className="w-8 h-8" />
+          </div>
+          <div className="space-y-1.5">
+            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-blue-500/15 text-blue-600 dark:text-blue-400 border border-blue-500/30">
+              Maintenance Mode Active
+            </span>
+            <h1 className="text-xl font-bold text-foreground">{activeSiteName}</h1>
+            <p className="text-xs text-muted-foreground leading-relaxed">
+              {maintenanceBlocked?.message || `${activeSiteName} is currently undergoing scheduled maintenance. Access for non-admin accounts is temporarily suspended.`}
+            </p>
+          </div>
+          <div className="flex items-center justify-center gap-2 pt-2">
+            <button
+              type="button"
+              onClick={async () => {
+                try {
+                  const fresh = await api.system.getSettings({ fresh: true })
+                  if (fresh) {
+                    setAppSettings(fresh)
+                    if (!fresh.maintenance_mode) {
+                      setMaintenanceBlocked(null)
+                      showToast('System is back online!', 'success')
+                      return
+                    }
+                  }
+                  showToast('System is still in Maintenance Mode.', 'info')
+                } catch (_) {
+                  showToast('System is still in Maintenance Mode.', 'info')
+                }
+              }}
+              className="px-4 py-2 rounded-xl bg-primary hover:bg-primary/90 text-primary-foreground text-xs font-bold cursor-pointer"
+            >
+              Check Again
+            </button>
+            <button
+              type="button"
+              onClick={() => logout()}
+              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl border border-border hover:bg-muted text-foreground text-xs font-semibold cursor-pointer"
+            >
+              <FiLogOut className="w-3.5 h-3.5" />
+              <span>Sign Out</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className={`admin-shell ${roleClass} flex h-screen bg-slate-50 dark:bg-[#081026] text-foreground overflow-hidden font-sans print:block print:h-auto print:min-h-0 print:overflow-visible print:bg-white`}>
@@ -1441,6 +1693,32 @@ export default function AppShell() {
           onRefreshNotifs={loadNotificationsOnly}
           onOpenConfig={() => setConfigOpen(true)}
         />
+
+        {isSystemAdmin && (isMaintenanceActive || isDebugActive) && (
+          <div className="print:hidden px-4 py-2 border-b border-border bg-amber-500/10 text-xs flex items-center justify-between gap-3 flex-wrap">
+            <div className="flex items-center gap-2 flex-wrap">
+              {isMaintenanceActive && (
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-blue-500/15 text-blue-700 dark:text-blue-300 border border-blue-500/30 font-bold text-[11px]">
+                  <FiShield className="w-3.5 h-3.5" />
+                  <span>Maintenance Mode Active (Non-admin access suspended)</span>
+                </span>
+              )}
+              {isDebugActive && (
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-500/30 font-bold text-[11px]">
+                  <FiActivity className="w-3.5 h-3.5" />
+                  <span>Debug Mode Enabled (Verbose logging &amp; stack traces active)</span>
+                </span>
+              )}
+            </div>
+            <button
+              type="button"
+              onClick={() => navigate('/admin-dashboard')}
+              className="text-[11px] font-bold text-primary hover:underline cursor-pointer"
+            >
+              Manage Global Configuration
+            </button>
+          </div>
+        )}
 
         <main className="flex-1 overflow-y-auto overflow-x-hidden p-3 sm:p-4 md:p-6 bg-transparent print:overflow-visible print:p-0 print:m-0">
           <div className="max-w-7xl mx-auto w-full min-w-0 print:max-w-none print:mx-0">
@@ -1469,55 +1747,111 @@ export default function AppShell() {
         }}
       />
 
-      {pendingVerification && (
-        authVerificationMode === 'face' ? (
+      {pendingVerification && (() => {
+        const resolveAuthRedirect = () => {
+          if (user?.role === 'Employee') return '/employee/attendance'
+          if (
+            location.pathname.startsWith('/store-admin/attendance/scanner') ||
+            location.pathname.startsWith('/attendance')
+          ) {
+            return null
+          }
+          return '/store-admin/attendance/scanner'
+        }
+        const finishVerificationUi = () => {
+          setPendingVerification(null)
+          const nextRoute = resolveAuthRedirect()
+          if (nextRoute) navigate(nextRoute)
+        }
+        const notifyTerminalVerification = (reqId, detail = {}) => {
+          if (typeof window === 'undefined' || !reqId) return
+          const payload = {
+            scan_log_id: Number(reqId),
+            ...detail,
+            ts: Date.now(),
+          }
+          window.dispatchEvent(new CustomEvent('pace:attendance-scan-update', {
+            detail: payload
+          }))
+          try {
+            localStorage.setItem('pace_pending_verif_ping', JSON.stringify(payload))
+          } catch (_) { }
+          try {
+            if (typeof BroadcastChannel !== 'undefined') {
+              const bc = new BroadcastChannel('pace_attendance_verifications')
+              bc.postMessage(payload)
+              bc.close()
+            }
+          } catch (_) { }
+        }
+        const cancelVerificationUi = () => {
+          const reqId = pendingVerification?.scan_log_id || pendingVerification?.id
+          if (reqId) {
+            cancelledVerifIdsRef.current.add(reqId)
+            api.attendance.rejectVerification({
+              scan_log_id: reqId,
+              reason: 'Attendance authorization cancelled by employee.'
+            }).finally(() => {
+              notifyTerminalVerification(reqId, {
+                status: 'FAILED',
+                stage: 'rejected',
+                failure_reason: 'Attendance authorization cancelled by employee.',
+              })
+            })
+          }
+          finishVerificationUi()
+        }
+
+        return authVerificationMode === 'face' ? (
           <FaceRecognitionAttendanceModal
             isOpen={!!pendingVerification}
             request={pendingVerification}
             onClose={() => {
-              const reqId = pendingVerification?.id
+              const reqId = pendingVerification?.scan_log_id || pendingVerification?.id
               if (reqId) cancelledVerifIdsRef.current.add(reqId)
-              setPendingVerification(null)
-              navigate(user?.role === 'Employee' ? '/employee/attendance' : '/attendance?tab=punch')
+              finishVerificationUi()
             }}
-            onCancel={() => {
-              const reqId = pendingVerification?.id
-              if (reqId) {
-                cancelledVerifIdsRef.current.add(reqId)
-                api.attendance.rejectVerification({
-                  scan_log_id: reqId,
-                  reason: 'Attendance authorization cancelled by employee.'
-                }).catch(() => { })
-              }
-              setPendingVerification(null)
-              navigate(user?.role === 'Employee' ? '/employee/attendance' : '/attendance?tab=punch')
-            }}
+            onCancel={cancelVerificationUi}
             onAuthorize={async (payload) => {
-              const reqId = pendingVerification?.id
-              try {
-                if (reqId) {
-                  cancelledVerifIdsRef.current.add(reqId)
-                  await api.attendance.approveVerification({
-                    scan_log_id: reqId,
-                    verification_type: 'FACE_RECOGNITION',
-                    face_verified: true,
-                    face_matched: payload?.face_matched ?? true,
-                    confidence: payload?.confidence
-                  })
-                }
-              } catch (err) {
-                console.error('Attendance approval error:', err)
+              const reqId = pendingVerification?.scan_log_id || pendingVerification?.id
+              if (!reqId) throw new Error('Missing verification request ID.')
+              const res = await api.attendance.approveVerification({
+                scan_log_id: reqId,
+                verification_type: 'FACE_RECOGNITION',
+                face_verified: true,
+                face_matched: payload?.face_matched === true,
+                confidence: payload?.confidence
+              })
+              if (res && res.success === false) {
+                throw new Error(res.message || 'Face authorization rejected.')
               }
-              setTimeout(() => {
-                setPendingVerification(null)
-                navigate(user?.role === 'Employee' ? '/employee/attendance' : '/attendance?tab=punch')
-              }, 400)
+              cancelledVerifIdsRef.current.add(reqId)
+              notifyTerminalVerification(reqId, {
+                status: 'SUCCESS',
+                stage: 'authorized',
+                action: res?.action,
+                time: res?.time,
+                date: res?.date,
+                total_hours: res?.total_hours,
+                overtime_hours: res?.overtime_hours,
+                verification_type: 'FACE_RECOGNITION',
+                face_verified: true,
+                message: res?.message,
+              })
+              triggerDataSync('attendance')
             }}
             onSuccess={() => {
-              const reqId = pendingVerification?.id
-              if (reqId) cancelledVerifIdsRef.current.add(reqId)
-              setPendingVerification(null)
-              navigate(user?.role === 'Employee' ? '/employee/attendance' : '/attendance?tab=punch')
+              const reqId = pendingVerification?.scan_log_id || pendingVerification?.id
+              if (reqId) {
+                cancelledVerifIdsRef.current.add(reqId)
+                notifyTerminalVerification(reqId, {
+                  status: 'SUCCESS',
+                  stage: 'authorized',
+                  verification_type: 'FACE_RECOGNITION',
+                  face_verified: true,
+                })
+              }
+              triggerDataSync('attendance')
             }}
             onSwitchToPin={() => setAuthVerificationMode('pin')}
           />
@@ -1525,33 +1859,35 @@ export default function AppShell() {
           <EmployeePinVerificationModal
             request={pendingVerification}
             onClose={() => {
-              const reqId = pendingVerification?.id
+              const reqId = pendingVerification?.scan_log_id || pendingVerification?.id
               if (reqId) cancelledVerifIdsRef.current.add(reqId)
-              setPendingVerification(null)
-              navigate(user?.role === 'Employee' ? '/employee/attendance' : '/attendance?tab=punch')
+              finishVerificationUi()
             }}
-            onCancel={() => {
-              const reqId = pendingVerification?.id
+            onCancel={cancelVerificationUi}
+            onSuccess={(approvedReqId, res) => {
+              const reqId = approvedReqId || pendingVerification?.scan_log_id || pendingVerification?.id
               if (reqId) {
                 cancelledVerifIdsRef.current.add(reqId)
-                api.attendance.rejectVerification({
-                  scan_log_id: reqId,
-                  reason: 'Attendance authorization cancelled by employee.'
-                }).catch(() => { })
+                notifyTerminalVerification(reqId, {
+                  status: 'SUCCESS',
+                  stage: 'authorized',
+                  action: res?.action,
+                  time: res?.time,
+                  date: res?.date,
+                  total_hours: res?.total_hours,
+                  overtime_hours: res?.overtime_hours,
+                  verification_type: 'PIN',
+                  face_verified: false,
+                  message: res?.message,
+                })
               }
-              setPendingVerification(null)
-              navigate(user?.role === 'Employee' ? '/employee/attendance' : '/attendance?tab=punch')
-            }}
-            onSuccess={() => {
-              const reqId = pendingVerification?.id
-              if (reqId) cancelledVerifIdsRef.current.add(reqId)
-              setPendingVerification(null)
-              navigate(user?.role === 'Employee' ? '/employee/attendance' : '/attendance?tab=punch')
+              triggerDataSync('attendance')
+              finishVerificationUi()
             }}
             onSwitchToFace={() => setAuthVerificationMode('face')}
           />
         )
-      )}
+      })()}
     </div>
   )
 }

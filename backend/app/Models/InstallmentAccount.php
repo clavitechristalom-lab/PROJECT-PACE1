@@ -8,9 +8,17 @@ class InstallmentAccount extends Model
     protected $table = 'installment_accounts';
 
     protected $fillable = [
-        'account_no', 'customer_id', 'sale_id', 'start_date', 'principal_amount',
-        'down_payment', 'interest_rate', 'interest_amount', 'total_payable',
-        'installment_amount', 'number_of_installments', 'frequency', 'status', 'notes'
+        'account_no', 'customer_id', 'sale_id', 'has_agent', 'agent_id',
+        'appliances_agent_contribution', 'furniture_agent_contribution', 'total_agent_contribution',
+        'start_date', 'principal_amount', 'down_payment', 'interest_rate', 'interest_amount',
+        'total_payable', 'installment_amount', 'number_of_installments', 'frequency', 'status', 'notes'
+    ];
+
+    protected $casts = [
+        'has_agent' => 'boolean',
+        'appliances_agent_contribution' => 'decimal:2',
+        'furniture_agent_contribution' => 'decimal:2',
+        'total_agent_contribution' => 'decimal:2',
     ];
 
     protected $appends = ['total_paid', 'balance', 'remaining_balance'];
@@ -26,13 +34,11 @@ class InstallmentAccount extends Model
             : $this->payments()->get();
 
         $completedPayments = $payments->filter(function ($p) {
-            $st = strtolower(trim((string) ($p->status ?? 'completed')));
-            return !in_array($st, ['pending', 'pending verification', 'pending approval', 'rejected', 'failed', 'cancelled'], true);
+            return Payment::isSettledStatus($p->status);
         });
 
         $pendingPayments = $payments->filter(function ($p) {
-            $st = strtolower(trim((string) ($p->status ?? '')));
-            return in_array($st, ['pending', 'pending verification', 'pending approval'], true);
+            return Payment::isPendingVerificationStatus($p->status);
         });
 
         $hasDownpaymentRow = $completedPayments->contains(function ($p) {
@@ -98,6 +104,11 @@ class InstallmentAccount extends Model
     public function saleTransaction()
     {
         return $this->belongsTo(SaleTransaction::class, 'sale_id', 'sale_id');
+    }
+
+    public function agent()
+    {
+        return $this->belongsTo(Employee::class, 'agent_id', 'employee_id');
     }
 
     public function paymentSchedules()

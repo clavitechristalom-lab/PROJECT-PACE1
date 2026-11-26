@@ -75,7 +75,7 @@ class SystemController extends Controller
     // ─── Users ──────────────────────────────────────────────────────────────────
     public function users(Request $request)
     {
-        User::syncSessionStatuses($request->user(), 'users');
+        User::syncSessionStatuses($request->user(), 'users', true);
 
         $users = User::with(['employee.branch', 'customer.branch', 'verifiedBy'])->orderBy('user_id')->get()->map(function ($u) {
             $emp = $u->employee;
@@ -151,7 +151,7 @@ class SystemController extends Controller
 
     public function showUser(Request $request, $id)
     {
-        User::syncSessionStatuses($request->user(), 'users');
+        User::syncSessionStatuses($request->user(), 'users', true);
 
         $u = User::with(['employee.branch', 'customer.branch', 'verifiedBy'])->findOrFail($id);
         $emp = $u->employee;
@@ -420,6 +420,8 @@ class SystemController extends Controller
             'user_agent' => $request->userAgent(),
         ]);
 
+        SyncController::invalidateFingerprint(['users', 'system', 'employees', 'customers']);
+
         $u = User::with(['employee.branch', 'customer.branch'])->find($user->user_id);
         list($branchId, $branchName, $branchObj) = $this->resolveBranch($u ? ($u->employee ?: $u->customer) : null);
 
@@ -443,6 +445,11 @@ class SystemController extends Controller
 
     public function updateUserDirect(Request $request)
     {
+        $acting = $request->user() ?? auth('sanctum')->user();
+        if (!$acting || !in_array($acting->role, ['Administrator', 'Admin'], true)) {
+            return response()->json(['success' => false, 'message' => '403 Forbidden: Only Administrators can update user accounts.'], 403);
+        }
+
         $id = $request->input('user_id') ?: $request->input('id');
         if (!$id && $request->input('employee_id')) {
             $u = User::where('employee_id', $request->input('employee_id'))->first();
@@ -458,6 +465,11 @@ class SystemController extends Controller
 
     public function updateUser(Request $request, $id)
     {
+        $acting = $request->user() ?? auth('sanctum')->user();
+        if (!$acting || !in_array($acting->role, ['Administrator', 'Admin'], true)) {
+            return response()->json(['success' => false, 'message' => '403 Forbidden: Only Administrators can update user accounts.'], 403);
+        }
+
         $user = User::findOrFail($id);
 
         $role = $request->input('role');
@@ -514,6 +526,14 @@ class SystemController extends Controller
         }
 
         $user->update($data);
+
+        if (!$user->is_active) {
+            try {
+                $user->tokens()->delete();
+            } catch (\Throwable $e) {}
+        }
+        User::clearSessionSyncCache();
+        SyncController::invalidateFingerprint(['users', 'system', 'employees', 'customers']);
 
         // Update linked Employee profile details if present
         if ($user->employee_id) {
@@ -725,6 +745,8 @@ class SystemController extends Controller
             'user_agent' => $request->userAgent(),
         ]);
 
+        SyncController::invalidateFingerprint(['users', 'system', 'employees', 'customers']);
+
         return response()->json(['message' => 'User deleted successfully']);
     }
 
@@ -791,12 +813,14 @@ class SystemController extends Controller
             return [
                 'log_id' => $l->id,
                 'user' => $userTitle,
+                'user_username' => $l->user?->username,
                 'user_role' => $userRole,
                 'action' => $l->action,
                 'module' => $l->module,
                 'description' => $l->description,
                 'ip_address' => $l->ip_address,
                 'datetime' => $l->created_at ? date('Y-m-d H:i:s', strtotime($l->created_at)) : '',
+                'created_at' => $l->created_at ? $l->created_at->toIso8601String() : null,
             ];
         });
 
@@ -958,10 +982,15 @@ class SystemController extends Controller
         $backup = BackupLog::findOrFail($id);
         $actingUserId = $this->resolveActingUserId($request);
 
-        if (Storage::disk('local')->exists($backup->file_path)) {
-            $sql = Storage::disk('local')->get($backup->file_path);
-            DB::unprepared($sql);
+        if (empty($backup->file_path) || !Storage::disk('local')->exists($backup->file_path)) {
+            return response()->json([
+                'success' => false,
+                'message' => "Backup file for '{$backup->backup_name}' was not found on disk. Restore aborted.",
+            ], 404);
         }
+
+        $sql = Storage::disk('local')->get($backup->file_path);
+        DB::unprepared($sql);
 
         SystemLog::create([
             'user_id' => $actingUserId,
@@ -1068,11 +1097,19 @@ class SystemController extends Controller
     // ─── Settings ───────────────────────────────────────────────────────────────
     public function getMergedSettings(): array
     {
+        return \Illuminate\Support\Facades\Cache::remember('pace_merged_settings', 60, function () {
+            return $this->buildMergedSettings();
+        });
+    }
+
+    private function buildMergedSettings(): array
+    {
         $settings = Setting::all()->pluck('value', 'key')->toArray();
         
         $defaults = [
             'company_name'      => 'PROJECT: PACE Z-LICZ',
             'name'              => 'PROJECT: PACE Z-LICZ',
+            'site_name'         => 'Z-LICZ Appliances',
             'branch_name'       => '',
             'address'           => '',
             'phone'             => '',
@@ -1085,6 +1122,9 @@ class SystemController extends Controller
             'tax_id'            => '',
             'web_links'         => '',
             'logo'              => '',
+            'maintenance_mode'  => false,
+            'debug_mode'        => false,
+            'default_language'  => 'EN',
         ];
 
         $branches = \App\Models\BranchProfile::query()
@@ -1152,6 +1192,12 @@ class SystemController extends Controller
             $merged['company_name'] = $merged['name'];
         }
 
+        if (empty($settings['site_name'])) {
+            $merged['site_name'] = !empty($merged['company_name']) ? $merged['company_name'] : 'Z-LICZ Appliances';
+        } else {
+            $merged['site_name'] = $settings['site_name'];
+        }
+
         if (!empty($merged['attendance_cutoff'])) {
             $merged['cutoff_time'] = $merged['attendance_cutoff'];
         } elseif (!empty($merged['cutoff_time'])) {
@@ -1169,6 +1215,9 @@ class SystemController extends Controller
             $merged['logo_url'] = null;
         }
 
+        $merged['maintenance_mode'] = filter_var($merged['maintenance_mode'] ?? false, FILTER_VALIDATE_BOOLEAN);
+        $merged['debug_mode'] = filter_var($merged['debug_mode'] ?? false, FILTER_VALIDATE_BOOLEAN);
+
         return $merged;
     }
 
@@ -1177,14 +1226,41 @@ class SystemController extends Controller
         return response()->json($this->getMergedSettings());
     }
 
+    public function publicBootstrap()
+    {
+        $payload = Cache::remember('pace_public_bootstrap', 15, function () {
+            $prodCtrl = app(ProductController::class);
+            $catCtrl = app(CategoryController::class);
+
+            $appData = $prodCtrl->indexPublic(new Request(['category' => 'Appliances']))->getData(true);
+            $furnData = $prodCtrl->indexPublic(new Request(['category' => 'Furniture']))->getData(true);
+            $catData = $catCtrl->index(new Request())->getData(true);
+
+            return [
+                'appliances' => $appData['products'] ?? [],
+                'furniture' => $furnData['products'] ?? [],
+                'categories' => $catData,
+                'settings' => $this->getMergedSettings(),
+            ];
+        });
+
+        return response()->json($payload);
+    }
+
     public function saveSettings(Request $request)
     {
-        // Support field aliases
+        // Support field aliases (site_name <-> company_name <-> name)
+        if ($request->has('site_name') && !$request->has('company_name')) {
+            $request->merge(['company_name' => $request->input('site_name')]);
+        }
         if ($request->has('name') && !$request->has('company_name')) {
             $request->merge(['company_name' => $request->input('name')]);
         }
         if ($request->has('company_name') && !$request->has('name')) {
             $request->merge(['name' => $request->input('company_name')]);
+        }
+        if ($request->has('company_name') && !$request->has('site_name')) {
+            $request->merge(['site_name' => $request->input('company_name')]);
         }
         if ($request->has('cutoff_time') && !$request->has('attendance_cutoff')) {
             $request->merge(['attendance_cutoff' => $request->input('cutoff_time')]);
@@ -1201,6 +1277,7 @@ class SystemController extends Controller
         $validated = $request->validate([
             'company_name'      => 'nullable|string|max:255',
             'name'              => 'nullable|string|max:255',
+            'site_name'         => 'nullable|string|max:255',
             'branch_name'       => 'nullable|string|max:255',
             'tax_id'            => 'nullable|string|max:100',
             'address'           => 'nullable|string|max:500',
@@ -1212,12 +1289,18 @@ class SystemController extends Controller
             'attendance_cutoff' => 'nullable|string|max:20',
             'cutoff_time'       => 'nullable|string|max:20',
             'web_links'         => 'nullable|string|max:500',
-            'logo'              => 'nullable|image|mimes:jpeg,png,jpg,gif,webp,svg|max:5120',
+            'maintenance_mode'  => 'nullable|boolean',
+            'debug_mode'        => 'nullable|boolean',
+            'default_language'  => 'nullable|string|max:20',
+            'logo'              => $request->hasFile('logo')
+                ? 'image|mimes:jpeg,png,jpg,gif,webp,svg|max:5120'
+                : 'nullable',
         ]);
 
         $fillableKeys = [
             'company_name',
             'name',
+            'site_name',
             'branch_name',
             'tax_id',
             'address',
@@ -1229,20 +1312,36 @@ class SystemController extends Controller
             'attendance_cutoff',
             'cutoff_time',
             'web_links',
+            'maintenance_mode',
+            'debug_mode',
+            'default_language',
         ];
 
         foreach ($fillableKeys as $key) {
             if ($request->has($key)) {
                 $val = $request->input($key);
-                Setting::updateOrCreate(['key' => $key], ['value' => $val !== null ? trim((string)$val) : '']);
+                if (in_array($key, ['maintenance_mode', 'debug_mode'], true)) {
+                    $storedVal = filter_var($val, FILTER_VALIDATE_BOOLEAN) ? '1' : '0';
+                } else {
+                    $storedVal = $val !== null ? trim((string)$val) : '';
+                }
+                Setting::updateOrCreate(['key' => $key], ['value' => $storedVal]);
             }
         }
 
-        // Also ensure company_name and name stay strictly in sync
-        if ($request->has('company_name')) {
-            Setting::updateOrCreate(['key' => 'name'], ['value' => trim((string)$request->input('company_name'))]);
+        // Keep company_name, name, and site_name strictly in sync
+        $syncedName = null;
+        if ($request->has('site_name')) {
+            $syncedName = trim((string)$request->input('site_name'));
+        } elseif ($request->has('company_name')) {
+            $syncedName = trim((string)$request->input('company_name'));
         } elseif ($request->has('name')) {
-            Setting::updateOrCreate(['key' => 'company_name'], ['value' => trim((string)$request->input('name'))]);
+            $syncedName = trim((string)$request->input('name'));
+        }
+        if ($syncedName !== null && $syncedName !== '') {
+            Setting::updateOrCreate(['key' => 'site_name'], ['value' => $syncedName]);
+            Setting::updateOrCreate(['key' => 'company_name'], ['value' => $syncedName]);
+            Setting::updateOrCreate(['key' => 'name'], ['value' => $syncedName]);
         }
 
         if ($request->has('attendance_cutoff')) {
@@ -1298,6 +1397,11 @@ class SystemController extends Controller
             'user_agent'  => $request->userAgent(),
         ]);
 
+        \Illuminate\Support\Facades\Cache::forget('pace_merged_settings');
+        \Illuminate\Support\Facades\Cache::forget('pace_public_bootstrap');
+        \Illuminate\Support\Facades\Cache::forget(\App\Http\Middleware\ApplyGlobalSystemSettings::CACHE_KEY);
+        SyncController::invalidateFingerprint(['system', 'settings', 'branches']);
+
         $updated = $this->getMergedSettings();
 
         return response()->json([
@@ -1310,69 +1414,7 @@ class SystemController extends Controller
 
     public function qrMonitoring(Request $request)
     {
-        $totalEmployees = \App\Models\Employee::count();
-        $qrGenerated = \App\Models\Employee::whereNotNull('qr_token')->count();
-        $qrNotGenerated = \App\Models\Employee::whereNull('qr_token')->count();
-        $activeQr = \App\Models\Employee::whereNotNull('qr_token')->where('qr_active', true)->count();
-        $revokedQr = \App\Models\Employee::whereNotNull('qr_token')->where('qr_active', false)->count();
-
-        $today = now()->startOfDay();
-        $todayScans = \App\Models\AttendanceScanLog::where('scan_time', '>=', $today)->count();
-        $successfulScans = \App\Models\AttendanceScanLog::where('scan_time', '>=', $today)
-            ->where('status', 'SUCCESS')->count();
-        $failedScans = \App\Models\AttendanceScanLog::where('scan_time', '>=', $today)
-            ->where('status', 'FAILED')->count();
-
-        $logsData = \App\Models\AttendanceScanLog::with(['employee.branch', 'scannedBy.employee'])
-            ->orderByDesc('scan_time')
-            ->limit(100)
-            ->get()
-            ->map(function($log) {
-                $emp = $log->employee;
-                $scannedBy = $log->scannedBy;
-                $scannedByName = $scannedBy ? ($scannedBy->employee ? trim("{$scannedBy->employee->first_name} {$scannedBy->employee->last_name}") : $scannedBy->username) : 'System';
-                
-                $verificationMethod = 'Failed';
-                if ($log->qr_verified && $log->pin_verified) {
-                    $verificationMethod = 'QR + PIN';
-                } elseif ($log->qr_verified) {
-                    $verificationMethod = 'QR Only';
-                }
-
-                $branchName = $log->branch;
-                if ($emp && $emp->branch) {
-                    $branchName = is_object($emp->branch) ? ($emp->branch->name ?? 'Unassigned') : ((string)$emp->branch ?: 'Unassigned');
-                }
-
-                return [
-                    'id' => $log->id,
-                    'employee_name' => $emp ? trim("{$emp->first_name} {$emp->last_name}") : 'Unknown',
-                    'employee_code' => $emp ? $emp->employee_code : '—',
-                    'branch' => $branchName,
-                    'department' => $emp ? $emp->department : '—',
-                    'action_type' => $log->action_type,
-                    'verification_method' => $verificationMethod,
-                    'scanned_by' => $scannedByName,
-                    'status' => $log->status,
-                    'details' => $log->failure_reason ?? 'Verified successfully',
-                    'timestamp' => $log->scan_time ? $log->scan_time->format('Y-m-d H:i:s') : null,
-                ];
-            });
-
-        return response()->json([
-            'success' => true,
-            'stats' => [
-                'total_employees' => $totalEmployees,
-                'qr_generated' => $qrGenerated,
-                'qr_not_generated' => $qrNotGenerated,
-                'active_qr' => $activeQr,
-                'revoked_qr' => $revokedQr,
-                'today_scans' => $todayScans,
-                'successful_scans' => $successfulScans,
-                'failed_scans' => $failedScans,
-            ],
-            'recent_logs' => $logsData,
-        ]);
+        return app(EmployeeController::class)->getQrMonitoringStats($request);
     }
 
     public function storage(Request $request)

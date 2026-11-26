@@ -76,26 +76,25 @@ export default function ReportsPage() {
     }
   }, [isStoreAdmin, userBranchName, branch])
 
+  // Fetch branch selector only when admin needs it, and lazy-load payroll periods only on Payroll tab
   useEffect(() => {
-    api.branches.getAll()
-      .then(res => {
-        if (res?.branches) setBranchesList(res.branches)
-      })
-      .catch(() => {})
-
-    api.system.getPublicSettings()
-      .then(setCompanySettings)
-      .catch(() => {})
-  }, [])
+    if (!isStoreAdmin && !isEmployee && branchesList.length === 0) {
+      api.branches.getAll()
+        .then(res => {
+          if (res?.branches) setBranchesList(res.branches)
+        })
+        .catch(() => {})
+    }
+  }, [isStoreAdmin, isEmployee, branchesList.length])
 
   useEffect(() => {
-    if (isStoreAdmin) return
+    if (activeTab !== 'payroll' || isStoreAdmin || periods.length > 0) return
     api.payroll.getPeriods()
       .then(res => {
         if (res?.periods) setPeriods(res.periods)
       })
       .catch(() => {})
-  }, [isStoreAdmin])
+  }, [activeTab, isStoreAdmin, periods.length])
 
   useEffect(() => {
     if (isStoreAdmin && activeTab === 'payroll') {
@@ -104,6 +103,9 @@ export default function ReportsPage() {
   }, [isStoreAdmin, activeTab])
 
   const loadAllReportsForPrint = async (overrides = {}) => {
+    if (!companySettings) {
+      api.system.getPublicSettings().then(setCompanySettings).catch(() => {})
+    }
     const activeBranchName = isStoreAdmin ? (userBranchName || branch) : (overrides.branch ?? branch)
     const deptVal = overrides.department ?? department
     const statVal = overrides.status ?? status
@@ -361,7 +363,7 @@ export default function ReportsPage() {
       const branchSuffix = isStoreAdmin && (userBranchName || branch) && (userBranchName || branch) !== 'All'
         ? `_${(userBranchName || branch).replace(/[^a-zA-Z0-9]/g, '_')}`
         : ''
-      document.title = `Z-LICZ_Reports_Analytics${branchSuffix}_${todayStr}`
+      document.title = `Z-LICZ_Reports_Summary${branchSuffix}_${todayStr}`
       await new Promise(resolve => setTimeout(resolve, 150))
       window.addEventListener('afterprint', restoreTitle)
       window.print()

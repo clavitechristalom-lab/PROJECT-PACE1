@@ -7,6 +7,7 @@ class Employee extends Model
     const POSITION_MANAGER = 'Manager (Store Admin)';
     const POSITION_CASHIER = 'Cashier (Employee)';
     const POSITION_COLLECTOR = 'Collector (Employee)';
+    const POSITION_SALES_AGENT = 'Sales Agent (Employee)';
     const POSITION_UTILITY = 'Utility (Employee)';
 
     public static function getValidPositions(): array
@@ -15,6 +16,7 @@ class Employee extends Model
             self::POSITION_MANAGER,
             self::POSITION_CASHIER,
             self::POSITION_COLLECTOR,
+            self::POSITION_SALES_AGENT,
             self::POSITION_UTILITY,
         ];
     }

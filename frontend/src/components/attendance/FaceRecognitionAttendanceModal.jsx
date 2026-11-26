@@ -193,7 +193,7 @@ export default function FaceRecognitionAttendanceModal({
     propAdminName ||
     (request?.scanned_by?.employee
       ? `${request.scanned_by.employee.first_name} ${request.scanned_by.employee.last_name || ''}`.trim()
-      : request?.scanned_by?.username || request?.scanned_by?.name || 'clavite talom')
+      : request?.scanned_by?.username || request?.scanned_by?.name || 'Store Administrator')
 
   // Stop camera tracks cleanly
   const stopCamera = useCallback(() => {
@@ -235,7 +235,6 @@ export default function FaceRecognitionAttendanceModal({
     setMismatchError(null)
     mismatchCountRef.current = 0
     setIsLivenessVerified(false)
-    setIsStaticSuspect(false)
     setLivenessPrompt('I-align imong nawong sa viewfinder...')
     blinkDetectorRef.current = createBlinkDetector()
 
@@ -311,39 +310,39 @@ export default function FaceRecognitionAttendanceModal({
   const resolveEmployeeData = useCallback(async () => {
     if (propEmployee) {
       return {
-        id: propEmployee.employee_id || propEmployee.id || 'EMP-016',
-        employee_code: propEmployee.employee_code || 'EMP-016',
-        name: `${propEmployee.first_name || ''} ${propEmployee.last_name || ''}`.trim() || propEmployee.name || 'Christalom Clavite',
+        id: propEmployee.employee_id || propEmployee.id || null,
+        employee_code: propEmployee.employee_code || '',
+        name: `${propEmployee.first_name || ''} ${propEmployee.last_name || ''}`.trim() || propEmployee.name || 'Employee',
         role: propEmployee.position || propEmployee.role || 'Staff Member',
-        department: propEmployee.department || 'Administration'
+        department: propEmployee.department || 'Operations'
       }
     }
     if (request?.employee) {
       const e = request.employee
       return {
-        id: e.employee_id || e.id || 'EMP-016',
-        employee_code: e.employee_code || 'EMP-016',
-        name: `${e.first_name || ''} ${e.last_name || ''}`.trim() || 'Christalom Clavite',
+        id: e.employee_id || e.id || null,
+        employee_code: e.employee_code || '',
+        name: `${e.first_name || ''} ${e.last_name || ''}`.trim() || e.name || 'Employee',
         role: e.position || 'Staff Member',
-        department: e.department || 'Administration'
+        department: e.department || 'Operations'
       }
     }
     if (user?.employee) {
       const e = user.employee
       return {
-        id: e.employee_id || user.user_id || 'EMP-016',
-        employee_code: e.employee_code || 'EMP-016',
-        name: `${e.first_name || ''} ${e.last_name || ''}`.trim() || user.name || 'Christalom Clavite',
+        id: e.employee_id || user.user_id || null,
+        employee_code: e.employee_code || '',
+        name: `${e.first_name || ''} ${e.last_name || ''}`.trim() || user.name || 'Employee',
         role: e.position || 'Staff Member',
-        department: e.department || 'Administration'
+        department: e.department || 'Operations'
       }
     }
     return {
-      id: 16,
-      employee_code: 'EMP-016',
-      name: 'Christalom Clavite',
+      id: user?.employee_id || user?.user_id || null,
+      employee_code: '',
+      name: user?.name || 'Employee',
       role: 'Staff Member',
-      department: 'Administration'
+      department: 'Operations'
     }
   }, [propEmployee, request, user])
 
@@ -353,11 +352,11 @@ export default function FaceRecognitionAttendanceModal({
     if (onClose) onClose()
   }, [stopCamera, onClose])
 
-  // Cancel & QR Code Navigation Flow (Rule 6)
+  // Cancel & QR Code Navigation Flow
   const handleCancel = useCallback(() => {
     isCancelledRef.current = true
 
-    // 1. Immediately set authorization state to false and stop camera
+    // 1. Immediately reset authorization state and stop camera
     stopCamera()
     isVerifiedRef.current = false
     authorizingRef.current = false
@@ -369,24 +368,24 @@ export default function FaceRecognitionAttendanceModal({
     setScanProgress(0)
     progressRef.current = 0
 
-    // 2. Prevent multiple/stacked attendance authorization triggers
+    // 2. Reject scan log via parent handler, or directly when no onCancel callback is provided
     const reqId = request?.id || request?.scan_log_id
-    if (reqId) {
-      api.attendance.rejectVerification({
-        scan_log_id: reqId,
-        reason: 'Attendance authorization cancelled by employee.'
-      }).catch(() => {})
-    }
-
     if (typeof onCancel === 'function') {
       try {
         onCancel({ authorized: false, cancelled: true, requestId: reqId })
       } catch (_) {}
-    }
-    if (typeof onClose === 'function') {
-      try {
-        onClose({ authorized: false, cancelled: true, requestId: reqId })
-      } catch (_) {}
+    } else {
+      if (reqId) {
+        api.attendance.rejectVerification({
+          scan_log_id: reqId,
+          reason: 'Attendance authorization cancelled by employee.'
+        }).catch(() => {})
+      }
+      if (typeof onClose === 'function') {
+        try {
+          onClose({ authorized: false, cancelled: true, requestId: reqId })
+        } catch (_) {}
+      }
     }
 
     // 3. Dispatch global reset event for any active attendance stations
@@ -396,12 +395,9 @@ export default function FaceRecognitionAttendanceModal({
       }))
       window.dispatchEvent(new CustomEvent('pace:verifications-sync'))
     }
+  }, [stopCamera, onCancel, onClose, request])
 
-    // 4. Automatically navigate/return the view back to the "Scan Employee QR Code" screen
-    navigate('/attendance?tab=punch')
-  }, [stopCamera, onCancel, onClose, navigate, request])
-
-  // Automatic biometric authorization handler (Zero manual clicks required on true)
+  // Automatic biometric authorization handler
   const triggerAutoAuthorize = useCallback(async (customPayload = null) => {
     if (authorizingRef.current || isCancelledRef.current) return
     authorizingRef.current = true
@@ -410,7 +406,7 @@ export default function FaceRecognitionAttendanceModal({
     try {
       const employeeInfo = customPayload?.employee || await resolveEmployeeData()
       const snapshot = customPayload?.snapshot || captureFrame()
-      const confidence = customPayload?.confidence || confidenceScore || (99.1).toFixed(1)
+      const confidence = Number(customPayload?.confidence || confidenceScore || 99.1)
 
       // If in ENROLLMENT mode: Save/register captured face to backend database
       if (mode === 'enrollment' && snapshot) {
@@ -442,52 +438,62 @@ export default function FaceRecognitionAttendanceModal({
         face_verified: true,
         face_matched: true, // EXPLICIT BOOLEAN TRUE
         snapshot,
-        confidence: Number(confidence),
+        confidence,
         status: 'VERIFIED',
         employee: employeeInfo,
         verified_at: new Date().toISOString()
       }
 
-      // 1. Primary callback
+      // 1. Primary callback (must throw if API authorization fails)
       if (typeof onAuthorize === 'function') {
         await onAuthorize(verificationPayload)
       }
 
-      // 2. Secondary/legacy callbacks if provided
-      if (typeof onAttendanceSuccess === 'function') {
-        await onAttendanceSuccess(verificationPayload)
-      }
-      if (typeof onSuccess === 'function') {
-        await onSuccess(verificationPayload)
-      }
-
-      // 3. Fallback direct backend API verification if no parent callback handled it
+      // 2. Fallback direct backend API verification if no parent callback handled it
       if (
         mode !== 'enrollment' &&
         typeof onAuthorize !== 'function' &&
         typeof onAttendanceSuccess !== 'function' &&
-        typeof onSuccess !== 'function' &&
         targetScanLogId &&
         api?.attendance?.approveVerification
       ) {
-        await api.attendance.approveVerification({
+        const res = await api.attendance.approveVerification({
           scan_log_id: targetScanLogId,
           verification_type: 'FACE_RECOGNITION',
           face_verified: true,
           face_matched: true,
-          confidence: Number(confidence)
+          confidence
         })
+        if (res && res.success === false) {
+          throw new Error(res.message || 'Face authorization rejected by server.')
+        }
+      }
+
+      // 3. Secondary callbacks after authorization succeeds
+      if (typeof onAttendanceSuccess === 'function') {
+        await onAttendanceSuccess(verificationPayload)
+      }
+      if (typeof onSuccess === 'function' && mode !== 'enrollment') {
+        await onSuccess(verificationPayload)
       }
 
       playSound('verified')
       showToast(mode === 'enrollment' ? 'Biometric Face ID Enrolled!' : 'Biometric attendance authorized! (Face ID Verified)', 'success')
 
-      // Immediate progression: brief 650ms confirmation so user sees 100% emerald UI
+      // Brief confirmation before closing when caller does not immediately close via onSuccess
       setTimeout(() => {
-        handleClose()
+        if (!isCancelledRef.current) {
+          handleClose()
+        }
       }, 650)
     } catch (err) {
       console.error('Auto authorization failed:', err)
+      isVerifiedRef.current = false
+      setIsVerified(false)
+      setScanProgress(0)
+      progressRef.current = 0
+      setScanStatus('scanning')
+      setMismatchError(err?.message || 'Failed to authorize attendance. Please retry.')
       showToast(err?.message || 'Failed to authorize attendance.', 'error')
       playSound('error')
     } finally {
@@ -569,7 +575,7 @@ export default function FaceRecognitionAttendanceModal({
             setRegisteredTemplate({
               status: 'missing',
               employeeName: employeeName || 'Employee',
-              employeeCode: employeeCode || 'EMP-016',
+              employeeCode: employeeCode || '',
               previewUrl: null
             })
             setTemplateLoading(false)
@@ -603,7 +609,7 @@ export default function FaceRecognitionAttendanceModal({
           setRegisteredTemplate({
             status: 'ready',
             employeeName: employeeName || 'Employee',
-            employeeCode: employeeCode || 'EMP-016',
+            employeeCode: employeeCode || '',
             previewUrl: candidateSource
           })
           setTemplateLoading(false)
@@ -615,7 +621,7 @@ export default function FaceRecognitionAttendanceModal({
             status: 'error',
             error: err.message,
             employeeName: 'Employee',
-            employeeCode: 'EMP-016'
+            employeeCode: ''
           })
           setTemplateLoading(false)
           if (mode === 'authorization') {
@@ -751,6 +757,27 @@ export default function FaceRecognitionAttendanceModal({
         // AUTHORIZATION MODE: Automatic Face ID Template Comparison
         // ──────────────────────────────────────────────────────────
         if (registeredDescriptorRef.current) {
+          // Enforce ambient lighting & face alignment/liveness before matching
+          if (!isLivenessValid) {
+            setIsLivenessVerified(false)
+            return
+          }
+
+          // Anti-spoof static image check via blink/aperture variance
+          const aperture = computeEyeAperture(video, result.faceBounds)
+          const blinkState = blinkDetectorRef.current?.update(aperture, result.isFaceDetected)
+          if (blinkState?.isStaticSuspect) {
+            isFaceMatchedRef.current = false
+            setIsFaceMatched(false)
+            setBooleanEvaluation('false')
+            setIsLivenessVerified(false)
+            progressRef.current = 0
+            setScanProgress(0)
+            setMismatchError('Photo / Screen Spoof suspected. Move slightly or blink naturally.')
+            return
+          }
+          setIsLivenessVerified(true)
+
           // Compare live face with enrolled template from Biometric Face Recognition Enrollment
           const comp = compareBiometricDescriptors(liveDesc, registeredDescriptorRef.current, { threshold: 58 })
 
@@ -1017,7 +1044,7 @@ export default function FaceRecognitionAttendanceModal({
                   ) : registeredTemplate?.status === 'ready' ? (
                     <span className="text-emerald-300 flex items-center gap-1 font-mono">
                       <span className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping" />
-                      {registeredTemplate.employeeCode || 'EMP-016'}
+                      {registeredTemplate.employeeCode || registeredTemplate.employeeName || 'Verified'}
                     </span>
                   ) : mode === 'enrollment' ? (
                     <span className="text-emerald-300/80 text-[11px]">Ready to Enroll</span>

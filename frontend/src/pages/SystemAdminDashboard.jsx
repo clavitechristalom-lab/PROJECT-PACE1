@@ -48,7 +48,9 @@ export default function SystemAdminDashboard() {
     debug_mode: false,
     default_language: 'EN',
   })
+  const [siteNameInput, setSiteNameInput] = useState('Z-LICZ Appliances')
   const [savingSettings, setSavingSettings] = useState(false)
+  const [savingSiteName, setSavingSiteName] = useState(false)
 
   // Carousel State
   const [carouselImages, setCarouselImages] = useState([])
@@ -68,8 +70,18 @@ export default function SystemAdminDashboard() {
         const data = await api.system.getLogs()
         setLogs(data.logs || [])
       } else if (tab === 'settings') {
-        const data = await api.system.getSettings()
-        if (data) setSettings(prev => ({ ...prev, ...data }))
+        const data = await api.system.getSettings({ fresh: true })
+        if (data) {
+          const resolvedSiteName = data.site_name || data.company_name || data.name || 'Z-LICZ Appliances'
+          setSettings(prev => ({
+            ...prev,
+            ...data,
+            site_name: resolvedSiteName,
+            maintenance_mode: Boolean(data.maintenance_mode),
+            debug_mode: Boolean(data.debug_mode),
+          }))
+          setSiteNameInput(resolvedSiteName)
+        }
       } else if (tab === 'carousel') {
         const data = await api.carouselImages.getAll()
         setCarouselImages(data || [])
@@ -182,18 +194,54 @@ export default function SystemAdminDashboard() {
   }
 
   const handleToggleSetting = async (key) => {
-    const updated = { ...settings, [key]: !settings[key] }
-    setSettings(updated)
+    const prevValue = Boolean(settings[key])
+    const nextValue = !prevValue
+    setSettings(prev => ({ ...prev, [key]: nextValue }))
     setSavingSettings(true)
     try {
-      await api.system.saveSettings(updated)
-      showToast('Settings saved automatically', 'success')
+      const res = await api.system.saveSettings({ [key]: nextValue })
+      const saved = res?.settings || res?.data || { [key]: nextValue }
+      const resolvedSiteName = saved.site_name || saved.company_name || saved.name || settings.site_name
+      setSettings(prev => ({
+        ...prev,
+        ...saved,
+        site_name: resolvedSiteName,
+        maintenance_mode: Boolean(saved.maintenance_mode ?? (key === 'maintenance_mode' ? nextValue : prev.maintenance_mode)),
+        debug_mode: Boolean(saved.debug_mode ?? (key === 'debug_mode' ? nextValue : prev.debug_mode)),
+      }))
+      window.dispatchEvent(new CustomEvent('system:settingsUpdated', { detail: { ...saved, site_name: resolvedSiteName } }))
+      const label = key === 'maintenance_mode' ? 'Maintenance Mode' : 'Debug Mode'
+      showToast(`${label} ${nextValue ? 'enabled' : 'disabled'}`, 'success')
       triggerDataSync('settings')
     } catch (err) {
-      showToast('Failed to save settings', 'error')
-      setSettings(settings)
+      showToast(err?.message || 'Failed to save settings', 'error')
+      setSettings(prev => ({ ...prev, [key]: prevValue }))
     } finally {
       setSavingSettings(false)
+    }
+  }
+
+  const handleSaveSiteName = async (e) => {
+    e?.preventDefault()
+    const trimmed = siteNameInput.trim()
+    if (!trimmed) {
+      showToast('Site Name cannot be empty', 'warning')
+      return
+    }
+    setSavingSiteName(true)
+    try {
+      const res = await api.system.saveSettings({ site_name: trimmed, company_name: trimmed })
+      const saved = res?.settings || res?.data || { site_name: trimmed, company_name: trimmed }
+      const resolvedSiteName = saved.site_name || saved.company_name || trimmed
+      setSettings(prev => ({ ...prev, ...saved, site_name: resolvedSiteName, company_name: resolvedSiteName }))
+      setSiteNameInput(resolvedSiteName)
+      window.dispatchEvent(new CustomEvent('system:settingsUpdated', { detail: { ...saved, site_name: resolvedSiteName, company_name: resolvedSiteName } }))
+      showToast(`Site Name updated to "${resolvedSiteName}"`, 'success')
+      triggerDataSync('settings')
+    } catch (err) {
+      showToast(err?.message || 'Failed to update Site Name', 'error')
+    } finally {
+      setSavingSiteName(false)
     }
   }
 
@@ -216,15 +264,16 @@ export default function SystemAdminDashboard() {
   const filteredLogs = useMemo(() => {
     return logs.filter(log => {
       const searchStr = logSearch.toLowerCase()
+      const userName = (typeof log.user === 'object' ? log.user?.username : log.user) || log.user_username || ''
       const matchesSearch = !logSearch || 
-        (log.user || '').toLowerCase().includes(searchStr) ||
+        userName.toLowerCase().includes(searchStr) ||
         (log.action || '').toLowerCase().includes(searchStr) ||
         (log.module || '').toLowerCase().includes(searchStr) ||
         (log.description || '').toLowerCase().includes(searchStr)
         
       let matchesDate = true
       if (logDateRange.start || logDateRange.end) {
-        const logDate = new Date(log.created_at)
+        const logDate = new Date(log.created_at || log.datetime)
         logDate.setHours(0, 0, 0, 0)
         
         if (logDateRange.start) {
@@ -749,8 +798,8 @@ export default function SystemAdminDashboard() {
                 <tr><td colSpan="4" className="p-8 text-center text-muted-foreground italic">No logs found matching criteria.</td></tr>
               ) : paginatedLogs.map(l => (
                 <tr key={l.log_id} className="hover:bg-muted/30">
-                  <td className="px-4 py-3 whitespace-nowrap text-muted-foreground font-mono">{fmtDate(l.created_at, 'MMM DD, YYYY HH:mm:ss')}</td>
-                  <td className="px-4 py-3 font-semibold text-foreground">{l.user?.username || 'System'}</td>
+                  <td className="px-4 py-3 whitespace-nowrap text-muted-foreground font-mono">{fmtDate(l.created_at || l.datetime, 'MMM DD, YYYY HH:mm:ss')}</td>
+                  <td className="px-4 py-3 font-semibold text-foreground">{(typeof l.user === 'object' ? l.user?.username : l.user) || l.user_username || 'System'}</td>
                   <td className="px-4 py-3">
                     <div className="font-semibold">{l.action}</div>
                     <div className="text-xs text-muted-foreground truncate max-w-md">{l.description}</div>
@@ -859,56 +908,103 @@ export default function SystemAdminDashboard() {
     </div>
   )
 
-  const renderSettings = () => (
-    <div className="max-w-3xl space-y-6">
-      <Card noPad className="border border-border overflow-hidden">
-        <div className="p-4 border-b border-border bg-muted/30">
-          <h3 className="font-bold text-foreground">Global Configuration</h3>
-          <p className="text-xs text-muted-foreground">These settings affect the entire system and application state.</p>
-        </div>
-        <div className="p-6 space-y-6">
-          <div className="flex items-center justify-between border-b border-border pb-4">
-            <div>
-              <div className="font-semibold text-sm">Maintenance Mode</div>
-              <div className="text-xs text-muted-foreground mt-1">Suspend access for all non-admin users.</div>
+  const renderSettings = () => {
+    const siteNameDirty = siteNameInput.trim() !== (settings.site_name || settings.company_name || '').trim()
+    return (
+      <div className="max-w-3xl space-y-6">
+        <Card noPad className="border border-border overflow-hidden">
+          <div className="p-4 border-b border-border bg-muted/30">
+            <h3 className="font-bold text-foreground">Global Configuration</h3>
+            <p className="text-xs text-muted-foreground">These settings affect the entire system and application state.</p>
+          </div>
+          <div className="p-6 space-y-6">
+            <div className="flex items-center justify-between gap-4 border-b border-border pb-4">
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="font-semibold text-sm text-foreground">Maintenance Mode</span>
+                  <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-full border ${
+                    settings.maintenance_mode
+                      ? 'bg-blue-500/15 text-blue-500 border-blue-500/30'
+                      : 'bg-muted text-muted-foreground border-border'
+                  }`}>
+                    {settings.maintenance_mode ? 'Enabled' : 'Disabled'}
+                  </span>
+                </div>
+                <div className="text-xs text-muted-foreground mt-1">
+                  Suspend access for all non-admin users. Administrators retain full access.
+                </div>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={Boolean(settings.maintenance_mode)}
+                aria-label="Toggle Maintenance Mode"
+                onClick={() => handleToggleSetting('maintenance_mode')}
+                disabled={savingSettings}
+                className="text-3xl focus:outline-none transition-colors cursor-pointer disabled:opacity-50 shrink-0"
+              >
+                {settings.maintenance_mode ? <FiToggleRight className="text-blue-500" /> : <FiToggleLeft className="text-muted-foreground" />}
+              </button>
             </div>
-            <button 
-              onClick={() => handleToggleSetting('maintenance_mode')}
-              disabled={savingSettings}
-              className="text-3xl focus:outline-none transition-colors cursor-pointer disabled:opacity-50"
-            >
-              {settings.maintenance_mode ? <FiToggleRight className="text-blue-500" /> : <FiToggleLeft className="text-muted-foreground" />}
-            </button>
-          </div>
-          
-          <div className="flex items-center justify-between border-b border-border pb-4">
-            <div>
-              <div className="font-semibold text-sm">Debug Mode</div>
-              <div className="text-xs text-muted-foreground mt-1">Enable verbose logging and error stack traces.</div>
+
+            <div className="flex items-center justify-between gap-4 border-b border-border pb-4">
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="font-semibold text-sm text-foreground">Debug Mode</span>
+                  <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-full border ${
+                    settings.debug_mode
+                      ? 'bg-amber-500/15 text-amber-500 border-amber-500/30'
+                      : 'bg-muted text-muted-foreground border-border'
+                  }`}>
+                    {settings.debug_mode ? 'Enabled' : 'Disabled'}
+                  </span>
+                </div>
+                <div className="text-xs text-muted-foreground mt-1">
+                  Enable verbose API logging, response timing headers, and error stack traces.
+                </div>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={Boolean(settings.debug_mode)}
+                aria-label="Toggle Debug Mode"
+                onClick={() => handleToggleSetting('debug_mode')}
+                disabled={savingSettings}
+                className="text-3xl focus:outline-none transition-colors cursor-pointer disabled:opacity-50 shrink-0"
+              >
+                {settings.debug_mode ? <FiToggleRight className="text-amber-500" /> : <FiToggleLeft className="text-muted-foreground" />}
+              </button>
             </div>
-            <button 
-              onClick={() => handleToggleSetting('debug_mode')}
-              disabled={savingSettings}
-              className="text-3xl focus:outline-none transition-colors cursor-pointer disabled:opacity-50"
-            >
-              {settings.debug_mode ? <FiToggleRight className="text-amber-500" /> : <FiToggleLeft className="text-muted-foreground" />}
-            </button>
+
+            <form onSubmit={handleSaveSiteName} className="space-y-2">
+              <label className="font-semibold text-sm text-foreground block">Site Name</label>
+              <div className="flex flex-col sm:flex-row gap-2">
+                <input
+                  type="text"
+                  value={siteNameInput}
+                  onChange={(e) => setSiteNameInput(e.target.value)}
+                  maxLength={255}
+                  placeholder="Enter application site name..."
+                  className="flex-1 px-4 py-2 bg-background border border-border focus:border-primary rounded-xl text-sm text-foreground outline-none transition-colors"
+                />
+                <button
+                  type="submit"
+                  disabled={savingSiteName || !siteNameInput.trim() || !siteNameDirty}
+                  className="inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl bg-primary hover:bg-primary/90 text-primary-foreground text-xs font-bold shadow-xs transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
+                >
+                  <FiCheckCircle className="w-3.5 h-3.5" />
+                  <span>{savingSiteName ? 'Saving...' : 'Save Site Name'}</span>
+                </button>
+              </div>
+              <p className="text-[11px] text-muted-foreground">
+                Updates the global site and company display name across the dashboard, navigation bar, and browser tab title.
+              </p>
+            </form>
           </div>
-          
-          <div>
-            <label className="font-semibold text-sm block mb-1">Site Name</label>
-            <input 
-              type="text" 
-              value={settings.site_name || settings.company_name} 
-              disabled
-              className="w-full px-4 py-2 bg-muted border border-border rounded-xl text-sm text-muted-foreground cursor-not-allowed"
-            />
-            <p className="text-[11px] text-muted-foreground mt-1">Site name cannot be edited from this interface.</p>
-          </div>
-        </div>
-      </Card>
-    </div>
-  )
+        </Card>
+      </div>
+    )
+  }
 
   const closeCarouselModal = () => {
     setCarouselModalOpen(false);

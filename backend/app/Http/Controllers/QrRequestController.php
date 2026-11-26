@@ -72,6 +72,7 @@ class QrRequestController extends Controller
             'user_id' => $user->user_id,
             'employee_id' => $employee->employee_id,
             'role' => $user->role,
+            'branch_id' => $employee->branch_id ?: null,
             'branch' => $qrBranch,
             'department' => $employee->department ?: 'Operations',
             'position' => $employee->position ?: $user->role,
@@ -80,9 +81,14 @@ class QrRequestController extends Controller
             'user_agent' => $request->userAgent(),
         ]);
 
-        // Update employee statuses
-        // Columns qr_request_status, account_status, qr_rejection_reason no longer exist
-        // $employee->save();
+        // Keep employee QR request status synchronized
+        if (\Illuminate\Support\Facades\Schema::hasColumn('employees', 'qr_request_status')) {
+            $employee->qr_request_status = 'REQUESTED';
+            if (\Illuminate\Support\Facades\Schema::hasColumn('employees', 'qr_rejection_reason')) {
+                $employee->qr_rejection_reason = null;
+            }
+            $employee->save();
+        }
 
         // System Audit Log
         SystemLog::create([
@@ -227,6 +233,10 @@ class QrRequestController extends Controller
             $query->where(function ($q) use ($branchName, $branchId) {
                 $q->where('branch', $branchName)
                   ->orWhere('branch', 'like', "%{$branchName}%");
+
+                if ($branchId) {
+                    $q->orWhere('branch_id', $branchId);
+                }
 
                 $q->orWhereHas('employee', function ($eq) use ($branchName, $branchId) {
                     if ($branchId) {
@@ -421,9 +431,9 @@ class QrRequestController extends Controller
             $qrRequest->reviewed_at = now();
             $qrRequest->save();
 
-            if ($qrRequest->employee) {
-                // qr_request_status no longer exists
-                // $qrRequest->employee->save();
+            if ($qrRequest->employee && \Illuminate\Support\Facades\Schema::hasColumn('employees', 'qr_request_status')) {
+                $qrRequest->employee->qr_request_status = 'UNDER_REVIEW';
+                $qrRequest->employee->save();
             }
 
             SystemLog::create([
@@ -509,7 +519,18 @@ class QrRequestController extends Controller
             $employee->qr_token = $qrToken;
             $employee->qr_active = true;
             $employee->qr_generated_at = now();
-            // qr_issued_by column does not exist in the database
+            if (\Illuminate\Support\Facades\Schema::hasColumn('employees', 'account_status')) {
+                $employee->account_status = 'VERIFIED';
+            }
+            if (\Illuminate\Support\Facades\Schema::hasColumn('employees', 'qr_request_status')) {
+                $employee->qr_request_status = 'APPROVED';
+            }
+            if (\Illuminate\Support\Facades\Schema::hasColumn('employees', 'qr_issued_by')) {
+                $employee->qr_issued_by = $user->user_id;
+            }
+            if (\Illuminate\Support\Facades\Schema::hasColumn('employees', 'qr_rejection_reason')) {
+                $employee->qr_rejection_reason = null;
+            }
             $employee->save();
 
             // 3. Update User account verified status
@@ -600,6 +621,15 @@ class QrRequestController extends Controller
         if ($qrRequest->employee) {
             $qrRequest->employee->account_verified = false;
             $qrRequest->employee->qr_active = false;
+            if (\Illuminate\Support\Facades\Schema::hasColumn('employees', 'account_status')) {
+                $qrRequest->employee->account_status = 'REJECTED';
+            }
+            if (\Illuminate\Support\Facades\Schema::hasColumn('employees', 'qr_request_status')) {
+                $qrRequest->employee->qr_request_status = 'REJECTED';
+            }
+            if (\Illuminate\Support\Facades\Schema::hasColumn('employees', 'qr_rejection_reason')) {
+                $qrRequest->employee->qr_rejection_reason = $reason;
+            }
             $qrRequest->employee->save();
         }
 
@@ -629,6 +659,62 @@ class QrRequestController extends Controller
             'account_status' => 'REJECTED',
             'qr_status' => 'REJECTED',
             'rejection_reason' => $reason,
+        ]);
+    }
+
+    /**
+     * Permanently delete a QR request record (Administrator only)
+     */
+    public function destroy(Request $request, $id)
+    {
+        $user = $request->user();
+        if (!$user || $user->role !== 'Administrator') {
+            return response()->json([
+                'success' => false,
+                'message' => '403 Forbidden: Only Administrators can delete QR requests.',
+            ], 403);
+        }
+
+        $qrRequest = QrRequest::with('employee')->findOrFail($id);
+        $code = $qrRequest->request_code;
+        $emp = $qrRequest->employee;
+        $empName = $emp ? trim("{$emp->first_name} {$emp->last_name}") : "Employee #{$qrRequest->employee_id}";
+
+        \Illuminate\Support\Facades\DB::transaction(function () use ($qrRequest, $emp, $user, $code, $empName, $request) {
+            $employeeId = $qrRequest->employee_id;
+            $qrRequest->delete();
+
+            if ($emp && \Illuminate\Support\Facades\Schema::hasColumn('employees', 'qr_request_status')) {
+                $latestRemaining = QrRequest::where('employee_id', $employeeId)->latest('request_id')->first();
+                if ($latestRemaining) {
+                    $statusMap = [
+                        'PENDING' => 'REQUESTED',
+                        'UNDER_REVIEW' => 'UNDER_REVIEW',
+                        'APPROVED' => 'APPROVED',
+                        'REJECTED' => 'REJECTED',
+                    ];
+                    $emp->qr_request_status = $statusMap[$latestRemaining->status] ?? 'NOT_REQUESTED';
+                } elseif (empty($emp->qr_token)) {
+                    $emp->qr_request_status = 'NOT_REQUESTED';
+                }
+                $emp->save();
+            }
+
+            SystemLog::create([
+                'user_id' => $user->user_id,
+                'action' => 'QR_REQUEST_DELETED',
+                'module' => 'QR Attendance',
+                'description' => "Administrator ({$user->username}) DELETED QR request {$code} for {$empName}",
+                'ip_address' => $request->ip(),
+                'user_agent' => $request->userAgent(),
+            ]);
+        });
+
+        SyncController::bumpMutation(['qr_requests', 'qr_monitoring', 'employees']);
+
+        return response()->json([
+            'success' => true,
+            'message' => "QR request {$code} deleted successfully.",
         ]);
     }
 }

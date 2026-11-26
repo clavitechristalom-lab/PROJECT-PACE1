@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef } from 'react'
+import { useState, useEffect, useMemo, useRef, useDeferredValue } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import {
   FiPlus, FiSearch, FiEye, FiEdit, FiTrash2,
@@ -13,10 +13,12 @@ import {
 } from '../components/ui'
 import { fmt, fmtDate, fastDeepEqual } from '../lib/utils'
 import { useAuth } from '../context/AuthContext'
-import api, { downloadCsv } from '../lib/api'
+import api, { downloadCsv, peekApiCache } from '../lib/api'
 import { useRealtimeSync, triggerDataSync, SyncButton } from '../lib/realtimeSync'
 import { TbCurrencyPeso } from 'react-icons/tb'
 import { FiDownload } from 'react-icons/fi'
+import AgentAssignmentSection from '../components/AgentAssignmentSection'
+import { summarizeAgentContributions, resolveCategoryDomain } from '../lib/agentContribution'
 
 const formatInstallmentProof = (path) => {
   if (!path) return null
@@ -155,15 +157,43 @@ export default function InstallmentsPage({ branchFilter: propBranchFilter, embed
   const isAdmin = user?.role === 'Administrator'
 
   const [activeTab, setActiveTab] = useState(searchParams.get('tab') || 'all')
-  const [installments, setInstallments] = useState([])
-  const [customers, setCustomers] = useState([])
-  const [products, setProducts] = useState([])
-  const [branches, setBranches] = useState([])
-  const [loading, setLoading] = useState(true)
+  const [installments, setInstallments] = useState(() => {
+    const cached = peekApiCache('/installments')
+    return Array.isArray(cached?.installments) ? cached.installments : []
+  })
+  const [customers, setCustomers] = useState(() => {
+    const cached = peekApiCache('/customers')
+    if (Array.isArray(cached?.customers)) return cached.customers
+    try {
+      const saved = sessionStorage.getItem('pace_cached_customers')
+      return saved ? JSON.parse(saved) : []
+    } catch { return [] }
+  })
+  const [products, setProducts] = useState(() => {
+    const cached = peekApiCache('/products')
+    if (Array.isArray(cached?.products)) return cached.products
+    try {
+      const saved = sessionStorage.getItem('pace_cached_products')
+      return saved ? JSON.parse(saved) : []
+    } catch { return [] }
+  })
+  const [branches, setBranches] = useState(() => {
+    const cached = peekApiCache('/branches')
+    if (Array.isArray(cached)) return cached
+    if (Array.isArray(cached?.branches)) return cached.branches
+    try {
+      const saved = sessionStorage.getItem('pace_cached_branches')
+      return saved ? JSON.parse(saved) : []
+    } catch { return [] }
+  })
+  const [loading, setLoading] = useState(() => {
+    return !Array.isArray(peekApiCache('/installments')?.installments)
+  })
   const [error, setError] = useState('')
 
   // Filters (Immediate reactive search & status)
   const [search, setSearch] = useState('')
+  const deferredSearch = useDeferredValue(search)
   const [statusFilter, setStatusFilter] = useState('All')
   const [localBranchFilter, setLocalBranchFilter] = useState(isStoreAdmin ? (user?.employee?.branch?.name || (typeof user?.employee?.branch === 'string' ? user.employee.branch : '')) : 'All')
   const branchFilter = propBranchFilter || localBranchFilter
@@ -179,9 +209,8 @@ export default function InstallmentsPage({ branchFilter: propBranchFilter, embed
   const [payModalItem, setPayModalItem] = useState(null)
   const [saving, setSaving] = useState(false)
 
-  // ─── ADD ACCOUNT FORM STATE ──────────────────────────────────────────────────
   const initialAddForm = {
-    customer_mode: 'existing', // 'existing' | 'new'
+    customer_mode: 'existing',
     customer_id: '',
     first_name: '',
     last_name: '',
@@ -189,14 +218,19 @@ export default function InstallmentsPage({ branchFilter: propBranchFilter, embed
     email: '',
     address: '',
 
-    product_mode: 'catalog', // 'catalog' | 'custom'
+    product_mode: 'catalog',
+    main_category: '',
     product_category: '',
     product_id: '',
     product_name: '',
     principal_amount: '',
+    quantity: '1',
+    discount_amount: '0',
+    has_agent: false,
+    agent_id: '',
     down_payment: '0',
-    interest_rate: '10', // default 10%
-    number_of_installments: '6', // default 6 months
+    interest_rate: '10',
+    number_of_installments: '6',
     frequency: 'Monthly',
     start_date: new Date().toISOString().slice(0, 10),
     due_date: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10),
@@ -204,6 +238,10 @@ export default function InstallmentsPage({ branchFilter: propBranchFilter, embed
     notes: '',
   }
   const [addForm, setAddForm] = useState(initialAddForm)
+  const [salesAgents, setSalesAgents] = useState([])
+  const [loadingAgents, setLoadingAgents] = useState(false)
+  const [agentsError, setAgentsError] = useState('')
+  const agentCacheRef = useRef({})
 
   // ─── EDIT FORM STATE ────────────────────────────────────────────────────────
   const [editForm, setEditForm] = useState({
@@ -226,13 +264,12 @@ export default function InstallmentsPage({ branchFilter: propBranchFilter, embed
 
   useEffect(() => {
     isMountedRef.current = true
-    try { sessionStorage.removeItem('pace_cached_installments') } catch { }
     return () => {
       isMountedRef.current = false
     }
   }, [])
 
-  // ─── INITIAL DATA LOAD ──────────────────────────────────────────────────────
+  // ─── INITIAL DATA LOAD (strictly active installment list; modal catalogs load on-demand) ──
   const loadInitialData = async (silent = false, signal) => {
     // Allow explicit mount/filter loads to run even when React StrictMode aborts the first pass
     if (inFlightRef.current && silent) return
@@ -243,20 +280,16 @@ export default function InstallmentsPage({ branchFilter: propBranchFilter, embed
     if (!isBg) setError('')
     try {
       const reqOpts = signal ? { signal } : {}
-      const needCatalog = customers.length === 0 || products.length === 0 || branches.length === 0 || addModalOpen || !silent
+      const needBranches = branches.length === 0
 
       const promises = [
         api.installments.getAll({
           branch: branchFilter !== 'All' ? branchFilter : undefined,
-        }, { ...reqOpts, fresh: !silent })
+        }, reqOpts)
       ]
 
-      if (needCatalog) {
-        promises.push(
-          api.customers.getAll({}, reqOpts).catch(() => ({ customers: [] })),
-          api.products.getAll({}, reqOpts).catch(() => ({ products: [] })),
-          api.branches.getAll(reqOpts).catch(() => [])
-        )
+      if (needBranches) {
+        promises.push(api.branches.getAll(reqOpts).catch(() => []))
       }
 
       const results = await Promise.all(promises)
@@ -266,6 +299,11 @@ export default function InstallmentsPage({ branchFilter: propBranchFilter, embed
       if (instRes && Array.isArray(instRes.installments)) {
         const newInst = instRes.installments
         setInstallments(prev => fastDeepEqual(prev, newInst) ? prev : newInst)
+        try {
+          if (branchFilter === 'All') {
+            sessionStorage.setItem('pace_cached_installments', JSON.stringify(newInst))
+          }
+        } catch { }
       }
 
       const activeDetailId = detailItem?.account?.installment_id || detailItem?.installment_id
@@ -278,17 +316,8 @@ export default function InstallmentsPage({ branchFilter: propBranchFilter, embed
           .catch(() => {})
       }
 
-      if (needCatalog && results.length >= 4) {
-        const custRes = results[1]
-        const prodRes = results[2]
-        const branchRes = results[3]
-
-        if (custRes && Array.isArray(custRes.customers)) {
-          setCustomers(prev => fastDeepEqual(prev, custRes.customers) ? prev : custRes.customers)
-        }
-        if (prodRes && Array.isArray(prodRes.products)) {
-          setProducts(prev => fastDeepEqual(prev, prodRes.products) ? prev : prodRes.products)
-        }
+      if (needBranches && results.length >= 2) {
+        const branchRes = results[1]
         const extractedBranches = Array.isArray(branchRes) ? branchRes : (Array.isArray(branchRes?.branches) ? branchRes.branches : null)
         if (extractedBranches) {
           setBranches(prev => fastDeepEqual(prev, extractedBranches) ? prev : extractedBranches)
@@ -306,11 +335,28 @@ export default function InstallmentsPage({ branchFilter: propBranchFilter, embed
     }
   }
 
+  // Lazy-load customers and products only when opening the Create Installment modal
+  useEffect(() => {
+    if (!addModalOpen) return
+    Promise.all([
+      customers.length === 0 ? api.customers.getAll().catch(() => ({ customers: [] })) : Promise.resolve(null),
+      products.length === 0 ? api.products.getAll().catch(() => ({ products: [] })) : Promise.resolve(null),
+    ]).then(([custRes, prodRes]) => {
+      if (!isMountedRef.current) return
+      if (custRes && Array.isArray(custRes.customers)) {
+        setCustomers(prev => fastDeepEqual(prev, custRes.customers) ? prev : custRes.customers)
+      }
+      if (prodRes && Array.isArray(prodRes.products)) {
+        setProducts(prev => fastDeepEqual(prev, prodRes.products) ? prev : prodRes.products)
+      }
+    }).catch(() => {})
+  }, [addModalOpen])
+
   useEffect(() => {
     const controller = new AbortController()
     loadInitialData(false, controller.signal)
     return () => controller.abort()
-  }, [branchFilter, statusFilter, activeTab])
+  }, [branchFilter])
 
   // On-demand click-driven synchronization
   const { sync: syncInstallments, isSyncing: isSyncingInstallments } = useRealtimeSync(
@@ -326,58 +372,162 @@ export default function InstallmentsPage({ branchFilter: propBranchFilter, embed
     }
   }, [searchParams])
 
-  // ─── CALCULATED VALUES FOR ADD FORM ─────────────────────────────────────────
   const calculatedAddValues = useMemo(() => {
-    const price = parseFloat(addForm.principal_amount) || 0
+    const unitPrice = parseFloat(addForm.principal_amount) || 0
+    const qty = Math.max(1, parseInt(addForm.quantity, 10) || 1)
+    const grossPrice = Math.round(unitPrice * qty * 100) / 100
+    const discount = Math.min(grossPrice, Math.max(0, parseFloat(addForm.discount_amount) || 0))
+    const price = Math.max(0, Math.round((grossPrice - discount) * 100) / 100)
     const down = parseFloat(addForm.down_payment) || 0
     const rate = parseFloat(addForm.interest_rate) || 0
-    const terms = parseInt(addForm.number_of_installments) || 1
+    const isOpenContract = addForm.number_of_installments === 'open' || addForm.number_of_installments === '0'
+    const terms = isOpenContract ? 0 : (parseInt(addForm.number_of_installments, 10) || 1)
 
     const financed = Math.max(0, price - down)
     const interestAmt = Math.round(financed * (rate / 100) * 100) / 100
     const totalPayable = Math.round((price + interestAmt) * 100) / 100
     const outstanding = Math.max(0, Math.round((totalPayable - down) * 100) / 100)
-    const monthlyAmt = terms > 0 ? Math.round((outstanding / terms) * 100) / 100 : 0
+    const monthlyAmt = !isOpenContract && terms > 0 ? Math.round((outstanding / terms) * 100) / 100 : 0
+
+    let estimatedEndDate = null
+    if (!isOpenContract && terms > 0 && addForm.due_date) {
+      const base = new Date(`${addForm.due_date}T00:00:00`)
+      if (!Number.isNaN(base.getTime())) {
+        const end = new Date(base.getTime())
+        if (addForm.frequency === 'Weekly') {
+          end.setDate(end.getDate() + (terms - 1) * 7)
+        } else if (addForm.frequency === 'Bi-weekly') {
+          end.setDate(end.getDate() + (terms - 1) * 14)
+        } else {
+          end.setMonth(end.getMonth() + (terms - 1))
+        }
+        estimatedEndDate = end.toISOString().slice(0, 10)
+      }
+    }
 
     return {
+      unitPrice,
+      qty,
+      grossPrice,
+      discount,
       price,
       down,
       rate,
+      isOpenContract,
       terms,
       financed,
       interestAmt,
       totalPayable,
       outstanding,
       monthlyAmt,
+      estimatedEndDate,
     }
-  }, [addForm.principal_amount, addForm.down_payment, addForm.interest_rate, addForm.number_of_installments])
+  }, [
+    addForm.principal_amount,
+    addForm.quantity,
+    addForm.discount_amount,
+    addForm.down_payment,
+    addForm.interest_rate,
+    addForm.number_of_installments,
+    addForm.frequency,
+    addForm.due_date,
+  ])
 
-  // Derived product category list & filtered products for Add Modal
+  const selectedAddProduct = useMemo(
+    () => products.find(p => String(p.product_id) === String(addForm.product_id)) || null,
+    [products, addForm.product_id]
+  )
+
+  const selectedAddCustomer = useMemo(
+    () => customers.find(c => String(c.customer_id) === String(addForm.customer_id)) || null,
+    [customers, addForm.customer_id]
+  )
+
+  const installmentAgentSummary = useMemo(() => {
+    if (!addForm.has_agent) {
+      return summarizeAgentContributions([], false)
+    }
+    return summarizeAgentContributions(
+      [{
+        netLineTotal: calculatedAddValues.price,
+        product: selectedAddProduct,
+        category: addForm.product_category || addForm.main_category || selectedAddProduct?.category || '',
+      }],
+      true
+    )
+  }, [addForm.has_agent, calculatedAddValues.price, selectedAddProduct, addForm.product_category, addForm.main_category])
+
+  const resolvedInstallmentCategoryDomain = useMemo(
+    () => resolveCategoryDomain(selectedAddProduct || addForm.product_category || addForm.main_category),
+    [selectedAddProduct, addForm.product_category, addForm.main_category]
+  )
+
   const getProductCatLabel = (p) => p?.category || p?.category_group || p?.main_category || 'Uncategorized'
+
+  const getProductMainCategory = (p) => {
+    const raw = p?.main_category || resolveCategoryDomain(p) || ''
+    if (String(raw).toLowerCase().includes('appliance')) return 'Appliances'
+    if (String(raw).toLowerCase().includes('furniture')) return 'Furniture'
+    return ''
+  }
+
+  const mainCategoryCounts = useMemo(() => {
+    let appliances = 0
+    let furniture = 0
+    products.forEach(p => {
+      const m = getProductMainCategory(p)
+      if (m === 'Appliances') appliances++
+      else if (m === 'Furniture') furniture++
+    })
+    return { Appliances: appliances, Furniture: furniture }
+  }, [products])
 
   const productCategories = useMemo(() => {
     const counts = new Map()
     products.forEach(p => {
+      if (addForm.main_category && getProductMainCategory(p) !== addForm.main_category) return
       const cat = getProductCatLabel(p)
       counts.set(cat, (counts.get(cat) || 0) + 1)
     })
     return Array.from(counts.entries())
       .sort((a, b) => a[0].localeCompare(b[0]))
       .map(([name, count]) => ({ name, count }))
-  }, [products])
+  }, [products, addForm.main_category])
 
   const filteredModalProducts = useMemo(() => {
-    if (!addForm.product_category) return products
-    return products.filter(p => getProductCatLabel(p) === addForm.product_category)
-  }, [products, addForm.product_category])
+    return products.filter(p => {
+      if (addForm.main_category && getProductMainCategory(p) !== addForm.main_category) return false
+      if (addForm.product_category && getProductCatLabel(p) !== addForm.product_category) return false
+      return true
+    })
+  }, [products, addForm.main_category, addForm.product_category])
+
+  const handleMainCategoryChange = (nextMain) => {
+    setAddForm(prev => {
+      const selectedProd = prev.product_id ? products.find(x => String(x.product_id) === String(prev.product_id)) : null
+      const prodMatches = selectedProd && (!nextMain || getProductMainCategory(selectedProd) === nextMain)
+      const catDomain = prev.product_category ? resolveCategoryDomain(prev.product_category) : ''
+      const catMatches = !prev.product_category || !nextMain || catDomain === nextMain
+      return {
+        ...prev,
+        main_category: nextMain,
+        product_category: catMatches ? prev.product_category : '',
+        product_id: prodMatches ? prev.product_id : '',
+        product_name: prodMatches ? prev.product_name : (prev.product_id ? '' : prev.product_name),
+        principal_amount: prodMatches ? prev.principal_amount : (prev.product_id ? '' : prev.principal_amount),
+      }
+    })
+  }
 
   const handleProductCategoryChange = (category) => {
     setAddForm(prev => {
       const selectedProd = prev.product_id ? products.find(x => String(x.product_id) === String(prev.product_id)) : null
       const matchesCat = selectedProd && (!category || getProductCatLabel(selectedProd) === category)
+      const inferredMain = category ? (resolveCategoryDomain(category) || prev.main_category) : prev.main_category
       if (prev.product_id && !matchesCat) {
         return {
           ...prev,
+          main_category: inferredMain,
           product_category: category,
           product_id: '',
           product_name: '',
@@ -386,18 +536,19 @@ export default function InstallmentsPage({ branchFilter: propBranchFilter, embed
       }
       return {
         ...prev,
+        main_category: inferredMain,
         product_category: category,
       }
     })
   }
 
-  // Handle Product Selection in Add Form
   const handleProductSelect = (prodId) => {
     const p = products.find(x => String(x.product_id) === String(prodId))
     if (p) {
-      const effectivePrice = p.discount_price ? p.discount_price : p.unit_price;
+      const effectivePrice = p.discount_price ? p.discount_price : p.unit_price
       setAddForm(prev => ({
         ...prev,
+        main_category: getProductMainCategory(p) || prev.main_category,
         product_category: getProductCatLabel(p),
         product_id: prodId,
         product_name: p.product_name,
@@ -411,7 +562,67 @@ export default function InstallmentsPage({ branchFilter: propBranchFilter, embed
     }
   }
 
-  // Handle Customer Selection in Add Form
+  const resolveAgentBranchScope = (nextCustomer = selectedAddCustomer) => {
+    const actorBranch = user?.employee?.branch_id || user?.employee?.branch?.id || user?.branch_id || ''
+    if (actorBranch) return String(actorBranch)
+    if (nextCustomer?.branch_id) return String(nextCustomer.branch_id)
+    return 'all'
+  }
+
+  const fetchSalesAgents = async (branchKey) => {
+    const key = String(branchKey || 'all')
+    if (agentCacheRef.current[key]) {
+      const cachedList = agentCacheRef.current[key]
+      setSalesAgents(cachedList)
+      setAgentsError('')
+      setAddForm(prev => ({
+        ...prev,
+        agent_id: prev.agent_id && !cachedList.some(a => String(a.employee_id) === String(prev.agent_id))
+          ? ''
+          : prev.agent_id,
+      }))
+      return cachedList
+    }
+
+    setLoadingAgents(true)
+    setAgentsError('')
+    try {
+      const params = key !== 'all' ? { branch_id: key } : {}
+      const res = await api.sales.getAgents(params, { fresh: true })
+      const list = Array.isArray(res?.agents) ? res.agents : []
+      agentCacheRef.current[key] = list
+      if (isMountedRef.current) {
+        setSalesAgents(list)
+        setAddForm(prev => ({
+          ...prev,
+          agent_id: prev.agent_id && !list.some(a => String(a.employee_id) === String(prev.agent_id))
+            ? ''
+            : prev.agent_id,
+        }))
+      }
+      return list
+    } catch (err) {
+      if (isMountedRef.current) {
+        setSalesAgents([])
+        setAgentsError(err.message || 'Unable to load active branch sales agents.')
+      }
+      return []
+    } finally {
+      if (isMountedRef.current) {
+        setLoadingAgents(false)
+      }
+    }
+  }
+
+  const handleToggleAgent = (nextHasAgent) => {
+    if (!nextHasAgent) {
+      setAgentsError('')
+      setAddForm(prev => ({ ...prev, has_agent: false, agent_id: '' }))
+      return
+    }
+    setAddForm(prev => ({ ...prev, has_agent: true }))
+  }
+
   const handleCustomerSelect = (custId) => {
     const c = customers.find(x => String(x.customer_id) === String(custId))
     if (c) {
@@ -424,6 +635,14 @@ export default function InstallmentsPage({ branchFilter: propBranchFilter, embed
         email: c.email || '',
         address: c.address || '',
       }))
+      if (addForm.has_agent) {
+        fetchSalesAgents(resolveAgentBranchScope(c))
+      }
+    } else {
+      setAddForm(prev => ({ ...prev, customer_id: '' }))
+      if (addForm.has_agent) {
+        fetchSalesAgents(resolveAgentBranchScope(null))
+      }
     }
   }
 
@@ -446,8 +665,8 @@ export default function InstallmentsPage({ branchFilter: propBranchFilter, embed
       }
 
       // Search query (Account #, Customer name/code, phone, invoice, product, branch)
-      if (search.trim()) {
-        const q = search.toLowerCase().trim()
+      if (deferredSearch.trim()) {
+        const q = deferredSearch.toLowerCase().trim()
         const matchAcc = (inst.account_no || '').toLowerCase().includes(q)
         const matchCust = (inst.customer_name || '').toLowerCase().includes(q)
         const matchCode = (inst.customer_code || '').toLowerCase().includes(q)
@@ -463,7 +682,7 @@ export default function InstallmentsPage({ branchFilter: propBranchFilter, embed
 
       return true
     })
-  }, [installments, activeTab, statusFilter, search])
+  }, [installments, activeTab, statusFilter, deferredSearch])
 
   // Summary KPI values computed from live state
   const liveSummary = useMemo(() => {
@@ -495,6 +714,8 @@ export default function InstallmentsPage({ branchFilter: propBranchFilter, embed
   }, [customers, isStoreAdmin, userBranchId])
 
   const openAddModal = async () => {
+    setAddForm(initialAddForm)
+    setAgentsError('')
     setAddModalOpen(true)
     if (customers.length === 0 || products.length === 0) {
       try {
@@ -546,6 +767,16 @@ export default function InstallmentsPage({ branchFilter: propBranchFilter, embed
       return
     }
 
+    if (!addForm.main_category) {
+      showToast('Please select a Main Category (Appliances or Furniture)', 'error')
+      return
+    }
+
+    if (addForm.has_agent && !resolvedInstallmentCategoryDomain) {
+      showToast('Please select an Appliances or Furniture category to calculate agent contribution', 'error')
+      return
+    }
+
     setSaving(true)
     try {
       const payload = {
@@ -556,18 +787,26 @@ export default function InstallmentsPage({ branchFilter: propBranchFilter, embed
         email: addForm.email?.trim() || undefined,
         address: addForm.address?.trim() || undefined,
         product_id: addForm.product_id ? parseInt(addForm.product_id) : undefined,
-        product_category: addForm.product_category || undefined,
+        main_category: addForm.main_category || undefined,
+        product_category: addForm.product_category || addForm.main_category || undefined,
         product_name: addForm.product_name?.trim() || undefined,
+        quantity: calculatedAddValues.qty,
+        unit_price: calculatedAddValues.unitPrice,
+        discount_amount: calculatedAddValues.discount,
         principal_amount: calculatedAddValues.price,
+        has_agent: Boolean(addForm.has_agent),
+        assigned_agent_id: null,
+        agent_id: null,
         down_payment: calculatedAddValues.down,
         interest_rate: calculatedAddValues.rate,
         interest_amount: calculatedAddValues.interestAmt,
         total_payable: calculatedAddValues.totalPayable,
-        installment_amount: calculatedAddValues.monthlyAmt,
-        number_of_installments: calculatedAddValues.terms,
-        frequency: addForm.frequency,
+        installment_amount: calculatedAddValues.isOpenContract ? 0 : calculatedAddValues.monthlyAmt,
+        number_of_installments: calculatedAddValues.isOpenContract ? 0 : calculatedAddValues.terms,
+        is_open_contract: calculatedAddValues.isOpenContract,
+        frequency: calculatedAddValues.isOpenContract ? 'Open Contract' : addForm.frequency,
         start_date: addForm.start_date,
-        due_date: addForm.due_date,
+        due_date: calculatedAddValues.isOpenContract ? (addForm.due_date || null) : addForm.due_date,
         status: addForm.status,
         notes: addForm.notes,
       }
@@ -964,20 +1203,20 @@ export default function InstallmentsPage({ branchFilter: propBranchFilter, embed
             }
           />
 
-          <div className="overflow-x-auto">
-            <table className="w-full text-xs min-w-[1280px]">
+          <div className="w-full overflow-hidden">
+            <table className="w-full table-fixed text-[11px]">
               <thead>
-                <tr className="border-b border-border bg-muted/40 text-muted-foreground uppercase font-semibold tracking-wider text-[11px]">
-                  <th className="py-3 px-3.5 text-left whitespace-nowrap">Account &amp; Branch</th>
-                  <th className="py-3 px-3.5 text-left whitespace-nowrap">Customer</th>
-                  <th className="py-3 px-3.5 text-left whitespace-nowrap">Financed Item</th>
-                  <th className="py-3 px-3.5 text-right whitespace-nowrap">Contract Pricing</th>
-                  <th className="py-3 px-3.5 text-right whitespace-nowrap">Terms &amp; Monthly</th>
-                  <th className="py-3 px-3.5 text-right whitespace-nowrap">Paid &amp; Progress</th>
-                  <th className="py-3 px-3.5 text-right whitespace-nowrap">Balance</th>
-                  <th className="py-3 px-3.5 text-left whitespace-nowrap">Next Due</th>
-                  <th className="py-3 px-3.5 text-center whitespace-nowrap">Status</th>
-                  <th className="py-3 px-3.5 text-center whitespace-nowrap">Actions</th>
+                <tr className="border-b border-border bg-muted/40 text-muted-foreground uppercase font-semibold tracking-tight text-[10px] leading-tight">
+                  <th className="w-[11%] py-2.5 px-2 text-left">Account &amp; Branch</th>
+                  <th className="w-[10%] py-2.5 px-1.5 text-left">Customer</th>
+                  <th className="w-[13%] py-2.5 px-1.5 text-left">Financed Item</th>
+                  <th className="w-[11%] py-2.5 px-1.5 text-left">Contract Pricing</th>
+                  <th className="w-[9%] py-2.5 px-1.5 text-left">Terms &amp; Monthly</th>
+                  <th className="w-[11%] py-2.5 px-1.5 text-left">Paid &amp; Progress</th>
+                  <th className="w-[8%] py-2.5 px-1.5 text-left">Balance</th>
+                  <th className="w-[9%] py-2.5 px-1.5 text-left">Next Due</th>
+                  <th className="w-[8%] py-2.5 px-1 text-center">Status</th>
+                  <th className="w-[10%] py-2.5 px-1.5 text-center">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
@@ -994,6 +1233,7 @@ export default function InstallmentsPage({ branchFilter: propBranchFilter, embed
                 ) : (
                   paginated.map((inst, i) => {
                     const isOverdue = inst.status === 'Overdue' || inst.days_overdue > 0
+                    const isOpenContract = Boolean(inst.is_open_contract || String(inst.frequency || '').toLowerCase() === 'open contract')
                     const totalPayableVal = Number(inst.total_payable || ((inst.principal_amount || 0) + (inst.interest_amount || 0)))
                     const totalTerms = inst.total_terms ?? inst.number_of_installments ?? 0
                     const paidTerms = inst.paid_installments ?? 0
@@ -1006,62 +1246,58 @@ export default function InstallmentsPage({ branchFilter: propBranchFilter, embed
                           i % 2 === 1 ? 'bg-muted/10' : ''
                         } ${isOverdue ? 'bg-rose-50/20 dark:bg-rose-950/10' : ''}`}
                       >
-                        {/* Account & Branch */}
-                        <td className="py-3 px-3.5 align-top whitespace-nowrap">
-                          <div className="flex items-center gap-1.5 font-mono font-bold text-foreground">
-                            <FiCreditCard className="w-3.5 h-3.5 text-primary shrink-0" />
-                            <span>{inst.account_no}</span>
+                        <td className="py-2.5 px-2 align-top">
+                          <div className="flex items-center gap-1 font-mono font-bold text-foreground min-w-0">
+                            <FiCreditCard className="w-3 h-3 text-primary shrink-0" />
+                            <span className="truncate" title={inst.account_no}>{inst.account_no}</span>
                           </div>
-                          <div className="text-[10px] text-muted-foreground font-mono mt-0.5 pl-5">
+                          <div className="text-[10px] text-muted-foreground font-mono mt-0.5 truncate" title={inst.invoice_no}>
                             {inst.invoice_no && inst.invoice_no !== 'N/A' ? inst.invoice_no : 'Direct'}
                           </div>
                           {(inst.branch_name || inst.branch) && (
-                            <div className="pl-5 mt-1">
-                              <span className="inline-block px-1.5 py-0.5 rounded bg-muted text-foreground/80 border border-border text-[10px] font-semibold whitespace-nowrap">
+                            <div className="mt-1">
+                              <span className="inline-block max-w-full truncate px-1.5 py-0.5 rounded bg-muted text-foreground/80 border border-border text-[10px] font-semibold">
                                 {inst.branch_name || inst.branch}
                               </span>
                             </div>
                           )}
                         </td>
 
-                        {/* Customer */}
-                        <td className="py-3 px-3.5 align-top whitespace-nowrap">
-                          <div className="font-semibold text-foreground flex items-center gap-1.5">
-                            <FiUser className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
-                            <span>{inst.customer_name}</span>
+                        <td className="py-2.5 px-1.5 align-top">
+                          <div className="font-semibold text-foreground flex items-start gap-1 leading-tight">
+                            <FiUser className="w-3 h-3 text-muted-foreground shrink-0 mt-0.5" />
+                            <span className="break-words min-w-0">{inst.customer_name}</span>
                           </div>
                           {inst.customer_code && (
-                            <div className="text-[10px] text-primary font-mono pl-5">{inst.customer_code}</div>
+                            <div className="text-[10px] text-primary font-mono mt-0.5 truncate">{inst.customer_code}</div>
                           )}
                           {inst.customer_phone && (
-                            <div className="text-[10px] text-muted-foreground font-mono pl-5">
+                            <div className="text-[10px] text-muted-foreground font-mono truncate">
                               {inst.customer_phone}
                             </div>
                           )}
                         </td>
 
-                        {/* Financed Item */}
-                        <td className="py-3 px-3.5 align-top">
-                          <div className="font-medium text-foreground flex items-center gap-1.5 max-w-[230px]" title={inst.product_name}>
-                            <FiPackage className="w-3.5 h-3.5 text-amber-500 shrink-0" />
-                            <span className="truncate">{inst.product_name || 'Appliance / Furniture'}</span>
+                        <td className="py-2.5 px-1.5 align-top">
+                          <div className="font-medium text-foreground flex items-start gap-1 leading-tight" title={inst.product_name}>
+                            <FiPackage className="w-3 h-3 text-amber-500 shrink-0 mt-0.5" />
+                            <span className="line-clamp-2 break-words min-w-0">{inst.product_name || 'Appliance / Furniture'}</span>
                           </div>
                           {inst.product_category && (
-                            <div className="text-[10px] text-primary/80 font-medium pl-5 mt-0.5 truncate max-w-[230px]">
+                            <div className="text-[10px] text-primary/80 font-medium mt-0.5 truncate" title={inst.product_category}>
                               {inst.product_category}
                             </div>
                           )}
                           {inst.start_date && (
-                            <div className="text-[10px] text-muted-foreground font-mono pl-5 mt-0.5 whitespace-nowrap">
+                            <div className="text-[10px] text-muted-foreground font-mono mt-0.5 truncate">
                               Started {inst.start_date}
                             </div>
                           )}
                         </td>
 
-                        {/* Contract Pricing */}
-                        <td className="py-3 px-3.5 text-right font-mono align-top whitespace-nowrap">
+                        <td className="py-2.5 px-1.5 text-left font-mono align-top leading-tight">
                           <div className="font-bold text-foreground">{fmt(totalPayableVal)}</div>
-                          <div className="text-[10px] text-muted-foreground">Price: {fmt(inst.principal_amount)}</div>
+                          <div className="text-[10px] text-muted-foreground mt-0.5">Price: {fmt(inst.principal_amount)}</div>
                           <div className="text-[10px] text-muted-foreground">Down: {fmt(inst.down_payment)}</div>
                           {Number(inst.interest_amount) > 0 && (
                             <div className="text-[10px] text-amber-600 dark:text-amber-400">
@@ -1070,19 +1306,28 @@ export default function InstallmentsPage({ branchFilter: propBranchFilter, embed
                           )}
                         </td>
 
-                        {/* Terms & Monthly */}
-                        <td className="py-3 px-3.5 text-right font-mono align-top whitespace-nowrap">
-                          <div className="font-bold text-primary">{fmt(inst.installment_amount)}</div>
-                          <div className="text-[10px] text-muted-foreground">/ {inst.frequency || 'Monthly'}</div>
-                          <div className="text-[10px] font-semibold text-foreground/80 mt-0.5">
-                            {paidTerms}/{totalTerms} terms paid
-                          </div>
+                        <td className="py-2.5 px-1.5 text-left font-mono align-top leading-tight">
+                          {isOpenContract ? (
+                            <>
+                              <span className="inline-block px-1.5 py-0.5 rounded bg-indigo-500/15 text-indigo-700 dark:text-indigo-300 border border-indigo-500/30 text-[10px] font-bold font-sans">
+                                Open Contract
+                              </span>
+                              <div className="text-[10px] text-muted-foreground mt-1 font-sans">Flexible term</div>
+                            </>
+                          ) : (
+                            <>
+                              <div className="font-bold text-primary">{fmt(inst.installment_amount)}</div>
+                              <div className="text-[10px] text-muted-foreground mt-0.5">/ {inst.frequency || 'Monthly'}</div>
+                              <div className="text-[10px] font-semibold text-foreground/80 mt-0.5">
+                                {paidTerms}/{totalTerms} paid
+                              </div>
+                            </>
+                          )}
                         </td>
 
-                        {/* Paid & Progress */}
-                        <td className="py-3 px-3.5 text-right font-mono align-top min-w-[140px] whitespace-nowrap">
+                        <td className="py-2.5 px-1.5 text-left font-mono align-top leading-tight">
                           <div className="font-bold text-emerald-600 dark:text-emerald-400">{fmt(inst.paid)}</div>
-                          <div className="w-full h-1.5 bg-muted rounded-full overflow-hidden mt-1.5">
+                          <div className="w-full h-1.5 bg-muted rounded-full overflow-hidden mt-1">
                             <div
                               className="h-full bg-emerald-500 rounded-full transition-all"
                               style={{ width: `${Math.min(100, progressPct)}%` }}
@@ -1090,42 +1335,44 @@ export default function InstallmentsPage({ branchFilter: propBranchFilter, embed
                           </div>
                           <div className="text-[10px] text-muted-foreground mt-0.5">{progressPct}% paid</div>
                           {pendingVerif > 0 && (
-                            <div className="text-[10px] font-semibold text-amber-600 dark:text-amber-400 mt-0.5">
-                              +{fmt(pendingVerif)} pending verif.
+                            <div className="text-[10px] font-semibold text-amber-600 dark:text-amber-400 mt-0.5 break-words">
+                              +{fmt(pendingVerif)} pending
                             </div>
                           )}
                         </td>
 
-                        {/* Balance */}
-                        <td className="py-3 px-3.5 text-right font-mono align-top whitespace-nowrap">
+                        <td className="py-2.5 px-1.5 text-left font-mono align-top leading-tight">
                           <div className={`font-bold ${Number(inst.balance) > 0 ? 'text-rose-600 dark:text-rose-400' : 'text-emerald-600'}`}>
                             {fmt(inst.balance)}
                           </div>
-                          {totalTerms > 0 && (
+                          {isOpenContract ? (
+                            <div className="text-[10px] text-indigo-600 dark:text-indigo-400 mt-0.5 font-sans">
+                              {Number(inst.balance) > 0 ? 'Open term' : 'Settled'}
+                            </div>
+                          ) : totalTerms > 0 && (
                             <div className="text-[10px] text-muted-foreground mt-0.5">
                               {Math.max(0, totalTerms - paidTerms)} left
                             </div>
                           )}
                         </td>
 
-                        {/* Next Due Date */}
-                        <td className="py-3 px-3.5 align-top whitespace-nowrap">
+                        <td className="py-2.5 px-1.5 align-top leading-tight">
                           {inst.next_due_date ? (
-                            <div className="font-mono text-xs">
-                              <div className="flex items-center gap-1.5">
-                                <FiCalendar className={`w-3.5 h-3.5 shrink-0 ${isOverdue ? 'text-rose-500' : 'text-muted-foreground'}`} />
-                                <span className={isOverdue ? 'text-rose-600 font-bold' : 'text-foreground'}>
+                            <div className="font-mono">
+                              <div className="flex items-center gap-1">
+                                <FiCalendar className={`w-3 h-3 shrink-0 ${isOverdue ? 'text-rose-500' : 'text-muted-foreground'}`} />
+                                <span className={`truncate ${isOverdue ? 'text-rose-600 font-bold' : 'text-foreground'}`}>
                                   {inst.next_due_date}
                                 </span>
                               </div>
                               {Number(inst.next_amount_due) > 0 && (
-                                <div className="text-[10px] text-muted-foreground pl-5 mt-0.5">
+                                <div className="text-[10px] text-muted-foreground mt-0.5">
                                   Due: {fmt(inst.next_amount_due)}
                                 </div>
                               )}
                               {inst.days_overdue > 0 && (
-                                <div className="pl-5 mt-0.5">
-                                  <span className="px-1.5 py-0.5 rounded bg-rose-500/15 text-rose-600 text-[10px] font-bold">
+                                <div className="mt-0.5">
+                                  <span className="inline-block px-1 py-0.5 rounded bg-rose-500/15 text-rose-600 text-[10px] font-bold">
                                     {inst.days_overdue}d overdue
                                   </span>
                                 </div>
@@ -1136,19 +1383,17 @@ export default function InstallmentsPage({ branchFilter: propBranchFilter, embed
                           )}
                         </td>
 
-                        {/* Status */}
-                        <td className="py-3 px-3.5 text-center align-top whitespace-nowrap">
+                        <td className="py-2.5 px-1 text-center align-top [&>span]:px-1.5 [&>span]:py-0.5 [&>span]:text-[10px] [&>span]:whitespace-normal [&>span]:leading-tight">
                           <StatusBadge status={Number(inst.balance) <= 0 ? 'Complete Payment' : inst.status} />
                         </td>
 
-                        {/* Actions with React Icons */}
-                        <td className="py-3 px-3.5 text-center align-top whitespace-nowrap">
-                          <div className="flex items-center justify-center gap-1">
+                        <td className="py-2.5 px-1.5 text-center align-top">
+                          <div className="flex items-center justify-center gap-0.5 flex-wrap">
                             <button
                               type="button"
                               onClick={() => openDetail(inst)}
                               title="View Full Contract & Schedules"
-                              className="p-1.5 rounded-lg border border-border hover:bg-muted text-foreground transition-colors cursor-pointer"
+                              className="p-1 rounded-lg border border-border hover:bg-muted text-foreground transition-colors cursor-pointer"
                             >
                               <FiEye className="w-3.5 h-3.5" />
                             </button>
@@ -1158,7 +1403,7 @@ export default function InstallmentsPage({ branchFilter: propBranchFilter, embed
                                 type="button"
                                 onClick={() => openPaymentModal(inst)}
                                 title="Record Installment Payment"
-                                className="p-1.5 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-700 dark:bg-emerald-950/50 dark:hover:bg-emerald-900 dark:text-emerald-300 border border-emerald-200 transition-colors cursor-pointer"
+                                className="p-1 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-700 dark:bg-emerald-950/50 dark:hover:bg-emerald-900 dark:text-emerald-300 border border-emerald-200 transition-colors cursor-pointer"
                               >
                                 <TbCurrencyPeso className="w-3.5 h-3.5" />
                               </button>
@@ -1168,7 +1413,7 @@ export default function InstallmentsPage({ branchFilter: propBranchFilter, embed
                               type="button"
                               onClick={() => openEditModal(inst)}
                               title="Edit Account Details"
-                              className="p-1.5 rounded-lg border border-border hover:bg-muted text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+                              className="p-1 rounded-lg border border-border hover:bg-muted text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
                             >
                               <FiEdit className="w-3.5 h-3.5" />
                             </button>
@@ -1177,7 +1422,7 @@ export default function InstallmentsPage({ branchFilter: propBranchFilter, embed
                               type="button"
                               onClick={() => handleDeleteAccount(inst)}
                               title="Delete Account"
-                              className="p-1.5 rounded-lg border border-border hover:bg-rose-50 hover:text-rose-600 dark:hover:bg-rose-950/40 text-muted-foreground transition-colors cursor-pointer"
+                              className="p-1 rounded-lg border border-border hover:bg-rose-50 hover:text-rose-600 dark:hover:bg-rose-950/40 text-muted-foreground transition-colors cursor-pointer"
                             >
                               <FiTrash2 className="w-3.5 h-3.5" />
                             </button>
@@ -1329,7 +1574,21 @@ export default function InstallmentsPage({ branchFilter: propBranchFilter, embed
                 <span>Product & Installment Terms</span>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5">
+                <div>
+                  <label className="block font-bold text-muted-foreground mb-1">Main Category *</label>
+                  <select
+                    value={addForm.main_category}
+                    onChange={e => handleMainCategoryChange(e.target.value)}
+                    required
+                    className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground font-semibold"
+                  >
+                    <option value="">-- Select Main Category --</option>
+                    <option value="Appliances">Appliances ({mainCategoryCounts.Appliances})</option>
+                    <option value="Furniture">Furniture ({mainCategoryCounts.Furniture})</option>
+                  </select>
+                </div>
+
                 <div>
                   <label className="block font-bold text-muted-foreground mb-1">Product Category</label>
                   <select
@@ -1337,7 +1596,11 @@ export default function InstallmentsPage({ branchFilter: propBranchFilter, embed
                     onChange={e => handleProductCategoryChange(e.target.value)}
                     className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground font-medium"
                   >
-                    <option value="">All Categories ({products.length})</option>
+                    <option value="">
+                      {addForm.main_category
+                        ? `All ${addForm.main_category} (${filteredModalProducts.length})`
+                        : `All Categories (${products.length})`}
+                    </option>
                     {productCategories.map(cat => (
                       <option key={cat.name} value={cat.name}>
                         {cat.name} ({cat.count})
@@ -1379,10 +1642,9 @@ export default function InstallmentsPage({ branchFilter: propBranchFilter, embed
                 </div>
               </div>
 
-              {/* Numerical Pricing Grid */}
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+              <div className="grid grid-cols-2 sm:grid-cols-6 gap-2.5">
                 <div>
-                  <label className="block font-bold text-muted-foreground mb-1">Product Price (PHP) *</label>
+                  <label className="block font-bold text-muted-foreground mb-1">Unit Price (PHP) *</label>
                   <input
                     type="number"
                     step="0.01"
@@ -1392,6 +1654,31 @@ export default function InstallmentsPage({ branchFilter: propBranchFilter, embed
                     onChange={e => setAddForm(p => ({ ...p, principal_amount: e.target.value }))}
                     required
                     className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground font-mono font-bold"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-bold text-muted-foreground mb-1">Qty</label>
+                  <input
+                    type="number"
+                    min="1"
+                    value={addForm.quantity}
+                    onChange={e => setAddForm(p => ({ ...p, quantity: e.target.value }))}
+                    className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground font-mono font-bold"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-bold text-muted-foreground mb-1">Discount (PHP)</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    max={calculatedAddValues.grossPrice || undefined}
+                    placeholder="0"
+                    value={addForm.discount_amount}
+                    onChange={e => setAddForm(p => ({ ...p, discount_amount: e.target.value }))}
+                    className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground font-mono"
                   />
                 </div>
 
@@ -1423,20 +1710,28 @@ export default function InstallmentsPage({ branchFilter: propBranchFilter, embed
                   </div>
                 </div>
 
-                <div>
+                <div className="sm:col-span-2">
                   <label className="block font-bold text-muted-foreground mb-1">Term (Months) *</label>
                   <select
                     value={addForm.number_of_installments}
-                    onChange={e => setAddForm(p => ({ ...p, number_of_installments: e.target.value }))}
+                    onChange={e => {
+                      const val = e.target.value
+                      setAddForm(p => ({
+                        ...p,
+                        number_of_installments: val,
+                        frequency: val === 'open' ? 'Open Contract' : (p.frequency === 'Open Contract' ? 'Monthly' : p.frequency),
+                      }))
+                    }}
                     className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground font-semibold"
                   >
-                    <option value="3">3 Months</option>
-                    <option value="6">6 Months</option>
-                    <option value="9">9 Months</option>
-                    <option value="12">12 Months</option>
-                    <option value="18">18 Months</option>
-                    <option value="24">24 Months</option>
-                    <option value="36">36 Months</option>
+                    <option value="open">Open Contract — Flexible Term (No Fixed Due / Pay Anytime)</option>
+                    <option value="3">3 Months — Short-Term Plan (3 Payments)</option>
+                    <option value="6">6 Months — Standard Plan (6 Payments)</option>
+                    <option value="9">9 Months — Extended Plan (9 Payments)</option>
+                    <option value="12">12 Months — 1-Year Plan (12 Payments)</option>
+                    <option value="18">18 Months — 1.5-Year Plan (18 Payments)</option>
+                    <option value="24">24 Months — 2-Year Plan (24 Payments)</option>
+                    <option value="36">36 Months — 3-Year Plan (36 Payments)</option>
                   </select>
                 </div>
               </div>
@@ -1446,13 +1741,20 @@ export default function InstallmentsPage({ branchFilter: propBranchFilter, embed
                 <div>
                   <label className="block font-bold text-muted-foreground mb-1">Payment Frequency</label>
                   <select
-                    value={addForm.frequency}
+                    value={calculatedAddValues.isOpenContract ? 'Open Contract' : addForm.frequency}
+                    disabled={calculatedAddValues.isOpenContract}
                     onChange={e => setAddForm(p => ({ ...p, frequency: e.target.value }))}
-                    className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground font-medium"
+                    className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground font-medium disabled:opacity-70 disabled:cursor-not-allowed"
                   >
-                    <option value="Monthly">Monthly</option>
-                    <option value="Bi-weekly">Bi-weekly</option>
-                    <option value="Weekly">Weekly</option>
+                    {calculatedAddValues.isOpenContract ? (
+                      <option value="Open Contract">Open / Flexible (Pay Anytime)</option>
+                    ) : (
+                      <>
+                        <option value="Monthly">Monthly (Every 30 Days)</option>
+                        <option value="Bi-weekly">Bi-weekly (Every 14 Days)</option>
+                        <option value="Weekly">Weekly (Every 7 Days)</option>
+                      </>
+                    )}
                   </select>
                 </div>
 
@@ -1468,19 +1770,95 @@ export default function InstallmentsPage({ branchFilter: propBranchFilter, embed
                 </div>
 
                 <div>
-                  <label className="block font-bold text-muted-foreground mb-1">First Due Date</label>
+                  <label className="block font-bold text-muted-foreground mb-1">
+                    {calculatedAddValues.isOpenContract ? 'Target Due Date (Optional)' : 'First Due Date'}
+                  </label>
                   <input
                     type="date"
                     value={addForm.due_date}
                     onChange={e => setAddForm(p => ({ ...p, due_date: e.target.value }))}
-                    required
+                    required={!calculatedAddValues.isOpenContract}
                     className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground font-mono"
                   />
                 </div>
               </div>
+
+              {/* Detailed Term & Contract Breakdown */}
+              <div className={`p-3 rounded-xl border space-y-2 ${
+                calculatedAddValues.isOpenContract
+                  ? 'bg-indigo-50/70 dark:bg-indigo-950/30 border-indigo-200 dark:border-indigo-800/60'
+                  : 'bg-muted/30 border-border'
+              }`}>
+                <div className="flex items-center justify-between gap-2 flex-wrap border-b border-border/60 pb-1.5">
+                  <span className="text-[11px] font-bold uppercase tracking-wider text-foreground">
+                    Term &amp; Contract Plan Details
+                  </span>
+                  <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${
+                    calculatedAddValues.isOpenContract
+                      ? 'bg-indigo-100 text-indigo-700 border-indigo-300 dark:bg-indigo-950/70 dark:text-indigo-300 dark:border-indigo-700'
+                      : 'bg-primary/10 text-primary border-primary/25'
+                  }`}>
+                    {calculatedAddValues.isOpenContract
+                      ? 'Open Contract • Flexible Term'
+                      : `Fixed Term • ${calculatedAddValues.terms} Months (${addForm.frequency})`}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px]">
+                  <div>
+                    <span className="text-muted-foreground block">Net Principal</span>
+                    <span className="font-mono font-bold text-foreground">{fmt(calculatedAddValues.price)}</span>
+                  </div>
+                  <div>
+                    <span className="text-muted-foreground block">Financed Base</span>
+                    <span className="font-mono font-bold text-foreground">{fmt(calculatedAddValues.financed)}</span>
+                  </div>
+                  <div>
+                    <span className="text-muted-foreground block">Interest ({calculatedAddValues.rate}%)</span>
+                    <span className="font-mono font-bold text-amber-600 dark:text-amber-400">{fmt(calculatedAddValues.interestAmt)}</span>
+                  </div>
+                  <div>
+                    <span className="text-muted-foreground block">
+                      {calculatedAddValues.isOpenContract ? 'Payment Rule' : 'Est. Maturity Date'}
+                    </span>
+                    <span className="font-mono font-bold text-foreground">
+                      {calculatedAddValues.isOpenContract
+                        ? 'Pay Any Amount'
+                        : (calculatedAddValues.estimatedEndDate || '—')}
+                    </span>
+                  </div>
+                </div>
+
+                <p className="text-[11px] text-muted-foreground leading-relaxed">
+                  {calculatedAddValues.isOpenContract ? (
+                    <>
+                      <strong className="text-indigo-700 dark:text-indigo-300">Open Contract:</strong> No fixed monthly schedule or maturity lock-in. The customer can pay any amount anytime toward the <strong className="text-foreground font-mono">{fmt(calculatedAddValues.outstanding)}</strong> balance until settled in full.
+                    </>
+                  ) : (
+                    <>
+                      <strong className="text-foreground">Fixed Amortization:</strong> {calculatedAddValues.terms} {addForm.frequency.toLowerCase()} installments of <strong className="text-primary font-mono">{fmt(calculatedAddValues.monthlyAmt)}</strong> starting <strong className="font-mono text-foreground">{addForm.due_date || addForm.start_date}</strong>{calculatedAddValues.estimatedEndDate ? <> through <strong className="font-mono text-foreground">{calculatedAddValues.estimatedEndDate}</strong></> : ''}.
+                    </>
+                  )}
+                </p>
+              </div>
             </div>
 
-            {/* Live Calculation Summary Card */}
+            <AgentAssignmentSection
+              hasAgent={Boolean(addForm.has_agent)}
+              onToggleAgent={handleToggleAgent}
+              selectedAgentId={addForm.agent_id}
+              onSelectAgent={(val) => setAddForm(p => ({ ...p, agent_id: val }))}
+              agents={salesAgents}
+              loadingAgents={loadingAgents}
+              agentsError={agentsError}
+              summary={installmentAgentSummary}
+              categoryNotice={
+                addForm.has_agent && !resolvedInstallmentCategoryDomain
+                  ? 'Select a Product Category (Appliances 12% or Furniture 15%) for commission calculation.'
+                  : ''
+              }
+            />
+
             <div className="p-3.5 rounded-xl bg-primary/5 border border-primary/20 grid grid-cols-2 sm:grid-cols-4 gap-2.5">
               <div>
                 <div className="text-[10px] uppercase font-bold text-muted-foreground">Interest Charge</div>
@@ -1491,8 +1869,12 @@ export default function InstallmentsPage({ branchFilter: propBranchFilter, embed
                 <div className="font-mono font-bold text-emerald-600 text-sm">{fmt(calculatedAddValues.totalPayable)}</div>
               </div>
               <div>
-                <div className="text-[10px] uppercase font-bold text-muted-foreground">Monthly Installment</div>
-                <div className="font-mono font-bold text-primary text-sm">{fmt(calculatedAddValues.monthlyAmt)}</div>
+                <div className="text-[10px] uppercase font-bold text-muted-foreground">
+                  {calculatedAddValues.isOpenContract ? 'Payment Term' : `${addForm.frequency} Installment`}
+                </div>
+                <div className="font-mono font-bold text-primary text-sm">
+                  {calculatedAddValues.isOpenContract ? 'Open / Flexible' : fmt(calculatedAddValues.monthlyAmt)}
+                </div>
               </div>
               <div>
                 <div className="text-[10px] uppercase font-bold text-muted-foreground">Outstanding Balance</div>
@@ -1681,6 +2063,12 @@ export default function InstallmentsPage({ branchFilter: propBranchFilter, embed
                   {detailItem.account?.store_admin && (
                     <div className="text-[11px] text-muted-foreground">Processed By: <strong className="text-foreground">{detailItem.account.store_admin}</strong></div>
                   )}
+                  {detailItem.account?.has_agent && (
+                    <div className="text-[11px] text-muted-foreground">
+                      Sales Agent: <strong className="text-primary">{detailItem.account.agent_name ? `${detailItem.account.agent_name}${detailItem.account.agent_code ? ` (${detailItem.account.agent_code})` : ''}` : 'With Agent'}</strong>
+                      {' '}• Contribution: <strong className="font-mono text-emerald-600 dark:text-emerald-400">{fmt(detailItem.account.total_agent_contribution)}</strong>
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -1755,7 +2143,9 @@ export default function InstallmentsPage({ branchFilter: propBranchFilter, embed
                   <div className="text-[10px] text-rose-700 dark:text-rose-300 uppercase font-bold">Remaining Balance</div>
                   <div className="font-mono font-bold text-rose-600 dark:text-rose-400 text-sm mt-0.5">{fmt(detailItem.account?.balance)}</div>
                   <div className="text-[10px] text-muted-foreground mt-0.5">
-                    {fmt(detailItem.account?.installment_amount)} / {detailItem.account?.frequency || 'Monthly'}
+                    {(detailItem.account?.is_open_contract || String(detailItem.account?.frequency || '').toLowerCase() === 'open contract')
+                      ? 'Open Contract (Flexible)'
+                      : `${fmt(detailItem.account?.installment_amount)} / ${detailItem.account?.frequency || 'Monthly'}`}
                   </div>
                 </div>
                 <div className="p-3 bg-muted/20 rounded-xl border border-border flex flex-col justify-between">
@@ -1764,7 +2154,9 @@ export default function InstallmentsPage({ branchFilter: propBranchFilter, embed
                     <StatusBadge status={Number(detailItem.account?.balance) <= 0 ? 'Complete Payment' : detailItem.account?.status} />
                   </div>
                   <div className="text-[10px] text-muted-foreground mt-0.5">
-                    {detailItem.account?.paid_installments ?? 0}/{detailItem.account?.total_terms ?? detailItem.account?.number_of_installments} terms paid
+                    {(detailItem.account?.is_open_contract || String(detailItem.account?.frequency || '').toLowerCase() === 'open contract')
+                      ? 'Open Contract • No fixed term'
+                      : `${detailItem.account?.paid_installments ?? 0}/${detailItem.account?.total_terms ?? detailItem.account?.number_of_installments} terms paid`}
                   </div>
                 </div>
               </div>

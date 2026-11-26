@@ -191,19 +191,23 @@ class AutomationService
                         'priority' => 'critical',
                     ];
 
+                    $custNotifData = $notifData;
+                    $custNotifData['action_url'] = '/customer/dashboard?tab=installments';
+
                     NotificationService::sendToAdmins($notifData);
                     NotificationService::sendToStoreAdmins($notifData, $branchId);
-                    NotificationService::sendToCustomer($inst->customer_id, $notifData);
+                    NotificationService::sendToCustomer($inst->customer_id, $custNotifData);
                     continue;
                 }
 
                 // B. Approaching due (today or within 3 days) -> Send Reminder
                 if ($sched->due_date === $today || $sched->due_date === $threeDays) {
-                    $alreadySent = Notification::where('user_id', $inst->customer_id)
+                    $customerUserId = \App\Models\User::where('customer_id', $inst->customer_id)->value('user_id');
+                    $alreadySent = $customerUserId ? Notification::where('user_id', $customerUserId)
                         ->where('type', 'upcoming_payment_alert')
                         ->where('related_id', (string)$inst->installment_id)
                         ->whereDate('created_at', $today)
-                        ->exists();
+                        ->exists() : false;
 
                     if (!$alreadySent) {
                         $timeWord = ($sched->due_date === $today) ? 'TODAY' : 'in 3 days';

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo } from 'react'
+import { useState, useEffect, useRef, useMemo, useDeferredValue } from 'react'
 import { useSearchParams, Navigate } from 'react-router-dom'
 import {
   FiUser, FiUsers, FiEdit, FiTrash2, FiEye,
@@ -17,7 +17,6 @@ import { api } from '../lib/api'
 import { useRealtimeSync, triggerDataSync, SyncButton } from '../lib/realtimeSync'
 import { downloadCenteredQrPng, printSingleBadge } from '../lib/qrBadge'
 import { QRCodeSVG } from 'qrcode.react'
-import EmployeeFinancialsTab from '../components/employees/EmployeeFinancialsTab'
 import { TbCurrencyPeso } from 'react-icons/tb'
 import { useAuth } from '../context/AuthContext'
 
@@ -65,6 +64,7 @@ export default function EmployeesPage({ branchFilter, embedded }) {
   }, [])
   const [error, setError] = useState('')
   const [search, setSearch] = useState('')
+  const deferredSearch = useDeferredValue(search)
   const [deptFilter, setDeptFilter] = useState('All')
   const [branchSelectFilter, setBranchSelectFilter] = useState('All')
   const [statusFilter, setStatusFilter] = useState('All')
@@ -473,6 +473,43 @@ export default function EmployeesPage({ branchFilter, embedded }) {
     }
   }
 
+  const handleDeleteQr = async () => {
+    if (!detailItem?.employee?.qr_token) return
+    const emp = detailItem.employee
+    const confirmed = await confirmAction({
+      title: 'Delete QR Code?',
+      text: `Are you sure you want to permanently delete the QR code for ${emp.first_name} ${emp.last_name} (${emp.employee_code})? The employee will no longer be able to scan with this badge until a new QR code is issued.`,
+      confirmButtonText: 'Yes, Delete QR Code',
+      cancelButtonText: 'Cancel',
+      isDanger: true,
+    })
+    if (!confirmed) return
+
+    setQrActionLoading(true)
+    try {
+      const res = await api.employees.deleteQr(emp.employee_id)
+      showToast(res.message || 'QR Code deleted successfully.', 'success')
+      setDetailItem(prev => ({
+        ...prev,
+        employee: {
+          ...prev.employee,
+          qr_token: null,
+          qr_active: false,
+          qr_generated_at: null,
+          has_qr: false,
+          qr_status: 'NOT GENERATED',
+        }
+      }))
+      triggerDataSync('employees')
+      triggerDataSync('qr_requests')
+      loadEmployees()
+    } catch (err) {
+      showToast(err.message || 'Failed to delete QR code', 'error')
+    } finally {
+      setQrActionLoading(false)
+    }
+  }
+
   const [verifyLoading, setVerifyLoading] = useState(false)
 
   const handleToggleVerify = async (empId, shouldVerify) => {
@@ -581,8 +618,8 @@ export default function EmployeesPage({ branchFilter, embedded }) {
   }
 
   const filtered = useMemo(() => {
-    return filterBySearch(employees, search, ['first_name', 'last_name', 'employee_code', 'position', 'branch_id'])
-  }, [employees, search])
+    return filterBySearch(employees, deferredSearch, ['first_name', 'last_name', 'employee_code', 'position', 'branch_id'])
+  }, [employees, deferredSearch])
 
   const total = filtered.length
   const paginated = filtered.slice((page - 1) * pageSize, page * pageSize)
@@ -993,9 +1030,8 @@ export default function EmployeesPage({ branchFilter, embedded }) {
             <TabBar
               tabs={[
                 { id: 'personal', label: '1. Personal Info', icon: <FiUser className="w-3.5 h-3.5" /> },
-                { id: 'government', label: '2. Government IDs', icon: <FiShield className="w-3.5 h-3.5" /> },
-                { id: 'employment', label: '3. Employment & Rate', icon: <TbCurrencyPeso className="w-3.5 h-3.5" /> },
-                { id: 'emergency', label: '4. Emergency Contact', icon: <FiPhone className="w-3.5 h-3.5" /> },
+                { id: 'employment', label: '2. Employment & Rate', icon: <TbCurrencyPeso className="w-3.5 h-3.5" /> },
+                { id: 'emergency', label: '3. Emergency Contact', icon: <FiPhone className="w-3.5 h-3.5" /> },
               ]}
               active={formTab}
               onChange={setFormTab}
@@ -1110,56 +1146,6 @@ export default function EmployeesPage({ branchFilter, embedded }) {
                     placeholder="Street, Barangay, City, Province"
                     className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground"
                   />
-                </div>
-              </div>
-            )}
-
-            {formTab === 'government' && (
-              <div className="space-y-3 mt-2">
-                <div className="grid grid-cols-2 gap-2.5">
-                  <div>
-                    <label className="block font-bold text-muted-foreground mb-1">TIN Number</label>
-                    <input
-                      type="text"
-                      value={form.tin_number}
-                      onChange={e => setForm(f => ({ ...f, tin_number: e.target.value }))}
-                      placeholder="000-000-000-000"
-                      className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground font-mono"
-                    />
-                  </div>
-                  <div>
-                    <label className="block font-bold text-muted-foreground mb-1">SSS Number</label>
-                    <input
-                      type="text"
-                      value={form.sss_number}
-                      onChange={e => setForm(f => ({ ...f, sss_number: e.target.value }))}
-                      placeholder="00-0000000-0"
-                      className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground font-mono"
-                    />
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-2.5">
-                  <div>
-                    <label className="block font-bold text-muted-foreground mb-1">PhilHealth Number</label>
-                    <input
-                      type="text"
-                      value={form.philhealth_number}
-                      onChange={e => setForm(f => ({ ...f, philhealth_number: e.target.value }))}
-                      placeholder="00-000000000-0"
-                      className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground font-mono"
-                    />
-                  </div>
-                  <div>
-                    <label className="block font-bold text-muted-foreground mb-1">Pag-IBIG Number</label>
-                    <input
-                      type="text"
-                      value={form.pagibig_number}
-                      onChange={e => setForm(f => ({ ...f, pagibig_number: e.target.value }))}
-                      placeholder="0000-0000-0000"
-                      className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground font-mono"
-                    />
-                  </div>
                 </div>
               </div>
             )}
@@ -1410,18 +1396,10 @@ export default function EmployeesPage({ branchFilter, embedded }) {
                   { id: 'qr', label: 'Permanent QR Badge', icon: <FiCamera className="w-3.5 h-3.5" /> },
                   { id: 'attendance', label: `Attendance (${detailItem.attendance?.length || 0})`, icon: <FiClock className="w-3.5 h-3.5" /> },
                   { id: 'payroll', label: `Payroll (${detailItem.payroll?.length || 0})`, icon: <TbCurrencyPeso className="w-3.5 h-3.5" /> },
-                  { id: 'financials', label: 'Financial Settings', icon: <TbCurrencyPeso className="w-3.5 h-3.5" /> },
                 ]}
                 active={detailTab}
                 onChange={setDetailTab}
               />
-
-              {/* Financial Settings Tab */}
-              {detailTab === 'financials' && (
-                <div className="pt-2">
-                  <EmployeeFinancialsTab employeeId={detailItem.employee.employee_id} />
-                </div>
-              )}
 
               {/* QR & Security Badge Tab */}
               {detailTab === 'qr' && (
@@ -1563,9 +1541,8 @@ export default function EmployeesPage({ branchFilter, embedded }) {
                               <button
                                 type="button"
                                 onClick={handleToggleQr}
-                                disabled={qrActionLoading}
-                                className={`flex items-center justify-center gap-1 px-3 py-1.5 rounded-xl font-bold cursor-pointer ${detailItem.employee.qr_active ? 'bg-rose-600 text-white' : 'bg-emerald-600 text-white'
-                                  }`}
+                                disabled={qrActionLoading || !detailItem.employee.qr_token}
+                                className={`flex items-center justify-center gap-1 px-3 py-1.5 rounded-xl font-bold ${!detailItem.employee.qr_token ? 'opacity-50 cursor-not-allowed bg-muted text-muted-foreground' : `cursor-pointer ${detailItem.employee.qr_active ? 'bg-rose-600 text-white' : 'bg-emerald-600 text-white'}`}`}
                               >
                                 {detailItem.employee.qr_active ? <FiSlash className="w-3.5 h-3.5" /> : <FiCheckCircle className="w-3.5 h-3.5" />}
                                 <span>{detailItem.employee.qr_active ? 'Disable QR Access' : 'Enable QR Access'}</span>
@@ -1583,6 +1560,20 @@ export default function EmployeesPage({ branchFilter, embedded }) {
                               >
                                 <FiRefreshCw className="w-3.5 h-3.5" />
                                 <span>Regenerate QR UUID</span>
+                              </button>
+                            )}
+
+                            {/* Delete QR Code Action */}
+                            {isAdmin && (
+                              <button
+                                type="button"
+                                onClick={handleDeleteQr}
+                                disabled={qrActionLoading || !detailItem.employee.qr_token}
+                                title="Delete QR Code"
+                                className={`flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-xl border font-bold transition-colors ${!detailItem.employee.qr_token ? 'border-border bg-muted/40 text-muted-foreground opacity-50 cursor-not-allowed' : 'border-rose-500/40 bg-rose-500/10 hover:bg-rose-600 text-rose-500 hover:text-white cursor-pointer'}`}
+                              >
+                                <FiTrash2 className="w-3.5 h-3.5" />
+                                <span>Delete QR Code</span>
                               </button>
                             )}
                           </div>

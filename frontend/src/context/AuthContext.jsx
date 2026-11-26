@@ -1,5 +1,6 @@
 import { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react'
-import { api, normalizeStorageUrls } from '../lib/api'
+import { api, normalizeStorageUrls, clearApiCache, clearSessionCaches } from '../lib/api'
+import { disconnectEcho } from '../lib/echo'
 
 const defaultAuthContext = {
   user: null,
@@ -94,15 +95,35 @@ export function AuthProvider({ children }) {
   }, [])
 
   useEffect(() => {
-    verifySession()
+    let timer = null
+    try {
+      const raw = sessionStorage.getItem('pace_session')
+      const parsed = raw ? JSON.parse(raw) : null
+      if (parsed?.cached_user && parsed?.user_id) {
+        // Stagger background session verification so active dashboard/figures load uncontested first
+        timer = setTimeout(() => {
+          verifySession()
+        }, 750)
+      } else {
+        verifySession()
+      }
+    } catch {
+      verifySession()
+    }
 
     const handleExpired = () => {
+      disconnectEcho()
       setUser(null)
       setCheckingAuth(false)
+      clearApiCache()
+      clearSessionCaches()
       sessionStorage.removeItem('pace_session')
     }
     window.addEventListener('auth:expired', handleExpired)
-    return () => window.removeEventListener('auth:expired', handleExpired)
+    return () => {
+      if (timer) clearTimeout(timer)
+      window.removeEventListener('auth:expired', handleExpired)
+    }
   }, [verifySession])
 
   const login = async (username, password, remember = true) => {
@@ -228,7 +249,10 @@ export function AuthProvider({ children }) {
     } catch (e) {
       console.warn('Logout API error:', e)
     } finally {
+      disconnectEcho()
       setUser(null)
+      clearApiCache()
+      clearSessionCaches()
       sessionStorage.removeItem('pace_session')
       sessionStorage.removeItem('pace_last_path')
     }

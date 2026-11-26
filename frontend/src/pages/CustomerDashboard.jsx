@@ -68,21 +68,26 @@ export default function CustomerDashboard() {
     setModalArgs(null);
   };
 
-  const fetchDashboardData = async (source) => {
+  const activeUrlTab = searchParams.get('tab');
+
+  const fetchDashboardData = async (source, includeInstallments = null) => {
     const isBg = source === 'timer' || source === 'database' || source === 'event' || source === 'focus' || source === 'mutation' || source === 'sync' || !!stats;
+    const needInst = includeInstallments !== null
+      ? includeInstallments
+      : (activeUrlTab === 'installments' || activeUrlTab === 'schedule' || activeUrlTab === 'pay' || activeModal === 'makePayment' || source === 'mutation' || source === 'manual');
     try {
       if (!isBg) setLoading(true);
-      const [dashResult, instResult] = await Promise.allSettled([
-        api.customerApp.getDashboard(),
-        api.customerApp.getInstallments()
-      ]);
-      if (dashResult.status === 'fulfilled' && dashResult.value?.metrics) {
-        setStats(dashResult.value.metrics);
-        try { sessionStorage.setItem('pace_cached_cust_stats', JSON.stringify(dashResult.value.metrics)); } catch(e){}
+      const dashResult = await api.customerApp.getDashboard();
+      if (dashResult?.metrics) {
+        setStats(dashResult.metrics);
+        try { sessionStorage.setItem('pace_cached_cust_stats', JSON.stringify(dashResult.metrics)); } catch(e){}
       }
-      if (instResult.status === 'fulfilled' && instResult.value?.installments) {
-        setInstallments(instResult.value.installments);
-        try { sessionStorage.setItem('pace_cached_cust_inst', JSON.stringify(instResult.value.installments)); } catch(e){}
+      if (needInst) {
+        const instResult = await api.customerApp.getInstallments();
+        if (instResult?.installments) {
+          setInstallments(instResult.installments);
+          try { sessionStorage.setItem('pace_cached_cust_inst', JSON.stringify(instResult.installments)); } catch(e){}
+        }
       }
     } catch (error) {
       if (!isBg) console.error('Failed to load dashboard', error);
@@ -94,6 +99,20 @@ export default function CustomerDashboard() {
   useEffect(() => {
     fetchDashboardData('initial');
   }, []);
+
+  // Lazy-load installment accounts only when switching to Installments/Schedule/Pay views
+  useEffect(() => {
+    if ((activeUrlTab === 'installments' || activeUrlTab === 'schedule' || activeUrlTab === 'pay' || activeModal === 'makePayment') && installments.length === 0) {
+      api.customerApp.getInstallments()
+        .then(res => {
+          if (res?.installments) {
+            setInstallments(res.installments);
+            try { sessionStorage.setItem('pace_cached_cust_inst', JSON.stringify(res.installments)); } catch(e){}
+          }
+        })
+        .catch(() => {});
+    }
+  }, [activeUrlTab, activeModal, installments.length]);
 
   // Return to main dashboard on browser refresh/reload as requested
   useEffect(() => {
@@ -546,14 +565,6 @@ export default function CustomerDashboard() {
                       <span>Pay Amortization</span>
                     </button>
                   )}
-                  <button
-                    type="button"
-                    onClick={() => handleViewLedger(primaryActive)}
-                    className="w-10 h-10 rounded-2xl border border-border hover:bg-muted text-muted-foreground hover:text-foreground flex items-center justify-center transition-colors cursor-pointer"
-                    title="View Ledger Statement"
-                  >
-                    <FiFileText size={17} />
-                  </button>
                 </div>
               </div>
 

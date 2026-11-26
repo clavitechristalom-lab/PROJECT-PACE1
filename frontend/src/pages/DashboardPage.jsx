@@ -20,7 +20,8 @@ import {
 import { fmt, fmtDate, fastDeepEqual } from '../lib/utils'
 import { api } from '../lib/api'
 import { useRealtimeSync, triggerDataSync, SyncButton } from '../lib/realtimeSync'
-import { TbCurrencyPeso } from 'react-icons/tb'
+import { TbCurrencyPeso, TbCashBanknoteMove, TbCashRegister } from 'react-icons/tb'
+import { isCollectorUser, isCashierUser } from '../lib/employeeDepartment'
 
 import BranchCarousel from '../components/branches/BranchCarousel'
 import BranchDetailsView from '../components/branches/BranchDetailsView'
@@ -139,14 +140,20 @@ function AdminBusinessDashboard() {
     }
     setError('')
     try {
-      const [statsData, chartsData, recentData, alertsData, branchData] = await Promise.all([
-        api.dashboard.getStats(),
-        api.dashboard.getCharts(),
-        api.dashboard.getRecent(),
-        api.dashboard.getAlerts().catch(() => ({ alerts: [] })),
-        api.dashboard.getBranchComparison().catch(() => ({ branches: [] })),
-      ])
+      const overview = await api.dashboard.getOverview({
+        timeframe,
+        date_from: timeframe === 'custom' ? customStart : undefined,
+        date_to: timeframe === 'custom' ? customEnd : undefined,
+        include_all: 1,
+      })
       if (!isMountedRef.current) return
+
+      const statsData = overview?.stats || null
+      const chartsData = overview?.charts || null
+      const recentData = overview?.recent || null
+      const alertsData = overview?.alerts || { alerts: [] }
+      const branchData = overview?.branch_comparison || { branches: [] }
+      const perfRes = overview?.business_performance || null
 
       const liveBranches = branchData?.branches || []
       setStats(prev => (fastDeepEqual(prev, statsData) ? prev : statsData))
@@ -154,6 +161,9 @@ function AdminBusinessDashboard() {
       setRecent(prev => (fastDeepEqual(prev, recentData) ? prev : recentData))
       setAlerts(prev => (fastDeepEqual(prev, alertsData?.alerts || []) ? prev : (alertsData?.alerts || [])))
       setBranchComp(prev => (fastDeepEqual(prev, liveBranches) ? prev : liveBranches))
+      if (perfRes) {
+        setPerfData(prev => (fastDeepEqual(prev, perfRes) ? prev : perfRes))
+      }
 
       try {
         sessionStorage.setItem('pace_cached_dash_stats', JSON.stringify(statsData))
@@ -162,10 +172,13 @@ function AdminBusinessDashboard() {
         sessionStorage.setItem('pace_cached_dash_branches', JSON.stringify(liveBranches))
       } catch (e) { }
 
-      if (isAdmin) {
-        api.qrRequests.getAll({ per_page: 1 }).then(res => {
-          if (res.summary && isMountedRef.current) setQrRequestSummary(res.summary)
-        }).catch(() => { })
+      if (isAdmin && isMountedRef.current) {
+        setTimeout(() => {
+          if (!isMountedRef.current) return
+          api.qrRequests.getAll({ per_page: 1 }).then(res => {
+            if (res?.summary && isMountedRef.current) setQrRequestSummary(res.summary)
+          }).catch(() => { })
+        }, 250)
       }
     } catch (err) {
       if (!isMountedRef.current) return
@@ -204,15 +217,11 @@ function AdminBusinessDashboard() {
 
   useEffect(() => {
     loadData('initial')
-    loadPerformance()
   }, [])
 
   // On-demand click-driven synchronization
   const { sync: syncDashboard, isSyncing: isSyncingDashboard } = useRealtimeSync(
-    () => {
-      loadData('manual')
-      loadPerformance(timeframe, false)
-    },
+    () => loadData('manual'),
     [],
     { module: 'dashboard' }
   )
@@ -472,7 +481,7 @@ function AdminBusinessDashboard() {
                     {perfData?.sales?.transactions || 0} Transactions
                   </span>
                 </div>
-                
+
                 <div className="space-y-2 text-xs">
                   <div className="flex items-center justify-between">
                     <span className="text-muted-foreground dark:text-slate-400">Gross Sales:</span>
@@ -791,15 +800,11 @@ function StoreAdminBusinessDashboard() {
     }
     setError('')
     try {
-      const [statsData, perfDataRes, recentData] = await Promise.all([
-        api.dashboard.getStats(),
-        api.dashboard.getBusinessPerformance({ timeframe }),
-        api.dashboard.getRecent(),
-      ])
+      const overview = await api.dashboard.getOverview({ timeframe })
       if (!isMountedRef.current) return
-      setStats(prev => (fastDeepEqual(prev, statsData) ? prev : statsData))
-      setPerfData(prev => (fastDeepEqual(prev, perfDataRes) ? prev : perfDataRes))
-      setRecent(prev => (fastDeepEqual(prev, recentData) ? prev : recentData))
+      setStats(prev => (fastDeepEqual(prev, overview?.stats) ? prev : overview?.stats))
+      setPerfData(prev => (fastDeepEqual(prev, overview?.business_performance) ? prev : overview?.business_performance))
+      setRecent(prev => (fastDeepEqual(prev, overview?.recent) ? prev : overview?.recent))
     } catch (err) {
       if (!isMountedRef.current) return
       if (!isBg) {
@@ -1136,22 +1141,21 @@ export function ExcuseLeaveLetterModal({ isOpen, onClose, user, onCreated }) {
     setSubmitting(true)
     try {
       const payload = new FormData()
-      payload.append('sender_type', 'employee')
       payload.append('category', formData.category)
-      payload.append('topic', `${formData.category} (${formData.from_date} to ${formData.to_date})`)
-      payload.append('from_date', formData.from_date)
-      payload.append('to_date', formData.to_date)
-      payload.append('reason', formData.reason || formData.category)
-      payload.append('message', formData.message)
+      payload.append('title', `${formData.category} (${formData.from_date} to ${formData.to_date})`)
+      payload.append('start_date', formData.from_date)
+      payload.append('end_date', formData.to_date)
+      payload.append('reason', (formData.reason || formData.category).slice(0, 1000))
+      payload.append('letter_body', formData.message)
       if (attachmentFile) {
         payload.append('attachment', attachmentFile)
       }
 
-      const res = await api.supportMessages.create(payload)
+      const res = await api.employeeLetters.create(payload)
       showToast(`${formData.category} submitted to Management!`, 'success')
-      triggerDataSync('support')
-      if (onCreated && res?.data) {
-        onCreated(res.data)
+      triggerDataSync('employee_letters')
+      if (onCreated && (res?.letter || res?.data)) {
+        onCreated(res.letter || res.data)
       }
       onClose()
     } catch (err) {
@@ -1212,8 +1216,8 @@ export function ExcuseLeaveLetterModal({ isOpen, onClose, user, onCreated }) {
                   type="button"
                   onClick={() => handleAutoFieldChange('category', cat)}
                   className={`px-3 py-2 rounded-xl font-bold text-xs border text-center transition-all cursor-pointer ${active
-                      ? 'bg-primary text-primary-foreground border-primary shadow-sm'
-                      : 'bg-card text-foreground border-border hover:bg-muted'
+                    ? 'bg-primary text-primary-foreground border-primary shadow-sm'
+                    : 'bg-card text-foreground border-border hover:bg-muted'
                     }`}
                 >
                   {cat}
@@ -1347,6 +1351,10 @@ export function EmployeeDashboard() {
   const [payslip, setPayslip] = useState(null)
   const [letterModalOpen, setLetterModalOpen] = useState(false)
   const [viewLetterModal, setViewLetterModal] = useState(null)
+  const [attendanceFrom, setAttendanceFrom] = useState('')
+  const [attendanceTo, setAttendanceTo] = useState('')
+  const [attendanceLoading, setAttendanceLoading] = useState(false)
+  const attendanceReqIdRef = useRef(0)
   const inFlightRef = useRef(false)
   const isMountedRef = useRef(true)
 
@@ -1359,11 +1367,21 @@ export function EmployeeDashboard() {
 
   const openPayslip = async (id) => {
     try {
+      let targetId = id
+      if (!targetId && user?.role === 'Employee') {
+        const list = await api.payroll.getMePayroll()
+        const latest = list?.payroll?.[0]
+        targetId = latest?.payroll_id
+      }
+      if (!targetId) {
+        showToast('Payslip record ID is unavailable. Please click Sync and try again.', 'error')
+        return
+      }
       if (user?.role === 'Employee') {
-        const data = await api.payroll.getMePayslip(id)
+        const data = await api.payroll.getMePayslip(targetId)
         setPayslip(data.record)
       } else {
-        const data = await api.payroll.getPayslip(id)
+        const data = await api.payroll.getPayslip(targetId)
         setPayslip(data.record)
       }
     } catch (err) {
@@ -1381,15 +1399,17 @@ export function EmployeeDashboard() {
     }
     setError('')
     try {
-      const [data, lettersRes] = await Promise.all([
-        api.dashboard.getStats({
-          role: 'Employee',
-          employee_id: user?.employee_id || undefined,
-        }),
-        api.employeeLetters.getAll().catch(() => ({ letters: [] })),
-      ])
+      // Load primary employee dashboard figures first, then fetch excuse letters sequentially
+      const data = await api.dashboard.getStats({
+        role: 'Employee',
+        employee_id: user?.employee_id || undefined,
+        attendance_from: attendanceFrom || undefined,
+        attendance_to: attendanceTo || undefined,
+      })
       if (!isMountedRef.current) return
       setStats(prev => (fastDeepEqual(prev, data) ? prev : data))
+      const lettersRes = await api.employeeLetters.getAll().catch(() => ({ letters: [] }))
+      if (!isMountedRef.current) return
       const nextLetters = lettersRes?.letters || []
       setMyLetters(prev => (fastDeepEqual(prev, nextLetters) ? prev : nextLetters))
     } catch (err) {
@@ -1404,6 +1424,46 @@ export function EmployeeDashboard() {
         setLoading(false)
       }
     }
+  }
+
+  const fetchAttendanceByDateRange = async (fromDate, toDate) => {
+    const reqId = ++attendanceReqIdRef.current
+    setAttendanceLoading(true)
+    try {
+      const data = await api.dashboard.getStats({
+        role: 'Employee',
+        employee_id: user?.employee_id || undefined,
+        attendance_from: fromDate || undefined,
+        attendance_to: toDate || undefined,
+      })
+      if (!isMountedRef.current || reqId !== attendanceReqIdRef.current) return
+      setStats(prev => (fastDeepEqual(prev, data) ? prev : data))
+    } catch (err) {
+      if (!isMountedRef.current || reqId !== attendanceReqIdRef.current) return
+      showToast(err.message || 'Failed to filter attendance records', 'error')
+    } finally {
+      if (isMountedRef.current && reqId === attendanceReqIdRef.current) {
+        setAttendanceLoading(false)
+      }
+    }
+  }
+
+  const handleAttendanceDateChange = (field, value) => {
+    let nextFrom = field === 'from' ? value : attendanceFrom
+    let nextTo = field === 'to' ? value : attendanceTo
+    if (nextFrom && nextTo && nextFrom > nextTo) {
+      if (field === 'from') nextTo = nextFrom
+      else nextFrom = nextTo
+    }
+    setAttendanceFrom(nextFrom)
+    setAttendanceTo(nextTo)
+    fetchAttendanceByDateRange(nextFrom, nextTo)
+  }
+
+  const clearAttendanceDates = () => {
+    setAttendanceFrom('')
+    setAttendanceTo('')
+    fetchAttendanceByDateRange('', '')
   }
 
   useEffect(() => {
@@ -1438,13 +1498,6 @@ export function EmployeeDashboard() {
         action={
           <div className="flex items-center gap-2 flex-wrap">
             <SyncButton sync={syncEmpDashboard} isSyncing={isSyncingEmpDashboard} label="Sync" />
-            <button
-              onClick={() => navigate('/employee/attendance')}
-              className="flex items-center gap-2 px-4 py-2 bg-primary hover:bg-primary/90 text-primary-foreground font-semibold text-xs rounded-xl shadow-xs transition-all cursor-pointer"
-            >
-              <FiCamera className="w-4 h-4" />
-              <span>My Permanent QR Badge</span>
-            </button>
           </div>
         }
       />
@@ -1605,8 +1658,43 @@ export function EmployeeDashboard() {
 
       {/* Recent Attendance */}
       <Card noPad>
-        <CardHeader title="Recent Attendance" />
-        <div className="overflow-x-auto">
+        <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 border-b border-border">
+          <span className="text-xs font-bold text-foreground uppercase tracking-wider">Recent Attendance</span>
+          <div className="flex flex-wrap items-center gap-2 text-xs">
+            <label className="flex items-center gap-1.5">
+              <span className="font-semibold text-muted-foreground">From:</span>
+              <input
+                type="date"
+                value={attendanceFrom}
+                max={attendanceTo || undefined}
+                onChange={(e) => handleAttendanceDateChange('from', e.target.value)}
+                className="px-2.5 py-1 rounded-xl border border-border bg-card text-foreground font-mono text-xs focus:outline-none focus:ring-2 focus:ring-primary/30"
+              />
+            </label>
+            <label className="flex items-center gap-1.5">
+              <span className="font-semibold text-muted-foreground">To:</span>
+              <input
+                type="date"
+                value={attendanceTo}
+                min={attendanceFrom || undefined}
+                onChange={(e) => handleAttendanceDateChange('to', e.target.value)}
+                className="px-2.5 py-1 rounded-xl border border-border bg-card text-foreground font-mono text-xs focus:outline-none focus:ring-2 focus:ring-primary/30"
+              />
+            </label>
+            {(attendanceFrom || attendanceTo) && (
+              <button
+                type="button"
+                onClick={clearAttendanceDates}
+                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-xl border border-border bg-muted/50 hover:bg-muted text-muted-foreground hover:text-foreground font-semibold text-xs transition-colors cursor-pointer"
+                title="Clear date filter"
+              >
+                <FiX className="w-3.5 h-3.5" />
+                <span>Clear</span>
+              </button>
+            )}
+          </div>
+        </div>
+        <div className={`overflow-x-auto transition-opacity ${attendanceLoading ? 'opacity-60' : ''}`}>
           <table className="w-full text-xs">
             <thead>
               <tr className="border-b border-border bg-muted/50 text-muted-foreground uppercase font-semibold text-[11px]">
@@ -1620,8 +1708,16 @@ export function EmployeeDashboard() {
               </tr>
             </thead>
             <tbody>
-              {myAttendance.length === 0 ? (
-                <tr><td colSpan={7} className="py-6 text-center text-muted-foreground">No recent attendance records</td></tr>
+              {attendanceLoading && myAttendance.length === 0 ? (
+                <tr><td colSpan={7} className="py-6 text-center text-muted-foreground">Loading attendance records...</td></tr>
+              ) : myAttendance.length === 0 ? (
+                <tr>
+                  <td colSpan={7} className="py-6 text-center text-muted-foreground">
+                    {(attendanceFrom || attendanceTo)
+                      ? 'No attendance records found for the selected date range'
+                      : 'No recent attendance records'}
+                  </td>
+                </tr>
               ) : (
                 myAttendance.map((a, i) => (
                   <tr key={a.attendance_id || i} className="border-b border-border hover:bg-muted/30">

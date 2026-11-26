@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo } from 'react'
+import { useState, useEffect, useRef, useMemo, useDeferredValue } from 'react'
 import { useLocation, useSearchParams, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import {
@@ -15,52 +15,13 @@ import { fmtDate, filterBySearch, fastDeepEqual } from '../lib/utils'
 import { api, downloadCsv } from '../lib/api'
 import { useRealtimeSync, triggerDataSync, SyncButton } from '../lib/realtimeSync'
 import { downloadCenteredQrPng, printSingleBadge } from '../lib/qrBadge'
-import { Html5Qrcode } from 'html5-qrcode'
 import { QRCodeSVG } from 'qrcode.react'
-import QrMonitoringModal from '../components/attendance/QrMonitoringModal'
-import FaceRecognitionAttendanceModal from '../components/attendance/FaceRecognitionAttendanceModal'
 import FaceRecognitionEnrollment from '../components/biometrics/FaceRecognitionEnrollment'
 
 const DEPARTMENTS = ['All', 'Store Admin', 'Employee']
 const STATUSES = ['All', 'Present', 'Late', 'Absent', 'Half Day']
 const DEFAULT_PERIOD_START = '2026-10-12'
 const DEFAULT_PERIOD_END = '2026-11-20'
-
-// Sound synthesizer using Web Audio API for zero-dependency instant feedback
-const playTone = (type) => {
-  try {
-    const AudioContext = window.AudioContext || window.webkitAudioContext
-    if (!AudioContext) return
-    const ctx = new AudioContext()
-    const osc = ctx.createOscillator()
-    const gain = ctx.createGain()
-    osc.connect(gain)
-    gain.connect(ctx.destination)
-
-    if (type === 'beep') {
-      osc.frequency.setValueAtTime(880, ctx.currentTime)
-      gain.gain.setValueAtTime(0.15, ctx.currentTime)
-      gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.12)
-      osc.start()
-      osc.stop(ctx.currentTime + 0.12)
-    } else if (type === 'success') {
-      osc.frequency.setValueAtTime(523.25, ctx.currentTime)
-      gain.gain.setValueAtTime(0.2, ctx.currentTime)
-      gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.35)
-      osc.start()
-      osc.stop(ctx.currentTime + 0.35)
-    } else if (type === 'error') {
-      osc.type = 'sawtooth'
-      osc.frequency.setValueAtTime(220, ctx.currentTime)
-      gain.gain.setValueAtTime(0.2, ctx.currentTime)
-      gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.3)
-      osc.start()
-      osc.stop(ctx.currentTime + 0.3)
-    }
-  } catch (e) {
-    // AudioContext blocked
-  }
-}
 
 export default function AttendancePage({ branchFilter: propBranchFilter, embedded }) {
   const { user, verifySession } = useAuth()
@@ -72,7 +33,6 @@ export default function AttendancePage({ branchFilter: propBranchFilter, embedde
 
   const location = useLocation()
   const [searchParams] = useSearchParams()
-  const [qrMonitoringOpen, setQrMonitoringOpen] = useState(false)
   const [faceAuthModalOpen, setFaceAuthModalOpen] = useState(false)
 
   // Branch Selection & Filter
@@ -84,7 +44,13 @@ export default function AttendancePage({ branchFilter: propBranchFilter, embedde
   })
   const branchFilter = propBranchFilter || localBranchFilter
 
+  const [activeTab, setActiveTab] = useState(
+    isEmployee ? 'my-qr' : 'log'
+  )
+
   useEffect(() => {
+    if (isEmployee || isStoreAdmin || branches.length > 0) return
+    if (activeTab !== 'log' && activeTab !== 'timesheet' && activeTab !== 'audit') return
     api.branches.getAll()
       .then(res => {
         if (res) {
@@ -93,12 +59,7 @@ export default function AttendancePage({ branchFilter: propBranchFilter, embedde
         }
       })
       .catch(err => console.error('Failed to load branches in AttendancePage:', err))
-  }, [])
-
-  // Default tab based on role
-  const [activeTab, setActiveTab] = useState(
-    isEmployee ? 'my-qr' : isStoreAdmin ? 'punch' : 'log'
-  )
+  }, [activeTab, isEmployee, isStoreAdmin, branches.length])
   const [records, setRecords] = useState(() => {
     try {
       const saved = sessionStorage.getItem('pace_cached_attendance_records')
@@ -139,6 +100,7 @@ export default function AttendancePage({ branchFilter: propBranchFilter, embedde
 
   // Logs & Filters
   const [search, setSearch] = useState('')
+  const deferredSearch = useDeferredValue(search)
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
   const [deptFilter, setDeptFilter] = useState('All')
@@ -151,9 +113,9 @@ export default function AttendancePage({ branchFilter: propBranchFilter, embedde
   const [periodEnd, setPeriodEnd] = useState(DEFAULT_PERIOD_END)
   const [periodRoleFilter, setPeriodRoleFilter] = useState('All')
   const [periodSearch, setPeriodSearch] = useState('')
+  const deferredPeriodSearch = useDeferredValue(periodSearch)
   const [periodMetrics, setPeriodMetrics] = useState(null)
   const [periodLoading, setPeriodLoading] = useState(false)
-  const [simulatingPeriod, setSimulatingPeriod] = useState(false)
   const [selectedStaffMetrics, setSelectedStaffMetrics] = useState(null)
 
   // Scan Logs Tab State
@@ -164,86 +126,6 @@ export default function AttendancePage({ branchFilter: propBranchFilter, embedde
   const [scanLogsStatusFilter, setScanLogsStatusFilter] = useState('All')
   const [scanLogsActionFilter, setScanLogsActionFilter] = useState('All')
 
-  // QR + PIN Attendance Station State (Persisted in sessionStorage so navigation to profile preserves WAITING FOR EMPLOYEE)
-  const [stationStep, setStationStep] = useState(() => {
-    try {
-      const saved = sessionStorage.getItem('pace_attendance_station_state')
-      if (saved) {
-        const parsed = JSON.parse(saved)
-        if (parsed.stationStep === 'waiting' && parsed.punchResult?.log_id) {
-          return 'waiting'
-        }
-      }
-    } catch (_) { }
-    return 'scan'
-  })
-  const [cameraActive, setCameraActive] = useState(() => {
-    try {
-      const saved = sessionStorage.getItem('pace_attendance_station_state')
-      if (saved) {
-        const parsed = JSON.parse(saved)
-        if (parsed.stationStep === 'waiting') return false
-      }
-    } catch (_) { }
-    return true
-  })
-  const [cameraError, setCameraError] = useState('')
-  const [cameras, setCameras] = useState([])
-  const [selectedCameraId, setSelectedCameraId] = useState('')
-  const [manualTokenInput, setManualTokenInput] = useState('')
-  const [showPin, setShowPin] = useState(false)
-
-  // Identified Employee from Step 1
-  const [identifiedEmployee, setIdentifiedEmployee] = useState(() => {
-    try {
-      const saved = sessionStorage.getItem('pace_attendance_station_state')
-      if (saved) {
-        const parsed = JSON.parse(saved)
-        if (parsed.stationStep === 'waiting' && parsed.identifiedEmployee) {
-          return parsed.identifiedEmployee
-        }
-      }
-    } catch (_) { }
-    return null
-  })
-  const [availableActions, setAvailableActions] = useState([])
-  const [selectedAction, setSelectedAction] = useState('')
-  const [scannedQrToken, setScannedQrToken] = useState(() => {
-    try {
-      const saved = sessionStorage.getItem('pace_attendance_station_state')
-      if (saved) {
-        const parsed = JSON.parse(saved)
-        if (parsed.stationStep === 'waiting' && parsed.scannedQrToken) {
-          return parsed.scannedQrToken
-        }
-      }
-    } catch (_) { }
-    return ''
-  })
-  const [verifyingQr, setVerifyingQr] = useState(false)
-
-  // PIN Pad state for Step 2
-  const [enteredPin, setEnteredPin] = useState('')
-  const [verifyingPin, setVerifyingPin] = useState(false)
-  const [pinError, setPinError] = useState('')
-  const [isLockedOut, setIsLockedOut] = useState(false)
-
-  // Result state for Step 3
-  const [punchResult, setPunchResult] = useState(() => {
-    try {
-      const saved = sessionStorage.getItem('pace_attendance_station_state')
-      if (saved) {
-        const parsed = JSON.parse(saved)
-        if (parsed.stationStep === 'waiting' && parsed.punchResult) {
-          return parsed.punchResult
-        }
-      }
-    } catch (_) { }
-    return null
-  })
-  const [countdown, setCountdown] = useState(8)
-  const countdownTimerRef = useRef(null)
-
   // QR Request Modal State
   const [qrRequestModalOpen, setQrRequestModalOpen] = useState(false)
   const [submittingRequest, setSubmittingRequest] = useState(false)
@@ -252,10 +134,6 @@ export default function AttendancePage({ branchFilter: propBranchFilter, embedde
   const [myProfile, setMyProfile] = useState(null)
   const [myProfileLoading, setMyProfileLoading] = useState(false)
 
-  const html5QrCodeRef = useRef(null)
-  const isScannerRunningRef = useRef(false)
-  const isProcessingScan = useRef(false) // Debouncing lock
-  const fileInputRef = useRef(null)
   const inFlightRef = useRef(false)
   const isMountedRef = useRef(true)
 
@@ -328,31 +206,6 @@ export default function AttendancePage({ branchFilter: propBranchFilter, embedde
     }
   }
 
-  const handleSimulatePeriod = async () => {
-    setSimulatingPeriod(true)
-    try {
-      const res = await api.attendance.simulatePeriod({
-        start_date: periodStart || DEFAULT_PERIOD_START,
-        end_date: periodEnd || DEFAULT_PERIOD_END,
-        force: true,
-        branch: branchFilter !== 'All' ? branchFilter : undefined,
-        role: periodRoleFilter !== 'All' ? periodRoleFilter : undefined,
-      })
-      if (res?.success) {
-        setPeriodMetrics(res)
-        showToast(res.message || 'Simulated period attendance metrics successfully.', 'success')
-        loadData(true)
-        triggerDataSync('attendance')
-      } else {
-        showToast(res?.message || 'Failed to simulate period metrics', 'error')
-      }
-    } catch (err) {
-      showToast(err.message || 'Failed to simulate period metrics', 'error')
-    } finally {
-      setSimulatingPeriod(false)
-    }
-  }
-
   const loadScanLogs = async (silent = false) => {
     if (!silent) setScanLogsLoading(true)
     try {
@@ -407,10 +260,10 @@ export default function AttendancePage({ branchFilter: propBranchFilter, embedde
   }
 
   useEffect(() => {
-    if (isEmployee || isStoreAdmin) {
+    if (isEmployee && activeTab === 'my-qr') {
       loadMyProfile()
     }
-  }, [isEmployee, isStoreAdmin])
+  }, [isEmployee, activeTab])
 
   useEffect(() => {
     if (activeTab === 'log') {
@@ -423,7 +276,7 @@ export default function AttendancePage({ branchFilter: propBranchFilter, embedde
     }
   }, [activeTab, dateFrom, dateTo, deptFilter, statusFilter, branchFilter, scanLogsPage, scanLogsStatusFilter, scanLogsActionFilter, periodStart, periodEnd, periodRoleFilter])
 
-  // On-demand click-driven synchronization
+  // On-demand click-driven synchronization strictly scoped to active tab
   const { sync: syncAttendance, isSyncing: isSyncingAttendance } = useRealtimeSync(
     () => {
       if (activeTab === 'log') {
@@ -433,12 +286,11 @@ export default function AttendancePage({ branchFilter: propBranchFilter, embedde
         loadPeriodMetrics(false)
       } else if (activeTab === 'audit') {
         loadScanLogs(false)
-      }
-      if (isEmployee || isStoreAdmin) {
+      } else if (isEmployee && activeTab === 'my-qr') {
         loadMyProfile(false)
       }
     },
-    [activeTab, isEmployee, isStoreAdmin],
+    [activeTab, isEmployee],
     { module: 'attendance' }
   )
 
@@ -449,34 +301,8 @@ export default function AttendancePage({ branchFilter: propBranchFilter, embedde
     const dateToParam = searchParams.get('date_to')
     const idParam = searchParams.get('id')
     const tabParam = searchParams.get('tab')
-    if (tabParam) {
+    if (tabParam && tabParam !== 'punch') {
       setActiveTab(tabParam)
-      if (tabParam === 'punch') {
-        let restoredWaiting = false
-        try {
-          const saved = sessionStorage.getItem('pace_attendance_station_state')
-          if (saved) {
-            const parsed = JSON.parse(saved)
-            if (parsed.stationStep === 'waiting' && parsed.punchResult?.log_id) {
-              setStationStep('waiting')
-              setPunchResult(parsed.punchResult)
-              setScannedQrToken(parsed.scannedQrToken || '')
-              setIdentifiedEmployee(parsed.identifiedEmployee || null)
-              setCameraActive(false)
-              restoredWaiting = true
-            }
-          }
-        } catch (_) { }
-
-        if (!restoredWaiting) {
-          setStationStep('scan')
-          setPunchResult(null)
-          setScannedQrToken('')
-          setIdentifiedEmployee(null)
-          setCameraActive(true)
-          isProcessingScan.current = false
-        }
-      }
     } else if (idParam || searchParam || dateParam || dateFromParam || dateToParam) {
       setActiveTab('log')
       if (searchParam) setSearch(searchParam)
@@ -488,537 +314,6 @@ export default function AttendancePage({ branchFilter: propBranchFilter, embedde
       if (dateToParam) setDateTo(dateToParam)
     }
   }, [searchParams])
-
-  // Camera Scanner Lifecycle
-  useEffect(() => {
-    if (activeTab === 'punch' && stationStep === 'scan' && cameraActive && isStoreAdmin) {
-      startCamera()
-    } else {
-      stopCamera()
-    }
-
-    return () => {
-      stopCamera()
-    }
-  }, [activeTab, stationStep, cameraActive, selectedCameraId, isStoreAdmin])
-
-  // Return to Scan Employee QR Code screen on Cancel (Rule 6)
-  useEffect(() => {
-    const handleReturnToQr = async () => {
-      setFaceAuthModalOpen(false)
-      setQrMonitoringOpen(false)
-      setStationStep('scan')
-      if (isStoreAdmin) setActiveTab('punch')
-      setPunchResult(null)
-      setScannedQrToken('')
-      setIdentifiedEmployee(null)
-      setCameraActive(true)
-      isProcessingScan.current = false
-      try {
-        await stopCamera()
-      } catch (_) { }
-      setTimeout(() => {
-        startCamera()
-      }, 80)
-    }
-    window.addEventListener('pace:return-to-qr-scan', handleReturnToQr)
-    return () => window.removeEventListener('pace:return-to-qr-scan', handleReturnToQr)
-  }, [isStoreAdmin])
-
-  const checkCameraPermission = async () => {
-    // Check if getUserMedia is supported
-    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-      if (window.isSecureContext === false) {
-        setCameraError('⚠ INSECURE CONNECTION (HTTP) ⚠\n\nYour browser is blocking camera access because this app is running over HTTP.\n\nTo fix it, restart the terminal/server, reopen the app with the HTTPS URL, and then retry camera access.')
-        return false
-      }
-      setCameraError('Camera API is not supported in this browser. Please ensure you are using HTTPS.')
-      return false
-    }
-
-    try {
-      // Explicitly request camera permission to catch denied states gracefully
-      const stream = await navigator.mediaDevices.getUserMedia({ video: true })
-      // Stop the stream immediately, we just needed the permission granted
-      stream.getTracks().forEach(track => track.stop())
-      return true
-    } catch (err) {
-      console.error("Permission check failed:", err)
-      if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
-        setCameraError('Camera permission was denied. Please allow camera access in your browser settings and click Retry.')
-      } else if (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError') {
-        setCameraError('No camera device found on this system.')
-      } else {
-        setCameraError(`Camera initialization failed: ${err.message || 'Unknown error'}`)
-      }
-      return false
-    }
-  }
-
-  const startCamera = async () => {
-    setCameraError('')
-    try {
-      if (isScannerRunningRef.current) return;
-
-      const hasPermission = await checkCameraPermission()
-      if (!hasPermission) return // Error state is already set by checkCameraPermission
-
-      const devices = await Html5Qrcode.getCameras()
-      if (devices && devices.length > 0) {
-        setCameras(devices)
-        const backCam = devices.find(d =>
-          d.label.toLowerCase().includes('back') ||
-          d.label.toLowerCase().includes('rear') ||
-          d.label.toLowerCase().includes('environment')
-        )
-        const cameraId = selectedCameraId || (backCam ? backCam.id : devices[0].id)
-
-        if (!html5QrCodeRef.current) {
-          html5QrCodeRef.current = new Html5Qrcode('qr-reader-container')
-        }
-
-        if (!isScannerRunningRef.current) {
-          await html5QrCodeRef.current.start(
-            cameraId,
-            {
-              fps: 15,
-              qrbox: { width: 240, height: 240 },
-              aspectRatio: 1.0,
-              disableFlip: false,
-            },
-            onQrCodeScanned,
-            () => { } // Ignore continuous frame errors
-          )
-          const videoEl = document.querySelector('#qr-reader-container video')
-          if (videoEl) {
-            videoEl.style.transform = 'scaleX(-1)'
-            videoEl.style.objectFit = 'cover'
-          }
-          isScannerRunningRef.current = true
-        }
-      } else {
-        setCameraError('No camera found on this device.')
-      }
-    } catch (err) {
-      console.error("Camera Start Error:", err)
-      setCameraError('Unable to start the camera scanner. Please retry or use manual input.')
-      isScannerRunningRef.current = false
-    }
-  }
-
-
-
-  const stopCamera = async () => {
-    if (html5QrCodeRef.current && isScannerRunningRef.current) {
-      try {
-        await html5QrCodeRef.current.stop()
-        html5QrCodeRef.current.clear()
-      } catch (err) {
-        console.error("Error stopping camera:", err)
-      }
-      isScannerRunningRef.current = false
-    }
-  }
-
-  const onQrCodeScanned = async (decodedText) => {
-    if (!decodedText || verifyingQr || isProcessingScan.current) return
-
-    // Lock the scanner immediately
-    isProcessingScan.current = true
-
-    playTone('beep')
-    await handleVerifyQr(decodedText.trim())
-
-    // Release the lock after the backend responds
-    isProcessingScan.current = false
-  }
-
-  const handleVerifyQr = async (token) => {
-    setVerifyingQr(true)
-    setCameraError('')
-    try {
-      const res = await api.attendance.scan({
-        qr_token: token,
-        device_info: `${navigator.platform} (${navigator.userAgent})`,
-      })
-
-      if (res.success && (res.status === 'SUCCESS' || res.action)) {
-        playTone('success')
-        const actionName = (res.action || '').replace('ATTENDANCE_', '')
-        setPunchResult({
-          ...res,
-          action: actionName,
-          time: res.time || new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-          date: res.date || new Date().toLocaleDateString(),
-          message: res.message || `✓ ${actionName.replace('_', ' ')} SUCCESSFUL`,
-        })
-        await stopCamera()
-        setStationStep('result')
-        startAutoResetCountdown()
-        triggerDataSync('attendance')
-        showToast(res.message || `Attendance Recorded: ${res.employee?.name || 'Employee'}`, 'success')
-      } else if (res.success && res.status === 'PENDING') {
-        const fullPunchResult = { ...res, log_id: res.scan_log_id }
-        setScannedQrToken(token)
-        setIdentifiedEmployee(res.employee)
-        setPunchResult(fullPunchResult) // Store log_id
-        await stopCamera()
-        setStationStep('waiting') // Move to polling state
-        showToast(`Employee Identified: ${res.employee.name}`, 'success')
-
-        // Automatically trigger ATTENDANCE AUTHORIZATION modal for Store Admin / current user if scanned
-        const isSelf = (user?.employee_id && String(user.employee_id) === String(res.employee?.employee_id))
-          || (user?.employee?.employee_id && String(user.employee.employee_id) === String(res.employee?.employee_id))
-          || (user?.user_id && String(user.user_id) === String(res.employee?.user_id))
-          || (user?.role && (user.role.includes('Store Admin') || user.role.includes('Store Administrator')) && (res.employee?.position?.includes('Manager') || res.employee?.position?.includes('Store Admin') || String(user.branch_id) === String(res.employee?.branch_id)))
-
-        if (isSelf) {
-          sessionStorage.setItem('pace_attendance_station_state', JSON.stringify({
-            stationStep: 'waiting',
-            punchResult: fullPunchResult,
-            scannedQrToken: token,
-            identifiedEmployee: res.employee
-          }))
-
-          window.dispatchEvent(new CustomEvent('pace:trigger-face-auth', {
-            detail: {
-              id: res.scan_log_id,
-              scan_log_id: res.scan_log_id,
-              employee_id: res.employee.employee_id,
-              employee: res.employee,
-              employee_name: res.employee.name,
-              employee_code: res.employee.employee_code,
-              face_biometric_image: res.employee?.face_biometric_image || user?.face_biometric_image,
-              face_biometric_base64: res.employee?.face_biometric_base64 || user?.face_biometric_base64,
-              has_registered_face: !!(res.employee?.face_biometric_image || user?.face_biometric_image),
-              scanned_by: {
-                user_id: user?.user_id,
-                employee: user?.employee || { first_name: 'Store', last_name: 'Admin' }
-              }
-            }
-          }))
-
-          navigate('/store-admin/profile')
-        }
-        window.dispatchEvent(new CustomEvent('pace:verifications-sync'))
-      } else {
-        playTone('error')
-        showToast(res.message || 'Invalid or inactive QR code', 'error')
-      }
-    } catch (err) {
-      playTone('error')
-      if (err.status === 423) {
-        setIsLockedOut(true)
-        showToast(err.message || 'Account temporarily locked', 'error')
-      } else if (err.status === 403) {
-        showToast(err.message || 'Cross-branch scan unauthorized', 'error')
-      } else {
-        showToast(err.message || 'QR code verification failed', 'error')
-      }
-    } finally {
-      setVerifyingQr(false)
-    }
-  }
-
-  // Keep station state synced in sessionStorage whenever waiting so unmounting/navigating doesn't lose it
-  useEffect(() => {
-    if (stationStep === 'waiting' && punchResult?.log_id) {
-      sessionStorage.setItem('pace_attendance_station_state', JSON.stringify({
-        stationStep: 'waiting',
-        punchResult,
-        scannedQrToken,
-        identifiedEmployee
-      }))
-    } else if (stationStep === 'scan' || stationStep === 'result') {
-      sessionStorage.removeItem('pace_attendance_station_state')
-    }
-  }, [stationStep, punchResult, scannedQrToken, identifiedEmployee])
-
-  // --- Poll Backend while waiting for Employee PIN (1.2s non-overlapping cycle) ---
-  useEffect(() => {
-    let interval
-    let checkInFlight = false
-    if (stationStep === 'waiting' && punchResult?.log_id) {
-      interval = setInterval(async () => {
-        if (checkInFlight) return
-        checkInFlight = true
-        try {
-          const res = await api.attendance.checkVerification(punchResult.log_id)
-          if (!res) return
-          if (res.status === 'SUCCESS') {
-            sessionStorage.removeItem('pace_attendance_station_state')
-            clearInterval(interval)
-            playTone('success')
-            const actionName = (res.action || '').replace('ATTENDANCE_', '')
-            setPunchResult(prev => ({
-              ...(prev || {}),
-              ...res,
-              action: actionName,
-              verification_type: res.verification_type || prev?.verification_type || 'FACE_RECOGNITION',
-              face_verified: true,
-              time: res.time || new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-              date: res.date || new Date().toLocaleDateString(),
-              message: res.message || `✓ ${actionName.replace('_', ' ')} SUCCESSFUL`,
-            }))
-            setStationStep('result')
-            startAutoResetCountdown()
-            triggerDataSync('attendance')
-          } else if (res.status === 'FAILED') {
-            sessionStorage.removeItem('pace_attendance_station_state')
-            clearInterval(interval)
-            playTone('error')
-            const reason = res.log?.failure_reason || 'Employee verification failed or rejected.'
-            setPinError(reason)
-            showToast(reason, 'error')
-            setStationStep('scan')
-            startCamera()
-          }
-        } catch (err) {
-          console.error('Polling error:', err)
-        } finally {
-          checkInFlight = false
-        }
-      }, 1200)
-    }
-    return () => clearInterval(interval)
-  }, [stationStep, punchResult?.log_id])
-
-  const handleCancelWaiting = async () => {
-    sessionStorage.removeItem('pace_attendance_station_state')
-    const logId = punchResult?.log_id
-    if (logId) {
-      try {
-        await api.attendance.rejectVerification({
-          scan_log_id: logId,
-          reason: 'Attendance authorization cancelled by Store Administrator.'
-        })
-      } catch (_) { }
-    }
-    setStationStep('scan')
-    setPunchResult(null)
-    setScannedQrToken('')
-    setIdentifiedEmployee(null)
-    setCameraActive(true)
-    isProcessingScan.current = false
-    try {
-      await stopCamera()
-    } catch (_) { }
-    setTimeout(() => {
-      startCamera()
-    }, 80)
-    if (typeof window !== 'undefined') {
-      window.dispatchEvent(new CustomEvent('pace:return-to-qr-scan', {
-        detail: { authorized: false, cancelled: true, requestId: logId }
-      }))
-      window.dispatchEvent(new CustomEvent('pace:verifications-sync'))
-    }
-  }
-
-  const handleManualTokenSubmit = (e) => {
-    e?.preventDefault()
-    if (!manualTokenInput.trim()) return
-    handleVerifyQr(manualTokenInput.trim())
-  }
-
-  const handleFileUpload = async (e) => {
-    const file = e.target.files[0]
-    if (!file) return
-
-    setVerifyingQr(true)
-    setCameraError('')
-
-    try {
-      const formData = new FormData()
-      formData.append('qr_image', file)
-      formData.append('device_info', `${navigator.platform} (${navigator.userAgent})`)
-
-      const res = await api.attendance.scanImage(formData)
-
-      if (res.success && (res.status === 'SUCCESS' || res.action)) {
-        playTone('success')
-        const actionName = (res.action || '').replace('ATTENDANCE_', '')
-        setPunchResult({
-          ...res,
-          action: actionName,
-          time: res.time || new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-          date: res.date || new Date().toLocaleDateString(),
-          message: res.message || `✓ ${actionName.replace('_', ' ')} SUCCESSFUL`,
-        })
-        await stopCamera()
-        setStationStep('result')
-        startAutoResetCountdown()
-        triggerDataSync('attendance')
-        showToast(res.message || `Attendance Recorded: ${res.employee?.name || 'Employee'}`, 'success')
-      } else if (res.success && res.status === 'PENDING') {
-        const fullPunchResult = { ...res, log_id: res.scan_log_id }
-        const scanToken = res.qr_token || 'IMAGE_SCANNED'
-        setScannedQrToken(scanToken)
-        setIdentifiedEmployee(res.employee)
-        setPunchResult(fullPunchResult) // Store log_id
-        await stopCamera()
-        setStationStep('waiting') // Move to polling state
-        showToast(`Employee Identified: ${res.employee.name}`, 'success')
-
-        // Automatically trigger ATTENDANCE AUTHORIZATION modal for Store Admin / current user if scanned
-        const isSelf = (user?.employee_id && String(user.employee_id) === String(res.employee?.employee_id))
-          || (user?.employee?.employee_id && String(user.employee.employee_id) === String(res.employee?.employee_id))
-          || (user?.user_id && String(user.user_id) === String(res.employee?.user_id))
-          || (user?.role && (user.role.includes('Store Admin') || user.role.includes('Store Administrator')) && (res.employee?.position?.includes('Manager') || res.employee?.position?.includes('Store Admin') || String(user.branch_id) === String(res.employee?.branch_id)))
-
-        if (isSelf) {
-          sessionStorage.setItem('pace_attendance_station_state', JSON.stringify({
-            stationStep: 'waiting',
-            punchResult: fullPunchResult,
-            scannedQrToken: scanToken,
-            identifiedEmployee: res.employee
-          }))
-
-          window.dispatchEvent(new CustomEvent('pace:trigger-face-auth', {
-            detail: {
-              id: res.scan_log_id,
-              scan_log_id: res.scan_log_id,
-              employee_id: res.employee.employee_id,
-              employee: res.employee,
-              employee_name: res.employee.name,
-              employee_code: res.employee.employee_code,
-              face_biometric_image: res.employee?.face_biometric_image || user?.face_biometric_image,
-              face_biometric_base64: res.employee?.face_biometric_base64 || user?.face_biometric_base64,
-              has_registered_face: !!(res.employee?.face_biometric_image || user?.face_biometric_image),
-              scanned_by: {
-                user_id: user?.user_id,
-                employee: user?.employee || { first_name: 'Store', last_name: 'Admin' }
-              }
-            }
-          }))
-
-          navigate('/store-admin/profile')
-        }
-        window.dispatchEvent(new CustomEvent('pace:verifications-sync'))
-      } else {
-        playTone('error')
-        showToast(res.message || 'Invalid or inactive QR code', 'error')
-      }
-    } catch (err) {
-      playTone('error')
-      if (err.status === 423) {
-        setIsLockedOut(true)
-        showToast(err.message || 'Account temporarily locked', 'error')
-      } else if (err.status === 403) {
-        showToast(err.message || 'Cross-branch scan unauthorized', 'error')
-      } else {
-        showToast(err.message || 'Could not decode QR code from the uploaded image.', 'error')
-      }
-    } finally {
-      setVerifyingQr(false)
-      e.target.value = ''
-    }
-  }
-
-  const handlePinDigit = (digit) => {
-    if (enteredPin.length < 6) {
-      setEnteredPin(prev => prev + digit)
-      setPinError('')
-    }
-  }
-
-  const handlePinDelete = () => {
-    setEnteredPin(prev => prev.slice(0, -1))
-    setPinError('')
-  }
-
-  const handlePinClear = () => {
-    setEnteredPin('')
-    setPinError('')
-  }
-
-  const handleVerifyPin = async (e) => {
-    if (e) e.preventDefault()
-    if (!scannedQrToken || enteredPin.length < 4) {
-      setPinError('Please enter your 4 to 6 digit employee PIN')
-      return
-    }
-
-    setVerifyingPin(true)
-    setPinError('')
-    try {
-      const res = await api.attendance.verifyPin({
-        qr_token: scannedQrToken,
-        pin: enteredPin,
-        action: availableActions[0] || selectedAction,
-        device_info: `${navigator.platform} (${navigator.userAgent})`,
-      })
-
-      if (res.success) {
-        playTone('success')
-        setPunchResult(res)
-        setStationStep('result')
-        startAutoResetCountdown()
-        triggerDataSync('attendance')
-        showToast(res.message || 'Attendance verified and recorded!', 'success')
-      } else {
-        playTone('error')
-        setPinError(res.message || 'PIN verification failed')
-        setEnteredPin('')
-      }
-    } catch (err) {
-      playTone('error')
-      setPinError(err.message || 'PIN verification failed')
-      setEnteredPin('')
-      if (err.status === 423) {
-        setIsLockedOut(true)
-      }
-    } finally {
-      setVerifyingPin(false)
-    }
-  }
-
-  const startAutoResetCountdown = () => {
-    if (countdownTimerRef.current) clearInterval(countdownTimerRef.current)
-    setCountdown(8)
-    countdownTimerRef.current = setInterval(() => {
-      setCountdown(prev => {
-        if (prev <= 1) {
-          clearInterval(countdownTimerRef.current)
-          resetStation()
-          return 0
-        }
-        return prev - 1
-      })
-    }, 1000)
-  }
-
-  const resetStation = () => {
-    sessionStorage.removeItem('pace_attendance_station_state')
-    if (countdownTimerRef.current) clearInterval(countdownTimerRef.current)
-    setStationStep('scan')
-    setIdentifiedEmployee(null)
-    setAvailableActions([])
-    setSelectedAction('')
-    setScannedQrToken('')
-    setEnteredPin('')
-    setPinError('')
-    setIsLockedOut(false)
-    setPunchResult(null)
-    setManualTokenInput('')
-  }
-
-  const startEmployeeSelfPunch = (action) => {
-    if (!myProfile?.qr_token) return
-
-    setScannedQrToken(myProfile.qr_token)
-    setIdentifiedEmployee({
-      name: `${myProfile.first_name || ''} ${myProfile.last_name || ''}`.trim() || myProfile.name || 'Employee',
-      employee_code: myProfile.employee_code || '',
-      branch: myProfile.branch || userBranch,
-    })
-    setAvailableActions([action])
-    setSelectedAction(action)
-    setEnteredPin('')
-    setPinError('')
-    setIsLockedOut(false)
-    setPunchResult(null)
-    setStationStep('pin')
-  }
 
   const handleDownloadMyQr = async () => {
     const ok = await downloadCenteredQrPng(
@@ -1047,7 +342,7 @@ export default function AttendancePage({ branchFilter: propBranchFilter, embedde
   }
 
   const filtered = useMemo(() => {
-    let result = filterBySearch(records, search, ['employee_name', 'employee_code', 'department'])
+    let result = filterBySearch(records, deferredSearch, ['employee_name', 'employee_code', 'department'])
     if (branchFilter && branchFilter !== 'All') {
       result = result.filter(r => {
         const b = r.branch?.name || (typeof r.branch === 'string' ? r.branch : '')
@@ -1061,7 +356,7 @@ export default function AttendancePage({ branchFilter: propBranchFilter, embedde
       result = result.filter(r => String(r.attendance_date || '').slice(0, 10) <= dateTo)
     }
     return result
-  }, [records, search, branchFilter, dateFrom, dateTo])
+  }, [records, deferredSearch, branchFilter, dateFrom, dateTo])
 
   const total = filtered.length
   const paginated = filtered.slice((page - 1) * pageSize, page * pageSize)
@@ -1125,7 +420,7 @@ export default function AttendancePage({ branchFilter: propBranchFilter, embedde
 
   const filteredPeriodStaff = useMemo(() => {
     const list = periodMetrics?.staff || []
-    const q = periodSearch.trim().toLowerCase()
+    const q = deferredPeriodSearch.trim().toLowerCase()
     if (!q) return list
     return list.filter(s =>
       String(s.employee_name || '').toLowerCase().includes(q) ||
@@ -1133,7 +428,7 @@ export default function AttendancePage({ branchFilter: propBranchFilter, embedde
       String(s.role || '').toLowerCase().includes(q) ||
       String(s.branch || '').toLowerCase().includes(q)
     )
-  }, [periodMetrics, periodSearch])
+  }, [periodMetrics, deferredPeriodSearch])
 
   // Determine Tab Options
   const tabList = isEmployee
@@ -1144,7 +439,6 @@ export default function AttendancePage({ branchFilter: propBranchFilter, embedde
     ]
     : isStoreAdmin
       ? [
-        { id: 'punch', label: 'QR Attendance Terminal', icon: <FiCamera className="w-3.5 h-3.5 text-primary" /> },
         { id: 'log', label: 'Branch Attendance Daily Logs', icon: <FiClock className="w-3.5 h-3.5" /> },
         { id: 'timesheet', label: 'Timesheet & Summary', icon: <FiBarChart2 className="w-3.5 h-3.5" /> },
         { id: 'audit', label: 'Security Scan Logs', icon: <FiShield className="w-3.5 h-3.5" /> },
@@ -1162,14 +456,14 @@ export default function AttendancePage({ branchFilter: propBranchFilter, embedde
           isEmployee
             ? "My Attendance & Permanent QR Badge"
             : isStoreAdmin
-              ? "QR Attendance Terminal & Branch Logs"
+              ? "Branch Attendance Logs"
               : "Attendance Logs & Verification Records"
         }
         subtitle={
           isEmployee
             ? "View your permanent QR attendance badge, punch records, and monthly timesheet summary"
             : isStoreAdmin
-              ? `Store Administrator Scanner Terminal • Authorized Branch: ${userBranch}`
+              ? `Branch Attendance Records & Verification Logs • Authorized Branch: ${userBranch}`
               : "Monitor organization-wide attendance records, QR + PIN verification methods, and work hours"
         }
         action={
@@ -1185,16 +479,6 @@ export default function AttendancePage({ branchFilter: propBranchFilter, embedde
                 <span>{exporting ? 'Exporting...' : 'Export CSV'}</span>
               </button>
             )}
-            {isAdmin && (
-              <Btn
-                variant="primary"
-                size="sm"
-                onClick={() => setQrMonitoringOpen(true)}
-                icon={<FiCamera className="w-4 h-4" />}
-              >
-                QR Monitoring
-              </Btn>
-            )}
             {isEmployee && (
               <Btn
                 variant="outline"
@@ -1204,16 +488,6 @@ export default function AttendancePage({ branchFilter: propBranchFilter, embedde
                 className="border-emerald-500/40 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/10"
               >
                 Face Recognition
-              </Btn>
-            )}
-            {isStoreAdmin && activeTab !== 'punch' && (
-              <Btn
-                variant="primary"
-                size="sm"
-                onClick={() => setActiveTab('punch')}
-                icon={<FiCamera className="w-4 h-4" />}
-              >
-                Open QR Scanner Terminal
               </Btn>
             )}
           </div>
@@ -1237,278 +511,6 @@ export default function AttendancePage({ branchFilter: propBranchFilter, embedde
           onChange={setActiveTab}
         />
       </div>
-
-      {/* TAB: STORE ADMINISTRATOR QR SCANNER TERMINAL */}
-      {isStoreAdmin && activeTab === 'punch' && (
-        <div className="max-w-3xl mx-auto space-y-6">
-          {/* STEP 1: LIVE CAMERA SCANNER */}
-          {stationStep === 'scan' && (
-            <Card className="p-6 border border-border shadow-xl space-y-4">
-              <div className="text-center space-y-1">
-                <span className="text-[10px] uppercase font-bold tracking-wider text-primary">
-                  Store Administrator Attendance Terminal • Step 1
-                </span>
-                <h2 className="text-lg font-bold text-foreground">Scan Employee QR Code</h2>
-                <p className="text-xs text-muted-foreground max-w-md mx-auto">
-                  Position the employee's permanent attendance QR code in front of the camera.
-                </p>
-              </div>
-
-              {cameraError && (
-                <div className="p-4 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-500 text-xs font-semibold text-center mx-auto max-w-sm mb-4 space-y-3">
-                  <div className="whitespace-pre-line">{cameraError}</div>
-                  <div className="flex items-center justify-center gap-3">
-                    <button
-                      type="button"
-                      onClick={startCamera}
-                      className="px-4 py-2 bg-amber-500/20 hover:bg-amber-500/30 text-amber-600 rounded-lg transition-colors flex items-center gap-2"
-                    >
-                      <FiRefreshCw className="w-3.5 h-3.5" />
-                      Retry Camera
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => fileInputRef.current?.click()}
-                      className="px-4 py-2 bg-primary/20 hover:bg-primary/30 text-primary rounded-lg transition-colors flex items-center gap-2"
-                    >
-                      <FiUpload className="w-3.5 h-3.5" />
-                      Upload Image
-                    </button>
-                    <input
-                      type="file"
-                      ref={fileInputRef}
-                      className="hidden"
-                      accept="image/*"
-                      capture="environment"
-                      onChange={handleFileUpload}
-                    />
-                  </div>
-                </div>
-              )}
-
-              {/* Viewport (Always in DOM for Html5Qrcode initialization) */}
-              <div className="w-full max-w-sm mx-auto aspect-square bg-slate-950 rounded-2xl border-2 border-slate-700 overflow-hidden relative shadow-2xl flex items-center justify-center">
-                <div
-                  id="qr-reader-container"
-                  className="w-full h-full [&_video]:-scale-x-100! [&_video]:object-cover [&_#qr-shaded-region>div]:hidden"
-                />
-
-                {/* Target Overlay */}
-                <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
-                  <div className="w-60 h-60 border-2 border-primary/80 rounded-2xl relative animate-pulse shadow-lg shadow-primary/20">
-                    <div className="absolute -top-0.5 -left-0.5 w-6 h-6 border-t-4 border-l-4 border-primary rounded-tl-xl" />
-                    <div className="absolute -top-0.5 -right-0.5 w-6 h-6 border-t-4 border-r-4 border-primary rounded-tr-xl" />
-                    <div className="absolute -bottom-0.5 -left-0.5 w-6 h-6 border-b-4 border-l-4 border-primary rounded-bl-xl" />
-                    <div className="absolute -bottom-0.5 -right-0.5 w-6 h-6 border-b-4 border-r-4 border-primary rounded-br-xl" />
-                  </div>
-                </div>
-
-                {verifyingQr && (
-                  <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-xs flex flex-col items-center justify-center text-primary gap-2 z-20">
-                    <FiRefreshCw className="animate-spin text-3xl" />
-                    <span className="text-xs font-bold text-white">Verifying Employee QR...</span>
-                  </div>
-                )}
-              </div>
-
-              {/* Camera Switcher */}
-              {cameras.length > 1 && !cameraError && (
-                <div className="flex items-center justify-center gap-2 text-xs text-muted-foreground mt-4">
-                  <FiCamera />
-                  <select
-                    value={selectedCameraId}
-                    onChange={(e) => setSelectedCameraId(e.target.value)}
-                    className="bg-card border border-border rounded-lg px-2.5 py-1 text-xs outline-none text-foreground font-semibold"
-                  >
-                    {cameras.map(c => (
-                      <option key={c.id} value={c.id}>{c.label || `Camera ${c.id.slice(0, 5)}`}</option>
-                    ))}
-                  </select>
-                </div>
-              )}
-
-              {/* Manual Barcode / Token Input Fallback */}
-              <div className="pt-2 max-w-sm mx-auto">
-                <form onSubmit={handleManualTokenSubmit} className="flex gap-2">
-                  <input
-                    type="text"
-                    value={manualTokenInput}
-                    onChange={e => setManualTokenInput(e.target.value)}
-                    placeholder="Scan or paste token..."
-                    className="flex-1 px-3 py-1.5 rounded-xl border border-border bg-card text-foreground font-mono text-xs outline-none"
-                  />
-                  <Btn type="submit" size="sm" variant="primary" disabled={verifyingQr || !manualTokenInput.trim()}>
-                    Scan
-                  </Btn>
-
-                  {/* File Upload Button Fallback */}
-                  <label className="flex items-center justify-center px-3 py-1.5 rounded-xl bg-muted hover:bg-muted/80 text-foreground cursor-pointer transition-colors border border-border shadow-xs">
-                    <input
-                      type="file"
-                      accept="image/*"
-                      className="hidden"
-                      onChange={handleFileUpload}
-                      disabled={verifyingQr}
-                    />
-                    <FiCamera className="w-4 h-4 text-muted-foreground" />
-                    <span className="ml-1.5 text-xs font-bold">Upload Image</span>
-                  </label>
-                </form>
-              </div>
-            </Card>
-          )}
-
-          {/* STEP 2: WAITING FOR EMPLOYEE PIN */}
-          {stationStep === 'waiting' && punchResult && (
-            <Card className="p-8 border border-border shadow-2xl max-w-lg mx-auto text-center space-y-5 animate-fadeIn">
-              <div className="w-16 h-16 rounded-full bg-primary/20 text-primary border-2 border-primary/40 flex items-center justify-center mx-auto text-3xl shadow-lg">
-                <FiRefreshCw className="animate-spin" />
-              </div>
-
-              <div>
-                <h2 className="text-xl font-black text-foreground uppercase">
-                  WAITING FOR EMPLOYEE
-                </h2>
-                <p className="text-xs text-muted-foreground mt-1">
-                  Employee <span className="font-bold text-foreground">{punchResult.employee?.name}</span> ({punchResult.employee?.employee_code}) can authorize on their device, or verify on this terminal:
-                </p>
-              </div>
-
-              {/* Quick Biometric Authorization Trigger */}
-              <div className="pt-1">
-                <Btn
-                  variant="primary"
-                  size="md"
-                  className="w-full flex items-center justify-center gap-2 font-bold"
-                  onClick={() => {
-                    window.dispatchEvent(new CustomEvent('pace:trigger-face-auth', {
-                      detail: {
-                        id: punchResult.scan_log_id || punchResult.log_id,
-                        scan_log_id: punchResult.scan_log_id || punchResult.log_id,
-                        employee_id: punchResult.employee?.employee_id,
-                        employee: punchResult.employee,
-                        employee_name: punchResult.employee?.name,
-                        employee_code: punchResult.employee?.employee_code,
-                        face_biometric_image: punchResult.employee?.face_biometric_image || user?.face_biometric_image,
-                        face_biometric_base64: punchResult.employee?.face_biometric_base64 || user?.face_biometric_base64,
-                        has_registered_face: !!(punchResult.employee?.face_biometric_image || user?.face_biometric_image),
-                        scanned_by: {
-                          user_id: user?.user_id,
-                          employee: user?.employee || { first_name: 'Store', last_name: 'Admin' }
-                        }
-                      }
-                    }))
-                  }}
-                  icon={<FiCheckCircle className="w-4 h-4 text-emerald-400" />}
-                >
-                  Open Attendance Authorization (Face ID)
-                </Btn>
-              </div>
-
-              {/* On-Terminal PIN Entry Form */}
-              <form onSubmit={handleVerifyPin} className="space-y-3 pt-3 border-t border-border">
-                <p className="text-xs font-semibold text-foreground">
-                  Or enter PIN on this terminal:
-                </p>
-                <div className="flex gap-2 justify-center max-w-xs mx-auto">
-                  <input
-                    type="password"
-                    maxLength={6}
-                    value={enteredPin}
-                    onChange={e => {
-                      setEnteredPin(e.target.value.replace(/\D/g, ''))
-                      setPinError('')
-                    }}
-                    placeholder="••••"
-                    className="flex-1 px-4 py-2 text-center text-lg font-mono tracking-widest rounded-xl border border-border bg-card text-foreground outline-none focus:ring-2 focus:ring-primary shadow-xs"
-                    disabled={verifyingPin}
-                    autoFocus
-                  />
-                  <Btn type="submit" variant="primary" disabled={verifyingPin || enteredPin.length < 4} icon={<FiCheckCircle />}>
-                    {verifyingPin ? 'Verifying...' : 'Verify PIN'}
-                  </Btn>
-                </div>
-                {pinError && (
-                  <p className="text-xs text-destructive font-medium">{pinError}</p>
-                )}
-              </form>
-
-              <div className="pt-2">
-                <Btn variant="outline" size="lg" className="w-full" onClick={handleCancelWaiting} icon={<FiCamera />}>
-                  Cancel & Scan Next Employee
-                </Btn>
-              </div>
-            </Card>
-          )}
-
-          {/* STEP 3: SUCCESS RESULT */}
-          {stationStep === 'result' && punchResult && (
-            <Card className="p-8 border border-border shadow-2xl max-w-lg mx-auto text-center space-y-5 animate-fadeIn">
-              <div className="w-16 h-16 rounded-full bg-emerald-500/20 text-emerald-500 border-2 border-emerald-500/40 flex items-center justify-center mx-auto text-3xl shadow-lg">
-                <FiCheckCircle />
-              </div>
-
-              <div>
-                <h2 className="text-xl font-black text-emerald-600 dark:text-emerald-400 uppercase">
-                  {punchResult.action === 'TIME_IN'
-                    ? '✓ TIME IN SUCCESSFUL'
-                    : punchResult.action === 'TIME_OUT'
-                      ? '✓ TIME OUT SUCCESSFUL'
-                      : '✓ ATTENDANCE VERIFIED'}
-                </h2>
-                <p className="text-xs text-muted-foreground mt-1">
-                  {punchResult.message}
-                </p>
-              </div>
-
-              <div className="p-4 rounded-2xl bg-muted/30 border border-border text-xs space-y-2 text-left">
-                <div className="flex justify-between py-1 border-b border-border">
-                  <span className="text-muted-foreground">Employee:</span>
-                  <span className="font-bold text-foreground">{punchResult.employee?.name}</span>
-                </div>
-                <div className="flex justify-between py-1 border-b border-border">
-                  <span className="text-muted-foreground">Employee Code:</span>
-                  <span className="font-mono font-bold text-primary">{punchResult.employee?.employee_code}</span>
-                </div>
-                <div className="flex justify-between py-1 border-b border-border">
-                  <span className="text-muted-foreground">Timestamp:</span>
-                  <span className="font-mono font-bold text-foreground">{punchResult.time}</span>
-                </div>
-                {punchResult.action === 'TIME_OUT' && (
-                  <>
-                    <div className="flex justify-between py-1 border-b border-border">
-                      <span className="text-muted-foreground">Total Hours:</span>
-                      <span className="font-mono font-bold text-emerald-600 dark:text-emerald-400">{punchResult.total_hours} hrs</span>
-                    </div>
-                    <div className="flex justify-between py-1 border-b border-border">
-                      <span className="text-muted-foreground">Overtime:</span>
-                      <span className="font-mono font-bold text-amber-500">{punchResult.overtime_hours} hrs</span>
-                    </div>
-                  </>
-                )}
-                <div className="flex justify-between py-1 border-b border-border">
-                  <span className="text-muted-foreground">Branch:</span>
-                  <span className="font-semibold text-foreground">{punchResult.branch?.name || (typeof punchResult.branch === 'string' ? punchResult.branch : userBranch)}</span>
-                </div>
-                <div className="flex justify-between py-1">
-                  <span className="text-muted-foreground">Verification Method:</span>
-                  <span className="font-bold text-foreground">
-                    {punchResult.verification_type === 'FACE_RECOGNITION' || punchResult.face_verified
-                      ? 'QR + Biometric Face ID'
-                      : 'QR + PIN'}
-                  </span>
-                </div>
-              </div>
-
-              <div className="pt-2">
-                <Btn variant="primary" size="lg" className="w-full" onClick={resetStation} icon={<FiCamera />}>
-                  Scan Next Employee ({countdown}s)
-                </Btn>
-              </div>
-            </Card>
-          )}
-        </div>
-      )}
 
       {/* TAB: EMPLOYEE PERSONAL ATTENDANCE QR */}
       {isEmployee && activeTab === 'my-qr' && (
@@ -1972,11 +974,10 @@ export default function AttendancePage({ branchFilter: propBranchFilter, embedde
                             <div className="flex flex-col items-center gap-1">
                               <StatusBadge status={a.status} />
                               {a.status === 'Absent' && (a.reason_code || a.absence_status) && (
-                                <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold ${
-                                  a.absence_status === 'Excused'
-                                    ? 'bg-sky-50 text-sky-700 border border-sky-200 dark:bg-sky-950/40 dark:text-sky-300 dark:border-sky-800'
-                                    : 'bg-rose-50 text-rose-700 border border-rose-200 dark:bg-rose-950/40 dark:text-rose-300 dark:border-rose-800'
-                                }`}>
+                                <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold ${a.absence_status === 'Excused'
+                                  ? 'bg-sky-50 text-sky-700 border border-sky-200 dark:bg-sky-950/40 dark:text-sky-300 dark:border-sky-800'
+                                  : 'bg-rose-50 text-rose-700 border border-rose-200 dark:bg-rose-950/40 dark:text-rose-300 dark:border-rose-800'
+                                  }`}>
                                   {a.reason_code ? `[${a.reason_code}] ` : ''}{a.absence_status || 'Unexcused'}
                                 </span>
                               )}
@@ -2097,16 +1098,6 @@ export default function AttendancePage({ branchFilter: propBranchFilter, embedde
                     Oct 12 – Nov 20
                   </Btn>
                 )}
-                {!isEmployee && (
-                  <Btn
-                    size="sm"
-                    onClick={handleSimulatePeriod}
-                    disabled={simulatingPeriod || periodLoading}
-                  >
-                    <FiRefreshCw className={`w-3.5 h-3.5 mr-1.5 ${simulatingPeriod ? 'animate-spin' : ''}`} />
-                    {simulatingPeriod ? 'Simulating...' : 'Simulate / Recalculate Period'}
-                  </Btn>
-                )}
               </div>
             </div>
 
@@ -2205,8 +1196,7 @@ export default function AttendancePage({ branchFilter: propBranchFilter, embedde
               <EmptyState
                 icon={<FiBarChart2 className="w-12 h-12 text-muted-foreground/30 mx-auto" />}
                 title="No period attendance data"
-                description="Click 'Simulate / Recalculate Period' to generate Oct 12 – Nov 20 metrics."
-                action={!isEmployee ? <Btn size="sm" onClick={handleSimulatePeriod}>Simulate Period</Btn> : null}
+                description="No attendance metrics were found for the selected date range and filters."
               />
             ) : (
               <div className="overflow-x-auto">
@@ -2236,11 +1226,10 @@ export default function AttendancePage({ branchFilter: propBranchFilter, embedde
                           <div className="text-[10px] text-muted-foreground">{s.position || s.department}</div>
                         </td>
                         <td className="py-3 px-3 align-top whitespace-nowrap">
-                          <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold border ${
-                            s.role === 'Store Admin'
-                              ? 'bg-indigo-50 text-indigo-700 border-indigo-200 dark:bg-indigo-950/40 dark:text-indigo-300 dark:border-indigo-800'
-                              : 'bg-slate-100 text-slate-700 border-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700'
-                          }`}>
+                          <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold border ${s.role === 'Store Admin'
+                            ? 'bg-indigo-50 text-indigo-700 border-indigo-200 dark:bg-indigo-950/40 dark:text-indigo-300 dark:border-indigo-800'
+                            : 'bg-slate-100 text-slate-700 border-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700'
+                            }`}>
                             {s.role}
                           </span>
                           <div className="text-[11px] text-muted-foreground mt-1">{s.branch || '—'}</div>
@@ -2487,13 +1476,6 @@ export default function AttendancePage({ branchFilter: propBranchFilter, embedde
         </div>
       )}
 
-      {/* QR ATTENDANCE MONITORING MODAL */}
-      <QrMonitoringModal
-        open={qrMonitoringOpen}
-        isOpen={qrMonitoringOpen}
-        onClose={() => setQrMonitoringOpen(false)}
-      />
-
       {/* EMPLOYEE FACE RECOGNITION ENROLLMENT MODAL ("Add a face") */}
       {isEmployee && faceAuthModalOpen && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-in fade-in duration-200 overflow-y-auto">
@@ -2523,60 +1505,6 @@ export default function AttendancePage({ branchFilter: propBranchFilter, embedde
             />
           </div>
         </div>
-      )}
-
-      {/* FACE RECOGNITION ATTENDANCE AUTHORIZATION MODAL */}
-      {!isEmployee && (
-        <FaceRecognitionAttendanceModal
-          isOpen={faceAuthModalOpen}
-          request={punchResult || null}
-          employee={identifiedEmployee || punchResult?.employee || myProfile || user?.employee || user}
-          onClose={() => {
-            setFaceAuthModalOpen(false)
-            setStationStep('scan')
-            setActiveTab('punch')
-            setPunchResult(null)
-            setScannedQrToken('')
-            setIdentifiedEmployee(null)
-            setCameraActive(true)
-            isProcessingScan.current = false
-            setTimeout(() => startCamera(), 80)
-          }}
-          onCancel={() => {
-            setFaceAuthModalOpen(false)
-            setStationStep('scan')
-            setActiveTab('punch')
-            setPunchResult(null)
-            setScannedQrToken('')
-            setIdentifiedEmployee(null)
-            setCameraActive(true)
-            isProcessingScan.current = false
-            setTimeout(() => startCamera(), 80)
-          }}
-          onAuthorize={() => {
-            setFaceAuthModalOpen(false)
-            setStationStep('scan')
-            setActiveTab('punch')
-            setPunchResult(null)
-            setScannedQrToken('')
-            setIdentifiedEmployee(null)
-            setCameraActive(true)
-            isProcessingScan.current = false
-            setTimeout(() => startCamera(), 80)
-          }}
-          onSuccess={() => {
-            setFaceAuthModalOpen(false)
-            setStationStep('scan')
-            setActiveTab('punch')
-            setPunchResult(null)
-            setScannedQrToken('')
-            setIdentifiedEmployee(null)
-            setCameraActive(true)
-            isProcessingScan.current = false
-            setTimeout(() => startCamera(), 80)
-          }}
-          adminName={user?.name || "talom clavite"}
-        />
       )}
 
       {/* STAFF PERIOD METRICS DRILLDOWN MODAL */}
@@ -2650,11 +1578,10 @@ export default function AttendancePage({ branchFilter: propBranchFilter, embedde
                       <td className="py-2 px-3 font-mono font-bold whitespace-nowrap">{ab.date}</td>
                       <td className="py-2 px-3 font-mono font-bold whitespace-nowrap">{ab.reason_code} — {ab.reason_label}</td>
                       <td className="py-2 px-3 whitespace-nowrap">
-                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${
-                          ab.status === 'Excused'
-                            ? 'bg-sky-50 text-sky-700 border-sky-200 dark:bg-sky-950/40 dark:text-sky-300 dark:border-sky-800'
-                            : 'bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-950/40 dark:text-rose-300 dark:border-rose-800'
-                        }`}>{ab.status}</span>
+                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${ab.status === 'Excused'
+                          ? 'bg-sky-50 text-sky-700 border-sky-200 dark:bg-sky-950/40 dark:text-sky-300 dark:border-sky-800'
+                          : 'bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-950/40 dark:text-rose-300 dark:border-rose-800'
+                          }`}>{ab.status}</span>
                       </td>
                       <td className="py-2 px-3 text-muted-foreground">{ab.remarks || '—'}</td>
                     </tr>

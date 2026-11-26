@@ -101,6 +101,11 @@ class BranchController extends Controller
      */
     public function store(Request $request)
     {
+        $user = $request->user();
+        if (!$user || !in_array($user->role, ['Administrator', 'Admin'], true)) {
+            return response()->json(['message' => 'Unauthorized: Only Administrators can create branches.'], 403);
+        }
+
         $validated = $request->validate([
             'name' => 'required|string|max:255|unique:branch_profiles',
             'branch_code' => 'nullable|string|max:50',
@@ -159,6 +164,8 @@ class BranchController extends Controller
             $branch->save();
         }
 
+        SyncController::invalidateFingerprint(['branches', 'dashboard', 'system']);
+
         return response()->json([
             'message' => 'Branch created successfully',
             'branch' => $branch
@@ -170,7 +177,15 @@ class BranchController extends Controller
      */
     public function uploadImage(Request $request, $id)
     {
+        $user = $request->user();
+        if (!$user || !in_array($user->role, ['Administrator', 'Admin', 'Store Administrator', 'Store Admin'], true)) {
+            return response()->json(['message' => 'Unauthorized: Only Administrators can update branch images.'], 403);
+        }
+
         $branch = BranchProfile::findOrFail($id);
+        if (in_array($user->role, ['Store Administrator', 'Store Admin'], true) && (int) ($user->employee?->branch_id ?? 0) !== (int) $branch->id) {
+            return response()->json(['message' => 'Unauthorized: Store Administrators can only update their assigned branch.'], 403);
+        }
 
         $request->validate([
             'image' => 'required|image|mimes:jpeg,png,jpg,gif,webp|max:5120',
@@ -206,7 +221,16 @@ class BranchController extends Controller
      */
     public function update(Request $request, $id)
     {
+        $user = $request->user();
+        if (!$user || !in_array($user->role, ['Administrator', 'Admin', 'Store Administrator', 'Store Admin'], true)) {
+            return response()->json(['message' => 'Unauthorized: Only Administrators can update branches.'], 403);
+        }
+
         $branch = BranchProfile::findOrFail($id);
+        $isStoreAdmin = in_array($user->role, ['Store Administrator', 'Store Admin'], true);
+        if ($isStoreAdmin && (int) ($user->employee?->branch_id ?? 0) !== (int) $branch->id) {
+            return response()->json(['message' => 'Unauthorized: Store Administrators can only update their assigned branch.'], 403);
+        }
         $oldName = $branch->name;
         $oldImageUrl = $branch->image_url;
 
@@ -241,7 +265,9 @@ class BranchController extends Controller
             }
         }
 
-        if (array_key_exists('manager_id', $validated)) {
+        if ($isStoreAdmin) {
+            unset($validated['manager_id'], $validated['manager_name'], $validated['status']);
+        } elseif (array_key_exists('manager_id', $validated)) {
             $validated['manager_id'] = !empty($validated['manager_id']) && is_numeric($validated['manager_id'])
                 ? (int) $validated['manager_id']
                 : null;
@@ -274,8 +300,9 @@ class BranchController extends Controller
                 ->update(['branch' => $branch->name]);
 
             \Illuminate\Support\Facades\DB::table('qr_requests')
-                ->where('branch', $oldName)
-                ->update(['branch' => $branch->name]);
+                ->where('branch_id', $branch->id)
+                ->orWhere('branch', $oldName)
+                ->update(['branch' => $branch->name, 'branch_id' => $branch->id]);
         }
 
         if ($request->hasFile('image')) {
@@ -326,6 +353,8 @@ class BranchController extends Controller
             ]);
         }
 
+        SyncController::invalidateFingerprint(['branches', 'dashboard', 'system']);
+
         return response()->json([
             'message' => 'Branch updated successfully',
             'image_url' => $branch->image_url,
@@ -336,8 +365,13 @@ class BranchController extends Controller
     /**
      * Delete a branch.
      */
-    public function destroy($id)
+    public function destroy(Request $request, $id)
     {
+        $user = $request->user();
+        if (!$user || !in_array($user->role, ['Administrator', 'Admin'], true)) {
+            return response()->json(['message' => 'Unauthorized: Only Administrators can delete branches.'], 403);
+        }
+
         $branch = BranchProfile::findOrFail($id);
         
         // Prevent deletion if branch has linked records
@@ -348,6 +382,8 @@ class BranchController extends Controller
         }
 
         $branch->delete();
+
+        SyncController::invalidateFingerprint(['branches', 'dashboard', 'system']);
 
         return response()->json([
             'message' => 'Branch deleted successfully'

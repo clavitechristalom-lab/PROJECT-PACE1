@@ -58,15 +58,6 @@ export class ErrorBoundary extends Component {
 
   componentDidCatch(error, errorInfo) {
     console.error('UI Runtime Error caught by ErrorBoundary:', error, errorInfo)
-    if (isModuleLoadError(error) && typeof window !== 'undefined') {
-      const reloadKey = 'pace_errorboundary_chunk_reload'
-      const lastReload = sessionStorage.getItem(reloadKey)
-      const now = Date.now()
-      if (!lastReload || now - parseInt(lastReload, 10) > 8000) {
-        sessionStorage.setItem(reloadKey, now.toString())
-        window.location.reload()
-      }
-    }
   }
 
   render() {
@@ -77,31 +68,26 @@ export class ErrorBoundary extends Component {
         <div className="p-8 max-w-2xl mx-auto my-12 bg-card border border-rose-200 dark:border-rose-900 rounded-2xl shadow-lg text-center space-y-4">
           <FiAlertTriangle className="w-12 h-12 text-rose-500 mx-auto" />
           <h2 className="text-lg font-bold text-foreground">
-            {isChunkError ? 'Application Update in Progress' : 'An error occurred in this view'}
+            {isChunkError ? 'Module Load Interrupted' : 'An error occurred in this view'}
           </h2>
           <p className="text-xs font-mono text-rose-600 bg-rose-50 dark:bg-rose-950/40 p-3 rounded-xl border border-rose-100 dark:border-rose-900 text-left overflow-x-auto">
             {isChunkError
-              ? 'A fresh module build is available. Click below to reload and connect to the latest version.'
+              ? 'Unable to load the requested view module. Click below to retry rendering.'
               : this.state.error?.message || 'Unexpected rendering error'}
           </p>
           <div className="flex justify-center gap-3 pt-2">
             <button
               onClick={() => {
-                if (isChunkError) {
-                  window.location.reload()
-                } else {
-                  this.setState({ hasError: false, error: null })
-                }
+                this.setState({ hasError: false, error: null })
               }}
               className="px-4 py-2 bg-primary hover:opacity-90 text-primary-foreground text-xs font-semibold rounded-xl cursor-pointer transition-all shadow-xs"
             >
-              {isChunkError ? 'Reload Application' : 'Retry View'}
+              Retry View
             </button>
             <button
               onClick={() => {
                 this.setState({ hasError: false, error: null })
                 window.location.hash = '#/dashboard'
-                if (isChunkError) window.location.reload()
               }}
               className="px-4 py-2 bg-muted hover:bg-muted/80 text-foreground text-xs font-semibold rounded-xl cursor-pointer transition-all"
             >
@@ -190,10 +176,10 @@ export function Badge({ label, text, children, color = 'gray', variant, icon }) 
 }
 
 const STATUS_COLORS = {
-  Active: 'green', Completed: 'green', 'Complete Payment': 'green', Paid: 'green', 'Paid in Full': 'green', 'Fully Paid': 'green', Present: 'green', Approved: 'blue', Responded: 'green',
+  Active: 'green', Completed: 'green', Verified: 'green', 'Complete Payment': 'green', Paid: 'green', 'Paid in Full': 'green', 'Fully Paid': 'green', 'Confirmed / Received by Cashier': 'green', Present: 'green', Approved: 'blue', Responded: 'green',
   Overdue: 'red', Inactive: 'red', Unactive: 'red', Absent: 'red', Cancelled: 'red', Rejected: 'red',
-  Pending: 'yellow', Draft: 'yellow', Late: 'yellow', Open: 'yellow', 'Half Day': 'yellow',
-  'Partially Paid': 'purple', Processing: 'blue', 'On Leave': 'indigo', 'Rest Day': 'gray',
+  Pending: 'yellow', 'Pending Collector': 'yellow', pending_collector: 'yellow', 'Pending Store Admin Approval': 'indigo', Draft: 'yellow', Late: 'yellow', Open: 'yellow', 'Half Day': 'yellow',
+  'Partially Paid': 'purple', 'Collected by Collector': 'blue', 'In Progress': 'blue', Processing: 'blue', 'On Leave': 'indigo', 'Rest Day': 'gray',
   'In Stock': 'green', 'High Stock': 'blue', 'Medium Stock': 'orange', 'Low Stock': 'yellow', 'Out of Stock': 'red',
   Administrator: 'blue', 'Store Administrator': 'indigo', Employee: 'gray',
   Closed: 'gray',
@@ -206,10 +192,12 @@ export function StatusBadge({ status }) {
   const s = String(status).toLowerCase().trim()
   if (s === 'inactive' || s === 'unactive' || s.includes('inactive') || s.includes('unactive')) {
     icon = <FiAlertCircle className="w-3 h-3" />
-  } else if (s.includes('active') || s.includes('complete') || s.includes('paid') || s.includes('present') || s.includes('approved')) {
+  } else if (s.includes('active') || s.includes('complete') || s.includes('paid') || s.includes('present') || s.includes('approved') || s.includes('confirmed')) {
     icon = <FiCheckCircle className="w-3 h-3" />
   } else if (s.includes('overdue') || s.includes('absent') || s.includes('cancelled') || s.includes('rejected')) {
     icon = <FiAlertCircle className="w-3 h-3" />
+  } else if (s.includes('collected by collector')) {
+    icon = <FiClock className="w-3 h-3" />
   } else if (s.includes('pending') || s.includes('late') || s.includes('low stock') || s.includes('draft') || s.includes('processing') || s.includes('open')) {
     icon = <FiClock className="w-3 h-3" />
   }
@@ -349,11 +337,10 @@ export function ConfirmDialog({ title, message, onConfirm, onCancel, confirmLabe
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 bg-slate-950/45 dark:bg-black/75 backdrop-blur-sm animate-[fadeIn_0.15s_ease-out]">
       <div className="relative w-full max-w-2xl p-6 sm:p-8 bg-white dark:bg-[#081329] text-slate-900 dark:text-white border border-slate-200 dark:border-blue-500/30 rounded-2xl shadow-2xl space-y-5">
         <div className="flex flex-col items-center text-center">
-          <div className={`w-12 h-12 rounded-2xl flex items-center justify-center shadow-sm mx-auto mb-3 border ${
-            danger
-              ? 'bg-rose-50 dark:bg-rose-950/80 text-rose-600 dark:text-rose-400 border-rose-200 dark:border-rose-500/30'
-              : 'bg-blue-50 dark:bg-blue-950/80 text-blue-600 dark:text-blue-400 border-blue-200 dark:border-blue-500/30'
-          }`}>
+          <div className={`w-12 h-12 rounded-2xl flex items-center justify-center shadow-sm mx-auto mb-3 border ${danger
+            ? 'bg-rose-50 dark:bg-rose-950/80 text-rose-600 dark:text-rose-400 border-rose-200 dark:border-rose-500/30'
+            : 'bg-blue-50 dark:bg-blue-950/80 text-blue-600 dark:text-blue-400 border-blue-200 dark:border-blue-500/30'
+            }`}>
             {danger ? <FiTrash2 className="w-6 h-6" /> : <FiCheckCircle className="w-6 h-6" />}
           </div>
           <h3 className="font-bold text-lg tracking-tight text-slate-900 dark:text-white mb-1">{title}</h3>
@@ -370,11 +357,10 @@ export function ConfirmDialog({ title, message, onConfirm, onCancel, confirmLabe
           <button
             type="button"
             onClick={onConfirm}
-            className={`inline-flex items-center justify-center font-bold rounded-xl cursor-pointer transition-all active:scale-95 px-5 py-2 text-xs sm:text-sm ${
-              danger
-                ? 'bg-rose-600 hover:bg-rose-700 text-white shadow-md shadow-rose-600/20'
-                : 'bg-blue-600 hover:bg-blue-700 text-white shadow-md shadow-blue-600/20'
-            }`}
+            className={`inline-flex items-center justify-center font-bold rounded-xl cursor-pointer transition-all active:scale-95 px-5 py-2 text-xs sm:text-sm ${danger
+              ? 'bg-rose-600 hover:bg-rose-700 text-white shadow-md shadow-rose-600/20'
+              : 'bg-blue-600 hover:bg-blue-700 text-white shadow-md shadow-blue-600/20'
+              }`}
           >
             {confirmLabel}
           </button>
@@ -585,8 +571,8 @@ export function Pagination({ page = 1, current, currentPage, total = 0, perPage 
               type="button"
               key={p}
               className={`w-7 h-7 rounded-lg border text-xs font-semibold cursor-pointer transition-colors ${p === curr
-                  ? 'bg-primary text-primary-foreground border-primary font-bold shadow-xs'
-                  : 'border-border bg-card text-muted-foreground hover:bg-muted'
+                ? 'bg-primary text-primary-foreground border-primary font-bold shadow-xs'
+                : 'border-border bg-card text-muted-foreground hover:bg-muted'
                 }`}
               onClick={() => changeFn(p)}
             >
@@ -719,8 +705,8 @@ export function TabBar({ tabs = [], activeTab, active, onChange }) {
             key={id}
             onClick={() => onChange(id)}
             className={`flex items-center gap-2 px-4 py-2.5 text-xs font-bold cursor-pointer transition-all border-b-2 -mb-px whitespace-nowrap ${isActive
-                ? 'border-blue-500 text-blue-600 dark:text-blue-400 font-extrabold'
-                : 'border-transparent text-muted-foreground hover:text-foreground font-semibold hover:border-blue-500/30'
+              ? 'border-blue-500 text-blue-600 dark:text-blue-400 font-extrabold'
+              : 'border-transparent text-muted-foreground hover:text-foreground font-semibold hover:border-blue-500/30'
               }`}
           >
             {icon && <span className={`shrink-0 ${isActive ? 'text-blue-600 dark:text-blue-400' : 'text-muted-foreground'}`}>{icon}</span>}
@@ -799,9 +785,8 @@ export function NotificationBell({
           setOpen(o => !o)
           if (!open && onRefresh) onRefresh()
         }}
-        className={`w-9 h-9 rounded-xl border flex items-center justify-center transition-colors cursor-pointer relative shadow-2xs ${
-          className || 'border-blue-500/25 bg-blue-50/50 dark:bg-blue-950/40 hover:bg-blue-500/20 text-blue-800 dark:text-blue-200 hover:text-blue-950 dark:hover:text-white'
-        }`}
+        className={`w-9 h-9 rounded-xl border flex items-center justify-center transition-colors cursor-pointer relative shadow-2xs ${className || 'border-blue-500/25 bg-blue-50/50 dark:bg-blue-950/40 hover:bg-blue-500/20 text-blue-800 dark:text-blue-200 hover:text-blue-950 dark:hover:text-white'
+          }`}
         aria-label="Notifications"
         title="Notifications"
       >
@@ -859,22 +844,20 @@ export function NotificationBell({
               <button
                 type="button"
                 onClick={() => setFilter('all')}
-                className={`text-[11px] font-semibold px-2.5 py-1 rounded-lg transition-colors cursor-pointer ${
-                  filter === 'all'
-                    ? 'bg-blue-600 text-white shadow-xs'
-                    : 'bg-blue-500/10 text-blue-900 dark:text-blue-200 hover:bg-blue-500/20'
-                }`}
+                className={`text-[11px] font-semibold px-2.5 py-1 rounded-lg transition-colors cursor-pointer ${filter === 'all'
+                  ? 'bg-blue-600 text-white shadow-xs'
+                  : 'bg-blue-500/10 text-blue-900 dark:text-blue-200 hover:bg-blue-500/20'
+                  }`}
               >
                 All ({notifications.length})
               </button>
               <button
                 type="button"
                 onClick={() => setFilter('unread')}
-                className={`text-[11px] font-semibold px-2.5 py-1 rounded-lg transition-colors cursor-pointer ${
-                  filter === 'unread'
-                    ? 'bg-blue-600 text-white shadow-xs'
-                    : 'bg-blue-500/10 text-blue-900 dark:text-blue-200 hover:bg-blue-500/20'
-                }`}
+                className={`text-[11px] font-semibold px-2.5 py-1 rounded-lg transition-colors cursor-pointer ${filter === 'unread'
+                  ? 'bg-blue-600 text-white shadow-xs'
+                  : 'bg-blue-500/10 text-blue-900 dark:text-blue-200 hover:bg-blue-500/20'
+                  }`}
               >
                 Unread ({unreadCount})
               </button>
@@ -904,9 +887,8 @@ export function NotificationBell({
                       if (onNotificationClick) onNotificationClick(n)
                       setOpen(false)
                     }}
-                    className={`p-3.5 hover:!bg-slate-50 dark:hover:!bg-[#13274c]/70 transition-colors flex gap-3 cursor-pointer relative group ${
-                      isUnread ? '!bg-blue-50/70 dark:!bg-[#0f1f3d]' : '!bg-white dark:!bg-[#081329]'
-                    }`}
+                    className={`p-3.5 hover:!bg-slate-50 dark:hover:!bg-[#13274c]/70 transition-colors flex gap-3 cursor-pointer relative group ${isUnread ? '!bg-blue-50/70 dark:!bg-[#0f1f3d]' : '!bg-white dark:!bg-[#081329]'
+                      }`}
                   >
                     <span className="w-9 h-9 rounded-xl bg-muted/80 border border-border flex items-center justify-center text-sm shrink-0 mt-0.5 shadow-2xs">
                       {getModuleIcon(n.module)}

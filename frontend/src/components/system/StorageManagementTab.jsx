@@ -280,17 +280,6 @@ export default function StorageManagementTab({ onNavigateToBackups }) {
               </p>
             </div>
           </div>
-
-          <div className="flex items-center gap-2 self-end sm:self-auto shrink-0">
-            <button
-              onClick={() => loadStorage(false, undefined, true)}
-              disabled={loading}
-              className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold border border-slate-200 dark:border-border bg-white dark:bg-card hover:bg-slate-50 dark:hover:bg-muted text-slate-800 dark:text-foreground transition-all cursor-pointer shadow-2xs disabled:opacity-50"
-            >
-              <FiRefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
-              <span>Rescan Server Disk</span>
-            </button>
-          </div>
         </div>
       </div>
 

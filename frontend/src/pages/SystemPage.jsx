@@ -26,19 +26,18 @@ export default function SystemPage({ defaultTab = 'users' }) {
   const [searchParams] = useSearchParams()
   const { user } = useAuth()
   const isAdmin = user?.role === 'Administrator'
+  const validTabs = ['users', 'backups', 'storage', 'settings']
   const [activeTab, setActiveTab] = useState(() => {
-    const initial = searchParams.get('tab') || defaultTab
-    return initial === 'logs' ? 'users' : initial
+    const requested = searchParams.get('tab') || defaultTab
+    return validTabs.includes(requested) ? requested : 'users'
   })
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
 
   useEffect(() => {
     const tabParam = searchParams.get('tab')
-    if (tabParam && ['users', 'backups', 'storage', 'settings'].includes(tabParam)) {
+    if (tabParam && validTabs.includes(tabParam)) {
       setActiveTab(tabParam)
-    } else if (tabParam === 'logs') {
-      setActiveTab('users')
     }
   }, [searchParams])
 
@@ -108,7 +107,7 @@ export default function SystemPage({ defaultTab = 'users' }) {
         const needCatalog = !silent || employeesList.length === 0 || customersList.length === 0 || registrationOptions.branches.length === 0
         if (needCatalog) {
           const [userData, empData, custList, regOptions] = await Promise.all([
-            api.system.getUsers().catch(() => ({ users: [] })),
+            api.system.getUsers({ fresh: true }).catch(() => ({ users: [] })),
             api.employees.getAll().catch(() => ({ employees: [] })),
             api.customers.getAll().catch(() => ({ customers: [] })),
             api.auth.registrationOptions().catch(() => ({ branches: [] })),
@@ -123,7 +122,7 @@ export default function SystemPage({ defaultTab = 'users' }) {
           }
           setRegistrationOptions({ branches: Array.isArray(allBranches) ? allBranches : [] })
         } else {
-          const userData = await api.system.getUsers().catch(() => ({ users: [] }))
+          const userData = await api.system.getUsers({ fresh: true }).catch(() => ({ users: [] }))
           setUsers(userData.users || [])
         }
       } else if (tab === 'logs') {
@@ -221,9 +220,9 @@ export default function SystemPage({ defaultTab = 'users' }) {
       if (editUser) {
         const enteredSalary =
           userForm.basic_salary !== '' &&
-          userForm.basic_salary !== null &&
-          userForm.basic_salary !== undefined &&
-          !isNaN(Number(userForm.basic_salary))
+            userForm.basic_salary !== null &&
+            userForm.basic_salary !== undefined &&
+            !isNaN(Number(userForm.basic_salary))
             ? Number(userForm.basic_salary)
             : 0
 
@@ -794,111 +793,6 @@ export default function SystemPage({ defaultTab = 'users' }) {
                 total={filteredUsers.length}
                 pageSize={userPageSize}
                 onChange={setUserPage}
-              />
-            )}
-          </Card>
-        </div>
-      )}
-
-      {/* ─── Logs Tab ─── */}
-      {activeTab === 'logs' && (
-        <div className="space-y-4">
-          <Card noPad className="p-3.5 border border-border flex flex-col sm:flex-row justify-between items-center gap-3">
-            <div className="w-full sm:w-80 relative">
-              <FiSearch className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
-              <input
-                type="text"
-                value={logSearch}
-                onChange={e => setLogSearch(e.target.value)}
-                placeholder="Search action, user, details..."
-                className="w-full pl-9 pr-8 py-2 text-xs border border-border rounded-xl bg-card text-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all placeholder:text-muted-foreground/70"
-              />
-              {logSearch && (
-                <button
-                  type="button"
-                  onClick={() => setLogSearch('')}
-                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground cursor-pointer"
-                >
-                  <FiX className="w-3.5 h-3.5" />
-                </button>
-              )}
-            </div>
-            <div className="flex items-center gap-2 w-full sm:w-auto">
-              <select
-                value={logModule}
-                onChange={e => setLogModule(e.target.value)}
-                className="border border-border rounded-xl px-3 py-2 text-xs font-semibold bg-card cursor-pointer"
-              >
-                {MODULES.map(m => <option key={m} value={m}>{m === 'All' ? 'All Modules' : m}</option>)}
-              </select>
-              {isAdmin && (
-                <button
-                  type="button"
-                  id="btn-clean-logs"
-                  onClick={handleClearLogs}
-                  disabled={clearingLogs || logs.length === 0}
-                  className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold rounded-xl border border-rose-200 dark:border-rose-900/50 bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/40 dark:hover:bg-rose-900/60 text-rose-600 dark:text-rose-400 cursor-pointer transition-all disabled:opacity-50 disabled:cursor-not-allowed shrink-0 shadow-xs"
-                  title={logs.length === 0 ? "No logs to clean" : "Clean all system audit logs"}
-                >
-                  <FiTrash2 className="w-3.5 h-3.5" />
-                  <span>{clearingLogs ? 'Cleaning...' : 'Clean Logs'}</span>
-                </button>
-              )}
-            </div>
-          </Card>
-
-          <Card noPad className="border border-border overflow-hidden">
-            {loading ? (
-              <TableSkeleton rows={8} cols={6} />
-            ) : filteredLogs.length === 0 ? (
-              <EmptyState
-                icon={<FiActivity className="w-12 h-12 text-muted-foreground/30 mx-auto" />}
-                title="No system audit logs recorded"
-              />
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-xs min-w-[760px]">
-                  <thead>
-                    <tr className="border-b border-border bg-muted/50 text-muted-foreground uppercase font-semibold text-[11px]">
-                      <th className="py-3 px-4 text-left">Timestamp</th>
-                      <th className="py-3 px-4 text-left">User</th>
-                      <th className="py-3 px-4 text-left">Module</th>
-                      <th className="py-3 px-4 text-left">Action</th>
-                      <th className="py-3 px-4 text-left">Description</th>
-                      <th className="py-3 px-4 text-left">IP Address</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-border">
-                    {paginatedLogs.map((l, i) => (
-                      <tr key={l.log_id || i} className={`hover:bg-muted/40 transition-colors ${i % 2 === 1 ? 'bg-muted/10' : ''}`}>
-                        <td className="py-3 px-4 font-mono text-muted-foreground">{l.datetime}</td>
-                        <td className="py-3 px-4">
-                          <div className="font-bold text-foreground">{l.user}</div>
-                          {l.user_role && (
-                            <span className="text-[10px] text-muted-foreground font-semibold uppercase tracking-wider">{l.user_role}</span>
-                          )}
-                        </td>
-                        <td className="py-3 px-4"><Badge text={l.module} variant="neutral" /></td>
-                        <td className="py-3 px-4">
-                          <Badge
-                            text={l.action}
-                            variant={l.action === 'DELETE' || l.action === 'REVOKE_VERIFICATION' ? 'danger' : l.action === 'CREATE' || l.action === 'VERIFY_ACCOUNT' ? 'success' : 'info'}
-                          />
-                        </td>
-                        <td className="py-3 px-4 text-foreground">{l.description}</td>
-                        <td className="py-3 px-4 font-mono text-muted-foreground">{l.ip_address}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-            {filteredLogs.length > logPageSize && (
-              <Pagination
-                page={logPage}
-                total={filteredLogs.length}
-                pageSize={logPageSize}
-                onChange={setLogPage}
               />
             )}
           </Card>
@@ -2341,7 +2235,7 @@ export function UsersPage() {
 }
 
 export function SystemLogsPage() {
-  return <SystemPage defaultTab="logs" />
+  return <SystemPage defaultTab="users" />
 }
 
 export function BackupsPage() {

@@ -18,52 +18,51 @@ import { useRealtimeSync, SyncButton } from '../lib/realtimeSync'
 import { TbCurrencyPeso } from 'react-icons/tb'
 import MySalesChart from '../components/MySalesChart'
 
-// Provider Badge Component with Brand Colors & React Icons
 function ProviderBadge({ provider, channel }) {
   if (provider === 'GCash') {
     return (
-      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-blue-50 text-blue-700 border border-blue-200 dark:bg-blue-950/40 dark:text-blue-300 dark:border-blue-800">
-        <FiSmartphone className="w-3.5 h-3.5 text-blue-500" />
-        <span>GCash</span>
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-blue-50 text-blue-700 border border-blue-200 dark:bg-blue-950/40 dark:text-blue-300 dark:border-blue-800 max-w-full">
+        <FiSmartphone className="w-3 h-3 shrink-0 text-blue-500" />
+        <span className="truncate">GCash</span>
       </span>
     )
   }
   if (provider === 'Maya') {
     return (
-      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-800">
-        <FiSmartphone className="w-3.5 h-3.5 text-emerald-500" />
-        <span>Maya</span>
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-800 max-w-full">
+        <FiSmartphone className="w-3 h-3 shrink-0 text-emerald-500" />
+        <span className="truncate">Maya</span>
       </span>
     )
   }
   if (provider === 'BDO Online' || provider === 'BPI Online' || provider === 'UnionBank' || channel === 'online_bank') {
     return (
-      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-indigo-50 text-indigo-700 border border-indigo-200 dark:bg-indigo-950/40 dark:text-indigo-300 dark:border-indigo-800">
-        <FiCreditCard className="w-3.5 h-3.5 text-indigo-500" />
-        <span>{provider || 'Online Banking'}</span>
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-indigo-50 text-indigo-700 border border-indigo-200 dark:bg-indigo-950/40 dark:text-indigo-300 dark:border-indigo-800 max-w-full">
+        <FiCreditCard className="w-3 h-3 shrink-0 text-indigo-500" />
+        <span className="truncate">{provider || 'Online Banking'}</span>
       </span>
     )
   }
   if (channel === 'ewallet') {
     return (
-      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-sky-50 text-sky-700 border border-sky-200 dark:bg-sky-950/40 dark:text-sky-300 dark:border-sky-800">
-        <FiSmartphone className="w-3.5 h-3.5 text-sky-500" />
-        <span>{provider || 'E-Wallet'}</span>
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-sky-50 text-sky-700 border border-sky-200 dark:bg-sky-950/40 dark:text-sky-300 dark:border-sky-800 max-w-full">
+        <FiSmartphone className="w-3 h-3 shrink-0 text-sky-500" />
+        <span className="truncate">{provider || 'E-Wallet'}</span>
       </span>
     )
   }
   if (channel === 'installment') {
     return (
-      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-amber-50 text-amber-700 border border-amber-200 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-800">
-        <FiFileText className="w-3.5 h-3.5 text-amber-500" />
-        <span>Installment</span>
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-amber-50 text-amber-700 border border-amber-200 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-800 max-w-full">
+        <FiFileText className="w-3 h-3 shrink-0 text-amber-500" />
+        <span className="truncate">Installment</span>
       </span>
     )
   }
   return (
-    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-muted text-muted-foreground border border-border">
-      <TbCurrencyPeso className="w-3.5 h-3.5 text-emerald-500" />
-      <span>Cash</span>
+    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-muted text-muted-foreground border border-border max-w-full">
+      <TbCurrencyPeso className="w-3 h-3 shrink-0 text-emerald-500" />
+      <span className="truncate">Cash</span>
     </span>
   )
 }
@@ -616,19 +615,19 @@ export default function TransactionsPage() {
             />
           ) : (
             <>
-              <div className="overflow-x-auto">
-                <table className="w-full text-xs min-w-[850px]">
+              <div className="w-full overflow-hidden">
+                <table className="w-full table-auto text-xs">
                   <thead>
-                    <tr className="border-b border-border bg-muted/50 text-muted-foreground uppercase font-semibold text-[11px] whitespace-nowrap">
-                      <th className="py-3 px-4 text-left">Reference / Code</th>
-                      <th className="py-3 px-4 text-left">Payment Channel</th>
-                      <th className="py-3 px-4 text-left">Digital Ref / Trace #</th>
-                      <th className="py-3 px-4 text-left">Date</th>
-                      <th className="py-3 px-4 text-left">Customer</th>
-                      <th className="py-3 px-4 text-right">Amount</th>
-                      <th className="py-3 px-4 text-center">Status</th>
-                      <th className="py-3 px-4 text-left">Handled By</th>
-                      <th className="py-3 px-4 text-center">Action</th>
+                    <tr className="border-b border-border bg-muted/50 text-muted-foreground uppercase font-semibold text-[10px] leading-tight">
+                      <th className="py-2.5 px-2.5 text-left">Reference / Code</th>
+                      <th className="py-2.5 px-2 text-left">Payment Channel</th>
+                      <th className="py-2.5 px-2 text-left">Digital Ref / Trace #</th>
+                      <th className="py-2.5 px-2 text-left">Date</th>
+                      <th className="py-2.5 px-2 text-left">Customer</th>
+                      <th className="py-2.5 px-2 text-left">Amount</th>
+                      <th className="py-2.5 px-2 text-center">Status</th>
+                      <th className="py-2.5 px-2 text-left">Handled By</th>
+                      <th className="py-2.5 px-2 text-center">Action</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-border">
@@ -637,54 +636,57 @@ export default function TransactionsPage() {
                       const { refNo: rowRef } = extractDigitalRefAndNotes(tx.notes, tx.reference_no, tx.channel, tx.category)
                       return (
                         <tr key={tx.id || i} className={`hover:bg-muted/40 transition-colors ${i % 2 === 1 ? 'bg-muted/10' : ''}`}>
-                          <td className="py-3 px-4 font-mono font-semibold text-primary whitespace-nowrap">
-                            <div className="flex items-center gap-1.5">
+                          <td className="py-2.5 px-2.5 font-mono font-semibold text-primary align-middle">
+                            <div className="flex items-center gap-1 whitespace-nowrap">
                               <FiFileText className="w-3.5 h-3.5 shrink-0" />
-                              <span>{tx.reference_code}</span>
+                              <span className="text-[11px]" title={tx.reference_code}>{tx.reference_code}</span>
                             </div>
-                            <div className="text-[10px] text-muted-foreground font-normal flex items-center gap-1 mt-0.5">
-                              <span className={`inline-block w-1.5 h-1.5 rounded-full ${isSale ? 'bg-blue-500' : 'bg-emerald-500'}`} />
-                              {isSale ? 'Sale Invoice' : 'Collection'}
-                              {tx.account_no && tx.account_no !== 'N/A' && ` · ${tx.account_no}`}
+                            <div className="text-[10px] text-muted-foreground font-normal flex items-center gap-1 mt-0.5 leading-tight whitespace-nowrap">
+                              <span className={`inline-block w-1.5 h-1.5 rounded-full shrink-0 ${isSale ? 'bg-blue-500' : 'bg-emerald-500'}`} />
+                              <span title={`${isSale ? 'Sale Invoice' : 'Collection'}${tx.account_no && tx.account_no !== 'N/A' ? ` · ${tx.account_no}` : ''}`}>
+                                {isSale ? 'Sale Invoice' : 'Collection'}
+                                {tx.account_no && tx.account_no !== 'N/A' && ` · ${tx.account_no}`}
+                              </span>
                             </div>
                           </td>
-                          <td className="py-3 px-4 whitespace-nowrap">
+                          <td className="py-2.5 px-2 align-middle whitespace-nowrap">
                             <ProviderBadge provider={tx.provider} channel={tx.channel} />
                           </td>
-                          <td className="py-3 px-4 font-mono whitespace-nowrap">
+                          <td className="py-2.5 px-2 font-mono align-middle">
                             {rowRef ? (
-                              <span className="font-semibold text-foreground bg-muted px-2 py-0.5 rounded-md border border-border">
+                              <span className="inline-block max-w-[185px] font-semibold text-[11px] leading-tight text-foreground bg-muted px-1.5 py-0.5 rounded-md border border-border break-all">
                                 {rowRef}
                               </span>
                             ) : (
                               <span className="text-muted-foreground">—</span>
                             )}
                           </td>
-                          <td className="py-3 px-4 font-mono text-muted-foreground whitespace-nowrap">{tx.date}</td>
-                          <td className="py-3 px-4">
-                            <div className="font-medium text-foreground whitespace-nowrap">{tx.customer_name}</div>
+                          <td className="py-2.5 px-2 font-mono text-[11px] text-muted-foreground align-middle whitespace-nowrap">{tx.date}</td>
+                          <td className="py-2.5 px-2 align-middle">
+                            <div className="font-medium text-[11px] text-foreground leading-tight whitespace-nowrap">{tx.customer_name}</div>
                             {tx.customer_code !== '—' && (
-                              <div className="text-[10px] text-muted-foreground font-mono whitespace-nowrap">{tx.customer_code}</div>
+                              <div className="text-[10px] text-muted-foreground font-mono leading-tight whitespace-nowrap">{tx.customer_code}</div>
                             )}
                           </td>
-                          <td className="py-3 px-4 text-right font-mono font-bold text-foreground whitespace-nowrap">
-                            {fmt(tx.amount)}
+                          <td className="py-2.5 px-2 text-left font-mono font-bold text-[11px] text-foreground align-middle whitespace-nowrap">
+                            <div>{fmt(tx.amount)}</div>
                             {isSale && tx.payment_method === 'Installment' && tx.amount_paid > 0 && (
-                              <div className="text-[10px] text-emerald-600 font-normal">
+                              <div className="text-[10px] text-emerald-600 font-normal leading-tight">
                                 DP: {fmt(tx.amount_paid)}
                               </div>
                             )}
                           </td>
-                          <td className="py-3 px-4 text-center whitespace-nowrap">
+                          <td className="py-2.5 px-2 text-center align-middle whitespace-nowrap [&>span]:px-2 [&>span]:py-0.5 [&>span]:text-[10px]">
                             <StatusBadge status={tx.status} />
                           </td>
-                          <td className="py-3 px-4 text-muted-foreground whitespace-nowrap">{tx.processed_by}</td>
-                          <td className="py-3 px-4 text-center whitespace-nowrap">
+                          <td className="py-2.5 px-2 text-[11px] text-muted-foreground leading-tight align-middle max-w-[120px] break-words">{tx.processed_by}</td>
+                          <td className="py-2.5 px-2 text-center align-middle whitespace-nowrap">
                             <button
                               onClick={() => handleOpenProof(tx)}
-                              className="inline-flex items-center gap-1 px-2.5 py-1 text-xs rounded-lg border border-border hover:bg-muted font-semibold cursor-pointer transition-colors"
+                              className="inline-flex items-center justify-center gap-1 px-2 py-1 text-[11px] rounded-lg border border-border hover:bg-muted font-semibold cursor-pointer transition-colors"
+                              title="View Proof"
                             >
-                              <FiEye className="w-3.5 h-3.5" />
+                              <FiEye className="w-3.5 h-3.5 shrink-0" />
                               <span>Proof</span>
                             </button>
                           </td>

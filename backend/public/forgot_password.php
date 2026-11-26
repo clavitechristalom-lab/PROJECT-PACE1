@@ -1,2 +1,5 @@
 <?php
-require_once __DIR__ . '/../forgot_password.php';
+http_response_code(403);
+header('Content-Type: application/json');
+echo json_encode(['success' => false, 'message' => 'Direct public PHP endpoints are disabled. Use /api/forgot-password.']);
+exit;

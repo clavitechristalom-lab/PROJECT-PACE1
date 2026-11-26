@@ -21,7 +21,11 @@ export default function StoreSettingsPage() {
     location: '',
     contact_number: '',
     color: '#2563eb',
-    image_url: ''
+    image_url: '',
+    email: '',
+    operating_hours: '',
+    branch_type: '',
+    description: ''
   })
   const [logoFile, setLogoFile] = useState(null)
   const [previewUrl, setPreviewUrl] = useState('')
@@ -59,7 +63,11 @@ export default function StoreSettingsPage() {
           location: data.branch.location || '',
           contact_number: data.branch.contact_number || '',
           color: data.branch.color || '#2563eb',
-          image_url: data.branch.image_url || ''
+          image_url: data.branch.image_url || '',
+          email: data.branch.email || '',
+          operating_hours: data.branch.operating_hours || '',
+          branch_type: data.branch.branch_type || '',
+          description: data.branch.description || ''
         })
         if (data.branch.image_url) {
           setPreviewUrl(
@@ -100,6 +108,10 @@ export default function StoreSettingsPage() {
       formData.append('location', settings.location)
       formData.append('contact_number', settings.contact_number)
       formData.append('color', settings.color)
+      formData.append('email', settings.email || '')
+      formData.append('operating_hours', settings.operating_hours || '')
+      formData.append('branch_type', settings.branch_type || '')
+      formData.append('description', settings.description || '')
       
       if (logoFile) {
         formData.append('image', logoFile)
@@ -248,11 +260,60 @@ export default function StoreSettingsPage() {
 
       {activeTab === 'preferences' && (
         <Card className="max-w-3xl border border-border">
-          <div className="p-6 text-center text-muted-foreground space-y-3">
-            <FiSettings className="w-12 h-12 mx-auto text-muted-foreground/30" />
-            <h3 className="text-lg font-bold text-foreground">Advanced Preferences</h3>
-            <p className="text-sm">Additional store configurations will be available in future updates.</p>
-          </div>
+          <form onSubmit={handleSave} className="space-y-6">
+            <div className="pb-4 border-b border-border">
+              <h3 className="text-base font-bold text-foreground">Branch Operations & Preferences</h3>
+              <p className="text-xs text-muted-foreground mt-0.5">Configure branch contact email, operating schedule, classification, and storefront summary.</p>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-foreground ml-1">Branch Classification</label>
+                <input
+                  type="text"
+                  value={settings.branch_type}
+                  onChange={(e) => setSettings({ ...settings, branch_type: e.target.value })}
+                  className="w-full px-4 py-2.5 bg-muted/40 border border-border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all"
+                  placeholder="e.g. Main Store / Regional Branch"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-foreground ml-1">Branch Support Email</label>
+                <input
+                  type="email"
+                  value={settings.email}
+                  onChange={(e) => setSettings({ ...settings, email: e.target.value })}
+                  className="w-full px-4 py-2.5 bg-muted/40 border border-border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all"
+                  placeholder="branch@zlicz.com"
+                />
+              </div>
+              <div className="space-y-1.5 md:col-span-2">
+                <label className="text-xs font-bold text-foreground ml-1">Operating Hours</label>
+                <input
+                  type="text"
+                  value={settings.operating_hours}
+                  onChange={(e) => setSettings({ ...settings, operating_hours: e.target.value })}
+                  className="w-full px-4 py-2.5 bg-muted/40 border border-border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all"
+                  placeholder="e.g. Mon-Sat 8:00 AM - 6:00 PM"
+                />
+              </div>
+              <div className="space-y-1.5 md:col-span-2">
+                <label className="text-xs font-bold text-foreground ml-1">Store Description & Notes</label>
+                <textarea
+                  rows={3}
+                  value={settings.description}
+                  onChange={(e) => setSettings({ ...settings, description: e.target.value })}
+                  className="w-full px-4 py-2.5 bg-muted/40 border border-border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all"
+                  placeholder="Services, delivery notes, and pickup instructions..."
+                />
+              </div>
+            </div>
+            <div className="pt-4 border-t border-border flex justify-end">
+              <Btn type="submit" disabled={saving} className="flex items-center gap-2">
+                <FiSave className="w-4 h-4" />
+                {saving ? 'Saving Preferences...' : 'Save Preferences'}
+              </Btn>
+            </div>
+          </form>
         </Card>
       )}
     </div>

@@ -33,8 +33,8 @@ class AuthController extends Controller
         }
 
         // Check if the current request is from an authenticated Administrator
-        $authUser = auth('sanctum')->user();
-        $isAdmin = ($authUser && $authUser->role === 'Administrator') || $request->input('from_admin') === true || $request->input('from_admin') === 'true';
+        $authUser = $request->user() ?? auth('sanctum')->user();
+        $isAdmin = ($authUser && $authUser->role === 'Administrator');
 
         // 1. Separate Customer Sign-Up from Staff Account Creation
         if (!$isAdmin) {
@@ -171,8 +171,13 @@ class AuthController extends Controller
         if ($role === 'Customer') {
             $maxId = \App\Models\Customer::max('customer_id');
             $nextId = $maxId ? $maxId + 1 : 1;
+            $custCode = 'CUS-' . str_pad($nextId, 3, '0', STR_PAD_LEFT);
+            while (\App\Models\Customer::where('customer_code', $custCode)->exists()) {
+                $nextId++;
+                $custCode = 'CUS-' . str_pad($nextId, 3, '0', STR_PAD_LEFT);
+            }
             $customer = \App\Models\Customer::create([
-                'customer_code' => 'CUS-' . str_pad($nextId, 3, '0', STR_PAD_LEFT),
+                'customer_code' => $custCode,
                 'first_name' => $firstName,
                 'middle_name' => $middleName,
                 'last_name' => $lastName,
@@ -182,7 +187,7 @@ class AuthController extends Controller
                 'gender' => $gender,
                 'date_of_birth' => $dateOfBirth,
                 'marital_status' => $maritalStatus,
-                'status' => 'Inactive',
+                'status' => 'Active',
                 'branch_id' => $branchId,
                 'branch' => $branchName,
             ]);
@@ -204,6 +209,10 @@ class AuthController extends Controller
             $nextId = $maxId ? $maxId + 1 : 1;
             $isAdminRole = ($role === 'Administrator' || $isAdmin);
             $employeeCode = 'EMP-' . str_pad($nextId, 3, '0', STR_PAD_LEFT);
+            while (\App\Models\Employee::where('employee_code', $employeeCode)->exists()) {
+                $nextId++;
+                $employeeCode = 'EMP-' . str_pad($nextId, 3, '0', STR_PAD_LEFT);
+            }
             $pin = (!$isAdminRole && !empty($validated['attendance_pin'])) ? $validated['attendance_pin'] : null;
             $defaultPosition = $role === 'Store Administrator' ? 'Manager (Store Admin)' : ($role === 'Administrator' ? 'Main Administrator' : 'Cashier (Employee)');
             $defaultDept = $role === 'Administrator' ? 'Administration' : ($role === 'Store Administrator' ? 'Store Admin' : 'Employee');
@@ -243,7 +252,7 @@ class AuthController extends Controller
                     'date_of_birth' => $dateOfBirth,
                     'marital_status' => $maritalStatus,
                     'position' => $request->input('position') ?: $defaultPosition,
-                    'status' => 'Inactive',
+                    'status' => 'Active',
                     'pay_type' => $request->input('pay_type') ?: 'Cash',
                     'basic_salary' => $inputSalary,
                     'daily_rate' => $dailyRate,
@@ -271,6 +280,7 @@ class AuthController extends Controller
                     'date_of_birth' => $dateOfBirth,
                     'marital_status' => $maritalStatus,
                     'position' => $request->input('position') ?: ($employee->position ?: $defaultPosition),
+                    'status' => 'Active',
                     'branch_id' => $branchId ?: $employee->branch_id,
                     'branch' => $branchName ?: $employee->branch,
                     'department' => $request->input('department') ?: ($employee->department ?: $defaultDept),
@@ -422,12 +432,16 @@ class AuthController extends Controller
             ? trim("{$user->customer->first_name} {$user->customer->last_name}")
             : ($user->employee ? trim("{$user->employee->first_name} {$user->employee->last_name}") : $user->username);
 
+        $subRole = $user->resolveEmployeeDepartment();
+
         $data = [
             'user_id'      => $user->user_id,
             'username'     => $user->username,
             'employee_id'  => $user->employee_id,
             'customer_id'  => $user->customer_id,
             'role'         => $user->role,
+            'sub_role'     => $subRole,
+            'employee_department' => $subRole,
             'is_active'    => (bool)$user->is_active,
             'name'         => $name,
             'last_login'   => $lastLogin,
@@ -450,6 +464,7 @@ class AuthController extends Controller
                 'last_name'     => $user->employee->last_name,
                 'position'      => $user->employee->position,
                 'department'    => $user->employee->department,
+                'sub_role'      => $subRole,
                 'branch_id'     => $user->employee->branch_id,
                 'branch'        => $empBranchName,
                 'profile_image' => $user->profile_image ? (str_starts_with($user->profile_image, 'http') ? $user->profile_image : url(Storage::url($user->profile_image))) : null,
@@ -559,6 +574,17 @@ class AuthController extends Controller
         }
 
         if ($user && $passwordMatched) {
+            // Enforce Maintenance Mode on login for non-admin accounts
+            $runtimeFlags = \App\Http\Middleware\ApplyGlobalSystemSettings::getRuntimeFlags();
+            if (!empty($runtimeFlags['maintenance_mode']) && !in_array($user->role, ['Administrator', 'Admin'], true)) {
+                $siteName = $runtimeFlags['site_name'] ?: 'Z-LICZ Appliances';
+                return response()->json([
+                    'success'          => false,
+                    'maintenance_mode' => true,
+                    'message'          => "{$siteName} is currently in Maintenance Mode. Only System Administrators may sign in right now.",
+                ], 503);
+            }
+
             // Mandatory Login 2FA OTP verification for ALL users (Administrator, Store Administrator, Employee, Customer)
             $recipientEmail = self::resolveUserEmail($user, $loginInput) ?: ($user->email ?: null);
             if ((empty($recipientEmail) || str_ends_with(strtolower($recipientEmail), '@example.com')) && in_array(strtolower($user->username), ['admin', 'administrator'])) {
@@ -694,6 +720,16 @@ class AuthController extends Controller
             ], 404);
         }
 
+        $runtimeFlags = \App\Http\Middleware\ApplyGlobalSystemSettings::getRuntimeFlags();
+        if (!empty($runtimeFlags['maintenance_mode']) && !in_array($user->role, ['Administrator', 'Admin'], true)) {
+            $siteName = $runtimeFlags['site_name'] ?: 'Z-LICZ Appliances';
+            return response()->json([
+                'success'          => false,
+                'maintenance_mode' => true,
+                'message'          => "{$siteName} is currently in Maintenance Mode. Only System Administrators may sign in right now.",
+            ], 503);
+        }
+
         // Strict checks: check both otps table and users table
         $expectedOtp = trim((string)$user->otp_code);
 
@@ -797,7 +833,8 @@ class AuthController extends Controller
         } catch (\Throwable $e) {}
         $sessionToken = $newToken->plainTextToken;
 
-        SyncController::invalidateFingerprint(['employees', 'customers', 'system']);
+        User::clearSessionSyncCache();
+        SyncController::invalidateFingerprint(['employees', 'customers', 'system', 'users']);
 
         return response()->json([
             'success'       => true,
@@ -841,6 +878,16 @@ class AuthController extends Controller
                 'success' => false,
                 'message' => 'User account not found.'
             ], 404);
+        }
+
+        $runtimeFlags = \App\Http\Middleware\ApplyGlobalSystemSettings::getRuntimeFlags();
+        if (!empty($runtimeFlags['maintenance_mode']) && !in_array($user->role, ['Administrator', 'Admin'], true)) {
+            $siteName = $runtimeFlags['site_name'] ?: 'Z-LICZ Appliances';
+            return response()->json([
+                'success'          => false,
+                'maintenance_mode' => true,
+                'message'          => "{$siteName} is currently in Maintenance Mode. Only System Administrators may sign in right now.",
+            ], 503);
         }
 
         // Resolve recipient email address
@@ -959,22 +1006,8 @@ class AuthController extends Controller
                 }
             } catch (\Throwable $e) {}
         }
-        if (!$user && $request->filled('user_id')) {
-            $user = User::with(['employee', 'customer'])->find($request->input('user_id'));
-        }
 
         if ($user) {
-            $user->loadMissing(['employee', 'customer']);
-            $user->is_active = false;
-            $user->save();
-
-            if ($user->employee) {
-                $user->employee->update(['status' => 'Inactive']);
-            }
-            if ($user->customer) {
-                $user->customer->update(['status' => 'Inactive']);
-            }
-
             SystemLog::create([
                 'user_id'     => $user->user_id,
                 'action'      => 'LOGOUT',
@@ -985,16 +1018,30 @@ class AuthController extends Controller
             ]);
 
             try {
-                $user->tokens()->delete();
+                if ($user->currentAccessToken()) {
+                    $user->currentAccessToken()->delete();
+                } else {
+                    $user->tokens()->delete();
+                }
             } catch (\Throwable $e) {
                 try {
-                    if ($user->currentAccessToken()) {
-                        $user->currentAccessToken()->delete();
-                    }
+                    $user->tokens()->delete();
                 } catch (\Throwable $ex) {}
             }
 
-            SyncController::invalidateFingerprint(['employees', 'customers', 'system']);
+            if ($user->tokens()->count() === 0) {
+                $user->is_active = false;
+                $user->save();
+                if ($user->employee && $user->employee->status === 'Active') {
+                    $user->employee->update(['status' => 'Inactive']);
+                }
+                if ($user->customer && $user->customer->status === 'Active') {
+                    $user->customer->update(['status' => 'Inactive']);
+                }
+            }
+
+            User::clearSessionSyncCache();
+            SyncController::invalidateFingerprint(['employees', 'customers', 'system', 'users']);
         }
 
         return response()->json([
@@ -1515,6 +1562,13 @@ class AuthController extends Controller
      */
     public function createUser(Request $request)
     {
+        $authUser = $request->user() ?? auth('sanctum')->user();
+        if (!$authUser || $authUser->role !== 'Administrator') {
+            return response()->json([
+                'success' => false,
+                'message' => '403 Forbidden: Only Administrators can create staff accounts.',
+            ], 403);
+        }
         $request->merge(['from_admin' => true]);
         return $this->register($request);
     }

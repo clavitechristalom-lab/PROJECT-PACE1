@@ -74,6 +74,50 @@ class User extends Authenticatable
         return $this->password_hash;
     }
 
+    public function resolveEmployeeDepartment(): ?string
+    {
+        $this->loadMissing('employee');
+        if (!$this->employee) {
+            return null;
+        }
+
+        $position = strtolower(trim((string) $this->employee->getRawOriginal('position') ?: (string) $this->employee->position));
+        $department = strtolower(trim((string) $this->employee->department));
+
+        if (str_contains($position, 'collector') || str_contains($department, 'collector')) {
+            return 'collector';
+        }
+        if (str_contains($position, 'cashier') || str_contains($department, 'cashier')) {
+            return 'cashier';
+        }
+        if (str_contains($position, 'utility') || str_contains($department, 'utility')) {
+            return 'utility';
+        }
+        if (str_contains($position, 'sales agent') || str_contains($department, 'sales agent')) {
+            return 'sales_agent';
+        }
+        if (str_contains($position, 'manager') || str_contains($department, 'store admin')) {
+            return 'manager';
+        }
+
+        return $department !== '' && $department !== 'employee' ? $department : null;
+    }
+
+    public function isCollector(): bool
+    {
+        return $this->role === self::ROLE_EMPLOYEE && $this->resolveEmployeeDepartment() === 'collector';
+    }
+
+    public function isCashier(): bool
+    {
+        return $this->role === self::ROLE_EMPLOYEE && $this->resolveEmployeeDepartment() === 'cashier';
+    }
+
+    public function isUtility(): bool
+    {
+        return $this->role === self::ROLE_EMPLOYEE && $this->resolveEmployeeDepartment() === 'utility';
+    }
+
     /**
      * Relationship with employee.
      */
@@ -275,36 +319,46 @@ class User extends Authenticatable
         return $this->hasMany(BackupLog::class, 'created_by', 'user_id');
     }
 
-    /**
-     * Synchronize account active/inactive statuses based on live login sessions.
-    /**
-     * Synchronize account statuses for the requested scope individually
-     * (without touching unrelated tables on every read, and throttled safely).
-     */
-    public static function syncSessionStatuses(?User $currentUser = null, string $scope = 'all'): void
+    public static function clearSessionSyncCache(): void
+    {
+        \Illuminate\Support\Facades\Cache::forget('pace_session_sync_global');
+        foreach (['all', 'users', 'employees', 'customers'] as $scope) {
+            \Illuminate\Support\Facades\Cache::forget("pace_session_sync_{$scope}");
+        }
+        \Illuminate\Support\Facades\Cache::forget('pace_token_prune_lock');
+    }
+
+    public static function syncSessionStatuses(?User $currentUser = null, string $scope = 'all', bool $force = false): void
     {
         try {
             $normalizedScope = strtolower(trim($scope)) ?: 'all';
-            if (!\Illuminate\Support\Facades\Cache::add("pace_session_sync_{$normalizedScope}", true, 15)) {
+            // Share a 30s global lock across Employees/Customers/Users tabs unless explicitly forced
+            if (!$force && !\Illuminate\Support\Facades\Cache::add('pace_session_sync_global', true, 30)) {
+                return;
+            }
+            if (!$force && !\Illuminate\Support\Facades\Cache::add("pace_session_sync_{$normalizedScope}", true, 30)) {
                 return;
             }
 
             $now = now();
 
-            // 1. Clean up stale tokens at most once per minute (avoids DELETE lock on every GET)
-            if (\Illuminate\Support\Facades\Cache::add('pace_token_prune_lock', true, 60)) {
+            if ($force || \Illuminate\Support\Facades\Cache::add('pace_token_prune_lock', true, 60)) {
                 \Illuminate\Support\Facades\DB::table('personal_access_tokens')
                     ->where('tokenable_type', self::class)
                     ->where(function ($q) use ($now) {
                         $q->where(function ($sub) use ($now) {
                             $sub->whereNull('last_used_at')
                                 ->where('created_at', '<', $now->copy()->subMinutes(5));
-                        })->orWhere('last_used_at', '<', $now->copy()->subHours(2));
+                        })
+                            ->orWhere('last_used_at', '<', $now->copy()->subHours(2))
+                            ->orWhere(function ($sub) use ($now) {
+                                $sub->whereNotNull('expires_at')
+                                    ->where('expires_at', '<', $now);
+                            });
                     })
                     ->delete();
             }
 
-            // 2. Collect all user IDs with an active login session token
             $activeUserIds = \Illuminate\Support\Facades\DB::table('personal_access_tokens')
                 ->where('tokenable_type', self::class)
                 ->pluck('tokenable_id')
@@ -313,71 +367,84 @@ class User extends Authenticatable
                 ->values()
                 ->all();
 
-            if ($currentUser && $currentUser->user_id) {
+            if ($currentUser && $currentUser->user_id && !in_array((int) $currentUser->user_id, $activeUserIds, true)) {
                 $activeUserIds[] = (int) $currentUser->user_id;
-                $activeUserIds = array_values(array_unique($activeUserIds));
             }
 
-            // 3. Update users table (is_active = true when logged in, false when logged out)
             if (!empty($activeUserIds)) {
-                self::whereIn('user_id', $activeUserIds)
+                \Illuminate\Support\Facades\DB::table('users')
+                    ->whereIn('user_id', $activeUserIds)
                     ->where('is_active', false)
                     ->update(['is_active' => true]);
 
-                self::whereNotIn('user_id', $activeUserIds)
+                \Illuminate\Support\Facades\DB::table('users')
+                    ->whereNotIn('user_id', $activeUserIds)
                     ->where('is_active', true)
                     ->update(['is_active' => false]);
             } else {
-                self::where('is_active', true)->update(['is_active' => false]);
+                \Illuminate\Support\Facades\DB::table('users')
+                    ->where('is_active', true)
+                    ->update(['is_active' => false]);
             }
 
-            // 4. Only sync employees table when on employees/users/all scope
-            if ($normalizedScope === 'all' || $normalizedScope === 'employees') {
-                $activeEmpIds = !empty($activeUserIds)
-                    ? self::whereIn('user_id', $activeUserIds)
-                        ->whereNotNull('employee_id')
-                        ->pluck('employee_id')
-                        ->map(fn($id) => (int) $id)
-                        ->all()
-                    : [];
+            if (in_array($normalizedScope, ['all', 'users', 'employees'], true)) {
+                $linkedEmployeeMap = \Illuminate\Support\Facades\DB::table('users')
+                    ->whereNotNull('employee_id')
+                    ->pluck('is_active', 'employee_id');
+
+                $activeEmpIds = [];
+                $inactiveEmpIds = [];
+                foreach ($linkedEmployeeMap as $empId => $isAct) {
+                    if ($isAct) {
+                        $activeEmpIds[] = (int) $empId;
+                    } else {
+                        $inactiveEmpIds[] = (int) $empId;
+                    }
+                }
 
                 if (!empty($activeEmpIds)) {
-                    Employee::whereIn('employee_id', $activeEmpIds)
-                        ->where('status', '!=', 'Active')
+                    \Illuminate\Support\Facades\DB::table('employees')
+                        ->whereIn('employee_id', $activeEmpIds)
+                        ->where('status', 'Inactive')
                         ->update(['status' => 'Active']);
-
-                    Employee::whereNotIn('employee_id', $activeEmpIds)
-                        ->where('status', '!=', 'Inactive')
+                }
+                if (!empty($inactiveEmpIds)) {
+                    \Illuminate\Support\Facades\DB::table('employees')
+                        ->whereIn('employee_id', $inactiveEmpIds)
+                        ->where('status', 'Active')
                         ->update(['status' => 'Inactive']);
-                } else {
-                    Employee::where('status', '!=', 'Inactive')->update(['status' => 'Inactive']);
                 }
             }
 
-            // 5. Only sync customers table when on customers/users/all scope
-            if ($normalizedScope === 'all' || $normalizedScope === 'customers') {
-                $activeCustIds = !empty($activeUserIds)
-                    ? self::whereIn('user_id', $activeUserIds)
-                        ->whereNotNull('customer_id')
-                        ->pluck('customer_id')
-                        ->map(fn($id) => (int) $id)
-                        ->all()
-                    : [];
+            if (in_array($normalizedScope, ['all', 'users', 'customers'], true)) {
+                $linkedCustomerMap = \Illuminate\Support\Facades\DB::table('users')
+                    ->whereNotNull('customer_id')
+                    ->pluck('is_active', 'customer_id');
+
+                $activeCustIds = [];
+                $inactiveCustIds = [];
+                foreach ($linkedCustomerMap as $custId => $isAct) {
+                    if ($isAct) {
+                        $activeCustIds[] = (int) $custId;
+                    } else {
+                        $inactiveCustIds[] = (int) $custId;
+                    }
+                }
 
                 if (!empty($activeCustIds)) {
-                    Customer::whereIn('customer_id', $activeCustIds)
-                        ->where('status', '!=', 'Active')
+                    \Illuminate\Support\Facades\DB::table('customers')
+                        ->whereIn('customer_id', $activeCustIds)
+                        ->where('status', 'Inactive')
                         ->update(['status' => 'Active']);
-
-                    Customer::whereNotIn('customer_id', $activeCustIds)
-                        ->where('status', '!=', 'Inactive')
+                }
+                if (!empty($inactiveCustIds)) {
+                    \Illuminate\Support\Facades\DB::table('customers')
+                        ->whereIn('customer_id', $inactiveCustIds)
+                        ->where('status', 'Active')
                         ->update(['status' => 'Inactive']);
-                } else {
-                    Customer::where('status', '!=', 'Inactive')->update(['status' => 'Inactive']);
                 }
             }
         } catch (\Throwable $e) {
-            // Silently ignore during migrations or if tables are not ready
         }
     }
 }

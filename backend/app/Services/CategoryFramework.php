@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\Category;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 
@@ -12,6 +13,75 @@ use Illuminate\Support\Str;
  */
 class CategoryFramework
 {
+    private static ?bool $categoriesTableExists = null;
+    private static ?array $dbCategoriesMap = null;
+    private static array $resolveMemo = [];
+
+    public static function clearLookupCache(): void
+    {
+        self::$categoriesTableExists = null;
+        self::$dbCategoriesMap = null;
+        self::$resolveMemo = [];
+        try {
+            Cache::forget('pace_cat_framework_db_map');
+        } catch (\Throwable $e) {}
+    }
+
+    private static function hasCategoriesTable(): bool
+    {
+        if (self::$categoriesTableExists === null) {
+            self::$categoriesTableExists = Schema::hasTable('categories');
+        }
+        return self::$categoriesTableExists;
+    }
+
+    private static function loadDbCategoriesMap(): array
+    {
+        if (self::$dbCategoriesMap !== null) {
+            return self::$dbCategoriesMap;
+        }
+
+        if (!self::hasCategoriesTable()) {
+            self::$dbCategoriesMap = ['byLower' => [], 'byParent' => [], 'byMain' => []];
+            return self::$dbCategoriesMap;
+        }
+
+        self::$dbCategoriesMap = Cache::remember('pace_cat_framework_db_map', 300, static function () {
+            $rows = Category::select(['id', 'name', 'level', 'parent_id', 'main_category', 'group_name', 'sku_prefix'])->get();
+            $byLower = [];
+            $byParent = [];
+            $byMain = [];
+
+            foreach ($rows as $row) {
+                $lower = strtolower(trim((string) $row->name));
+                if ($lower !== '' && !isset($byLower[$lower])) {
+                    $byLower[$lower] = [
+                        'id' => $row->id,
+                        'name' => $row->name,
+                        'level' => $row->level,
+                        'parent_id' => $row->parent_id,
+                        'main_category' => $row->main_category,
+                        'group_name' => $row->group_name,
+                        'sku_prefix' => $row->sku_prefix,
+                    ];
+                }
+                if ($row->parent_id) {
+                    $byParent[(int) $row->parent_id][] = $row->name;
+                }
+                if (!empty($row->main_category)) {
+                    $byMain[$row->main_category][] = $row->name;
+                }
+            }
+
+            return [
+                'byLower' => $byLower,
+                'byParent' => $byParent,
+                'byMain' => $byMain,
+            ];
+        });
+
+        return self::$dbCategoriesMap;
+    }
     public const FRAMEWORK = [
         [
             'main' => 'Furniture',
@@ -253,6 +323,10 @@ class CategoryFramework
             ];
         }
 
+        if (isset(self::$resolveMemo[$raw])) {
+            return self::$resolveMemo[$raw];
+        }
+
         $lookup = self::buildLookup();
         $lower = strtolower($raw);
         if (isset(self::ALIASES[$lower])) {
@@ -260,32 +334,31 @@ class CategoryFramework
         }
 
         if (isset($lookup['exact'][$lower])) {
-            return $lookup['exact'][$lower];
+            return self::$resolveMemo[$raw] = $lookup['exact'][$lower];
         }
 
-        if (Schema::hasTable('categories')) {
-            $dbCat = Category::whereRaw('LOWER(name) = ?', [$lower])->first();
-            if ($dbCat) {
-                $dbMain = $dbCat->main_category ?: ($dbCat->level === 'main' ? $dbCat->name : null);
-                $dbPrefix = $dbMain === 'Furniture'
-                    ? 'FUR'
-                    : ($dbMain === 'Appliances' ? 'APP' : ($dbCat->sku_prefix ?: 'PRD'));
+        $dbMap = self::loadDbCategoriesMap();
+        if (isset($dbMap['byLower'][$lower])) {
+            $dbCat = $dbMap['byLower'][$lower];
+            $dbMain = $dbCat['main_category'] ?: ($dbCat['level'] === 'main' ? $dbCat['name'] : null);
+            $dbPrefix = $dbMain === 'Furniture'
+                ? 'FUR'
+                : ($dbMain === 'Appliances' ? 'APP' : ($dbCat['sku_prefix'] ?: 'PRD'));
 
-                return [
-                    'category' => $dbCat->name,
-                    'main_category' => $dbMain,
-                    'category_group' => $dbCat->level === 'group' ? $dbCat->name : ($dbCat->group_name ?: null),
-                    'subcategory' => $dbCat->level === 'subcategory' ? $dbCat->name : null,
-                    'level' => $dbCat->level ?: 'custom',
-                    'sku_prefix' => $dbPrefix,
-                ];
-            }
+            return self::$resolveMemo[$raw] = [
+                'category' => $dbCat['name'],
+                'main_category' => $dbMain,
+                'category_group' => $dbCat['level'] === 'group' ? $dbCat['name'] : ($dbCat['group_name'] ?: null),
+                'subcategory' => $dbCat['level'] === 'subcategory' ? $dbCat['name'] : null,
+                'level' => $dbCat['level'] ?: 'custom',
+                'sku_prefix' => $dbPrefix,
+            ];
         }
 
         // Heuristic fallback for any legacy custom labels
         $prefix = strtoupper(substr(preg_replace('/[^A-Za-z0-9]/', '', $raw), 0, 3)) ?: 'PRD';
         if (str_contains($lower, 'furniture')) {
-            return [
+            return self::$resolveMemo[$raw] = [
                 'category' => $raw,
                 'main_category' => 'Furniture',
                 'category_group' => null,
@@ -295,7 +368,7 @@ class CategoryFramework
             ];
         }
         if (str_contains($lower, 'appliance') || str_contains($lower, 'electronic') || str_contains($lower, 'audio') || str_contains($lower, 'television') || str_contains($lower, 'display')) {
-            return [
+            return self::$resolveMemo[$raw] = [
                 'category' => $raw,
                 'main_category' => 'Appliances',
                 'category_group' => null,
@@ -305,7 +378,7 @@ class CategoryFramework
             ];
         }
 
-        return [
+        return self::$resolveMemo[$raw] = [
             'category' => $raw,
             'main_category' => null,
             'category_group' => null,
@@ -357,15 +430,14 @@ class CategoryFramework
             $matches[] = $resolved['category'];
         }
 
-        if (Schema::hasTable('categories')) {
-            $catNode = Category::where('name', $raw)->first();
-            if ($catNode) {
-                $descendants = Category::where('parent_id', $catNode->id)->pluck('name')->all();
-                $matches = array_merge($matches, $descendants);
-                if ($catNode->level === 'main') {
-                    $deep = Category::where('main_category', $catNode->name)->pluck('name')->all();
-                    $matches = array_merge($matches, $deep);
-                }
+        $dbMap = self::loadDbCategoriesMap();
+        $catNode = $dbMap['byLower'][strtolower($raw)] ?? null;
+        if ($catNode) {
+            $descendants = $dbMap['byParent'][(int) $catNode['id']] ?? [];
+            $matches = array_merge($matches, $descendants);
+            if ($catNode['level'] === 'main') {
+                $deep = $dbMap['byMain'][$catNode['name']] ?? [];
+                $matches = array_merge($matches, $deep);
             }
         }
 
@@ -465,6 +537,8 @@ class CategoryFramework
                   ->orWhere('name', 'Consumer Electronics & Audio-Visual');
             })
             ->delete();
+
+        self::clearLookupCache();
     }
 }
 

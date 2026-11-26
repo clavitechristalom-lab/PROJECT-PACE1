@@ -5,12 +5,15 @@
   "type": "module",
   "scripts": {
     "dev": "vite --host 0.0.0.0",
+    "dev:lan": "vite --host 0.0.0.0",
     "build": "vite build",
     "preview": "vite preview",
     "format": "oxfmt"
   },
   "dependencies": {
     "html5-qrcode": "^2.3.8",
+    "laravel-echo": "^2.6.3",
+    "pusher-js": "^8.6.0",
     "qrcode.react": "^4.2.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",

@@ -14,33 +14,83 @@ use Illuminate\Support\Facades\Storage;
 
 class EmployeeLetterController extends Controller
 {
+    private function resolveEmployeeForUser(?User $user, $explicitEmployeeId = null): ?Employee
+    {
+        if ($explicitEmployeeId) {
+            $explicit = Employee::find($explicitEmployeeId);
+            if ($explicit) {
+                return $explicit;
+            }
+        }
+
+        if (!$user) {
+            return null;
+        }
+
+        if ($user->employee_id) {
+            $emp = Employee::find($user->employee_id);
+            if ($emp) {
+                return $emp;
+            }
+        }
+
+        if ($user->employee) {
+            return $user->employee;
+        }
+
+        $candidates = array_values(array_filter(array_unique([
+            $user->email ? trim((string) $user->email) : null,
+            $user->username ? trim((string) $user->username) : null,
+        ])));
+
+        $matched = null;
+        foreach ($candidates as $identifier) {
+            $matched = Employee::whereRaw('LOWER(email) = ?', [strtolower($identifier)])->first();
+            if ($matched) {
+                break;
+            }
+        }
+
+        if (!$matched && !empty($user->phone_number)) {
+            $matched = Employee::where('phone', trim((string) $user->phone_number))->first();
+        }
+
+        if ($matched && !$user->employee_id) {
+            $user->forceFill(['employee_id' => $matched->employee_id])->save();
+        }
+
+        return $matched;
+    }
+
     /**
      * Get a list of employee excuse and leave letters with filters and stats.
      */
     public function index(Request $request)
     {
-        // 1. Automatically archive letters older than 24 hours
         EmployeeLetter::autoArchiveOldLetters();
 
         $user = $request->user();
+        $resolvedEmployee = $user ? $this->resolveEmployeeForUser($user) : null;
+        $userEmpId = $resolvedEmployee?->employee_id ?? $user?->employee_id;
+
         $query = EmployeeLetter::with([
             'employee.branch',
             'user',
             'reviewer.employee',
         ])->orderBy('created_at', 'desc');
 
-        // Role-based scoping (or personal scope when my_only is requested)
         if ($user) {
             if ($user->role === 'Employee' || $request->boolean('my_only')) {
-                $query->where(function ($q) use ($user) {
-                    if ($user->employee_id) {
-                        $q->where('employee_id', $user->employee_id);
+                $query->where(function ($q) use ($user, $userEmpId) {
+                    if ($userEmpId) {
+                        $q->where('employee_id', $userEmpId)
+                            ->orWhere('user_id', $user->user_id);
                     } else {
                         $q->where('user_id', $user->user_id);
                     }
                 });
-            } elseif (in_array($user->role, ['Store Administrator', 'Store Admin']) && $user->employee && $user->employee->branch_id) {
-                $branchId = $user->employee->branch_id;
+            } elseif (in_array($user->role, ['Store Administrator', 'Store Admin']) && $resolvedEmployee && $resolvedEmployee->branch_id) {
+                $branchId = $resolvedEmployee->branch_id;
                 $query->whereHas('employee', function ($q) use ($branchId) {
                     $q->where('branch_id', $branchId);
                 });
@@ -89,19 +139,19 @@ class EmployeeLetterController extends Controller
 
         $letters = $query->get();
 
-        // Calculate summary counts for tabs based on current role scoping
         $countsQuery = EmployeeLetter::query();
         if ($user) {
             if ($user->role === 'Employee' || $request->boolean('my_only')) {
-                $countsQuery->where(function ($q) use ($user) {
-                    if ($user->employee_id) {
-                        $q->where('employee_id', $user->employee_id);
+                $countsQuery->where(function ($q) use ($user, $userEmpId) {
+                    if ($userEmpId) {
+                        $q->where('employee_id', $userEmpId)
+                            ->orWhere('user_id', $user->user_id);
                     } else {
                         $q->where('user_id', $user->user_id);
                     }
                 });
-            } elseif (in_array($user->role, ['Store Administrator', 'Store Admin']) && $user->employee && $user->employee->branch_id) {
-                $branchId = $user->employee->branch_id;
+            } elseif (in_array($user->role, ['Store Administrator', 'Store Admin']) && $resolvedEmployee && $resolvedEmployee->branch_id) {
+                $branchId = $resolvedEmployee->branch_id;
                 $countsQuery->whereHas('employee', function ($q) use ($branchId) {
                     $q->where('branch_id', $branchId);
                 });
@@ -148,19 +198,22 @@ class EmployeeLetterController extends Controller
         EmployeeLetter::autoArchiveOldLetters();
 
         $user = $request->user();
+        $resolvedEmployee = $user ? $this->resolveEmployeeForUser($user) : null;
+        $userEmpId = $resolvedEmployee?->employee_id ?? $user?->employee_id;
         $query = EmployeeLetter::query();
 
         if ($user) {
             if ($user->role === 'Employee') {
-                $query->where(function ($q) use ($user) {
-                    if ($user->employee_id) {
-                        $q->where('employee_id', $user->employee_id);
+                $query->where(function ($q) use ($user, $userEmpId) {
+                    if ($userEmpId) {
+                        $q->where('employee_id', $userEmpId)
+                            ->orWhere('user_id', $user->user_id);
                     } else {
                         $q->where('user_id', $user->user_id);
                     }
                 });
-            } elseif ($user->role === 'Store Administrator' && $user->employee && $user->employee->branch_id) {
-                $branchId = $user->employee->branch_id;
+            } elseif (in_array($user->role, ['Store Administrator', 'Store Admin']) && $resolvedEmployee && $resolvedEmployee->branch_id) {
+                $branchId = $resolvedEmployee->branch_id;
                 $query->whereHas('employee', function ($q) use ($branchId) {
                     $q->where('branch_id', $branchId);
                 });
@@ -199,15 +252,19 @@ class EmployeeLetterController extends Controller
             'reviewer.employee',
         ])->findOrFail($id);
 
-        // Security check
         if ($user && $user->role === 'Employee') {
-            if ($letter->employee_id != $user->employee_id && $letter->user_id != $user->user_id) {
-                return response()->json(['error' => 'Unauthorized access to this letter'], 403);
+            $resolvedEmp = $this->resolveEmployeeForUser($user);
+            $userEmpId = $resolvedEmp?->employee_id ?? $user->employee_id;
+            if ($letter->employee_id != $userEmpId && $letter->user_id != $user->user_id) {
+                return response()->json([
+                    'message' => 'Unauthorized access to this letter',
+                    'error' => 'Unauthorized access to this letter',
+                ], 403);
             }
         }
 
         // Mark as read if admin/store admin
-        if ($user && in_array($user->role, ['Administrator', 'Store Administrator']) && !$letter->is_read) {
+        if ($user && in_array($user->role, ['Administrator', 'Store Administrator', 'Store Admin'], true) && !$letter->is_read) {
             $letter->update([
                 'is_read' => true,
                 'read_at' => Carbon::now(),
@@ -234,29 +291,21 @@ class EmployeeLetterController extends Controller
             'reason' => 'nullable|string|max:1000',
             'letter_body' => 'required|string',
             'title' => 'nullable|string|max:255',
-            'attachment' => 'nullable|file|max:10240|mimes:pdf,jpg,jpeg,png,webp,doc,docx',
+            'attachment' => 'nullable|file|max:10240|mimes:pdf,jpg,jpeg,jfif,png,webp,gif,bmp,heic,doc,docx,txt',
             'employee_id' => 'nullable|integer',
         ]);
 
-        // Resolve employee ID
-        $employeeId = $validated['employee_id'] ?? null;
-        if (!$employeeId && $user) {
-            $employeeId = $user->employee_id;
-            if (!$employeeId && $user->employee) {
-                $employeeId = $user->employee->employee_id;
-            }
-        }
+        $employee = $this->resolveEmployeeForUser($user, $validated['employee_id'] ?? null);
 
-        if (!$employeeId) {
+        if (!$employee) {
+            $msg = 'Unable to determine employee record. Please ensure your employee profile is linked.';
             return response()->json([
-                'error' => 'Unable to determine employee record. Please ensure your employee profile is linked.',
+                'message' => $msg,
+                'error' => $msg,
             ], 422);
         }
 
-        $employee = Employee::find($employeeId);
-        if (!$employee) {
-            return response()->json(['error' => 'Employee profile not found.'], 404);
-        }
+        $employeeId = $employee->employee_id;
 
         // Handle attachment upload
         $attachmentPath = null;
@@ -292,7 +341,9 @@ class EmployeeLetterController extends Controller
             'user_id' => $user ? $user->user_id : null,
             'action' => 'SUBMIT_EXCUSE_LETTER',
             'module' => 'Excuse Letters',
-            'details' => "Employee {$employee->first_name} {$employee->last_name} submitted {$letter->category} for {$letter->start_date->format('Y-m-d')} to {$letter->end_date->format('Y-m-d')}",
+            'description' => "Employee {$employee->first_name} {$employee->last_name} submitted {$letter->category} for {$letter->start_date->format('Y-m-d')} to {$letter->end_date->format('Y-m-d')}",
+            'ip_address' => $request->ip(),
+            'user_agent' => $request->userAgent(),
         ]);
 
         // Notify Admins & Store Admins
@@ -317,10 +368,21 @@ class EmployeeLetterController extends Controller
             }
         }
 
-        SyncController::invalidateFingerprint(['employees', 'attendance', 'payroll']);
+        SyncController::invalidateFingerprint(['employee_letters', 'employees', 'attendance', 'payroll', 'notifications']);
         if ($letter->employee) {
             \App\Http\Controllers\PayrollController::recalculateDraftPayrollForEmployee($letter->employee);
         }
+
+        \App\Services\RealtimeBroadcaster::dispatch(new \App\Events\LeaveOrExcuseUpdated([
+            'letter_id' => $letter->letter_id,
+            'category' => $letter->category,
+            'status' => $letter->status,
+            'employee_name' => $empFullName,
+            'action' => 'submitted',
+            'actor_user_id' => $user ? (int) $user->user_id : null,
+            'toast_title' => "New {$letter->category} Submitted",
+            'toast_message' => "{$empFullName} submitted a {$letter->category}.",
+        ], $employee->branch_id ? (int) $employee->branch_id : null, $user ? (int) $user->user_id : null));
 
         return response()->json([
             'success' => true,
@@ -341,6 +403,12 @@ class EmployeeLetterController extends Controller
         }
 
         $letter = EmployeeLetter::with('employee')->findOrFail($id);
+        if (in_array($user->role, ['Store Administrator', 'Store Admin'], true)) {
+            $userBranch = $user->employee?->branch_id;
+            if ($userBranch && $letter->employee && (int) $letter->employee->branch_id !== (int) $userBranch) {
+                return response()->json(['error' => 'Unauthorized to review excuse letter from another branch.'], 403);
+            }
+        }
 
         $validated = $request->validate([
             'status' => 'required|string|in:Pending,Approved,Rejected',
@@ -418,7 +486,7 @@ class EmployeeLetterController extends Controller
             Attendance::where('employee_id', $letter->employee_id)
                 ->whereBetween('attendance_date', [$start->format('Y-m-d'), $end->format('Y-m-d')])
                 ->where('status', 'Absent')
-                ->where('remarks', 'like', "Excused Leave ({$letter->category})%")
+                ->where('remarks', 'like', "Excused Leave ({$letter->category}%")
                 ->delete();
         }
 
@@ -427,7 +495,9 @@ class EmployeeLetterController extends Controller
             'user_id' => $user->user_id,
             'action' => 'REVIEW_EXCUSE_LETTER',
             'module' => 'Excuse Letters',
-            'details' => "{$reviewerName} marked {$letter->category} #{$letter->letter_id} as {$newStatus} ({$leaveTypeLabel})",
+            'description' => "{$reviewerName} marked {$letter->category} #{$letter->letter_id} as {$newStatus} ({$leaveTypeLabel})",
+            'ip_address' => $request->ip(),
+            'user_agent' => $request->userAgent(),
         ]);
 
         // Send notification to the employee
@@ -455,12 +525,23 @@ class EmployeeLetterController extends Controller
             ]);
         }
 
-        SyncController::invalidateFingerprint(['employees', 'attendance', 'payroll']);
+        SyncController::invalidateFingerprint(['employee_letters', 'employees', 'attendance', 'payroll', 'notifications']);
         if ($letter->employee) {
             \App\Http\Controllers\PayrollController::recalculateDraftPayrollForEmployee($letter->employee);
         }
 
         $letter->load(['employee.branch', 'user', 'reviewer.employee']);
+
+        \App\Services\RealtimeBroadcaster::dispatch(new \App\Events\LeaveOrExcuseUpdated([
+            'letter_id' => $letter->letter_id,
+            'category' => $letter->category,
+            'status' => $newStatus,
+            'leave_type' => $canonicalLeaveType,
+            'action' => 'reviewed',
+            'actor_user_id' => $user ? (int) $user->user_id : null,
+            'toast_title' => "{$letter->category} {$newStatus}",
+            'toast_message' => "{$letter->category} #{$letter->letter_id} marked as {$newStatus}.",
+        ], $letter->employee?->branch_id ? (int) $letter->employee->branch_id : null, $targetUserId ? (int) $targetUserId : null));
 
         return response()->json([
             'success' => true,
@@ -477,16 +558,18 @@ class EmployeeLetterController extends Controller
         $user = $request->user();
         $letter = EmployeeLetter::findOrFail($id);
 
-        // Security check: Only Admin, or Employee if letter is still Pending
         if ($user->role === 'Employee') {
-            if ($letter->employee_id != $user->employee_id && $letter->user_id != $user->user_id) {
-                return response()->json(['error' => 'Unauthorized'], 403);
+            $resolvedEmp = $this->resolveEmployeeForUser($user);
+            $userEmpId = $resolvedEmp?->employee_id ?? $user->employee_id;
+            if ($letter->employee_id != $userEmpId && $letter->user_id != $user->user_id) {
+                return response()->json(['message' => 'Unauthorized', 'error' => 'Unauthorized'], 403);
             }
             if ($letter->status !== 'Pending') {
-                return response()->json(['error' => 'Cannot delete letter that has already been reviewed.'], 422);
+                $msg = 'Cannot delete letter that has already been reviewed.';
+                return response()->json(['message' => $msg, 'error' => $msg], 422);
             }
-        } elseif (!in_array($user->role, ['Administrator', 'Store Administrator'])) {
-            return response()->json(['error' => 'Unauthorized'], 403);
+        } elseif (!in_array($user->role, ['Administrator', 'Store Administrator', 'Store Admin'])) {
+            return response()->json(['message' => 'Unauthorized', 'error' => 'Unauthorized'], 403);
         }
 
         // Delete attachment if stored
@@ -502,12 +585,12 @@ class EmployeeLetterController extends Controller
             Attendance::where('employee_id', $letter->employee_id)
                 ->whereBetween('attendance_date', [$start->format('Y-m-d'), $end->format('Y-m-d')])
                 ->where('status', 'Absent')
-                ->where('remarks', 'like', "Excused Leave ({$letter->category})%")
+                ->where('remarks', 'like', "Excused Leave ({$letter->category}%")
                 ->delete();
         }
 
         $letter->delete();
-        SyncController::invalidateFingerprint(['employees', 'attendance', 'payroll']);
+        SyncController::invalidateFingerprint(['employee_letters', 'employees', 'attendance', 'payroll', 'notifications']);
         if ($letter->employee) {
             \App\Http\Controllers\PayrollController::recalculateDraftPayrollForEmployee($letter->employee);
         }
@@ -524,11 +607,17 @@ class EmployeeLetterController extends Controller
     public function archive(Request $request, $id)
     {
         $user = $request->user();
-        if (!$user || !in_array($user->role, ['Administrator', 'Store Administrator'])) {
+        if (!$user || !in_array($user->role, ['Administrator', 'Store Administrator', 'Store Admin'], true)) {
             return response()->json(['error' => 'Unauthorized to archive excuse letters.'], 403);
         }
 
-        $letter = EmployeeLetter::findOrFail($id);
+        $letter = EmployeeLetter::with('employee')->findOrFail($id);
+        if (in_array($user->role, ['Store Administrator', 'Store Admin'], true)) {
+            $userBranch = $user->employee?->branch_id;
+            if ($userBranch && $letter->employee && (int) $letter->employee->branch_id !== (int) $userBranch) {
+                return response()->json(['error' => 'Unauthorized to access excuse letter from another branch.'], 403);
+            }
+        }
         $letter->update([
             'is_archived' => true,
             'archived_at' => Carbon::now(),
@@ -541,10 +630,12 @@ class EmployeeLetterController extends Controller
             'user_id' => $user->user_id,
             'action' => 'ARCHIVE_EXCUSE_LETTER',
             'module' => 'Excuse Letters',
-            'details' => "{$reviewerName} moved {$letter->category} #{$letter->letter_id} to archive",
+            'description' => "{$reviewerName} moved {$letter->category} #{$letter->letter_id} to archive",
+            'ip_address' => $request->ip(),
+            'user_agent' => $request->userAgent(),
         ]);
 
-        SyncController::invalidateFingerprint(['employees', 'attendance', 'payroll']);
+        SyncController::invalidateFingerprint(['employee_letters', 'employees', 'attendance', 'payroll', 'notifications']);
 
         return response()->json([
             'success' => true,
@@ -559,11 +650,17 @@ class EmployeeLetterController extends Controller
     public function unarchive(Request $request, $id)
     {
         $user = $request->user();
-        if (!$user || !in_array($user->role, ['Administrator', 'Store Administrator'])) {
+        if (!$user || !in_array($user->role, ['Administrator', 'Store Administrator', 'Store Admin'], true)) {
             return response()->json(['error' => 'Unauthorized to restore excuse letters.'], 403);
         }
 
-        $letter = EmployeeLetter::findOrFail($id);
+        $letter = EmployeeLetter::with('employee')->findOrFail($id);
+        if (in_array($user->role, ['Store Administrator', 'Store Admin'], true)) {
+            $userBranch = $user->employee?->branch_id;
+            if ($userBranch && $letter->employee && (int) $letter->employee->branch_id !== (int) $userBranch) {
+                return response()->json(['error' => 'Unauthorized to restore excuse letter from another branch.'], 403);
+            }
+        }
         $letter->update([
             'is_archived' => false,
             'archived_at' => null,
@@ -576,10 +673,12 @@ class EmployeeLetterController extends Controller
             'user_id' => $user->user_id,
             'action' => 'RESTORE_EXCUSE_LETTER',
             'module' => 'Excuse Letters',
-            'details' => "{$reviewerName} restored {$letter->category} #{$letter->letter_id} from archive",
+            'description' => "{$reviewerName} restored {$letter->category} #{$letter->letter_id} from archive",
+            'ip_address' => $request->ip(),
+            'user_agent' => $request->userAgent(),
         ]);
 
-        SyncController::invalidateFingerprint(['employees', 'attendance', 'payroll']);
+        SyncController::invalidateFingerprint(['employee_letters', 'employees', 'attendance', 'payroll', 'notifications']);
 
         return response()->json([
             'success' => true,

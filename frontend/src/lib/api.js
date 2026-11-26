@@ -22,7 +22,9 @@ export const normalizeStorageUrls = (val) => {
 
 const cleanParams = (params) => {
   const cleaned = {};
-  for (const [key, val] of Object.entries(params || {})) {
+  const keys = Object.keys(params || {}).sort();
+  for (const key of keys) {
+    const val = params[key];
     if (val !== undefined && val !== null && val !== '') {
       cleaned[key] = val;
     }
@@ -32,8 +34,59 @@ const cleanParams = (params) => {
 
 const inFlightGets = new Map();
 const inFlightControllers = new Map();
+const inFlightWaiters = new Map();
 const responseCache = new Map();
-const CACHE_TTL_MS = 800; // 2-minute on-demand cache: avoids repeating identical queries when switching routes
+const CACHE_TTL_MS = 60000; // 1-minute response cache across route transitions
+const MAX_CACHE_ENTRIES = 200;
+
+export const RELATED_MODULE_INVALIDATIONS = {
+  sales: ['sales', 'products', 'customers', 'installments', 'dashboard', 'reports', 'transactions'],
+  payments: ['payments', 'installments', 'customers', 'dashboard', 'reports', 'transactions', 'customer_installments'],
+  installments: ['installments', 'customers', 'dashboard', 'reports', 'customer_installments', 'payment_schedules'],
+  customer_installments: ['customer_installments', 'installments', 'payments', 'customers', 'dashboard'],
+  payment_schedules: ['payment_schedules', 'installments', 'customer_installments', 'dashboard'],
+  branches: ['branches', 'dashboard', 'settings', 'employees', 'customers', 'products'],
+  products: ['products', 'categories', 'sales', 'dashboard', 'reports', 'settings'],
+  categories: ['categories', 'products', 'settings'],
+  customers: ['customers', 'installments', 'sales', 'dashboard', 'reports', 'settings', 'customer_installments'],
+  employees: ['employees', 'attendance', 'payroll', 'dashboard', 'reports', 'qr_requests', 'qr_monitoring', 'profile'],
+  employee_financials: ['employee_financials', 'employees', 'payroll', 'dashboard'],
+  employee_letters: ['employee_letters', 'employees', 'attendance', 'notifications'],
+  attendance: ['attendance', 'employees', 'payroll', 'dashboard', 'reports', 'profile'],
+  payroll: ['payroll', 'dashboard', 'reports', 'profile'],
+  qr_requests: ['qr_requests', 'qr_monitoring', 'employees', 'notifications'],
+  qr_monitoring: ['qr_monitoring', 'qr_requests', 'employees'],
+  settings: ['settings', 'system', 'dashboard'],
+  users: ['users', 'system', 'employees', 'customers', 'settings', 'dashboard'],
+  system: ['system', 'settings', 'users', 'dashboard', 'storage'],
+  notifications: ['notifications'],
+};
+
+export function clearSessionCaches(prefix = 'pace_cached_') {
+  try {
+    if (typeof sessionStorage === 'undefined') return;
+    const keys = [];
+    for (let i = 0; i < sessionStorage.length; i++) {
+      const k = sessionStorage.key(i);
+      if (k && k.startsWith(prefix)) keys.push(k);
+    }
+    keys.forEach((k) => sessionStorage.removeItem(k));
+  } catch (_) { }
+}
+
+function pruneResponseCache() {
+  const now = Date.now();
+  for (const [k, entry] of responseCache.entries()) {
+    if (!entry || now - entry.timestamp >= CACHE_TTL_MS) {
+      responseCache.delete(k);
+    }
+  }
+  while (responseCache.size >= MAX_CACHE_ENTRIES) {
+    const oldestKey = responseCache.keys().next().value;
+    if (oldestKey === undefined) break;
+    responseCache.delete(oldestKey);
+  }
+}
 
 export const ENDPOINT_MODULE_MAP = {
   branches: ['/branches', '/dashboard/branch-comparison'],
@@ -57,7 +110,7 @@ export const ENDPOINT_MODULE_MAP = {
   transactions: ['/transactions'],
   installments: ['/installments', '/payment-schedules', '/statements'],
   payment_schedules: ['/payment-schedules'],
-  payments: ['/payments'],
+  payments: ['/payments', '/collector/collections', '/collector/installment-accounts', '/collector/customer-pay', '/cashier/walk-in-payments'],
   payroll: ['/payroll', '/payroll-periods', '/payslips'],
   dashboard: ['/dashboard'],
   store_dashboard: ['/dashboard'],
@@ -94,6 +147,16 @@ export function clearApiCache(endpointPrefix = null) {
   }
 }
 
+export function peekApiCache(endpoint) {
+  if (!endpoint || !responseCache.has(endpoint)) return null;
+  const cached = responseCache.get(endpoint);
+  if (!cached || Date.now() - cached.timestamp >= CACHE_TTL_MS) {
+    responseCache.delete(endpoint);
+    return null;
+  }
+  return cached.data;
+}
+
 export function clearApiCacheForModule(module, targetId = null) {
   if (!module) return;
   const modLower = String(module).toLowerCase();
@@ -123,7 +186,7 @@ export function clearApiCacheForEndpoint(endpoint) {
   if (!endpoint) return;
   const cleanEndpoint = extractCleanPath(endpoint);
 
-  // Match the single most specific (longest prefix) module so unrelated features stay cached
+  // Match the single most specific (longest prefix) module, then expand across all dependent modules
   let bestModule = null;
   let bestLength = 0;
 
@@ -138,12 +201,12 @@ export function clearApiCacheForEndpoint(endpoint) {
 
   // Handle nested employee financial subroutes (e.g. /employees/{id}/allowances) individually
   if (/^\/employees\/[^/]+\/(financials|allowances|deductions|loans)(\/|$)/.test(cleanEndpoint)) {
-    clearApiCacheForModule('employee_financials');
-    return;
+    bestModule = 'employee_financials';
   }
 
   if (bestModule) {
-    clearApiCacheForModule(bestModule);
+    const modulesToClear = RELATED_MODULE_INVALIDATIONS[bestModule] || [bestModule];
+    modulesToClear.forEach((mod) => clearApiCacheForModule(mod));
     return;
   }
 
@@ -179,10 +242,44 @@ async function request(endpoint, options = {}) {
     }
   }
 
-  // Deduplicate identical in-flight GET requests (never reuse an already-aborted controller)
+  // Deduplicate identical in-flight GET requests (never let one unmounting caller cancel another's shared wait)
   const existingCtrl = inFlightControllers.get(endpoint);
   if (isGet && inFlightGets.has(endpoint) && !options.fresh && !existingCtrl?.signal?.aborted) {
-    return inFlightGets.get(endpoint);
+    const sharedPromise = inFlightGets.get(endpoint);
+    if (!options.signal) {
+      inFlightWaiters.set(endpoint, (inFlightWaiters.get(endpoint) || 1) + 1);
+      return sharedPromise;
+    }
+    if (options.signal.aborted) {
+      return Promise.resolve(null);
+    }
+    inFlightWaiters.set(endpoint, (inFlightWaiters.get(endpoint) || 1) + 1);
+    return new Promise((resolve, reject) => {
+      let settled = false;
+      const onCallerAbort = () => {
+        if (settled) return;
+        settled = true;
+        const left = Math.max(0, (inFlightWaiters.get(endpoint) || 1) - 1);
+        inFlightWaiters.set(endpoint, left);
+        if (left === 0 && inFlightControllers.get(endpoint) === existingCtrl) {
+          inFlightControllers.delete(endpoint);
+          inFlightGets.delete(endpoint);
+          try { existingCtrl.abort(); } catch (_) { }
+        }
+        resolve(null);
+      };
+      options.signal.addEventListener('abort', onCallerAbort, { once: true });
+      sharedPromise.then(
+        (res) => {
+          options.signal.removeEventListener('abort', onCallerAbort);
+          if (!settled) { settled = true; resolve(res); }
+        },
+        (err) => {
+          options.signal.removeEventListener('abort', onCallerAbort);
+          if (!settled) { settled = true; reject(err); }
+        }
+      );
+    });
   }
 
   // Cancel prior in-flight GET for the same endpoint if requested or during background refreshes
@@ -192,19 +289,28 @@ async function request(endpoint, options = {}) {
     } catch (_) { }
     inFlightControllers.delete(endpoint);
     inFlightGets.delete(endpoint);
+    inFlightWaiters.delete(endpoint);
   }
 
   const controller = new AbortController();
   if (isGet) {
     inFlightControllers.set(endpoint, controller);
+    inFlightWaiters.set(endpoint, 1);
   }
 
   const abortAndRelease = () => {
     if (isGet) {
+      const left = Math.max(0, (inFlightWaiters.get(endpoint) || 1) - 1);
+      inFlightWaiters.set(endpoint, left);
+      if (left > 0) {
+        // Other active tabs/components are still awaiting this GET; keep it running for them
+        return;
+      }
       if (inFlightControllers.get(endpoint) === controller) {
         inFlightControllers.delete(endpoint);
       }
       inFlightGets.delete(endpoint);
+      inFlightWaiters.delete(endpoint);
     }
     controller.abort();
   };
@@ -246,12 +352,24 @@ async function request(endpoint, options = {}) {
       const rawData = await response.json().catch(() => null);
       const data = normalizeStorageUrls(rawData);
 
+      if (response.headers?.get('X-Debug-Mode') === 'enabled') {
+        const ms = response.headers.get('X-Response-Time-Ms');
+        console.debug(`[PACE DEBUG] ${method} ${endpoint} -> ${response.status}${ms ? ` (${ms}ms)` : ''}`, data);
+      }
+
       if (!response.ok) {
+        if (response.status === 503 && data?.maintenance_mode) {
+          window.dispatchEvent(new CustomEvent('system:maintenanceMode', {
+            detail: { active: true, message: data.message, site_name: data.site_name },
+          }));
+        }
         if (response.status === 401 && !endpoint.startsWith('/login') && !endpoint.startsWith('/register')) {
+          clearApiCache();
+          clearSessionCaches();
           sessionStorage.removeItem('pace_session');
           window.dispatchEvent(new CustomEvent('auth:expired'));
         }
-        let errorMsg = data?.message || `Request failed with status ${response.status}`;
+        let errorMsg = data?.message || data?.error || `Request failed with status ${response.status}`;
         if (response.status === 401 && !endpoint.startsWith('/login') && !endpoint.startsWith('/register')) {
           errorMsg = 'Your session has expired. Please log in again.';
         }
@@ -266,6 +384,8 @@ async function request(endpoint, options = {}) {
       }
 
       if (isGet && !bypassCache && data) {
+        pruneResponseCache();
+        if (responseCache.has(endpoint)) responseCache.delete(endpoint);
         responseCache.set(endpoint, { data, timestamp: Date.now() });
       }
 
@@ -296,6 +416,7 @@ async function request(endpoint, options = {}) {
       .finally(() => {
         if (inFlightGets.get(endpoint) === promise) {
           inFlightGets.delete(endpoint);
+          inFlightWaiters.delete(endpoint);
         }
       })
       .catch(() => { });
@@ -409,7 +530,7 @@ export const api = {
 
   // ─── Realtime Sync ───
   sync: {
-    getStatus: (options = {}) => request('/sync/status', options),
+    getStatus: (options = {}) => request('/sync/status', { fresh: true, ...options }),
     triggerSync: (module = 'System') =>
       request('/sync/trigger', {
         method: 'POST',
@@ -418,6 +539,10 @@ export const api = {
   },
 
   dashboard: {
+    getOverview: (params = {}, options = {}) => {
+      const qs = new URLSearchParams(cleanParams(params)).toString();
+      return request(`/dashboard/overview${qs ? `?${qs}` : ''}`, options);
+    },
     getStats: (params = {}, options = {}) => {
       const qs = new URLSearchParams(cleanParams(params)).toString();
       return request(`/dashboard/stats${qs ? `?${qs}` : ''}`, options);
@@ -529,7 +654,12 @@ export const api = {
     },
     exportCsv: async (params = {}) => {
       const qs = new URLSearchParams(cleanParams(params)).toString();
-      const token = localStorage.getItem('token');
+      let token = null;
+      try {
+        const raw = sessionStorage.getItem('pace_session');
+        if (raw) token = JSON.parse(raw)?.token || null;
+      } catch (_) { }
+      if (!token) token = localStorage.getItem('token');
       const res = await fetch(`${API_BASE}/transactions/export${qs ? `?${qs}` : ''}`, {
         headers: {
           Authorization: token ? `Bearer ${token}` : '',
@@ -545,6 +675,10 @@ export const api = {
 
   // ─── Sales ───
   sales: {
+    getAgents: (params = {}, options = {}) => {
+      const qs = new URLSearchParams(cleanParams(params)).toString();
+      return request(`/sales-agents${qs ? `?${qs}` : ''}`, options);
+    },
     getAll: (params = {}, options = {}) => {
       const qs = new URLSearchParams(cleanParams(params)).toString();
       return request(`/sales${qs ? `?${qs}` : ''}`, options);
@@ -609,13 +743,17 @@ export const api = {
 
   // ─── E-Wallet & Payment Gateway ───
   ewallet: {
+    getCashCollectors: (params = {}, options = {}) => {
+      const qs = new URLSearchParams(cleanParams(params)).toString();
+      return request(`/payments/cash/collectors${qs ? `?${qs}` : ''}`, options);
+    },
     createCheckout: (data) =>
       request('/payments/ewallet/checkout', {
         method: 'POST',
         body: JSON.stringify(data),
       }),
-    checkStatus: (reference) =>
-      request(`/payments/ewallet/status/${encodeURIComponent(reference)}`),
+    checkStatus: (reference, options = {}) =>
+      request(`/payments/ewallet/status/${encodeURIComponent(reference)}`, { fresh: true, ...options }),
     simulateWebhook: (payload) => {
       const isFormData = payload instanceof FormData;
       return request('/payments/ewallet/simulate-webhook', {
@@ -627,6 +765,39 @@ export const api = {
     },
     getWalletInfo: () =>
       request('/customer/wallet'),
+  },
+
+  collectorCollections: {
+    getAll: (params = {}, options = {}) => {
+      const qs = new URLSearchParams(cleanParams(params)).toString();
+      return request(`/collector/collections${qs ? `?${qs}` : ''}`, options);
+    },
+    getInstallmentAccounts: (params = {}, options = {}) => {
+      const qs = new URLSearchParams(cleanParams(params)).toString();
+      return request(`/collector/installment-accounts${qs ? `?${qs}` : ''}`, options);
+    },
+    customerPay: (data) =>
+      request('/collector/customer-pay', {
+        method: 'POST',
+        body: data instanceof FormData ? data : JSON.stringify(data),
+      }),
+    collect: (id, data) =>
+      request(`/collector/collections/${id}/collect`, {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+  },
+
+  cashierPayments: {
+    getAll: (params = {}, options = {}) => {
+      const qs = new URLSearchParams(cleanParams(params)).toString();
+      return request(`/cashier/walk-in-payments${qs ? `?${qs}` : ''}`, options);
+    },
+    confirm: (id, data) =>
+      request(`/cashier/walk-in-payments/${id}/confirm`, {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
   },
 
   // ─── Employees ───
@@ -700,6 +871,10 @@ export const api = {
       request(`/employees/${id}/qr/toggle`, {
         method: 'POST',
         body: JSON.stringify({ active }),
+      }),
+    deleteQr: (id) =>
+      request(`/employees/${id}/qr`, {
+        method: 'DELETE',
       }),
     verify: (id) =>
       request(`/employees/${id}/verify`, {
@@ -778,8 +953,8 @@ export const api = {
         method: 'POST',
         body: JSON.stringify(data),
       }),
-    checkVerification: (id) => request(`/attendance/check-verification/${id}`),
-    pendingVerifications: () => request('/employee/me/pending-verifications'),
+    checkVerification: (id, options = {}) => request(`/attendance/check-verification/${id}`, { fresh: true, ...options }),
+    pendingVerifications: (options = {}) => request('/employee/me/pending-verifications', { fresh: true, ...options }),
     getMyFaceTemplate: (params) => {
       const qs = params && Object.keys(cleanParams(params)).length
         ? `?${new URLSearchParams(cleanParams(params)).toString()}`
@@ -1029,6 +1204,7 @@ export const api = {
         body: JSON.stringify({ relative_paths: relativePaths }),
       }),
     getPublicSettings: (options = {}) => request('/public/settings', options),
+    getPublicBootstrap: (options = {}) => request('/public/bootstrap', options),
     saveSettings: (data) => {
       const isFormData = data instanceof FormData;
       return request('/settings', {
@@ -1048,9 +1224,9 @@ export const api = {
     },
     getLatest: (params = {}, options = {}) => {
       const qs = new URLSearchParams(cleanParams(params)).toString();
-      return request(`/notifications/latest${qs ? `?${qs}` : ''}`, options);
+      return request(`/notifications/latest${qs ? `?${qs}` : ''}`, { fresh: true, ...options });
     },
-    getUnreadCount: (options = {}) => request('/notifications/unread-count', options),
+    getUnreadCount: (options = {}) => request('/notifications/unread-count', { fresh: true, ...options }),
     getById: (id, options = {}) => request(`/notifications/${id}`, options),
     markAsRead: (id) =>
       request(`/notifications/${id}/read`, {
@@ -1094,6 +1270,10 @@ export const api = {
       request(`/admin/qr-requests/${id}/reject`, {
         method: 'POST',
         body: JSON.stringify({ rejection_reason: reason }),
+      }),
+    delete: (id) =>
+      request(`/admin/qr-requests/${id}`, {
+        method: 'DELETE',
       }),
   },
 

@@ -58,10 +58,13 @@ class ReportController extends Controller
     public function employees(Request $request)
     {
         $user = $request->user();
+        if (!$user || !in_array($user->role, ['Administrator', 'Admin', 'Store Administrator', 'Store Admin'], true)) {
+            return response()->json(['message' => 'Unauthorized to access employee reports.'], 403);
+        }
         [$saBranchId, $saBranchName] = $this->resolveStoreAdminBranch($user);
 
-        $fp = SyncController::computeFingerprint('employees');
         $cacheKey = 'pace_rep_emp_' . md5(json_encode([
+            'v' => SyncController::moduleVersion('employees'),
             'u' => $user ? $user->user_id : 0,
             'r' => $user ? $user->role : '',
             'b' => $saBranchId ?: $request->query('branch_id', $request->query('branch', '')),
@@ -69,9 +72,9 @@ class ReportController extends Controller
             'p' => $request->query('position', ''),
             'st' => $request->query('status', ''),
             's' => $request->query('search', ''),
-        ])) . '_' . $fp;
+        ]));
 
-        $payload = Cache::remember($cacheKey, 2, function () use ($request, $user, $saBranchId, $saBranchName) {
+        $payload = Cache::remember($cacheKey, 45, function () use ($request, $user, $saBranchId, $saBranchName) {
             $query = Employee::query();
 
             // Role scoping
@@ -176,9 +179,12 @@ class ReportController extends Controller
     public function attendance(Request $request)
     {
         $user = $request->user();
+        if (!$user || $user->role === 'Customer') {
+            return response()->json(['message' => 'Customers cannot access attendance reports.'], 403);
+        }
         [$saBranchId, $saBranchName] = $this->resolveStoreAdminBranch($user);
-        $fp = SyncController::computeFingerprint('attendance');
         $cacheKey = 'pace_rep_att_' . md5(json_encode([
+            'v' => SyncController::moduleVersion('attendance'),
             'u' => $user ? $user->user_id : 0,
             'r' => $user ? $user->role : '',
             'b' => $saBranchId ?: $request->query('branch', ''),
@@ -187,9 +193,9 @@ class ReportController extends Controller
             'd' => $request->query('department', ''),
             'st' => $request->query('status', ''),
             'e' => $request->query('employee_id', ''),
-        ])) . '_' . $fp;
+        ]));
 
-        $payload = Cache::remember($cacheKey, 2, function () use ($request, $user, $saBranchId, $saBranchName) {
+        $payload = Cache::remember($cacheKey, 45, function () use ($request, $user, $saBranchId, $saBranchName) {
             $query = Attendance::with('employee.branch');
 
             // Role scoping
@@ -297,14 +303,14 @@ class ReportController extends Controller
     public function payroll(Request $request)
     {
         $user = $request->user();
-        if ($user && in_array($user->role, ['Store Administrator', 'Store Admin'])) {
+        if (!$user || !in_array($user->role, ['Administrator', 'Admin', 'Employee'], true)) {
             return response()->json([
-                'message' => 'Store Administrators do not have access to payroll reports.'
+                'message' => 'Store Administrators and Customers do not have access to payroll reports.'
             ], 403);
         }
 
-        $fp = SyncController::computeFingerprint('payroll');
         $cacheKey = 'pace_rep_pay_' . md5(json_encode([
+            'v' => SyncController::moduleVersion('payroll'),
             'u' => $user ? $user->user_id : 0,
             'r' => $user ? $user->role : '',
             'b' => $request->query('branch_id', ''),
@@ -312,9 +318,9 @@ class ReportController extends Controller
             'd' => $request->query('department', ''),
             'st' => $request->query('status', ''),
             'e' => $request->query('employee_id', ''),
-        ])) . '_' . $fp;
+        ]));
 
-        $payload = Cache::remember($cacheKey, 2, function () use ($request, $user) {
+        $payload = Cache::remember($cacheKey, 45, function () use ($request, $user) {
             $query = Payroll::with(['employee.branch', 'period', 'deductions']);
 
             if ($user && $user->role === 'Employee') {
@@ -395,21 +401,24 @@ class ReportController extends Controller
     public function sales(Request $request)
     {
         $user = $request->user();
+        if (!$user || !in_array($user->role, ['Administrator', 'Admin', 'Store Administrator', 'Store Admin'], true)) {
+            return response()->json(['message' => 'Unauthorized to access sales reports.'], 403);
+        }
         [$saBranchId, $saBranchName] = $this->resolveStoreAdminBranch($user);
         $filterBranch = $saBranchId ?: $request->query('branch_id', $request->query('branch'));
 
         $dateFrom = $request->query('date_from');
         $dateTo = $request->query('date_to');
-        $fp = SyncController::computeFingerprint('sales');
         $cacheKey = 'pace_rep_sales_' . md5(json_encode([
+            'v' => SyncController::moduleVersion('sales'),
             'u' => $user ? $user->user_id : 0,
             'r' => $user ? $user->role : '',
             'b' => $filterBranch ?: '',
             'df' => $dateFrom ?: '',
             'dt' => $dateTo ?: '',
-        ])) . '_' . $fp;
+        ]));
 
-        $payload = Cache::remember($cacheKey, 2, function () use ($request, $user, $saBranchId, $filterBranch, $dateFrom, $dateTo) {
+        $payload = Cache::remember($cacheKey, 45, function () use ($request, $user, $saBranchId, $filterBranch, $dateFrom, $dateTo) {
             $query = SaleTransaction::with('customer');
 
             if ($saBranchId) {
@@ -439,8 +448,16 @@ class ReportController extends Controller
 
             if ($saBranchId) {
                 $trendQuery->where('branch_id', $saBranchId);
+            } elseif ($user && in_array($user->role, ['Store Administrator', 'Store Admin'])) {
+                $trendQuery->where('sale_id', -1);
             } elseif ($filterBranch && $filterBranch !== 'All') {
                 $trendQuery->where('branch_id', $filterBranch);
+            }
+            if ($dateFrom) {
+                $trendQuery->whereDate('sale_date', '>=', $dateFrom);
+            }
+            if ($dateTo) {
+                $trendQuery->whereDate('sale_date', '<=', $dateTo);
             }
 
             $trend = $trendQuery->groupBy('month', 'month_num')
@@ -478,17 +495,20 @@ class ReportController extends Controller
     public function inventory(Request $request)
     {
         $user = $request->user();
+        if (!$user || !in_array($user->role, ['Administrator', 'Admin', 'Store Administrator', 'Store Admin'], true)) {
+            return response()->json(['message' => 'Unauthorized to access inventory reports.'], 403);
+        }
         [$saBranchId, $saBranchName] = $this->resolveStoreAdminBranch($user);
         $filterBranch = $saBranchId ?: $request->query('branch_id', $request->query('branch'));
 
-        $fp = SyncController::computeFingerprint('products');
         $cacheKey = 'pace_rep_inv_' . md5(json_encode([
+            'v' => SyncController::moduleVersion('products'),
             'u' => $user ? $user->user_id : 0,
             'r' => $user ? $user->role : '',
             'b' => $filterBranch ?: 'All',
-        ])) . '_' . $fp;
+        ]));
 
-        $payload = Cache::remember($cacheKey, 2, function () use ($user, $saBranchId, $filterBranch) {
+        $payload = Cache::remember($cacheKey, 45, function () use ($user, $saBranchId, $filterBranch) {
             $query = Product::query();
 
             if ($saBranchId) {
@@ -532,17 +552,20 @@ class ReportController extends Controller
     public function installments(Request $request)
     {
         $user = $request->user();
+        if (!$user || !in_array($user->role, ['Administrator', 'Admin', 'Store Administrator', 'Store Admin'], true)) {
+            return response()->json(['message' => 'Unauthorized to access installment reports.'], 403);
+        }
         [$saBranchId, $saBranchName] = $this->resolveStoreAdminBranch($user);
         $filterBranch = $saBranchId ?: $request->query('branch_id', $request->query('branch'));
 
-        $fp = SyncController::computeFingerprint('installments');
         $cacheKey = 'pace_rep_inst_' . md5(json_encode([
+            'v' => SyncController::moduleVersion('installments'),
             'u' => $user ? $user->user_id : 0,
             'r' => $user ? $user->role : '',
             'b' => $filterBranch ?: 'All',
-        ])) . '_' . $fp;
+        ]));
 
-        $payload = Cache::remember($cacheKey, 2, function () use ($user, $saBranchId, $filterBranch) {
+        $payload = Cache::remember($cacheKey, 45, function () use ($user, $saBranchId, $filterBranch) {
             $query = InstallmentAccount::with([
                 'customer',
                 'payments',
@@ -579,8 +602,9 @@ class ReportController extends Controller
             $completed = $accounts->where('status', 'Completed')->count();
 
             $list = $accounts->map(function ($acc) {
-                $paid = (float)$acc->payments->sum('amount') + (float)$acc->down_payment;
-                $balance = max(0, (float)$acc->total_payable - $paid);
+                $fin = $acc->financialBreakdown();
+                $paid = (float) $fin['paid'];
+                $balance = (float) $fin['balance'];
 
                 return [
                     'installment_id' => $acc->installment_id,
@@ -821,23 +845,20 @@ class ReportController extends Controller
             'submitted_at' => now(),
         ]);
 
-        // Send notification to admin
+        // Send notification to all Administrators (do not drop offline admins)
         $storeAdminName = $user->employee ? trim("{$user->employee->first_name} {$user->employee->last_name}") : $user->username;
         $branchName = $report->branch ? $report->branch->name : 'Unknown Branch';
-        
-        $admins = \App\Models\User::where('role', 'Administrator')->where('is_active', true)->get();
-        foreach ($admins as $admin) {
-            NotificationService::sendToUser($admin->user_id, [
-                'type' => 'report_submission',
-                'title' => 'New Report Submitted',
-                'message' => "Weekly report '{$report->report_title}' submitted by {$storeAdminName} for {$branchName}.",
-                'module' => 'Reports',
-                'related_id' => $report->report_id,
-                'related_type' => 'App\Models\Report',
-                'action_url' => '/dashboard',
-                'priority' => 'normal',
-            ]);
-        }
+
+        NotificationService::sendToAdmins([
+            'type' => 'report_submission',
+            'title' => 'New Report Submitted',
+            'message' => "Weekly report '{$report->report_title}' submitted by {$storeAdminName} for {$branchName}.",
+            'module' => 'Reports',
+            'related_id' => $report->report_id,
+            'related_type' => 'App\Models\Report',
+            'action_url' => '/reports',
+            'priority' => 'normal',
+        ]);
 
         return response()->json([
             'success' => true,

@@ -1,38 +1,47 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { clearApiCacheForModule } from './api'
+import { clearApiCacheForModule, RELATED_MODULE_INVALIDATIONS } from './api'
 export { fastDeepEqual, setIfChanged } from './diff'
 export { SyncButton, OnDemandSyncButton, default as DefaultSyncButton } from '../components/SyncButton'
 
-// Active sync locks registry: tracks module/targetId currently in an active sync operation
-const activeSyncLocks = new Set()
-// Debounce timestamps registry: prevents rapid multi-clicks
-const syncDebounceTimestamps = new Map()
-// Active AbortControllers: to cleanly cancel an in-flight operation if needed
-const syncAbortControllers = new Map()
+const MODULE_SESSION_CACHE_KEYS = {
+  attendance: ['pace_cached_attendance_records', 'pace_cached_attendance_summary'],
+  employees: ['pace_cached_employees'],
+  customers: ['pace_cached_customers', 'pace_cached_cust_stats', 'pace_cached_cust_inst'],
+  products: ['pace_cached_products', 'pace_cached_branches'],
+  categories: ['pace_cached_products'],
+  branches: ['pace_cached_branches', 'pace_cached_dash_branches'],
+  sales: ['pace_cached_sales', 'pace_cached_dash_stats', 'pace_cached_dash_charts', 'pace_cached_dash_recent'],
+  payments: ['pace_cached_cust_stats', 'pace_cached_cust_inst', 'pace_cached_dash_stats', 'pace_cached_dash_charts', 'pace_cached_dash_recent'],
+  installments: ['pace_cached_installments', 'pace_cached_cust_stats', 'pace_cached_cust_inst', 'pace_cached_dash_stats'],
+  customer_installments: ['pace_cached_installments', 'pace_cached_cust_stats', 'pace_cached_cust_inst', 'pace_cached_dash_stats'],
+  payroll: ['pace_cached_payroll', 'pace_cached_periods'],
+  dashboard: ['pace_cached_dash_stats', 'pace_cached_dash_charts', 'pace_cached_dash_recent', 'pace_cached_dash_branches'],
+  store_dashboard: ['pace_cached_dash_stats', 'pace_cached_dash_charts', 'pace_cached_dash_recent', 'pace_cached_dash_branches'],
+  employee_dashboard: ['pace_cached_dash_stats', 'pace_cached_dash_charts', 'pace_cached_dash_recent', 'pace_cached_dash_branches'],
+}
 
-/**
- * Checks whether an on-demand sync is currently in-flight for a specific key
- * @param {string} [key='general']
- * @returns {boolean}
- */
+function clearSessionCacheForModules(modules) {
+  try {
+    if (typeof sessionStorage === 'undefined') return
+    for (const mod of modules) {
+      const keys = MODULE_SESSION_CACHE_KEYS[mod]
+      if (keys) {
+        keys.forEach((k) => sessionStorage.removeItem(k))
+      }
+    }
+  } catch {
+  }
+}
+
+const activeSyncLocks = new Set()
+const syncDebounceTimestamps = new Map()
+const syncAbortControllers = new Map()
+const pendingDispatchTimers = new Map()
+
 export function isSyncing(key = 'general') {
   return activeSyncLocks.has(key)
 }
 
-/**
- * Strictly on-demand, click-driven sync execution handler.
- * Enforces single-run locking, debouncing, and strictly targeted cache & payload dispatching.
- *
- * @param {Object} options
- * @param {string} [options.module='general'] - Targeted module (e.g. 'customers', 'employees', 'notifications')
- * @param {string|number|null} [options.targetId=null] - Specific entity ID being synced/updated
- * @param {string} [options.action='sync'] - Action verb (e.g. 'refresh', 'mutation', 'click')
- * @param {Object|null} [options.payload=null] - Minimal targeted payload (only target ID/action, never full DB)
- * @param {Function|null} [options.syncFn=null] - Targeted async network/sync fetcher to execute
- * @param {Function|null} [options.onSuccess=null] - Targeted success callback
- * @param {Function|null} [options.onError=null] - Targeted error callback
- * @returns {Promise<{ status: string, result?: any, error?: any, reason?: string }>}
- */
 export async function executeOnDemandSync({
   module = 'general',
   targetId = null,
@@ -40,16 +49,14 @@ export async function executeOnDemandSync({
   payload = null,
   syncFn = null,
   onSuccess = null,
-  onError = null
+  onError = null,
 } = {}) {
   const lockKey = targetId !== null && targetId !== undefined ? `${module}:${targetId}` : module
 
-  // 1. Single-Run Locking Guard: If sync is already in progress, safely ignore subsequent clicks
   if (activeSyncLocks.has(lockKey) || activeSyncLocks.has(`${module}:all`)) {
     return { status: 'ignored', reason: 'already_syncing' }
   }
 
-  // 2. Debounce Guard: 400ms cooldown to block rapid-fire multi-clicks
   const now = Date.now()
   const lastTime = syncDebounceTimestamps.get(lockKey) || 0
   if (now - lastTime < 400) {
@@ -57,12 +64,13 @@ export async function executeOnDemandSync({
   }
   syncDebounceTimestamps.set(lockKey, now)
 
-  // 3. Acquire Lock
   activeSyncLocks.add(lockKey)
 
-  // Manage AbortController for clean cancellation
   if (syncAbortControllers.has(lockKey)) {
-    try { syncAbortControllers.get(lockKey).abort() } catch (_) {}
+    try {
+      syncAbortControllers.get(lockKey).abort()
+    } catch {
+    }
   }
   const controller = new AbortController()
   syncAbortControllers.set(lockKey, controller)
@@ -75,11 +83,10 @@ export async function executeOnDemandSync({
         targetId,
         action,
         payload,
-        signal: controller.signal
+        signal: controller.signal,
       })
     }
 
-    // 4. Targeted Cache Invalidation: Only clear cache keys related to this module & targetId
     if (module) {
       clearApiCacheForModule(module, targetId)
     }
@@ -91,7 +98,6 @@ export async function executeOnDemandSync({
     return { status: 'success', result }
   } catch (err) {
     if (err?.name !== 'AbortError') {
-      // Clean, targeted error logging strictly for the explicit user-triggered action
       console.error(`[RealtimeSync] Action failed for ${module}${targetId ? ` (ID: ${targetId})` : ''}:`, err?.message || err)
       if (typeof onError === 'function') {
         onError(err)
@@ -99,45 +105,46 @@ export async function executeOnDemandSync({
     }
     return { status: 'error', error: err }
   } finally {
-    // 5. Release Lock
     activeSyncLocks.delete(lockKey)
     syncAbortControllers.delete(lockKey)
   }
 }
 
-/**
- * On-demand data sync trigger for user actions (create, edit, delete, status toggle).
- * Strictly targeted to the specific module and entity, invalidating isolated cache.
- */
 export function triggerDataSync(module = 'general', extra = {}) {
   const targetId = extra?.id || extra?.targetId || null
   const action = extra?.action || 'mutation'
 
-  // 1. Immediately invalidate ONLY the targeted module's API cache
   if (module && module !== 'general') {
-    clearApiCacheForModule(module, targetId)
+    const modKey = String(module).toLowerCase()
+    const modulesToClear = RELATED_MODULE_INVALIDATIONS[modKey] || [modKey]
+    modulesToClear.forEach((m) => clearApiCacheForModule(m, m === modKey ? targetId : null))
+    clearSessionCacheForModules(modulesToClear)
   }
 
-  // 2. Dispatch strictly to the targeted module listener (no global broadcast collision)
   if (typeof window !== 'undefined') {
-    const detail = { module, targetId, action, timestamp: Date.now() }
-    if (module && module !== 'general') {
-      window.dispatchEvent(new CustomEvent(`pace:sync:${module}`, { detail }))
-    } else {
-      window.dispatchEvent(new CustomEvent('pace:data-sync', { detail }))
+    const eventName = module && module !== 'general' ? `pace:sync:${module}` : 'pace:data-sync'
+    const existingTimer = pendingDispatchTimers.get(eventName)
+    if (existingTimer) {
+      clearTimeout(existingTimer)
     }
+    const timer = setTimeout(() => {
+      pendingDispatchTimers.delete(eventName)
+      const detail = {
+        module,
+        targetId,
+        action,
+        payload: extra?.payload || null,
+        eventName: extra?.eventName || null,
+        timestamp: Date.now(),
+      }
+      window.dispatchEvent(new CustomEvent(eventName, { detail }))
+    }, 60)
+    pendingDispatchTimers.set(eventName, timer)
   }
 
   return { status: 'dispatched', module, targetId, action }
 }
 
-/**
- * React hook for strictly isolated, event-driven, on-demand synchronization.
- *
- * @param {Function} refreshFn - Sync callback to execute (receives source, signal, extraData)
- * @param {Array} deps - Dependency array
- * @param {Object} options - { enabled?: boolean, module?: string }
- */
 export function useRealtimeSync(refreshFn, deps = [], options = {}) {
   const { enabled = true, module = 'general' } = typeof options === 'object' ? options : {}
   const [isSyncingState, setIsSyncingState] = useState(false)
@@ -160,13 +167,12 @@ export function useRealtimeSync(refreshFn, deps = [], options = {}) {
     refreshFnRef.current = refreshFn
   }, [refreshFn])
 
-  // Explicit, click-driven sync trigger with concurrency locking
   const handleManualSync = useCallback(async (targetId = null, extraData = null) => {
     if (!enabled || !isMountedRef.current) return
 
     const lockKey = targetId !== null && targetId !== undefined ? `${module}:${targetId}` : module
     if (activeSyncLocks.has(lockKey) || activeSyncLocks.has(`${module}:all`)) {
-      return // Single-run locking: safely ignore duplicate concurrent clicks
+      return
     }
 
     if (isMountedRef.current) setIsSyncingState(true)
@@ -179,7 +185,7 @@ export function useRealtimeSync(refreshFn, deps = [], options = {}) {
           if (refreshFnRef.current && isMountedRef.current) {
             await refreshFnRef.current('manual', signal, extraData)
           }
-        }
+        },
       })
     } finally {
       if (isMountedRef.current) setIsSyncingState(false)
@@ -187,18 +193,14 @@ export function useRealtimeSync(refreshFn, deps = [], options = {}) {
   }, [enabled, module])
 
   useEffect(() => {
-    // Strictly isolate: do not attach wildcard listeners if module is generic or disabled
     if (!enabled || typeof window === 'undefined' || !module || module === 'general') {
       return
     }
 
     const onDataSync = (e) => {
       const mod = e?.detail?.module
-      // Strictly isolated: only trigger when the active component's specific module matches
       if (!mod || mod !== module || isFetchingRef.current) return
-      if (typeof document !== 'undefined' && document.hidden) return
 
-      // Micro-debounce & yield to the main thread (guarantees 60fps UI responsiveness)
       if (debounceTimerRef.current) {
         clearTimeout(debounceTimerRef.current)
       }
@@ -210,7 +212,7 @@ export function useRealtimeSync(refreshFn, deps = [], options = {}) {
           if (refreshFnRef.current && isMountedRef.current) {
             await refreshFnRef.current('event', undefined, e?.detail)
           }
-        } catch (_) {
+        } catch {
         } finally {
           isFetchingRef.current = false
         }
@@ -231,21 +233,14 @@ export function useRealtimeSync(refreshFn, deps = [], options = {}) {
   return {
     sync: handleManualSync,
     triggerSync: handleManualSync,
-    isSyncing: isSyncingState
+    isSyncing: isSyncingState,
   }
 }
 
-/**
- * Dedicated hook for binding on-demand sync to specific UI action buttons
- */
 export function useOnDemandSync(module, syncFn, options = {}) {
   return useRealtimeSync(syncFn, [], { ...options, module })
 }
 
-/**
- * Retained for backward-compatibility.
- * Background auto-engine is permanently disabled to eliminate background lag.
- */
 export function startRealtimeEngine() {
   return () => {}
 }

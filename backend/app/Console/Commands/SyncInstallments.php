@@ -64,19 +64,23 @@ class SyncInstallments extends Command
                     'priority' => 'critical',
                 ];
 
+                $custNotifData = $notifData;
+                $custNotifData['action_url'] = '/customer/dashboard?tab=installments';
+
                 \App\Services\NotificationService::sendToAdmins($notifData);
                 \App\Services\NotificationService::sendToStoreAdmins($notifData, $accBranch);
-                \App\Services\NotificationService::sendToCustomer($inst->customer_id, $notifData);
+                \App\Services\NotificationService::sendToCustomer($inst->customer_id, $custNotifData);
                 continue;
             }
 
             // APPROACHING DUE / DUE TODAY CHECK
             if ($sched->due_date === $threeDaysFromNow || $sched->due_date === $today) {
-                // Prevent duplicate notifications for the same schedule on the same day
-                $alreadyNotified = \App\Models\Notification::where('type', 'upcoming_payment_alert')
-                    ->where('related_id', $inst->installment_id)
+                $customerUserId = \App\Models\User::where('customer_id', $inst->customer_id)->value('user_id');
+                $alreadyNotified = $customerUserId ? \App\Models\Notification::where('user_id', $customerUserId)
+                    ->where('type', 'upcoming_payment_alert')
+                    ->where('related_id', (string) $inst->installment_id)
                     ->whereDate('created_at', $today)
-                    ->exists();
+                    ->exists() : false;
 
                 if (!$alreadyNotified) {
                     $dueCount++;
@@ -89,7 +93,7 @@ class SyncInstallments extends Command
                         'module' => 'Installments',
                         'related_id' => $inst->installment_id,
                         'related_type' => 'App\Models\InstallmentAccount',
-                        'action_url' => "/installments?id={$inst->installment_id}",
+                        'action_url' => '/customer/dashboard?tab=installments',
                         'priority' => 'high',
                     ];
 

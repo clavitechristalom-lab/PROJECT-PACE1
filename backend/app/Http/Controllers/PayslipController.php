@@ -11,6 +11,36 @@ use Illuminate\Support\Facades\DB;
 
 class PayslipController extends Controller
 {
+    private function authorizePayslipAccess(?\App\Models\User $user, ?int $employeeId, bool $write = false)
+    {
+        if (!$user) {
+            return response()->json(['success' => false, 'message' => 'Unauthenticated.'], 401);
+        }
+
+        if (in_array($user->role, ['Administrator', 'Admin'], true)) {
+            return null;
+        }
+
+        if ($user->role === 'Customer') {
+            return response()->json(['success' => false, 'message' => 'Customers cannot access employee payslips.'], 403);
+        }
+
+        if (in_array($user->role, ['Store Administrator', 'Store Admin'], true)) {
+            $branchId = $user->employee?->branch_id;
+            $targetBranchId = $employeeId ? Employee::where('employee_id', $employeeId)->value('branch_id') : null;
+            if (!$branchId || !$targetBranchId || (int) $branchId !== (int) $targetBranchId) {
+                return response()->json(['success' => false, 'message' => 'Unauthorized access to employee payslip in another branch.'], 403);
+            }
+            return null;
+        }
+
+        if ($user->role === 'Employee' && !$write && $user->employee_id && (int) $user->employee_id === (int) $employeeId) {
+            return null;
+        }
+
+        return response()->json(['success' => false, 'message' => 'Unauthorized to access this payslip.'], 403);
+    }
+
     /**
      * Display a listing of payslips with all 13 UI table columns.
      */
@@ -130,6 +160,10 @@ class PayslipController extends Controller
             'proof_of_payment'    => 'nullable|string|max:255',
         ]);
 
+        if ($denied = $this->authorizePayslipAccess($request->user(), (int) $validated['employee_id'], true)) {
+            return $denied;
+        }
+
         return DB::transaction(function () use ($validated) {
             $emp = Employee::with('branchProfile')->find($validated['employee_id']);
 
@@ -197,7 +231,7 @@ class PayslipController extends Controller
     /**
      * Display the specified payslip.
      */
-    public function show(int $id): JsonResponse
+    public function show(Request $request, int $id): JsonResponse
     {
         $payslip = Payslip::with(['employee', 'payroll.period', 'payroll.deductions'])->find($id);
 
@@ -212,6 +246,10 @@ class PayslipController extends Controller
                 'success' => false,
                 'message' => 'Payslip not found.',
             ], 404);
+        }
+
+        if ($denied = $this->authorizePayslipAccess($request->user(), (int) $payslip->employee_id, false)) {
+            return $denied;
         }
 
         return response()->json([
@@ -232,6 +270,10 @@ class PayslipController extends Controller
                 'success' => false,
                 'message' => 'Payslip not found.',
             ], 404);
+        }
+
+        if ($denied = $this->authorizePayslipAccess($request->user(), (int) $payslip->employee_id, true)) {
+            return $denied;
         }
 
         $validated = $request->validate([
@@ -291,7 +333,7 @@ class PayslipController extends Controller
     /**
      * Remove the specified payslip from the database.
      */
-    public function destroy(int $id): JsonResponse
+    public function destroy(Request $request, int $id): JsonResponse
     {
         $payslip = Payslip::find($id) ?: Payslip::where('payroll_id', $id)->first();
 
@@ -300,6 +342,10 @@ class PayslipController extends Controller
                 'success' => false,
                 'message' => 'Payslip not found.',
             ], 404);
+        }
+
+        if ($denied = $this->authorizePayslipAccess($request->user(), (int) $payslip->employee_id, true)) {
+            return $denied;
         }
 
         $payslip->delete();

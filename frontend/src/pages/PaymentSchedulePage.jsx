@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import {
   FiCalendar, FiClock, FiAlertTriangle, FiCheckCircle,
-  FiSearch, FiList, FiGrid, FiCreditCard, FiX, FiMapPin
+  FiSearch, FiList, FiGrid, FiCreditCard, FiX, FiMapPin, FiEye
 } from 'react-icons/fi'
 import {
   Btn, StatusBadge, Table, TR, TD, SearchBar, PageHeader, StatCard, Card, Pagination,
@@ -96,8 +96,45 @@ export default function PaymentSchedulePage({ branchFilter: propBranchFilter, em
     return filterBySearch(schedules, search, ['account_no', 'customer_name', 'due_date', 'branch'])
   }, [schedules, search])
 
-  const total = filtered.length
-  const paginated = filtered.slice((page - 1) * pageSize, page * pageSize)
+  // Consolidate list view to 1 row per account; full #1..#N schedule breakdown is shown in Installment & Product Details modal
+  const groupedList = useMemo(() => {
+    const byAccount = new Map()
+    for (const s of filtered) {
+      const key = s.installment_id || s.account_no
+      if (!byAccount.has(key)) byAccount.set(key, [])
+      byAccount.get(key).push(s)
+    }
+
+    const totalPerAccount = new Map()
+    for (const s of schedules) {
+      const key = s.installment_id || s.account_no
+      totalPerAccount.set(key, (totalPerAccount.get(key) || 0) + 1)
+    }
+
+    const pickRepresentative = (rows) => {
+      const overdue = rows.find(r => r.status === 'Overdue')
+      if (overdue) return overdue
+      const dueOrPartial = rows.find(r => r.status === 'Due' || r.status === 'Partially Paid')
+      if (dueOrPartial) return dueOrPartial
+      const paidRows = rows.filter(r => r.status === 'Paid' || r.status === 'Fully Paid')
+      if (paidRows.length > 0) return paidRows[paidRows.length - 1]
+      return rows[0]
+    }
+
+    const result = []
+    for (const [key, rows] of byAccount.entries()) {
+      const sorted = [...rows].sort((a, b) => Number(a.installment_no || 0) - Number(b.installment_no || 0))
+      const rep = pickRepresentative(sorted)
+      result.push({
+        ...rep,
+        total_installments: totalPerAccount.get(key) || sorted.length,
+      })
+    }
+    return result
+  }, [filtered, schedules])
+
+  const total = groupedList.length
+  const paginated = groupedList.slice((page - 1) * pageSize, page * pageSize)
 
   // Live aggregates
   const totalCount = schedules.length
@@ -201,7 +238,7 @@ export default function PaymentSchedulePage({ branchFilter: propBranchFilter, em
       {/* Content */}
       <Card noPad={viewMode === 'list'} className={viewMode === 'calendar' ? 'bg-transparent shadow-none border-none p-0' : 'border border-border overflow-hidden'}>
         {loading ? (
-          <TableSkeleton rows={6} cols={9} />
+          <TableSkeleton rows={6} cols={10} />
         ) : filtered.length === 0 ? (
           <EmptyState
             icon={<FiCalendar className="w-12 h-12 text-muted-foreground/30 mx-auto" />}
@@ -223,6 +260,7 @@ export default function PaymentSchedulePage({ branchFilter: propBranchFilter, em
                     <th className="py-3 px-4 text-right">Amount Paid</th>
                     <th className="py-3 px-4 text-right">Balance Due</th>
                     <th className="py-3 px-4 text-center">Status</th>
+                    <th className="py-3 px-4 text-center">Action</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border">
@@ -236,7 +274,9 @@ export default function PaymentSchedulePage({ branchFilter: propBranchFilter, em
                           <span>{s.branch || 'Main Branch'}</span>
                         </span>
                       </td>
-                      <td className="py-3 px-4 font-mono text-muted-foreground">#{s.installment_no}</td>
+                      <td className="py-3 px-4 font-mono text-muted-foreground">
+                        #{s.installment_no}{s.total_installments > 1 ? ` / ${s.total_installments}` : ''}
+                      </td>
                       <td className="py-3 px-4 font-mono">{s.status === 'Paid' && s.paid_date ? s.paid_date : s.due_date}</td>
                       <td className="py-3 px-4 text-right font-mono font-bold text-foreground">{fmt(s.amount_due)}</td>
                       <td className="py-3 px-4 text-right font-mono text-emerald-600 font-semibold">{fmt(s.amount_paid)}</td>
@@ -246,6 +286,16 @@ export default function PaymentSchedulePage({ branchFilter: propBranchFilter, em
                         </span>
                       </td>
                       <td className="py-3 px-4 text-center"><StatusBadge status={s.status} /></td>
+                      <td className="py-3 px-4 text-center">
+                        <button
+                          type="button"
+                          onClick={() => setSelectedInstallmentId(s.installment_id)}
+                          title="View Installment & Schedule Details"
+                          className="inline-flex items-center justify-center w-8 h-8 rounded-lg border border-border hover:bg-muted text-blue-500 hover:text-primary transition-colors cursor-pointer"
+                        >
+                          <FiEye className="w-4 h-4" />
+                        </button>
+                      </td>
                     </tr>
                   ))}
                 </tbody>

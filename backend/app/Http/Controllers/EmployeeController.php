@@ -19,8 +19,7 @@ class EmployeeController extends Controller
     {
         $user = $request->user();
 
-        // 1-2s Performance Cache
-        $fp = SyncController::computeFingerprint('employees');
+        // Versioned 45s Performance Cache
         $cacheKey = 'pace_emp_idx_' . md5(json_encode([
             'u' => $user ? $user->user_id : 0,
             'r' => $user ? $user->role : '',
@@ -29,7 +28,8 @@ class EmployeeController extends Controller
             'st' => $request->query('status', ''),
             'b' => $request->query('branch_id', ''),
             'td' => date('Y-m-d'),
-        ])) . '_' . $fp;
+            'v' => SyncController::moduleVersion('employees'),
+        ]));
 
         $cached = Cache::get($cacheKey);
         if ($cached !== null) {
@@ -139,7 +139,7 @@ class EmployeeController extends Controller
             'total' => $employees->count(),
         ];
 
-        Cache::put($cacheKey, $res, 2);
+        Cache::put($cacheKey, $res, 45);
 
         return response()->json($res);
     }
@@ -264,7 +264,7 @@ class EmployeeController extends Controller
         ]);
 
         $user = auth()->user();
-        if ($user && $user->role === 'Store Administrator') {
+        if ($user && in_array($user->role, ['Store Administrator', 'Store Admin'], true)) {
             if ($user->employee && $user->employee->branch_id) {
                 $validated['branch_id'] = $user->employee->branch_id;
             }
@@ -283,8 +283,13 @@ class EmployeeController extends Controller
         }
 
         if (empty($validated['employee_code'])) {
-            $count = Employee::count() + 1;
-            $validated['employee_code'] = 'EMP-' . str_pad($count, 3, '0', STR_PAD_LEFT);
+            $count = (Employee::max('employee_id') ?? 0) + 1;
+            $code = 'EMP-' . str_pad($count, 3, '0', STR_PAD_LEFT);
+            while (Employee::where('employee_code', $code)->exists()) {
+                $count++;
+                $code = 'EMP-' . str_pad($count, 3, '0', STR_PAD_LEFT);
+            }
+            $validated['employee_code'] = $code;
         }
 
         $dailyInput = $request->input('daily_rate');
@@ -344,12 +349,19 @@ class EmployeeController extends Controller
     public function update(Request $request, $id)
     {
         $employee = Employee::findOrFail($id);
+        $actingUser = $request->user() ?? auth()->user();
+        if ($actingUser && in_array($actingUser->role, ['Store Administrator', 'Store Admin'], true)) {
+            $userBranch = $actingUser->employee ? $actingUser->employee->branch_id : null;
+            if (!$userBranch || (int) $employee->branch_id !== (int) $userBranch) {
+                return response()->json(['message' => 'Unauthorized access to employee in another branch.'], 403);
+            }
+        }
 
         $validated = $request->validate([
-            'employee_code' => "required|string|unique:employees,employee_code,{$id},employee_id",
-            'first_name' => 'required|string|max:255',
+            'employee_code' => "sometimes|required|string|unique:employees,employee_code,{$id},employee_id",
+            'first_name' => 'sometimes|required|string|max:255',
             'middle_name' => 'nullable|string|max:255',
-            'last_name' => 'required|string|max:255',
+            'last_name' => 'sometimes|required|string|max:255',
             'gender' => 'nullable|string|in:Male,Female,Other',
             'birth_date' => 'nullable|date',
             'date_of_birth' => 'nullable|date',
@@ -358,10 +370,10 @@ class EmployeeController extends Controller
             'sss_number' => 'nullable|string',
             'philhealth_number' => 'nullable|string',
             'pagibig_number' => 'nullable|string',
-            'position' => 'required|string|max:255',
+            'position' => 'sometimes|required|string|max:255',
             'department' => 'nullable|string|max:255',
             'branch_id' => 'nullable|integer|exists:branch_profiles,id',
-            'pay_type' => 'required|string',
+            'pay_type' => 'sometimes|required|string',
             'basic_salary' => 'nullable|numeric|min:0',
             'phone' => ['nullable', 'string', 'regex:/^(09\d{9}|639\d{9})$/'],
             'email' => 'nullable|email|max:255',
@@ -372,7 +384,7 @@ class EmployeeController extends Controller
             'emergency_contact_relation' => 'nullable|string',
             'emergency_contact_phone' => ['nullable', 'string', 'regex:/^(09\d{9}|639\d{9})$/'],
             'documents' => 'nullable|array',
-            'status' => 'required|string|in:Active,Inactive',
+            'status' => 'sometimes|required|string|in:Active,Inactive',
             'notes' => 'nullable|string',
             'attendance_pin' => 'nullable|string|min:4|max:6',
         ]);
@@ -466,7 +478,7 @@ class EmployeeController extends Controller
         }
 
         $user = auth()->user();
-        if ($user && $user->role === 'Store Administrator') {
+        if ($user && in_array($user->role, ['Store Administrator', 'Store Admin'], true)) {
             if ($user->employee && $user->employee->branch_id) {
                 $validated['branch_id'] = $user->employee->branch_id;
             }
@@ -800,6 +812,58 @@ class EmployeeController extends Controller
         return $active ? $this->enableQr($request, $id) : $this->revokeQr($request, $id);
     }
 
+    public function deleteQr(Request $request, $id)
+    {
+        $user = $request->user('sanctum') ?? $request->user();
+        if (!$user || $user->role !== 'Administrator') {
+            return response()->json([
+                'success' => false,
+                'message' => '403 Forbidden: ONLY Administrator can delete employee QR codes.',
+            ], 403);
+        }
+
+        $employee = Employee::findOrFail($id);
+
+        DB::transaction(function () use ($employee, $user, $request) {
+            $employee->qr_token = null;
+            $employee->qr_code = null;
+            $employee->qr_active = false;
+            $employee->qr_generated_at = null;
+            if (\Illuminate\Support\Facades\Schema::hasColumn('employees', 'qr_issued_by')) {
+                $employee->qr_issued_by = null;
+            }
+            if (\Illuminate\Support\Facades\Schema::hasColumn('employees', 'qr_request_status')) {
+                $employee->qr_request_status = 'NOT_REQUESTED';
+            }
+            if (\Illuminate\Support\Facades\Schema::hasColumn('employees', 'qr_rejection_reason')) {
+                $employee->qr_rejection_reason = null;
+            }
+            $employee->save();
+
+            DB::table('qr_requests')->where('employee_id', $employee->employee_id)->delete();
+
+            SystemLog::create([
+                'user_id' => $user->user_id,
+                'action' => 'DELETE',
+                'module' => 'QR Attendance',
+                'description' => "Administrator ({$user->username}) DELETED attendance QR code for {$employee->first_name} {$employee->last_name} ({$employee->employee_code})",
+                'ip_address' => $request->ip(),
+                'user_agent' => $request->userAgent(),
+            ]);
+        });
+
+        SyncController::bumpMutation(['employees', 'qr_requests', 'qr_monitoring', 'attendance']);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'QR Code deleted successfully.',
+            'qr_token' => null,
+            'qr_active' => false,
+            'qr_status' => 'NOT GENERATED',
+            'qr_generated_at' => null,
+        ]);
+    }
+
     /**
      * Get QR Monitoring Statistics and Live Audit Logs (ADMIN ONLY)
      * All values directly computed from MySQL database. NO MOCK DATA.
@@ -903,7 +967,18 @@ class EmployeeController extends Controller
 
     public function setPin($id, Request $request)
     {
+        $user = $request->user();
+        if (!$user || !in_array($user->role, ['Administrator', 'Admin', 'Store Administrator', 'Store Admin'], true)) {
+            return response()->json(['message' => 'Unauthorized to manage employee attendance PINs.'], 403);
+        }
+
         $employee = Employee::findOrFail($id);
+        if (in_array($user->role, ['Store Administrator', 'Store Admin'], true)) {
+            $userBranch = $user->employee ? $user->employee->branch_id : null;
+            if (!$userBranch || (int) $employee->branch_id !== (int) $userBranch) {
+                return response()->json(['message' => 'Unauthorized access to employee in another branch.'], 403);
+            }
+        }
 
         $validated = $request->validate([
             'pin' => 'required|string|min:4|max:6|regex:/^[0-9]+$/',
@@ -942,6 +1017,12 @@ class EmployeeController extends Controller
                 'success' => false,
                 'message' => 'Your session has expired. Please log in again.',
             ], 401);
+        }
+        if ($user->role === 'Customer') {
+            return response()->json([
+                'success' => false,
+                'message' => 'Customers do not have employee profiles.',
+            ], 403);
         }
 
         $employee = null;
@@ -1115,6 +1196,12 @@ class EmployeeController extends Controller
                 'success' => false,
                 'message' => 'Unauthenticated session.',
             ], 401);
+        }
+        if ($user->role === 'Customer') {
+            return response()->json([
+                'success' => false,
+                'message' => 'Customers cannot update employee profiles.',
+            ], 403);
         }
 
         $employee = ($user->employee_id ? Employee::find($user->employee_id) : null) ?: ($user->employee ?: Employee::where('email', $user->username)->first());
@@ -1332,6 +1419,11 @@ class EmployeeController extends Controller
         ]);
     }
 
+    public function verifyMe(Request $request)
+    {
+        return $this->verifyAccount($request);
+    }
+
     public function verifyAccount(Request $request)
     {
         $user = $request->user();
@@ -1340,6 +1432,12 @@ class EmployeeController extends Controller
                 'success' => false,
                 'message' => 'Unauthenticated session.',
             ], 401);
+        }
+        if ($user->role === 'Customer') {
+            return response()->json([
+                'success' => false,
+                'message' => 'Customers cannot verify employee accounts.',
+            ], 403);
         }
 
         $employee = ($user->employee_id ? Employee::find($user->employee_id) : null) ?: ($user->employee ?: Employee::where('email', $user->username)->first());

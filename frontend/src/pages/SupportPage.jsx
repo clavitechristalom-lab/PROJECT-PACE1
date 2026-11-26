@@ -104,7 +104,10 @@ function RespondModal({ isOpen, onClose, message, onSend }) {
               <h4 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Conversation History</h4>
               <div className="space-y-2.5 max-h-56 overflow-y-auto pr-1">
                 {message.chat_history.map((msg, idx) => {
-                  const isStaff = msg.sender_role === 'staff' || msg.sender_role === 'admin'
+                  const senderType = String(msg.sender_role || msg.sender || '').toLowerCase()
+                  const isStaff = senderType === 'staff' || senderType === 'admin' || senderType === 'administrator' || senderType === 'store administrator'
+                  const ts = msg.created_at || msg.timestamp
+                  const bodyText = msg.message ?? msg.text ?? ''
                   return (
                     <div
                       key={idx}
@@ -116,9 +119,9 @@ function RespondModal({ isOpen, onClose, message, onSend }) {
                     >
                       <div className="flex justify-between items-center mb-1 font-semibold text-[11px] text-muted-foreground">
                         <span>{isStaff ? 'Staff Support' : senderName}</span>
-                        <span className="font-mono text-[10px]">{msg.created_at ? new Date(msg.created_at).toLocaleTimeString() : ''}</span>
+                        <span className="font-mono text-[10px]">{ts ? new Date(ts).toLocaleTimeString() : ''}</span>
                       </div>
-                      <div className="whitespace-pre-wrap leading-relaxed">{msg.message}</div>
+                      <div className="whitespace-pre-wrap leading-relaxed">{bodyText}</div>
                     </div>
                   )
                 })}

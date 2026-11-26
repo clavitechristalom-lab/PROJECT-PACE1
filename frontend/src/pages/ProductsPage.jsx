@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef } from 'react'
+import { useState, useEffect, useMemo, useRef, useDeferredValue } from 'react'
 import { useSearchParams, useNavigate } from 'react-router-dom'
 import {
   FiPackage, FiPlus, FiEdit, FiTrash2, FiEye,
@@ -84,8 +84,10 @@ export default function ProductsPage({ branchFilter, embedded }) {
   })
   const [error, setError] = useState('')
   const [search, setSearch] = useState('')
+  const deferredSearch = useDeferredValue(search)
   const [category, setCategory] = useState(() => urlCategoryParam || 'All')
   const [categorySearch, setCategorySearch] = useState('')
+  const deferredCategorySearch = useDeferredValue(categorySearch)
   const [categoryDomainTab, setCategoryDomainTab] = useState('All')
   const [categoryLevelFilter, setCategoryLevelFilter] = useState('group')
   const [categoryStatusFilter, setCategoryStatusFilter] = useState('All')
@@ -117,6 +119,21 @@ export default function ProductsPage({ branchFilter, embedded }) {
     classification_scope: '',
     is_active: true,
   })
+  const createEmptyCategoryProductRow = () => ({
+    rowKey: `cat-prod-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+    product_name: '',
+    product_code: '',
+    brand: '',
+    unit_price: '',
+    cost_price: '',
+    stock_quantity: '0',
+    unit: 'unit',
+    status: 'Active',
+  })
+  const [categoryMultiProductTab, setCategoryMultiProductTab] = useState('new')
+  const [categoryNewProducts, setCategoryNewProducts] = useState(() => [createEmptyCategoryProductRow()])
+  const [categoryAssignProductIds, setCategoryAssignProductIds] = useState([])
+  const [categoryExistingProductSearch, setCategoryExistingProductSearch] = useState('')
   const [savingCategory, setSavingCategory] = useState(false)
   const [discountModal, setDiscountModal] = useState(null) // holds the product to discount
   const [discountForm, setDiscountForm] = useState({ discount_price: '' })
@@ -184,7 +201,7 @@ export default function ProductsPage({ branchFilter, embedded }) {
     }
     setError('')
     try {
-      const needBranches = branches.length === 0 || !isBackground
+      const needBranches = branches.length === 0
       const effectiveCategoryFilter = viewMode === 'categories' ? 'All' : category
       const [data, branchesData] = await Promise.all([
         api.products.getAll({
@@ -246,19 +263,24 @@ export default function ProductsPage({ branchFilter, embedded }) {
     } catch (_) {}
   }
 
+  // Tab-aware loading: only fetch categories when viewing Categories tab (or once when products modal needs tree),
+  // and only fetch products when viewing the Products tab.
   useEffect(() => {
-    loadBranches()
-  }, [])
-
-  useEffect(() => {
-    loadCategories()
+    if (viewMode === 'categories') {
+      loadCategories()
+      return
+    }
+    if (categoryTree.length === 0) {
+      loadCategories()
+    }
   }, [viewMode])
 
   useEffect(() => {
-    if (isAdmin && branches.length === 0) {
-      loadBranches()
-    }
-  }, [isAdmin])
+    if (viewMode === 'categories') return
+    const controller = new AbortController()
+    loadProducts('filter_change', controller.signal)
+    return () => controller.abort()
+  }, [category, stockStatus, activeBranch, viewMode])
 
   useEffect(() => {
     if (embedded) return
@@ -273,14 +295,10 @@ export default function ProductsPage({ branchFilter, embedded }) {
     }
   }, [searchParams, embedded])
 
-  useEffect(() => {
-    loadProducts('filter_change')
-  }, [category, stockStatus, activeBranch, viewMode])
-
-  // On-demand click-driven synchronization
+  // On-demand click-driven synchronization scoped to active tab
   const { sync: syncProducts, isSyncing: isSyncingProducts } = useRealtimeSync(
-    () => Promise.all([loadProducts('manual'), loadCategories()]),
-    [],
+    () => (viewMode === 'categories' ? loadCategories() : loadProducts('manual')),
+    [viewMode],
     { module: 'products' }
   )
 
@@ -385,7 +403,7 @@ export default function ProductsPage({ branchFilter, embedded }) {
   }
 
   const filteredCategoryRows = useMemo(() => {
-    const q = categorySearch.trim().toLowerCase()
+    const q = deferredCategorySearch.trim().toLowerCase()
     return normalizedCategoryRows.filter((row) => {
       if (categoryLevelFilter !== 'All' && row.level !== categoryLevelFilter) return false
       if (categoryDomainTab !== 'All' && row.main_category !== categoryDomainTab) return false
@@ -399,7 +417,7 @@ export default function ProductsPage({ branchFilter, embedded }) {
       }
       return true
     })
-  }, [normalizedCategoryRows, categoryLevelFilter, categoryDomainTab, categoryStatusFilter, categorySearch, activeBranch, branches])
+  }, [normalizedCategoryRows, categoryLevelFilter, categoryDomainTab, categoryStatusFilter, deferredCategorySearch, activeBranch, branches])
 
   const paginatedCategoryRows = filteredCategoryRows.slice((catPage - 1) * catPageSize, catPage * catPageSize)
 
@@ -414,6 +432,40 @@ export default function ProductsPage({ branchFilter, embedded }) {
       .replace(/&/g, 'and')
       .replace(/[^a-z0-9]+/g, '-')
       .replace(/^-+|-+$/g, '')
+
+  const resetCategoryMultiProducts = () => {
+    setCategoryMultiProductTab('new')
+    setCategoryNewProducts([createEmptyCategoryProductRow()])
+    setCategoryAssignProductIds([])
+    setCategoryExistingProductSearch('')
+  }
+
+  const addCategoryProductRow = (count = 1) => {
+    setCategoryNewProducts(prev => [
+      ...prev,
+      ...Array.from({ length: count }, () => createEmptyCategoryProductRow()),
+    ])
+  }
+
+  const updateCategoryProductRow = (rowKey, field, value) => {
+    setCategoryNewProducts(prev =>
+      prev.map(row => (row.rowKey === rowKey ? { ...row, [field]: value } : row))
+    )
+  }
+
+  const removeCategoryProductRow = (rowKey) => {
+    setCategoryNewProducts(prev => {
+      const next = prev.filter(row => row.rowKey !== rowKey)
+      return next.length > 0 ? next : [createEmptyCategoryProductRow()]
+    })
+  }
+
+  const toggleAssignProductId = (productId) => {
+    const idNum = Number(productId)
+    setCategoryAssignProductIds(prev =>
+      prev.includes(idNum) ? prev.filter(id => id !== idNum) : [...prev, idNum]
+    )
+  }
 
   const openCreateCategory = (presetParentRow = null) => {
     if (branches.length === 0) {
@@ -447,6 +499,7 @@ export default function ProductsPage({ branchFilter, embedded }) {
       classification_scope: '',
       is_active: true,
     })
+    resetCategoryMultiProducts()
     setCategoryModal({ mode: 'create', item: null })
   }
 
@@ -467,6 +520,7 @@ export default function ProductsPage({ branchFilter, embedded }) {
       classification_scope: row.scope || '',
       is_active: row.is_active !== false,
     })
+    resetCategoryMultiProducts()
     setCategoryModal({ mode: 'edit', item: row })
   }
 
@@ -489,6 +543,48 @@ export default function ProductsPage({ branchFilter, embedded }) {
       showToast('Category name is required', 'error')
       return
     }
+
+    const preparedNewProducts = []
+    for (let i = 0; i < categoryNewProducts.length; i++) {
+      const row = categoryNewProducts[i]
+      const name = String(row.product_name || '').trim()
+      const brand = String(row.brand || '').trim()
+      const code = String(row.product_code || '').trim()
+      const priceRaw = String(row.unit_price ?? '').trim()
+      const costRaw = String(row.cost_price ?? '').trim()
+      const stockRaw = String(row.stock_quantity ?? '').trim()
+      const hasAnyData = Boolean(
+        name || brand || code || priceRaw !== '' || costRaw !== '' || (stockRaw !== '' && stockRaw !== '0')
+      )
+      if (!hasAnyData) continue
+      if (!name) {
+        showToast(`Product Row #${i + 1}: Product Name is required`, 'error')
+        return
+      }
+      if (priceRaw === '' || Number.isNaN(Number(priceRaw)) || Number(priceRaw) < 0) {
+        showToast(`Product Row #${i + 1} ("${name}"): Enter a valid Unit Price`, 'error')
+        return
+      }
+      if (costRaw !== '' && (Number.isNaN(Number(costRaw)) || Number(costRaw) < 0)) {
+        showToast(`Product Row #${i + 1} ("${name}"): Enter a valid Cost Price`, 'error')
+        return
+      }
+      if (stockRaw !== '' && (Number.isNaN(Number(stockRaw)) || Number(stockRaw) < 0)) {
+        showToast(`Product Row #${i + 1} ("${name}"): Enter a valid Stock Quantity`, 'error')
+        return
+      }
+      preparedNewProducts.push({
+        product_name: name,
+        product_code: code || undefined,
+        brand: brand || undefined,
+        unit_price: Number(priceRaw),
+        cost_price: costRaw !== '' ? Number(costRaw) : 0,
+        stock_quantity: stockRaw !== '' ? Math.floor(Number(stockRaw)) : 0,
+        unit: String(row.unit || 'unit').trim() || 'unit',
+        status: row.status === 'Inactive' ? 'Inactive' : 'Active',
+      })
+    }
+
     setSavingCategory(true)
     try {
       const payload = {
@@ -506,15 +602,19 @@ export default function ProductsPage({ branchFilter, embedded }) {
           : undefined,
         classification_scope: categoryForm.classification_scope.trim(),
         is_active: Boolean(categoryForm.is_active),
+        new_products: preparedNewProducts.length > 0 ? preparedNewProducts : undefined,
+        assign_product_ids: categoryAssignProductIds.length > 0 ? categoryAssignProductIds : undefined,
       }
+      let res
       if (categoryModal?.mode === 'edit' && categoryModal.item) {
-        await api.products.updateCategory(categoryModal.item.id, payload)
-        showToast('Category updated successfully', 'success')
+        res = await api.products.updateCategory(categoryModal.item.id, payload)
+        showToast(res?.message || 'Category updated successfully', 'success')
       } else {
-        await api.products.createCategory(payload)
-        showToast('Category created successfully', 'success')
+        res = await api.products.createCategory(payload)
+        showToast(res?.message || 'Category created successfully', 'success')
       }
       setCategoryModal(null)
+      resetCategoryMultiProducts()
       await Promise.all([loadCategories(), loadProducts('manual')])
       triggerDataSync('products')
     } catch (err) {
@@ -818,7 +918,7 @@ export default function ProductsPage({ branchFilter, embedded }) {
 
   // Filter & paginate
   const filtered = useMemo(() => {
-    let result = filterBySearch(products, search, ['product_code', 'product_name', 'brand', 'category', 'main_category', 'category_group'])
+    let result = filterBySearch(products, deferredSearch, ['product_code', 'product_name', 'brand', 'category', 'main_category', 'category_group'])
     if (activeBranch && activeBranch !== 'All') {
       result = result.filter(p => !p.branch_id || String(p.branch_id) === String(activeBranch))
     }
@@ -826,7 +926,7 @@ export default function ProductsPage({ branchFilter, embedded }) {
       result = result.filter(p => matchesCategoryFilter(p, category, categoryTree))
     }
     return result
-  }, [products, search, activeBranch, category, categoryTree])
+  }, [products, deferredSearch, activeBranch, category, categoryTree])
 
   const total = filtered.length
   const paginated = filtered.slice((page - 1) * pageSize, page * pageSize)
@@ -2062,6 +2162,26 @@ export default function ProductsPage({ branchFilter, embedded }) {
         const effectiveSkuPrefix = (categoryForm.sku_prefix || (categoryForm.main_category === 'Appliances' ? 'APP' : 'FUR')).toUpperCase()
         const effectiveSlug = categoryForm.slug || toCategorySlug(`${categoryForm.main_category} ${categoryForm.name || 'category'}`)
 
+        const queuedNewProducts = categoryNewProducts.filter(r => String(r.product_name || '').trim() !== '')
+        const queuedNewStock = queuedNewProducts.reduce((acc, r) => acc + (Math.max(0, Number(r.stock_quantity) || 0)), 0)
+        const queuedNewValue = queuedNewProducts.reduce(
+          (acc, r) => acc + ((Math.max(0, Number(r.unit_price) || 0)) * (Math.max(0, Number(r.stock_quantity) || 0))),
+          0
+        )
+        const assignedProductIdSet = new Set(assignedProductsList.map(p => Number(p.product_id)))
+        const existingSearchTerm = categoryExistingProductSearch.trim().toLowerCase()
+        const filteredExistingProducts = products.filter(p => {
+          if (!existingSearchTerm) return true
+          return (
+            String(p.product_name || '').toLowerCase().includes(existingSearchTerm) ||
+            String(p.product_code || '').toLowerCase().includes(existingSearchTerm) ||
+            String(p.brand || '').toLowerCase().includes(existingSearchTerm) ||
+            String(p.category || '').toLowerCase().includes(existingSearchTerm)
+          )
+        })
+        const selectedExistingProducts = products.filter(p => categoryAssignProductIds.includes(Number(p.product_id)))
+        const totalQueuedMultiCount = queuedNewProducts.length + categoryAssignProductIds.length
+
         const scopeSuggestions = categoryForm.main_category === 'Appliances'
           ? [
               'Energy-efficient inverter & residential appliances with manufacturer warranty.',
@@ -2328,6 +2448,340 @@ export default function ProductsPage({ branchFilter, embedded }) {
                     </p>
                   </div>
                 )}
+
+                {/* Multiple Products Manager inside Category Identity & Hierarchy */}
+                <div className="pt-3 mt-1 border-t border-border space-y-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold text-foreground text-xs inline-flex items-center gap-1.5">
+                          <FiPackage className="w-3.5 h-3.5 text-primary" />
+                          Add Multiple Products
+                        </span>
+                        {totalQueuedMultiCount > 0 && (
+                          <span className="px-2 py-0.5 rounded-full bg-primary/15 text-primary font-bold text-[10px]">
+                            {totalQueuedMultiCount} Queued
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-[10px] text-muted-foreground mt-0.5">
+                        Create multiple new products under this category or bulk-assign existing catalog products on save.
+                      </p>
+                    </div>
+
+                    <div className="inline-flex rounded-xl bg-muted/60 p-0.5 border border-border">
+                      <button
+                        type="button"
+                        onClick={() => setCategoryMultiProductTab('new')}
+                        className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-colors cursor-pointer ${
+                          categoryMultiProductTab === 'new'
+                            ? 'bg-primary text-primary-foreground shadow-2xs'
+                            : 'text-muted-foreground hover:text-foreground'
+                        }`}
+                      >
+                        New Products {queuedNewProducts.length > 0 ? `(${queuedNewProducts.length})` : ''}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setCategoryMultiProductTab('existing')}
+                        className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-colors cursor-pointer ${
+                          categoryMultiProductTab === 'existing'
+                            ? 'bg-primary text-primary-foreground shadow-2xs'
+                            : 'text-muted-foreground hover:text-foreground'
+                        }`}
+                      >
+                        Assign Existing {categoryAssignProductIds.length > 0 ? `(${categoryAssignProductIds.length})` : ''}
+                      </button>
+                    </div>
+                  </div>
+
+                  {categoryMultiProductTab === 'new' ? (
+                    <div className="space-y-2.5">
+                      <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
+                        {categoryNewProducts.map((row, idx) => (
+                          <div
+                            key={row.rowKey}
+                            className="p-2.5 rounded-xl bg-muted/25 border border-border space-y-2"
+                          >
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground inline-flex items-center gap-1.5">
+                                <span className="w-4 h-4 rounded-md bg-primary/15 text-primary flex items-center justify-center font-mono text-[10px]">
+                                  {idx + 1}
+                                </span>
+                                Product #{idx + 1}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => removeCategoryProductRow(row.rowKey)}
+                                title="Remove product row"
+                                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[10px] font-semibold text-destructive hover:bg-destructive/10 transition-colors cursor-pointer"
+                              >
+                                <FiTrash2 className="w-3 h-3" />
+                                <span>Remove</span>
+                              </button>
+                            </div>
+
+                            <div className="grid grid-cols-1 sm:grid-cols-12 gap-2">
+                              <div className="sm:col-span-5">
+                                <label className="block text-[10px] font-bold text-muted-foreground mb-0.5">
+                                  Product Name *
+                                </label>
+                                <input
+                                  type="text"
+                                  value={row.product_name}
+                                  onChange={e => updateCategoryProductRow(row.rowKey, 'product_name', e.target.value)}
+                                  placeholder="e.g. 3-Seater Fabric Sofa"
+                                  className="w-full px-2.5 py-1.5 rounded-lg border border-border bg-card text-foreground text-xs font-semibold"
+                                />
+                              </div>
+
+                              <div className="sm:col-span-3">
+                                <label className="block text-[10px] font-bold text-muted-foreground mb-0.5">
+                                  Brand
+                                </label>
+                                <input
+                                  type="text"
+                                  value={row.brand}
+                                  onChange={e => updateCategoryProductRow(row.rowKey, 'brand', e.target.value)}
+                                  placeholder="e.g. Uratex"
+                                  className="w-full px-2.5 py-1.5 rounded-lg border border-border bg-card text-foreground text-xs"
+                                />
+                              </div>
+
+                              <div className="sm:col-span-4">
+                                <label className="block text-[10px] font-bold text-muted-foreground mb-0.5">
+                                  SKU Code (Optional)
+                                </label>
+                                <input
+                                  type="text"
+                                  value={row.product_code}
+                                  onChange={e => updateCategoryProductRow(row.rowKey, 'product_code', e.target.value)}
+                                  placeholder={`Auto (${effectiveSkuPrefix}-XXX)`}
+                                  className="w-full px-2.5 py-1.5 rounded-lg border border-border bg-card text-foreground font-mono text-xs"
+                                />
+                              </div>
+
+                              <div className="sm:col-span-3">
+                                <label className="block text-[10px] font-bold text-muted-foreground mb-0.5">
+                                  Unit Price (₱) *
+                                </label>
+                                <input
+                                  type="number"
+                                  min="0"
+                                  step="0.01"
+                                  value={row.unit_price}
+                                  onChange={e => updateCategoryProductRow(row.rowKey, 'unit_price', e.target.value)}
+                                  placeholder="0.00"
+                                  className="w-full px-2.5 py-1.5 rounded-lg border border-border bg-card text-foreground font-mono text-xs font-semibold"
+                                />
+                              </div>
+
+                              <div className="sm:col-span-3">
+                                <label className="block text-[10px] font-bold text-muted-foreground mb-0.5">
+                                  Cost Price (₱)
+                                </label>
+                                <input
+                                  type="number"
+                                  min="0"
+                                  step="0.01"
+                                  value={row.cost_price}
+                                  onChange={e => updateCategoryProductRow(row.rowKey, 'cost_price', e.target.value)}
+                                  placeholder="0.00"
+                                  className="w-full px-2.5 py-1.5 rounded-lg border border-border bg-card text-foreground font-mono text-xs"
+                                />
+                              </div>
+
+                              <div className="sm:col-span-2">
+                                <label className="block text-[10px] font-bold text-muted-foreground mb-0.5">
+                                  Stock Qty
+                                </label>
+                                <input
+                                  type="number"
+                                  min="0"
+                                  step="1"
+                                  value={row.stock_quantity}
+                                  onChange={e => updateCategoryProductRow(row.rowKey, 'stock_quantity', e.target.value)}
+                                  placeholder="0"
+                                  className="w-full px-2.5 py-1.5 rounded-lg border border-border bg-card text-foreground font-mono text-xs font-semibold"
+                                />
+                              </div>
+
+                              <div className="sm:col-span-2">
+                                <label className="block text-[10px] font-bold text-muted-foreground mb-0.5">
+                                  Unit
+                                </label>
+                                <select
+                                  value={row.unit}
+                                  onChange={e => updateCategoryProductRow(row.rowKey, 'unit', e.target.value)}
+                                  className="w-full px-2 py-1.5 rounded-lg border border-border bg-card text-foreground text-xs"
+                                >
+                                  {PRODUCT_UNIT_OPTIONS.map(u => (
+                                    <option key={`${row.rowKey}-unit-${u.value}`} value={u.value}>
+                                      {u.label}
+                                    </option>
+                                  ))}
+                                </select>
+                              </div>
+
+                              <div className="sm:col-span-2">
+                                <label className="block text-[10px] font-bold text-muted-foreground mb-0.5">
+                                  Status
+                                </label>
+                                <select
+                                  value={row.status}
+                                  onChange={e => updateCategoryProductRow(row.rowKey, 'status', e.target.value)}
+                                  className="w-full px-2 py-1.5 rounded-lg border border-border bg-card text-foreground text-xs"
+                                >
+                                  <option value="Active">Active</option>
+                                  <option value="Inactive">Inactive</option>
+                                </select>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+
+                      <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => addCategoryProductRow(1)}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-primary/10 hover:bg-primary/20 text-primary font-bold text-[11px] border border-primary/20 transition-colors cursor-pointer"
+                          >
+                            <FiPlus className="w-3.5 h-3.5" />
+                            <span>Add Another Product</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => addCategoryProductRow(3)}
+                            className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-muted/60 hover:bg-muted text-foreground font-semibold text-[11px] border border-border transition-colors cursor-pointer"
+                          >
+                            <FiPlus className="w-3 h-3" />
+                            <span>Add 3 Rows</span>
+                          </button>
+                        </div>
+
+                        {queuedNewProducts.length > 0 && (
+                          <div className="text-[11px] text-muted-foreground font-medium">
+                            Ready to add: <span className="font-bold text-foreground">{queuedNewProducts.length}</span> {queuedNewProducts.length === 1 ? 'product' : 'products'} •{' '}
+                            <span className="font-mono font-bold text-primary">{queuedNewStock}</span> units •{' '}
+                            <span className="font-mono font-bold text-emerald-600">{fmt(queuedNewValue)}</span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="space-y-2.5">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <div className="relative flex-1 min-w-[200px]">
+                          <FiSearch className="w-3.5 h-3.5 text-muted-foreground absolute left-3 top-1/2 -translate-y-1/2" />
+                          <input
+                            type="text"
+                            value={categoryExistingProductSearch}
+                            onChange={e => setCategoryExistingProductSearch(e.target.value)}
+                            placeholder="Search existing products by name, SKU, brand, or category..."
+                            className="w-full pl-8 pr-3 py-1.5 rounded-xl border border-border bg-card text-foreground text-xs"
+                          />
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const visibleIds = filteredExistingProducts
+                              .filter(p => !assignedProductIdSet.has(Number(p.product_id)))
+                              .map(p => Number(p.product_id))
+                            setCategoryAssignProductIds(prev => Array.from(new Set([...prev, ...visibleIds])))
+                          }}
+                          className="px-2.5 py-1.5 rounded-xl border border-border bg-muted/50 hover:bg-muted text-[11px] font-bold text-foreground cursor-pointer"
+                        >
+                          Select Visible
+                        </button>
+                        {categoryAssignProductIds.length > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => setCategoryAssignProductIds([])}
+                            className="px-2.5 py-1.5 rounded-xl border border-destructive/20 bg-destructive/10 hover:bg-destructive/20 text-[11px] font-bold text-destructive cursor-pointer"
+                          >
+                            Clear ({categoryAssignProductIds.length})
+                          </button>
+                        )}
+                      </div>
+
+                      {selectedExistingProducts.length > 0 && (
+                        <div className="flex flex-wrap gap-1.5 p-2 rounded-xl bg-primary/5 border border-primary/15">
+                          {selectedExistingProducts.map(p => (
+                            <span
+                              key={`sel-assign-${p.product_id}`}
+                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-card border border-primary/30 text-[10px] font-semibold text-foreground"
+                            >
+                              <span className="truncate max-w-[160px]">{p.product_name}</span>
+                              <button
+                                type="button"
+                                onClick={() => toggleAssignProductId(p.product_id)}
+                                className="text-muted-foreground hover:text-destructive cursor-pointer"
+                              >
+                                <FiX className="w-3 h-3" />
+                              </button>
+                            </span>
+                          ))}
+                        </div>
+                      )}
+
+                      <div className="max-h-52 overflow-y-auto rounded-xl border border-border divide-y divide-border bg-card">
+                        {filteredExistingProducts.length === 0 ? (
+                          <div className="p-4 text-center text-[11px] text-muted-foreground">
+                            No matching products found.
+                          </div>
+                        ) : (
+                          filteredExistingProducts.slice(0, 80).map(p => {
+                            const pid = Number(p.product_id)
+                            const isChecked = categoryAssignProductIds.includes(pid)
+                            const alreadyInCategory = assignedProductIdSet.has(pid)
+                            return (
+                              <label
+                                key={`assign-opt-${pid}`}
+                                className={`flex items-center justify-between gap-2.5 px-3 py-2 text-xs transition-colors ${
+                                  alreadyInCategory
+                                    ? 'bg-muted/20 opacity-65 cursor-default'
+                                    : isChecked
+                                      ? 'bg-primary/10 cursor-pointer'
+                                      : 'hover:bg-muted/30 cursor-pointer'
+                                }`}
+                              >
+                                <div className="flex items-center gap-2.5 min-w-0">
+                                  <input
+                                    type="checkbox"
+                                    disabled={alreadyInCategory}
+                                    checked={alreadyInCategory || isChecked}
+                                    onChange={() => !alreadyInCategory && toggleAssignProductId(pid)}
+                                    className="rounded border-border text-primary focus:ring-primary"
+                                  />
+                                  <div className="min-w-0">
+                                    <div className="font-semibold text-foreground truncate flex items-center gap-1.5">
+                                      <span className="truncate">{p.product_name}</span>
+                                      {alreadyInCategory && (
+                                        <span className="px-1.5 py-0.2 rounded bg-emerald-500/15 text-emerald-600 text-[9px] font-bold shrink-0">
+                                          Already Assigned
+                                        </span>
+                                      )}
+                                    </div>
+                                    <div className="text-[10px] text-muted-foreground truncate">
+                                      SKU: <span className="font-mono">{p.product_code || '—'}</span> • Current: {p.category || 'Uncategorized'}
+                                      {p.brand ? ` • ${p.brand}` : ''}
+                                    </div>
+                                  </div>
+                                </div>
+                                <div className="text-right shrink-0">
+                                  <div className="font-mono font-bold text-foreground">{fmt(p.unit_price)}</div>
+                                  <div className="text-[10px] text-muted-foreground">Stock: {p.stock_quantity ?? 0}</div>
+                                </div>
+                              </label>
+                            )
+                          })
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
               </div>
 
               {/* Section 2: Cataloging, SKU & Storefront Configuration */}

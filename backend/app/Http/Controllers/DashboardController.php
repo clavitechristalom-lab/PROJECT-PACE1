@@ -21,6 +21,30 @@ use Illuminate\Support\Facades\Cache;
 class DashboardController extends Controller
 {
     /**
+     * Aggregated dashboard payload in a single HTTP round-trip so local single-worker
+     * dev servers do not serialize 5-6 parallel dashboard requests.
+     */
+    public function overview(Request $request)
+    {
+        $user = $request->user();
+        $isStoreAdmin = $user && in_array($user->role, ['Store Administrator', 'Store Admin'], true);
+
+        $payload = [
+            'stats' => $this->stats($request)->getData(true),
+            'recent' => $this->recent()->getData(true),
+            'business_performance' => $this->businessPerformance($request)->getData(true),
+        ];
+
+        if (!$isStoreAdmin || $request->boolean('include_all')) {
+            $payload['charts'] = $this->charts()->getData(true);
+            $payload['alerts'] = $this->alerts($request)->getData(true);
+            $payload['branch_comparison'] = $this->branchComparison($request)->getData(true);
+        }
+
+        return response()->json($payload);
+    }
+
+    /**
      * Top-level Business Monitoring & Dashboard statistics.
      */
     public function stats(Request $request)
@@ -35,13 +59,15 @@ class DashboardController extends Controller
         $today = date('Y-m-d');
         $currentMonth = date('m');
         $currentYear = date('Y');
+        $attendanceFrom = trim((string) $request->query('attendance_from', ''));
+        $attendanceTo = trim((string) $request->query('attendance_to', ''));
 
-        $fingerprint = SyncController::computeFingerprint('dashboard');
-        $cacheKey = "dash_stats_{$role}_{$branch}_{$employeeId}_{$fingerprint}";
+        $dashVer = SyncController::moduleVersion('dashboard');
+        $cacheKey = "dash_stats_{$role}_{$branch}_{$employeeId}_{$attendanceFrom}_{$attendanceTo}_{$dashVer}";
 
-        $result = Cache::remember($cacheKey, 2, function () use ($user, $role, $employeeId, $isStoreAdmin, $branch, $today, $currentMonth, $currentYear) {
-            // Automatically sync overdue schedules in database (throttled to once every 5 minutes to prevent table locks)
-            if (Cache::add('sync_overdue_schedules_dash', true, 300)) {
+        $result = Cache::remember($cacheKey, 30, function () use ($user, $role, $employeeId, $isStoreAdmin, $branch, $today, $currentMonth, $currentYear, $attendanceFrom, $attendanceTo) {
+            // Automatically sync overdue schedules in database (shared 5-minute lock across Dashboard & Installments)
+            if (Cache::add('sync_overdue_schedules_global', true, 300)) {
                 PaymentSchedule::where('due_date', '<', $today)
                     ->where('balance_due', '>', 0)
                     ->whereIn('status', ['Pending', 'Partially Paid'])
@@ -99,7 +125,9 @@ class DashboardController extends Controller
                 }
             }
 
-            $payAgg = (clone $paymentQuery)->selectRaw("
+            $payAgg = (clone $paymentQuery)
+                ->whereNotIn('status', Payment::EXCLUDED_NON_SETTLED_STATUSES)
+                ->selectRaw("
                 COALESCE(SUM(amount), 0) as total_collections,
                 COALESCE(SUM(CASE WHEN payment_date >= ? AND payment_date <= ? THEN amount ELSE 0 END), 0) as today_collections,
                 COALESCE(SUM(CASE WHEN payment_date >= ? THEN amount ELSE 0 END), 0) as month_collections
@@ -140,11 +168,19 @@ class DashboardController extends Controller
             $completedInstallments = (int)($instAgg->completed_installments ?? 0);
 
             // High-performance outstanding balance without full model hydration
-            $totalPaidCollections = (float)Payment::whereIn('installment_id', (clone $instQuery)->select('installment_id'))->sum('amount');
+            $totalPaidCollections = (float)Payment::whereIn('installment_id', (clone $instQuery)->select('installment_id'))
+                ->whereNotIn('status', Payment::EXCLUDED_NON_SETTLED_STATUSES)
+                ->sum('amount');
             $totalOutstandingBalance = max(0, round($totalInstallmentSales - ($totalPaidCollections + $totalDownPayment), 2));
 
             // 4. Products & Stock (Single Query)
-            $prodAgg = DB::table('products')->selectRaw("
+            $prodQuery = DB::table('products');
+            if ($isStoreAdmin && $branch) {
+                $prodQuery->where(function ($q) use ($branch) {
+                    $q->where('branch_id', $branch)->orWhereNull('branch_id');
+                });
+            }
+            $prodAgg = $prodQuery->selectRaw("
                 COUNT(*) as total,
                 COUNT(CASE WHEN stock_quantity = 1 THEN 1 END) as low_stock,
                 COUNT(CASE WHEN stock_quantity <= 0 THEN 1 END) as out_of_stock
@@ -154,7 +190,11 @@ class DashboardController extends Controller
             $outOfStockProducts = (int)($prodAgg->out_of_stock ?? 0);
 
             // 5. Customers & Branches
-            $totalCustomers = Customer::count();
+            $custQuery = Customer::query();
+            if ($isStoreAdmin && $branch) {
+                $custQuery->where('branch_id', $branch);
+            }
+            $totalCustomers = $custQuery->count();
             $branchesList = \App\Models\BranchProfile::pluck('name')->toArray();
             $totalBranches = count($branchesList);
 
@@ -212,7 +252,17 @@ class DashboardController extends Controller
                 }
             }
             $myLatestPayroll = Payroll::with('period')->where('employee_id', $employeeId)->orderByDesc('payroll_id')->first();
-            $myRecentAttendance = Attendance::where('employee_id', $employeeId)->orderByDesc('attendance_date')->take(7)->get()->map(function ($a) {
+            $myAttQuery = Attendance::where('employee_id', $employeeId)->orderByDesc('attendance_date');
+            if ($attendanceFrom !== '') {
+                $myAttQuery->where('attendance_date', '>=', $attendanceFrom);
+            }
+            if ($attendanceTo !== '') {
+                $myAttQuery->where('attendance_date', '<=', $attendanceTo);
+            }
+            if ($attendanceFrom === '' && $attendanceTo === '') {
+                $myAttQuery->take(7);
+            }
+            $myRecentAttendance = $myAttQuery->get()->map(function ($a) {
                 $regular = max(0, (float)$a->total_hours - (float)$a->overtime_hours);
                 return [
                     'attendance_id' => $a->attendance_id,
@@ -276,6 +326,8 @@ class DashboardController extends Controller
                 'status' => $myAttendanceToday->status,
             ] : null,
             'my_latest_payroll' => $myLatestPayroll ? [
+                'payroll_id' => $myLatestPayroll->payroll_id,
+                'period_id' => $myLatestPayroll->period_id,
                 'period_name' => $myLatestPayroll->period ? $myLatestPayroll->period->period_name : "Period #{$myLatestPayroll->period_id}",
                 'basic_salary' => (float)$myLatestPayroll->basic_salary,
                 'gross_pay' => (float)$myLatestPayroll->gross_pay,
@@ -328,10 +380,12 @@ class DashboardController extends Controller
             $endDate = $now->endOfMonth()->toDateString();
         }
 
-        $fingerprint = SyncController::computeFingerprint('dashboard');
-        $cacheKey = "dash_perf_{$timeframe}_{$startDate}_{$endDate}_{$branch}_{$fingerprint}";
+        $dashVer = SyncController::moduleVersion('dashboard');
+        $userIdKey = $user ? $user->user_id : 0;
+        $roleKey = $user ? $user->role : 'Guest';
+        $cacheKey = "dash_perf_{$roleKey}_{$userIdKey}_{$timeframe}_{$startDate}_{$endDate}_{$branch}_{$dashVer}";
 
-        $result = Cache::remember($cacheKey, 2, function () use ($user, $isStoreAdmin, $branch, $startDate, $endDate, $timeframe) {
+        $result = Cache::remember($cacheKey, 30, function () use ($user, $isStoreAdmin, $branch, $startDate, $endDate, $timeframe) {
             // 1. Sales Performance
             $salesQuery = SaleTransaction::whereDate('sale_date', '>=', $startDate)
                 ->whereDate('sale_date', '<=', $endDate);
@@ -379,7 +433,9 @@ class DashboardController extends Controller
             }
         }
 
-        $payments = $paymentQuery->get();
+        $payments = (clone $paymentQuery)
+            ->whereNotIn('status', Payment::EXCLUDED_NON_SETTLED_STATUSES)
+            ->get();
         $paymentsCount = $payments->count();
         $totalCollected = (float)$payments->sum('amount');
         $cashCollections = (float)$payments->where('payment_method', 'Cash')->sum('amount');
@@ -408,6 +464,7 @@ class DashboardController extends Controller
         $instSummaries = (clone $instQuery)->select('installment_id', 'total_payable', 'down_payment')->get();
         $instIds = $instSummaries->pluck('installment_id')->toArray();
         $paidMap = empty($instIds) ? [] : Payment::whereIn('installment_id', $instIds)
+            ->whereNotIn('status', Payment::EXCLUDED_NON_SETTLED_STATUSES)
             ->groupBy('installment_id')
             ->selectRaw('installment_id, SUM(amount) as paid')
             ->pluck('paid', 'installment_id')
@@ -456,8 +513,8 @@ class DashboardController extends Controller
      */
     public function branchComparison(Request $request)
     {
-        $fingerprint = SyncController::computeFingerprint('dashboard');
-        return \Illuminate\Support\Facades\Cache::remember("pace_dash_branch_comp_{$fingerprint}", 2, function () {
+        $dashVer = SyncController::moduleVersion('dashboard');
+        return \Illuminate\Support\Facades\Cache::remember("pace_dash_branch_comparison_{$dashVer}", 30, function () {
             $branchProfiles = \App\Models\BranchProfile::all();
 
             // 1. Batch aggregate sales by branch in 1 single query
@@ -473,6 +530,7 @@ class DashboardController extends Controller
                 ->join('sale_transactions', 'installment_accounts.sale_id', '=', 'sale_transactions.sale_id')
                 ->selectRaw('sale_transactions.branch_id, SUM(payments.amount) as total_collections')
                 ->whereNotNull('sale_transactions.branch_id')
+                ->whereNotIn('payments.status', Payment::EXCLUDED_NON_SETTLED_STATUSES)
                 ->groupBy('sale_transactions.branch_id')
                 ->pluck('total_collections', 'branch_id');
 
@@ -491,7 +549,7 @@ class DashboardController extends Controller
                 ->keyBy('branch_id');
 
             // 4. Batch fetch store managers in 1 query
-            $managers = \App\Models\User::where('role', 'Store Administrator')
+            $managers = \App\Models\User::whereIn('role', ['Store Administrator', 'Store Admin'])
                 ->with('employee:employee_id,branch_id')
                 ->get()
                 ->filter(fn($u) => $u->employee && $u->employee->branch_id)
@@ -540,14 +598,21 @@ class DashboardController extends Controller
         $user = $request->user();
         $isStoreAdmin = $user && in_array($user->role, ['Store Administrator', 'Store Admin']);
         $branch = $isStoreAdmin ? ($user->employee ? $user->employee->branch_id : null) : 'All';
-        $fingerprint = SyncController::computeFingerprint('dashboard');
-        $cacheKey = "pace_dash_alerts_" . ($isStoreAdmin ? "store_{$branch}" : "admin") . "_{$fingerprint}";
+        $dashVer = SyncController::moduleVersion('dashboard');
+        $userId = $user ? $user->user_id : 0;
+        $cacheKey = "pace_dash_alerts_{$dashVer}_u{$userId}_" . ($isStoreAdmin ? "store_{$branch}" : "admin");
 
-        $data = \Illuminate\Support\Facades\Cache::remember($cacheKey, 2, function () use ($isStoreAdmin, $branch, $user) {
+        $data = \Illuminate\Support\Facades\Cache::remember($cacheKey, 30, function () use ($isStoreAdmin, $branch, $user) {
             $alerts = [];
 
             // 1 & 2. Stock Alerts (Single Aggregated Query)
-            $stockAgg = DB::table('products')->selectRaw("
+            $stockQuery = DB::table('products');
+            if ($isStoreAdmin && $branch) {
+                $stockQuery->where(function ($q) use ($branch) {
+                    $q->where('branch_id', $branch)->orWhereNull('branch_id');
+                });
+            }
+            $stockAgg = $stockQuery->selectRaw("
                 COUNT(CASE WHEN stock_quantity <= 1 AND stock_quantity > 0 THEN 1 END) as low_stock,
                 COUNT(CASE WHEN stock_quantity <= 0 THEN 1 END) as out_of_stock
             ")->first();
@@ -625,8 +690,8 @@ class DashboardController extends Controller
      */
     public function charts()
     {
-        $fingerprint = SyncController::computeFingerprint('dashboard');
-        return \Illuminate\Support\Facades\Cache::remember("pace_dash_charts_{$fingerprint}", 2, function () {
+        $dashVer = SyncController::moduleVersion('dashboard');
+        return \Illuminate\Support\Facades\Cache::remember("pace_dash_charts_{$dashVer}", 30, function () {
             // Monthly Sales & Collections Trend
             $salesTrend = DB::table('sale_transactions')
                 ->leftJoin('sale_items', 'sale_transactions.sale_id', '=', 'sale_items.sale_id')
@@ -636,6 +701,7 @@ class DashboardController extends Controller
                 ->get();
 
             $collectionsTrend = DB::table('payments')
+                ->whereNotIn('status', Payment::EXCLUDED_NON_SETTLED_STATUSES)
                 ->selectRaw("DATE_FORMAT(payment_date, '%b') as month, MONTH(payment_date) as month_num, SUM(amount) as collections")
                 ->groupBy('month', 'month_num')
                 ->orderBy('month_num')
@@ -673,9 +739,11 @@ class DashboardController extends Controller
 
             // Branch Sales Distribution
             $branchSales = DB::table('sale_transactions')
-                ->join('users', 'sale_transactions.processed_by', '=', 'users.user_id')
-                ->join('employees', 'users.employee_id', '=', 'employees.employee_id')
-                ->leftJoin('branch_profiles', 'employees.branch_id', '=', 'branch_profiles.id')
+                ->leftJoin('users', 'sale_transactions.processed_by', '=', 'users.user_id')
+                ->leftJoin('employees', 'users.employee_id', '=', 'employees.employee_id')
+                ->leftJoin('branch_profiles', function ($join) {
+                    $join->on('branch_profiles.id', '=', DB::raw('COALESCE(sale_transactions.branch_id, employees.branch_id)'));
+                })
                 ->selectRaw("COALESCE(branch_profiles.name, 'Unassigned') as branch, SUM(sale_transactions.total_amount) as total_sales")
                 ->groupBy('branch_profiles.name')
                 ->get();
@@ -693,10 +761,10 @@ class DashboardController extends Controller
      */
     public function recent()
     {
-        $fingerprint = SyncController::computeFingerprint('dashboard');
-        $cacheKey = "dash_recent_{$fingerprint}";
+        $dashVer = SyncController::moduleVersion('dashboard');
+        $cacheKey = "pace_dash_recent_{$dashVer}";
 
-        $result = Cache::remember($cacheKey, 2, function () {
+        $result = Cache::remember($cacheKey, 30, function () {
             $recentSales = SaleTransaction::with([
                     'customer:customer_id,first_name,last_name',
                     'processedBy:user_id,employee_id',

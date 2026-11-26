@@ -11,6 +11,42 @@ use Illuminate\Validation\Rule;
 
 class StatementController extends Controller
 {
+    private function authorizeStatementAccess(?\App\Models\User $user, ?int $customerId, bool $write = false)
+    {
+        if (!$user) {
+            return response()->json(['success' => false, 'message' => 'Unauthenticated.'], 401);
+        }
+
+        if (in_array($user->role, ['Administrator', 'Admin'], true)) {
+            return null;
+        }
+
+        if ($user->role === 'Customer') {
+            if ($write) {
+                return response()->json(['success' => false, 'message' => 'Customers cannot modify statements.'], 403);
+            }
+            $ownCustomerId = CustomerDashboardController::resolveCustomerId($user);
+            if (!$ownCustomerId || (int) $ownCustomerId !== (int) $customerId) {
+                return response()->json(['success' => false, 'message' => 'Unauthorized access to customer statement.'], 403);
+            }
+            return null;
+        }
+
+        if (in_array($user->role, ['Store Administrator', 'Store Admin', 'Employee'], true)) {
+            if ($user->role === 'Employee' && $write) {
+                return response()->json(['success' => false, 'message' => 'Unauthorized to modify customer statements.'], 403);
+            }
+            $branchId = $user->employee?->branch_id;
+            $targetBranchId = $customerId ? Customer::where('customer_id', $customerId)->value('branch_id') : null;
+            if (!$branchId || !$targetBranchId || (int) $branchId !== (int) $targetBranchId) {
+                return response()->json(['success' => false, 'message' => 'Unauthorized access to customer statement in another branch.'], 403);
+            }
+            return null;
+        }
+
+        return response()->json(['success' => false, 'message' => 'Unauthorized to access customer statements.'], 403);
+    }
+
     /**
      * Display a listing of customer statements with all 6 UI table columns.
      */
@@ -21,12 +57,20 @@ class StatementController extends Controller
         // Sync existing customer transactions into statements table if empty
         if (Statement::count() === 0) {
             Statement::syncAllFromTransactions();
-        } elseif ($request->filled('customer_id')) {
-            Statement::syncCustomerStatements((int)$request->customer_id);
         } elseif ($user && $user->role === 'Customer') {
             $custId = CustomerDashboardController::resolveCustomerId($user);
             if ($custId) {
                 Statement::syncCustomerStatements((int)$custId);
+            }
+        } elseif ($request->filled('customer_id') && $user && in_array($user->role, ['Administrator', 'Admin', 'Store Administrator', 'Store Admin', 'Employee'], true)) {
+            $reqCustId = (int) $request->customer_id;
+            if (in_array($user->role, ['Store Administrator', 'Store Admin', 'Employee'], true)) {
+                $custBranch = Customer::where('customer_id', $reqCustId)->value('branch_id');
+                if ($user->employee?->branch_id && (int) $user->employee->branch_id === (int) $custBranch) {
+                    Statement::syncCustomerStatements($reqCustId);
+                }
+            } else {
+                Statement::syncCustomerStatements($reqCustId);
             }
         }
 
@@ -52,6 +96,8 @@ class StatementController extends Controller
                         }
                     });
                 });
+            } else {
+                $query->whereRaw('1 = 0');
             }
         }
 
@@ -148,6 +194,10 @@ class StatementController extends Controller
             'due_date'         => 'nullable|date',
         ]);
 
+        if ($denied = $this->authorizeStatementAccess($request->user(), (int) $validated['customer_id'], true)) {
+            return $denied;
+        }
+
         return DB::transaction(function () use ($validated) {
             $dateVal    = $validated['date'] ?? $validated['start_date'] ?? now()->toDateString();
             $refNo      = $validated['reference_no'] ?? $validated['reference'] ?? $validated['statement_number'] ?? Statement::generateStatementNumber();
@@ -202,7 +252,7 @@ class StatementController extends Controller
     /**
      * Display the specified statement.
      */
-    public function show(int $id): JsonResponse
+    public function show(Request $request, int $id): JsonResponse
     {
         $statement = Statement::with(['customer'])->find($id);
 
@@ -211,6 +261,10 @@ class StatementController extends Controller
                 'success' => false,
                 'message' => 'Statement not found.',
             ], 404);
+        }
+
+        if ($denied = $this->authorizeStatementAccess($request->user(), (int) $statement->customer_id, false)) {
+            return $denied;
         }
 
         return response()->json([
@@ -231,6 +285,10 @@ class StatementController extends Controller
                 'success' => false,
                 'message' => 'Statement not found.',
             ], 404);
+        }
+
+        if ($denied = $this->authorizeStatementAccess($request->user(), (int) $statement->customer_id, true)) {
+            return $denied;
         }
 
         $validated = $request->validate([
@@ -271,7 +329,7 @@ class StatementController extends Controller
     /**
      * Remove the specified statement from the database.
      */
-    public function destroy(int $id): JsonResponse
+    public function destroy(Request $request, int $id): JsonResponse
     {
         $statement = Statement::find($id);
 
@@ -280,6 +338,10 @@ class StatementController extends Controller
                 'success' => false,
                 'message' => 'Statement not found.',
             ], 404);
+        }
+
+        if ($denied = $this->authorizeStatementAccess($request->user(), (int) $statement->customer_id, true)) {
+            return $denied;
         }
 
         $statement->delete();

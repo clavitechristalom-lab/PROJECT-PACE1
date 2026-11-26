@@ -311,7 +311,7 @@ export default function WaterfallPaymentModal({
                 <FiShield className="w-3.5 h-3.5 text-blue-600" />
                 Live Waterfall Allocation Preview
               </span>
-              <span className="text-[10px] font-mono text-emerald-600 dark:text-emerald-400 font-bold">C# Engine Sync</span>
+              <span className="text-[10px] font-mono text-emerald-600 dark:text-emerald-400 font-bold">Auto-Waterfall Engine</span>
             </div>
 
             <div className="grid grid-cols-3 gap-2.5 pt-1">

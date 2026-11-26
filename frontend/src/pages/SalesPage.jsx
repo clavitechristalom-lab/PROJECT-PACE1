@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef } from 'react'
+import { useState, useEffect, useMemo, useRef, useDeferredValue } from 'react'
 import {
   FiShoppingCart, FiPlus, FiDownload, FiCreditCard,
   FiEye, FiTrash2, FiPrinter, FiSearch, FiCalendar, FiUser,
@@ -17,6 +17,8 @@ import api, { downloadCsv } from '../lib/api'
 import { useRealtimeSync, triggerDataSync, SyncButton } from '../lib/realtimeSync'
 import { TbCurrencyPeso } from 'react-icons/tb'
 import MySalesChart from '../components/MySalesChart'
+import AgentAssignmentSection from '../components/AgentAssignmentSection'
+import { summarizeAgentContributions } from '../lib/agentContribution'
 
 function SalesPage({ branchFilter, embedded }) {
   const { user } = useAuth()
@@ -38,6 +40,7 @@ function SalesPage({ branchFilter, embedded }) {
   })
   const [error, setError] = useState('')
   const [search, setSearch] = useState('')
+  const deferredSearch = useDeferredValue(search)
   const [methodFilter, setMethodFilter] = useState('All')
   const [statusFilter, setStatusFilter] = useState('All')
   const [page, setPage] = useState(1)
@@ -58,7 +61,7 @@ function SalesPage({ branchFilter, embedded }) {
   const [customerSearch, setCustomerSearch] = useState('')
   const [saleDate, setSaleDate] = useState(getTodayLocalYMD)
   const [paymentMethod, setPaymentMethod] = useState('Cash')
-  const [items, setItems] = useState([{ product_id: '', quantity: 1, discount: 0 }])
+  const [items, setItems] = useState([{ product_category: '', product_id: '', quantity: 1, discount: 0 }])
   const [cashTendered, setCashTendered] = useState('')
   const [paymentReference, setPaymentReference] = useState('')
   const [downPayment, setDownPayment] = useState('0')
@@ -68,13 +71,19 @@ function SalesPage({ branchFilter, embedded }) {
   const [frequency, setFrequency] = useState('Monthly')
   const [notes, setNotes] = useState('')
   const [autoOpenInvoice, setAutoOpenInvoice] = useState(true)
+  const [hasAgent, setHasAgent] = useState(false)
+  const [assignedAgentId, setAssignedAgentId] = useState('')
+  const [salesAgents, setSalesAgents] = useState([])
+  const [loadingAgents, setLoadingAgents] = useState(false)
+  const [agentsError, setAgentsError] = useState('')
+  const agentCacheRef = useRef({})
 
   const resetNewSaleForm = () => {
     setCustomerId('')
     setCustomerSearch('')
     setSaleDate(getTodayLocalYMD())
     setPaymentMethod('Cash')
-    setItems([{ product_id: '', quantity: 1, discount: 0 }])
+    setItems([{ product_category: '', product_id: '', quantity: 1, discount: 0 }])
     setCashTendered('')
     setPaymentReference('')
     setDownPayment('0')
@@ -83,6 +92,9 @@ function SalesPage({ branchFilter, embedded }) {
     setNumInstallments('12')
     setFrequency('Monthly')
     setNotes('')
+    setHasAgent(false)
+    setAssignedAgentId('')
+    setAgentsError('')
   }
 
   const openNewSaleModal = () => {
@@ -107,37 +119,17 @@ function SalesPage({ branchFilter, embedded }) {
     if (!isBg) setError('')
     try {
       const reqOpts = signal ? { signal } : {}
-      const needCatalog = products.length === 0 || customers.length === 0 || !silent
-
-      const promises = [
-        api.sales.getAll({
-          search: search || undefined,
-          payment_method: methodFilter !== 'All' ? methodFilter : undefined,
-          status: statusFilter !== 'All' ? statusFilter : undefined,
-          branch: branchFilter || undefined,
-        }, reqOpts)
-      ]
-
-      if (needCatalog) {
-        promises.push(
-          api.products.getAll({ branch: branchFilter || undefined }, reqOpts).catch(() => ({ products: [] })),
-          api.customers.getAll({ branch: branchFilter || undefined }, reqOpts).catch(() => ({ customers: [] }))
-        )
-      }
-
-      const [salesRes, productsRes, customersRes] = await Promise.all(promises)
+      const salesRes = await api.sales.getAll({
+        search: search || undefined,
+        payment_method: methodFilter !== 'All' ? methodFilter : undefined,
+        status: statusFilter !== 'All' ? statusFilter : undefined,
+        branch: branchFilter || undefined,
+      }, reqOpts)
 
       if (!isMountedRef.current) return
 
       const newSales = salesRes?.sales || []
       setSales(prev => (fastDeepEqual(prev, newSales) ? prev : newSales))
-
-      if (productsRes && productsRes.products) {
-        setProducts(prev => (fastDeepEqual(prev, productsRes.products) ? prev : productsRes.products))
-      }
-      if (customersRes && customersRes.customers) {
-        setCustomers(prev => (fastDeepEqual(prev, customersRes.customers) ? prev : customersRes.customers))
-      }
 
       try {
         if (!search && methodFilter === 'All' && statusFilter === 'All') {
@@ -153,6 +145,23 @@ function SalesPage({ branchFilter, embedded }) {
       if (!isBg && isMountedRef.current) setLoading(false)
     }
   }
+
+  // Lazy-load product & customer catalogs strictly when opening New Sale modal
+  useEffect(() => {
+    if (!newSaleModal) return
+    Promise.all([
+      products.length === 0 ? api.products.getAll({ branch: branchFilter || undefined }).catch(() => ({ products: [] })) : Promise.resolve(null),
+      customers.length === 0 ? api.customers.getAll({ branch: branchFilter || undefined }).catch(() => ({ customers: [] })) : Promise.resolve(null),
+    ]).then(([productsRes, customersRes]) => {
+      if (!isMountedRef.current) return
+      if (productsRes?.products) {
+        setProducts(prev => (fastDeepEqual(prev, productsRes.products) ? prev : productsRes.products))
+      }
+      if (customersRes?.customers) {
+        setCustomers(prev => (fastDeepEqual(prev, customersRes.customers) ? prev : customersRes.customers))
+      }
+    }).catch(() => {})
+  }, [newSaleModal, branchFilter])
 
   useEffect(() => {
     const controller = new AbortController()
@@ -192,8 +201,21 @@ function SalesPage({ branchFilter, embedded }) {
     }
   }
 
+  const getProductCatLabel = (p) => p?.category || p?.category_group || p?.main_category || 'Uncategorized'
+
+  const productCategories = useMemo(() => {
+    const counts = new Map()
+    products.forEach(p => {
+      const cat = getProductCatLabel(p)
+      counts.set(cat, (counts.get(cat) || 0) + 1)
+    })
+    return Array.from(counts.entries())
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([name, count]) => ({ name, count }))
+  }, [products])
+
   const handleAddItem = () => {
-    setItems(prev => [...prev, { product_id: '', quantity: 1, discount: 0 }])
+    setItems(prev => [...prev, { product_category: '', product_id: '', quantity: 1, discount: 0 }])
   }
 
   const handleRemoveItem = (index) => {
@@ -201,7 +223,19 @@ function SalesPage({ branchFilter, embedded }) {
   }
 
   const handleItemChange = (index, field, value) => {
-    setItems(prev => prev.map((item, i) => i === index ? { ...item, [field]: value } : item))
+    setItems(prev => prev.map((item, i) => {
+      if (i !== index) return item
+      if (field === 'product_category') {
+        const selectedProd = item.product_id ? products.find(p => String(p.product_id) === String(item.product_id)) : null
+        const matchesCat = selectedProd && (!value || getProductCatLabel(selectedProd) === value)
+        return {
+          ...item,
+          product_category: value,
+          product_id: matchesCat ? item.product_id : '',
+        }
+      }
+      return { ...item, [field]: value }
+    }))
   }
 
   // Calculate live totals & line breakdowns for the new sale
@@ -264,6 +298,74 @@ function SalesPage({ branchFilter, embedded }) {
     () => customers.find(c => String(c.customer_id) === String(customerId)) || null,
     [customers, customerId]
   )
+
+  const resolveAgentBranchScope = (nextCustomer = selectedCustomer) => {
+    const actorBranch = user?.employee?.branch_id || user?.branch_id || ''
+    if (actorBranch) return String(actorBranch)
+    if (nextCustomer?.branch_id) return String(nextCustomer.branch_id)
+    return 'all'
+  }
+
+  const fetchSalesAgents = async (branchKey) => {
+    const key = String(branchKey || 'all')
+    if (agentCacheRef.current[key]) {
+      const cachedList = agentCacheRef.current[key]
+      setSalesAgents(cachedList)
+      setAgentsError('')
+      setAssignedAgentId(prev =>
+        prev && !cachedList.some(a => String(a.employee_id) === String(prev)) ? '' : prev
+      )
+      return cachedList
+    }
+
+    setLoadingAgents(true)
+    setAgentsError('')
+    try {
+      const params = key !== 'all' ? { branch_id: key } : {}
+      const res = await api.sales.getAgents(params, { fresh: true })
+      const list = Array.isArray(res?.agents) ? res.agents : []
+      agentCacheRef.current[key] = list
+      if (isMountedRef.current) {
+        setSalesAgents(list)
+        setAssignedAgentId(prev =>
+          prev && !list.some(a => String(a.employee_id) === String(prev)) ? '' : prev
+        )
+      }
+      return list
+    } catch (err) {
+      if (isMountedRef.current) {
+        setSalesAgents([])
+        setAgentsError(err.message || 'Unable to load active branch sales agents.')
+      }
+      return []
+    } finally {
+      if (isMountedRef.current) {
+        setLoadingAgents(false)
+      }
+    }
+  }
+
+  const handleToggleAgent = (nextHasAgent) => {
+    setHasAgent(nextHasAgent)
+    if (!nextHasAgent) {
+      setAssignedAgentId('')
+      setAgentsError('')
+    }
+  }
+
+  const agentContributionSummary = useMemo(() => {
+    if (!hasAgent) {
+      return summarizeAgentContributions([], false)
+    }
+    return summarizeAgentContributions(
+      detailedItems.map(it => ({
+        netLineTotal: it.lineTotal,
+        product: it.prod,
+        category: it.product_category || it.prod?.category || '',
+      })),
+      true
+    )
+  }, [detailedItems, hasAgent])
 
   const filteredCustomers = useMemo(() => {
     const q = customerSearch.trim().toLowerCase()
@@ -339,6 +441,9 @@ function SalesPage({ branchFilter, embedded }) {
         payment_method: paymentMethod,
         sale_date: saleDate || undefined,
         user_id: user?.user_id || 1,
+        has_agent: hasAgent,
+        assigned_agent_id: null,
+        agent_id: null,
         items: validItems.map(it => ({
           product_id: parseInt(it.product_id, 10),
           quantity: parseInt(it.qty, 10),
@@ -389,8 +494,8 @@ function SalesPage({ branchFilter, embedded }) {
   }
 
   const filtered = useMemo(() => {
-    return filterBySearch(sales, search, ['invoice_no', 'customer_name', 'payment_method'])
-  }, [sales, search])
+    return filterBySearch(sales, deferredSearch, ['invoice_no', 'customer_name', 'payment_method'])
+  }, [sales, deferredSearch])
 
   const total = filtered.length
   const paginated = filtered.slice((page - 1) * pageSize, page * pageSize)
@@ -706,6 +811,24 @@ function SalesPage({ branchFilter, embedded }) {
                     <span className="text-muted-foreground">Currency:</span>
                     <span className="font-mono font-semibold text-foreground">PHP (₱)</span>
                   </div>
+                  {inv.has_agent && (
+                    <>
+                      <div className="flex justify-between text-[11px] pt-1 border-t border-border/60">
+                        <span className="text-muted-foreground">Sales Agent:</span>
+                        <span className="font-semibold text-primary">
+                          {inv.agent_name
+                            ? `${inv.agent_name}${inv.agent_code ? ` (${inv.agent_code})` : ''}`
+                            : 'With Agent'}
+                        </span>
+                      </div>
+                      <div className="flex justify-between text-[11px]">
+                        <span className="text-muted-foreground">Agent Contribution:</span>
+                        <span className="font-mono font-bold text-emerald-600 dark:text-emerald-400">
+                          {fmt(inv.total_agent_contribution)}
+                        </span>
+                      </div>
+                    </>
+                  )}
                 </div>
               </div>
 
@@ -947,7 +1070,14 @@ function SalesPage({ branchFilter, embedded }) {
 
                 <select
                   value={customerId}
-                  onChange={e => setCustomerId(e.target.value)}
+                  onChange={e => {
+                    const nextId = e.target.value
+                    setCustomerId(nextId)
+                    if (hasAgent) {
+                      const nextCust = customers.find(c => String(c.customer_id) === String(nextId)) || null
+                      fetchSalesAgents(resolveAgentBranchScope(nextCust))
+                    }
+                  }}
                   className="w-full px-3 py-2 rounded-xl border border-border bg-card text-foreground font-semibold cursor-pointer"
                   required
                 >
@@ -1136,159 +1266,190 @@ function SalesPage({ branchFilter, embedded }) {
                     {items.filter(it => it.product_id).length} item(s) · {totalCartUnits} unit(s)
                   </span>
                 </div>
-                <button
-                  type="button"
-                  onClick={handleAddItem}
-                  className="flex items-center gap-1 px-3 py-1.5 rounded-xl bg-primary hover:bg-primary/90 text-primary-foreground font-bold text-[11px] cursor-pointer transition-all"
-                >
-                  <FiPlus className="w-3.5 h-3.5" />
-                  <span>Add Product Row</span>
-                </button>
               </div>
 
-              {/* Desktop Table Header */}
-              <div className="hidden md:grid grid-cols-12 gap-2 px-3 text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
-                <div className="col-span-5">Product / SKU</div>
-                <div className="col-span-2 text-right">Unit Price</div>
-                <div className="col-span-1 text-center">Qty</div>
-                <div className="col-span-2 text-right">Discount (₱)</div>
-                <div className="col-span-1 text-right">Total</div>
-                <div className="col-span-1 text-center">Act</div>
-              </div>
+              <div className="space-y-2.5">
+                {detailedItems.map((item, idx) => {
+                  const rowProducts = item.product_category
+                    ? products.filter(p => getProductCatLabel(p) === item.product_category)
+                    : products
 
-              <div className="space-y-2">
-                {detailedItems.map((item, idx) => (
-                  <div
-                    key={idx}
-                    className={`bg-card p-3 rounded-xl border space-y-2 ${
-                      item.overStock || (item.prod && item.stockAvail <= 0)
-                        ? 'border-rose-500/60 bg-rose-500/5'
-                        : 'border-border'
-                    }`}
-                  >
-                    <div className="grid grid-cols-1 md:grid-cols-12 gap-2.5 items-center">
-                      <div className="md:col-span-5">
-                        <label className="md:hidden text-[10px] font-bold text-muted-foreground block mb-1">Product</label>
-                        <select
-                          value={item.product_id}
-                          onChange={e => handleItemChange(idx, 'product_id', e.target.value)}
-                          className="w-full px-2.5 py-2 rounded-lg border border-border bg-card text-foreground font-medium text-xs cursor-pointer"
-                          required
-                        >
-                          <option value="">-- Select Product Item --</option>
-                          {products.map(p => {
-                            const eff = p.discount_price ? parseFloat(p.discount_price) : parseFloat(p.unit_price)
-                            const outOfStock = Number(p.stock_quantity || 0) <= 0
-                            return (
-                              <option key={p.product_id} value={p.product_id} disabled={outOfStock}>
-                                {p.product_name}{p.product_code ? ` [${p.product_code}]` : ''} — {fmt(eff)} ({outOfStock ? 'Out of Stock' : `Stock: ${p.stock_quantity}`})
+                  return (
+                    <div
+                      key={idx}
+                      className={`bg-card p-3.5 rounded-xl border space-y-3 ${
+                        item.overStock || (item.prod && item.stockAvail <= 0)
+                          ? 'border-rose-500/60 bg-rose-500/5'
+                          : 'border-border'
+                      }`}
+                    >
+                      {/* Row 1: Product Category & Product Selection */}
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                        <div>
+                          <label className="block text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-1">
+                            Product Category
+                          </label>
+                          <select
+                            value={item.product_category || ''}
+                            onChange={e => handleItemChange(idx, 'product_category', e.target.value)}
+                            className="w-full px-2.5 py-2 rounded-lg border border-border bg-card text-foreground font-medium text-xs cursor-pointer"
+                          >
+                            <option value="">All Categories ({products.length})</option>
+                            {productCategories.map(cat => (
+                              <option key={cat.name} value={cat.name}>
+                                {cat.name} ({cat.count})
                               </option>
-                            )
-                          })}
-                        </select>
+                            ))}
+                          </select>
+                        </div>
+
+                        <div>
+                          <label className="block text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-1">
+                            Product Selection *
+                          </label>
+                          <select
+                            value={item.product_id}
+                            onChange={e => handleItemChange(idx, 'product_id', e.target.value)}
+                            className="w-full px-2.5 py-2 rounded-lg border border-border bg-card text-foreground font-medium text-xs cursor-pointer"
+                            required
+                          >
+                            <option value="">-- Select Product Item --</option>
+                            {rowProducts.map(p => {
+                              const eff = p.discount_price ? parseFloat(p.discount_price) : parseFloat(p.unit_price)
+                              const outOfStock = Number(p.stock_quantity || 0) <= 0
+                              const catLabel = getProductCatLabel(p)
+                              return (
+                                <option key={p.product_id} value={p.product_id} disabled={outOfStock}>
+                                  {!item.product_category ? `[${catLabel}] ` : ''}{p.product_name}{p.product_code ? ` [${p.product_code}]` : ''} — {fmt(eff)} ({outOfStock ? 'Out of Stock' : `Stock: ${p.stock_quantity}`}) {p.discount_price ? '[SALE]' : ''}
+                                </option>
+                              )
+                            })}
+                          </select>
+                        </div>
                       </div>
 
-                      <div className="md:col-span-2 md:text-right">
-                        <label className="md:hidden text-[10px] font-bold text-muted-foreground block mb-1">Unit Price</label>
-                        {item.prod ? (
-                          <div className="font-mono font-semibold text-foreground">
-                            <div>{fmt(item.unitPrice)}</div>
-                            {item.promoPrice !== null && (
-                              <div className="text-[10px] text-muted-foreground line-through">
-                                {fmt(item.basePrice)}
-                              </div>
+                      {/* Row 2: Pricing, Qty, Discount, Line Total & Action */}
+                      <div className="grid grid-cols-2 sm:grid-cols-12 gap-2.5 items-end pt-2 border-t border-border/60">
+                        <div className="sm:col-span-3">
+                          <label className="block text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-1">
+                            Unit Price
+                          </label>
+                          {item.prod ? (
+                            <div className="font-mono font-semibold text-foreground py-1.5">
+                              <div>{fmt(item.unitPrice)}</div>
+                              {item.promoPrice !== null && (
+                                <div className="text-[10px] text-muted-foreground line-through">
+                                  {fmt(item.basePrice)}
+                                </div>
+                              )}
+                            </div>
+                          ) : (
+                            <div className="font-mono text-muted-foreground py-1.5">—</div>
+                          )}
+                        </div>
+
+                        <div className="sm:col-span-2">
+                          <label className="block text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-1">
+                            Qty
+                          </label>
+                          <input
+                            type="number"
+                            min="1"
+                            max={item.prod && item.stockAvail > 0 ? item.stockAvail : undefined}
+                            placeholder="Qty"
+                            value={item.quantity}
+                            onChange={e => handleItemChange(idx, 'quantity', e.target.value)}
+                            className="w-full px-2 py-1.5 rounded-lg border border-border bg-card text-foreground font-mono text-center"
+                            required
+                          />
+                        </div>
+
+                        <div className="sm:col-span-3">
+                          <label className="block text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-1">
+                            Discount (₱)
+                          </label>
+                          <input
+                            type="number"
+                            step="0.01"
+                            min="0"
+                            placeholder="0.00"
+                            value={item.discount}
+                            onChange={e => handleItemChange(idx, 'discount', e.target.value)}
+                            className="w-full px-2.5 py-1.5 rounded-lg border border-border bg-card text-foreground font-mono text-right"
+                          />
+                        </div>
+
+                        <div className="sm:col-span-3 sm:text-right">
+                          <label className="block text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-1">
+                            Total
+                          </label>
+                          <div className="font-mono font-bold text-foreground py-1.5">
+                            {fmt(item.lineTotal)}
+                          </div>
+                        </div>
+
+                        <div className="sm:col-span-1 flex sm:justify-end">
+                          {items.length > 1 && (
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveItem(idx)}
+                              title="Remove item"
+                              className="text-rose-500 hover:text-rose-600 hover:bg-rose-500/10 rounded-lg cursor-pointer p-1.5 transition-colors"
+                            >
+                              <FiTrash2 className="w-4 h-4" />
+                            </button>
+                          )}
+                        </div>
+                      </div>
+
+                      {item.prod && (
+                        <div className="flex flex-wrap items-center justify-between gap-2 pt-1.5 border-t border-border/60 text-[11px] text-muted-foreground">
+                          <div className="flex flex-wrap items-center gap-2">
+                            {item.prod.product_code && (
+                              <span className="font-mono bg-muted px-1.5 py-0.5 rounded text-foreground">
+                                {item.prod.product_code}
+                              </span>
+                            )}
+                            {(item.prod.brand || item.prod.category) && (
+                              <span>
+                                {[item.prod.brand, item.prod.category].filter(Boolean).join(' • ')}
+                              </span>
                             )}
                           </div>
-                        ) : (
-                          <span className="font-mono text-muted-foreground">—</span>
-                        )}
-                      </div>
-
-                      <div className="md:col-span-1">
-                        <label className="md:hidden text-[10px] font-bold text-muted-foreground block mb-1">Qty</label>
-                        <input
-                          type="number"
-                          min="1"
-                          max={item.prod && item.stockAvail > 0 ? item.stockAvail : undefined}
-                          placeholder="Qty"
-                          value={item.quantity}
-                          onChange={e => handleItemChange(idx, 'quantity', e.target.value)}
-                          className="w-full px-2 py-1.5 rounded-lg border border-border bg-card text-foreground font-mono text-center"
-                          required
-                        />
-                      </div>
-
-                      <div className="md:col-span-2">
-                        <label className="md:hidden text-[10px] font-bold text-muted-foreground block mb-1">Discount (₱)</label>
-                        <input
-                          type="number"
-                          step="0.01"
-                          min="0"
-                          placeholder="0.00"
-                          value={item.discount}
-                          onChange={e => handleItemChange(idx, 'discount', e.target.value)}
-                          className="w-full px-2.5 py-1.5 rounded-lg border border-border bg-card text-foreground font-mono text-right"
-                        />
-                      </div>
-
-                      <div className="md:col-span-1 md:text-right">
-                        <label className="md:hidden text-[10px] font-bold text-muted-foreground block mb-1">Line Total</label>
-                        <span className="font-mono font-bold text-foreground">
-                          {fmt(item.lineTotal)}
-                        </span>
-                      </div>
-
-                      <div className="md:col-span-1 flex md:justify-center">
-                        {items.length > 1 && (
-                          <button
-                            type="button"
-                            onClick={() => handleRemoveItem(idx)}
-                            title="Remove item"
-                            className="text-rose-500 hover:text-rose-600 hover:bg-rose-500/10 rounded-lg cursor-pointer p-1.5 transition-colors"
-                          >
-                            <FiTrash2 className="w-4 h-4" />
-                          </button>
-                        )}
-                      </div>
+                          <div className="flex items-center gap-2">
+                            <span
+                              className={`font-semibold ${
+                                item.overStock || item.stockAvail <= 0
+                                  ? 'text-rose-500'
+                                  : item.stockAvail <= 2
+                                    ? 'text-amber-500'
+                                    : 'text-emerald-600 dark:text-emerald-400'
+                              }`}
+                            >
+                              {item.overStock
+                                ? `Exceeds stock (${item.stockAvail} left)`
+                                : `Available Stock: ${item.stockAvail}`}
+                            </span>
+                          </div>
+                        </div>
+                      )}
                     </div>
-
-                    {item.prod && (
-                      <div className="flex flex-wrap items-center justify-between gap-2 pt-1.5 border-t border-border/60 text-[11px] text-muted-foreground">
-                        <div className="flex flex-wrap items-center gap-2">
-                          {item.prod.product_code && (
-                            <span className="font-mono bg-muted px-1.5 py-0.5 rounded text-foreground">
-                              {item.prod.product_code}
-                            </span>
-                          )}
-                          {(item.prod.brand || item.prod.category) && (
-                            <span>
-                              {[item.prod.brand, item.prod.category].filter(Boolean).join(' • ')}
-                            </span>
-                          )}
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <span
-                            className={`font-semibold ${
-                              item.overStock || item.stockAvail <= 0
-                                ? 'text-rose-500'
-                                : item.stockAvail <= 2
-                                  ? 'text-amber-500'
-                                  : 'text-emerald-600 dark:text-emerald-400'
-                            }`}
-                          >
-                            {item.overStock
-                              ? `Exceeds stock (${item.stockAvail} left)`
-                              : `Available Stock: ${item.stockAvail}`}
-                          </span>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                ))}
+                  )
+                })}
               </div>
             </div>
 
-            {/* Section 3: Installment Financing Agreement (if Installment) */}
+            <AgentAssignmentSection
+              hasAgent={hasAgent}
+              onToggleAgent={handleToggleAgent}
+              selectedAgentId={assignedAgentId}
+              onSelectAgent={setAssignedAgentId}
+              agents={salesAgents}
+              loadingAgents={loadingAgents}
+              agentsError={agentsError}
+              summary={agentContributionSummary}
+            />
+
             {isInstallment && (
               <div className="p-4 bg-amber-50/50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-900 rounded-2xl space-y-3">
                 <div className="flex flex-wrap items-center justify-between gap-2 border-b border-amber-500/20 pb-2">

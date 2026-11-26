@@ -90,8 +90,9 @@ class TransactionController extends Controller
                 'customer:customer_id,first_name,last_name,customer_code,phone,email,address',
                 'processedBy:user_id,username,employee_id',
                 'processedBy.employee:employee_id,first_name,last_name',
+                'agent:employee_id,employee_code,first_name,last_name,position',
                 'branch:id,name,location,contact_number',
-                'items:sale_item_id,sale_id,product_id,quantity,unit_price,discount_amount,line_total',
+                'items:sale_item_id,sale_id,product_id,quantity,unit_price,discount_amount,line_total,category_domain,agent_commission_rate,agent_contribution',
                 'items.product:product_id,product_name,product_code,brand,category',
                 'installmentAccount.payments:payment_id,installment_id,amount,status,reference_no,notes',
                 'installmentAccount.paymentSchedules' => fn($q) => $q->orderBy('installment_no'),
@@ -99,6 +100,13 @@ class TransactionController extends Controller
 
             if ($user && $user->role === 'Customer') {
                 $salesQuery->where('customer_id', $customerId ?? -1);
+            } elseif ($user && in_array($user->role, ['Store Administrator', 'Store Admin', 'Employee'], true)) {
+                $branchId = $user->employee ? $user->employee->branch_id : null;
+                if ($branchId) {
+                    $salesQuery->where('branch_id', $branchId);
+                } else {
+                    $salesQuery->whereRaw('1 = 0');
+                }
             }
 
             if ($search) {
@@ -180,6 +188,14 @@ class TransactionController extends Controller
                     'reference_no' => $extractedRef,
                     'status' => $s->status ?? 'Completed',
                     'processed_by' => $staff,
+                    'has_agent' => (bool) $s->has_agent,
+                    'agent_id' => $s->agent_id ? (int) $s->agent_id : null,
+                    'assigned_agent_id' => $s->agent_id ? (int) $s->agent_id : null,
+                    'agent_name' => $s->agent ? trim("{$s->agent->first_name} {$s->agent->last_name}") : null,
+                    'agent_code' => $s->agent?->employee_code ?? null,
+                    'appliances_agent_contribution' => (float) ($s->appliances_agent_contribution ?? 0),
+                    'furniture_agent_contribution' => (float) ($s->furniture_agent_contribution ?? 0),
+                    'total_agent_contribution' => (float) ($s->total_agent_contribution ?? 0),
                     'items_count' => $s->items->count(),
                     'notes' => $s->notes ?? '',
                     'items' => $s->items->map(function ($item) {
@@ -190,6 +206,9 @@ class TransactionController extends Controller
                             'product_code' => $item->product ? ($item->product->product_code ?? '') : '',
                             'brand' => $item->product ? ($item->product->brand ?? '') : '',
                             'category' => $item->product ? ($item->product->category ?? '') : '',
+                            'category_domain' => $item->category_domain,
+                            'agent_commission_rate' => (float) ($item->agent_commission_rate ?? 0),
+                            'agent_contribution' => (float) ($item->agent_contribution ?? 0),
                             'quantity' => (float)$item->quantity == (int)$item->quantity ? (int)$item->quantity : (float)$item->quantity,
                             'unit_price' => (float)$item->unit_price,
                             'discount_amount' => (float)($item->discount_amount ?? $item->discount ?? 0),
@@ -215,15 +234,33 @@ class TransactionController extends Controller
                 'installmentAccount.saleTransaction.branch:id,name,location,contact_number',
                 'installmentAccount.saleTransaction.items:sale_item_id,sale_id,product_id,quantity,unit_price,discount_amount,line_total',
                 'installmentAccount.saleTransaction.items.product:product_id,product_name,product_code,brand,category',
+                'sale:sale_id,invoice_no,customer_id,branch_id,subtotal,discount_amount,total_amount',
+                'sale.customer:customer_id,first_name,last_name,customer_code,phone,email,address',
+                'sale.branch:id,name,location,contact_number',
+                'sale.items:sale_item_id,sale_id,product_id,quantity,unit_price,discount_amount,line_total',
+                'sale.items.product:product_id,product_name,product_code,brand,category',
                 'paymentSchedule:schedule_id,installment_id,installment_no,due_date,amount_due,amount_paid,balance_due,status',
                 'receivedBy:user_id,username,employee_id',
-                'receivedBy.employee:employee_id,first_name,last_name'
+                'receivedBy.employee:employee_id,first_name,last_name',
+                'agent:employee_id,employee_code,first_name,last_name,position'
             ]);
 
             if ($user && $user->role === 'Customer') {
-                $paymentsQuery->whereHas('installmentAccount', function ($query) use ($customerId) {
-                    $query->where('customer_id', $customerId ?? -1);
+                $paymentsQuery->where(function ($pq) use ($customerId) {
+                    $pq->whereHas('installmentAccount', fn($iq) => $iq->where('customer_id', $customerId ?? -1))
+                       ->orWhereHas('sale', fn($sq) => $sq->where('customer_id', $customerId ?? -1));
                 });
+            } elseif ($user && in_array($user->role, ['Store Administrator', 'Store Admin', 'Employee'], true)) {
+                $branchId = $user->employee ? $user->employee->branch_id : null;
+                if ($branchId) {
+                    $paymentsQuery->where(function ($pq) use ($branchId) {
+                        $pq->whereHas('sale', fn($sq) => $sq->where('branch_id', $branchId))
+                           ->orWhereHas('installmentAccount.saleTransaction', fn($sq) => $sq->where('branch_id', $branchId))
+                           ->orWhereHas('installmentAccount.customer', fn($cq) => $cq->where('branch_id', $branchId));
+                    });
+                } else {
+                    $paymentsQuery->whereRaw('1 = 0');
+                }
             }
 
             if ($search) {
@@ -247,6 +284,10 @@ class TransactionController extends Controller
                 $paymentsQuery->where('payment_method', $paymentMethod);
             }
 
+            if ($status !== 'All') {
+                $paymentsQuery->where('status', $status);
+            }
+
             if ($dateFrom) {
                 $paymentsQuery->whereDate('payment_date', '>=', $dateFrom);
             }
@@ -256,8 +297,8 @@ class TransactionController extends Controller
 
             $payments = $paymentsQuery->get()->map(function ($p) use ($companyName, $sysSettings) {
                 $inst = $p->installmentAccount;
-                $cust = $inst ? $inst->customer : null;
-                $linkedSale = $inst ? $inst->saleTransaction : null;
+                $linkedSale = $inst ? $inst->saleTransaction : $p->sale;
+                $cust = $inst ? $inst->customer : ($linkedSale ? $linkedSale->customer : null);
                 $branchProfile = $linkedSale ? $linkedSale->branch : null;
                 $staff = $p->receivedBy
                     ? ($p->receivedBy->employee
@@ -288,15 +329,16 @@ class TransactionController extends Controller
                     'id' => 'PAY-' . $p->payment_id,
                     'raw_id' => $p->payment_id,
                     'payment_id' => $p->payment_id,
-                    'sale_id' => $inst?->sale_id,
+                    'sale_id' => $inst?->sale_id ?? $p->sale_id,
                     'invoice_no' => $linkedSale?->invoice_no ?? '',
-                    'type' => 'Installment Payment',
+                    'type' => ($p->payment_type === 'product_cash' || !$p->installment_id) ? 'Cash Product Payment' : 'Installment Payment',
+                    'payment_type' => $p->payment_type ?: ($p->installment_id ? 'installment' : 'product_cash'),
                     'category' => 'payment',
                     'channel' => $detection['channel'],
                     'provider' => $detection['provider'],
                     'badge_color' => $detection['badge_color'],
                     'reference_code' => $p->receipt_no,
-                    'account_no' => $inst ? $inst->account_no : 'N/A',
+                    'account_no' => $inst ? $inst->account_no : ($linkedSale?->invoice_no ?? 'CASH SALE'),
                     'installment_id' => $p->installment_id,
                     'date' => date('Y-m-d', strtotime($p->payment_date)),
                     'sale_datetime' => date('M d, Y h:i A', strtotime($p->payment_date)),
@@ -324,6 +366,14 @@ class TransactionController extends Controller
                     'reference_no' => $p->reference_no ?? '',
                     'status' => $p->status ?? 'Completed',
                     'processed_by' => $staff,
+                    'has_agent' => (bool) ($p->has_agent ?? false),
+                    'agent_id' => $p->agent_id ? (int) $p->agent_id : null,
+                    'assigned_agent_id' => $p->agent_id ? (int) $p->agent_id : null,
+                    'agent_name' => $p->agent ? trim("{$p->agent->first_name} {$p->agent->last_name}") : null,
+                    'agent_code' => $p->agent?->employee_code ?? null,
+                    'appliances_agent_contribution' => (float) ($p->appliances_agent_contribution ?? 0),
+                    'furniture_agent_contribution' => (float) ($p->furniture_agent_contribution ?? 0),
+                    'total_agent_contribution' => (float) ($p->total_agent_contribution ?? 0),
                     'items_count' => is_countable($linkedItems) && count($linkedItems) > 0 ? count($linkedItems) : 1,
                     'notes' => $p->notes ?? '',
                     'items' => $linkedItems,
