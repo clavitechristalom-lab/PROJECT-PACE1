@@ -604,7 +604,7 @@ export default function SystemPage({ defaultTab = 'users' }) {
   const tabs = [
     { id: 'users', label: 'User Accounts & Verification', icon: <FiUsers className="w-3.5 h-3.5" /> },
     { id: 'backups', label: 'Database Backup & Restore', icon: <FiDatabase className="w-3.5 h-3.5" /> },
-    { id: 'storage', label: 'System Storage Management', icon: <FiHardDrive className="w-3.5 h-3.5" /> },
+    { id: 'storage', label: 'System Management', icon: <FiHardDrive className="w-3.5 h-3.5" /> },
     { id: 'settings', label: 'Company Configuration', icon: <FiSettings className="w-3.5 h-3.5" /> },
   ]
 

@@ -65,6 +65,12 @@ export default function CashierReceiveCashPage() {
     { module: 'payments' }
   )
 
+  useRealtimeSync(
+    () => loadWalkInPayments({ silent: true }),
+    [],
+    { module: 'installments' }
+  )
+
   const isSentToStoreAdmin = useCallback((item) => {
     const st = String(item?.status || '').toLowerCase()
     if (item?.sent_to_store_admin) return true
@@ -225,7 +231,7 @@ export default function CashierReceiveCashPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Receive Cash"
+        title="Receive Customer Installments"
         subtitle={`Walk-In Counter Cash Drawer • ${branchLabel} • ${cashierName}${cashierCode ? ` (${cashierCode})` : ''}`}
         action={
           <div className="flex items-center gap-2 flex-wrap">
@@ -463,7 +469,7 @@ export default function CashierReceiveCashPage() {
                         }`}
                       >
                         <TbCashRegister className="w-3.5 h-3.5" />
-                        <span>{item.is_collector_remittance ? 'Receive & Send to Admin' : 'Receive Cash'}</span>
+                        <span>{item.is_collector_remittance ? 'Receive & Send to Admin' : 'Receive Customer Installments'}</span>
                       </button>
                     )}
                     <button

@@ -97,6 +97,8 @@ class EWalletController extends Controller
             'payment_type' => 'nullable|string|in:deposit,installment_payment,product_purchase,product_order,installment_order',
             'installment_id' => 'nullable|exists:installment_accounts,installment_id',
             'schedule_id' => 'nullable|exists:payment_schedule,schedule_id',
+            'schedule_ids' => 'nullable|array',
+            'schedule_ids.*' => 'integer|exists:payment_schedule,schedule_id',
             'items' => 'nullable|array',
             'items.*.product_id' => 'nullable|exists:products,product_id',
             'items.*.quantity' => 'nullable|integer|min:1',
@@ -153,16 +155,35 @@ class EWalletController extends Controller
         $productImage = null;
 
         if (!empty($validated['installment_id'])) {
-            $installmentAccount = InstallmentAccount::with(['sale.saleItems.product', 'customer'])->find($validated['installment_id']);
+            $installmentAccount = InstallmentAccount::with(['sale.saleItems.product', 'customer', 'payments'])->find($validated['installment_id']);
             if ($installmentAccount) {
+                if ($installmentAccount->isFullyPaid()) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => "Installment account {$installmentAccount->account_no} is already Fully Paid.",
+                    ], 422);
+                }
                 $firstSaleItem = $installmentAccount->sale?->saleItems?->first() ?? $installmentAccount->sale?->items?->first();
                 $productName = $firstSaleItem?->product?->product_name ?? 'Furniture/Appliance Item';
                 $productImage = $firstSaleItem?->product?->image_url ?? null;
             }
         }
-        if (!empty($validated['schedule_id'])) {
-            $schedule = PaymentSchedule::find($validated['schedule_id']);
+        $selectedSchedules = collect();
+        if (!empty($validated['schedule_ids']) && is_array($validated['schedule_ids'])) {
+            $schedQuery = PaymentSchedule::whereIn('schedule_id', array_map('intval', $validated['schedule_ids']));
+            if ($installmentAccount) {
+                $schedQuery->where('installment_id', $installmentAccount->installment_id);
+            }
+            $selectedSchedules = $schedQuery->orderBy('installment_no')->get();
         }
+        if ($selectedSchedules->isEmpty() && !empty($validated['schedule_id'])) {
+            $singleSched = PaymentSchedule::find($validated['schedule_id']);
+            if ($singleSched && (!$installmentAccount || (int) $singleSched->installment_id === (int) $installmentAccount->installment_id)) {
+                $selectedSchedules = collect([$singleSched]);
+            }
+        }
+        $schedule = $selectedSchedules->first();
+        $selectedScheduleIds = $selectedSchedules->pluck('schedule_id')->map(fn ($id) => (int) $id)->values()->all();
 
         $isCashMethod = strtolower((string) $validated['payment_method']) === 'cash';
         $cashChannel = $isCashMethod ? ($validated['cash_channel'] ?? 'store') : null;
@@ -201,7 +222,12 @@ class EWalletController extends Controller
             $itemsForCheckout = $validated['items'];
         } elseif ($installmentAccount) {
             $accNo = $installmentAccount->account_no;
-            $schedInfo = $schedule ? "Month {$schedule->installment_no}" : "Due";
+            if ($selectedSchedules->count() > 1) {
+                $monthList = $selectedSchedules->pluck('installment_no')->implode(', ');
+                $schedInfo = "Months {$monthList}";
+            } else {
+                $schedInfo = $schedule ? "Month {$schedule->installment_no}" : "Due";
+            }
             $itemsForCheckout = [
                 [
                     'name' => "Installment Due: {$accNo} ({$schedInfo})",
@@ -214,10 +240,14 @@ class EWalletController extends Controller
             ];
         }
 
+        $schedDescSuffix = $selectedSchedules->count() > 1
+            ? ' (Months ' . $selectedSchedules->pluck('installment_no')->implode(', ') . ')'
+            : ($schedule ? " (Month {$schedule->installment_no})" : '');
+
         $desc = $isInstallmentTerm
             ? "Downpayment for {$validated['installment_term_months']}-month Installment Plan (" . count($validated['items'] ?? []) . " items) via {$validated['payment_method']}"
             : ($installmentAccount
-                ? "Installment payment for {$installmentAccount->account_no}" . ($schedule ? " (Month {$schedule->installment_no})" : "") . " via {$validated['payment_method']}"
+                ? "Installment payment for {$installmentAccount->account_no}{$schedDescSuffix} via {$validated['payment_method']}"
                 : ($hasItems
                     ? "Order of " . count($validated['items']) . " item(s) for ₱" . number_format($amount, 2) . " via {$validated['payment_method']}"
                     : "Payment of ₱" . number_format($amount, 2) . " via {$validated['payment_method']}"));
@@ -232,16 +262,17 @@ class EWalletController extends Controller
             ];
         }
 
-        // Build transaction metadata and gateway response details
         $gatewayResponse = [
             'reference_number' => $reference,
             'amount' => $amount,
             'payment_method' => $validated['payment_method'],
             'description' => $desc,
+            'selected_schedule_ids' => $selectedScheduleIds,
             'metadata' => [
                 'installment_account_no' => $installmentAccount?->account_no,
                 'product_name' => $productName,
                 'product_image_url' => $productImage,
+                'selected_schedule_ids' => $selectedScheduleIds,
             ],
         ];
 
@@ -271,7 +302,7 @@ class EWalletController extends Controller
             'customer_id' => $customerId,
             'user_id' => $user ? $user->user_id : null,
             'installment_id' => $validated['installment_id'] ?? null,
-            'schedule_id' => $validated['schedule_id'] ?? null,
+            'schedule_id' => $schedule?->schedule_id ?? ($validated['schedule_id'] ?? null),
             'payment_method' => $validated['payment_method'],
             'payment_type' => $paymentType,
             'amount' => $amount,
@@ -448,7 +479,7 @@ class EWalletController extends Controller
             if ($deposit->user_id) {
                 NotificationService::sendToUser($deposit->user_id, [
                     'type' => 'payment_success',
-                    'title' => 'Payment Confirmed! 🎉',
+                    'title' => 'Payment Confirmed!',
                     'message' => "Your {$deposit->payment_method} payment of ₱" . number_format($deposit->amount, 2) . " has been successfully verified.",
                     'module' => 'Payments',
                     'priority' => 'high',
@@ -818,15 +849,13 @@ class EWalletController extends Controller
         ]);
     }
 
-    /**
-     * Apply paid deposit to Installment Account & Payment Schedules.
-     */
     protected function applyInstallmentPayment(EWalletDeposit $deposit): void
     {
-        $inst = InstallmentAccount::with(['paymentSchedules'])->find($deposit->installment_id);
-        if (!$inst) return;
+        $inst = InstallmentAccount::with(['paymentSchedules', 'payments'])->find($deposit->installment_id);
+        if (!$inst || $inst->isFullyPaid()) {
+            return;
+        }
 
-        // Generate receipt number
         $paymentCount = (Payment::max('payment_id') ?? 0) + 1;
         $receiptNo = 'REC-' . date('Y') . '-' . str_pad($paymentCount, 5, '0', STR_PAD_LEFT);
         while (Payment::where('receipt_no', $receiptNo)->exists()) {
@@ -840,6 +869,7 @@ class EWalletController extends Controller
 
         $payment = Payment::create([
             'installment_id' => $inst->installment_id,
+            'sale_id' => $inst->sale_id,
             'schedule_id' => $deposit->schedule_id,
             'receipt_no' => $receiptNo,
             'payment_date' => now()->toDateString(),
@@ -848,6 +878,8 @@ class EWalletController extends Controller
             'reference_no' => $refNo,
             'proof_of_payment' => $proofOfPayment,
             'received_by' => $deposit->user_id,
+            'confirmed_by' => $deposit->user_id,
+            'confirmed_at' => now(),
             'notes' => "Automatic online confirmation via {$deposit->payment_method} gateway" . ($customerRef ? " [Customer Ref: {$customerRef}]" : ""),
             'status' => 'Completed',
             'created_at' => now(),
@@ -856,41 +888,7 @@ class EWalletController extends Controller
         $deposit->payment_id = $payment->payment_id;
         $deposit->save();
 
-        // Sequentially apply to schedules
-        $remaining = (float)$deposit->amount;
-        $schedules = PaymentSchedule::where('installment_id', $inst->installment_id)
-            ->where('balance_due', '>', 0)
-            ->orderBy('installment_no')
-            ->get();
-
-        foreach ($schedules as $sched) {
-            if ($remaining <= 0) break;
-            $due = (float)$sched->balance_due;
-            $apply = min($remaining, $due);
-
-            $newPaid = round((float)$sched->amount_paid + $apply, 2);
-            $newBal = max(0, round((float)$sched->amount_due - $newPaid, 2));
-            $newStatus = $newBal <= 0 ? 'Paid' : 'Partially Paid';
-
-            $sched->update([
-                'amount_paid' => $newPaid,
-                'balance_due' => $newBal,
-                'status' => $newStatus,
-                'paid_date' => $newBal <= 0 ? now()->toDateString() : $sched->paid_date,
-            ]);
-
-            $remaining -= $apply;
-        }
-
-        $inst->unsetRelation('payments');
-        $fin = $inst->financialBreakdown();
-        $totalPaid = (float) $fin['paid'];
-        $balance = (float) $fin['balance'];
-        $instStatus = $balance <= 0 ? 'Completed' : $inst->status;
-
-        $inst->update([
-            'status' => $instStatus,
-        ]);
+        PaymentSettlementService::applyConfirmedInstallmentSettlement($payment);
     }
 
     /**
@@ -1059,7 +1057,7 @@ class EWalletController extends Controller
         if ($deposit->user_id) {
             NotificationService::sendToUser($deposit->user_id, [
                 'type'     => 'order_confirmed',
-                'title'    => $isInstallment ? "Installment Plan Activated: #{$accountNo} 🎉" : "Order Confirmed: #{$invoiceNo} 🎉",
+                'title'    => $isInstallment ? "Installment Plan Activated: #{$accountNo}" : "Order Confirmed: #{$invoiceNo}",
                 'message'  => $isInstallment
                     ? "Your {$deposit->payment_method} downpayment of ₱" . number_format($deposit->amount, 2) . " has been verified. Your installment plan is now active."
                     : "Your {$deposit->payment_method} payment of ₱" . number_format($deposit->amount, 2) . " has been successfully verified.",

@@ -1,17 +1,30 @@
 <?php
 namespace App\Models;
+
 use Illuminate\Database\Eloquent\Model;
 
 class InstallmentAccount extends Model
 {
+    public const STATUS_FULLY_PAID = 'Fully Paid';
+    public const STANDING_CLEARED = 'Cleared / Good Standing';
+    public const AGENT_CONTRIBUTION_SETTLED = 'Settled';
+
+    public const COMPLETED_STATUSES = [
+        'Fully Paid',
+        'Completed',
+        'Complete Payment',
+    ];
+
     protected $primaryKey = 'installment_id';
     protected $table = 'installment_accounts';
 
     protected $fillable = [
         'account_no', 'customer_id', 'sale_id', 'has_agent', 'agent_id',
         'appliances_agent_contribution', 'furniture_agent_contribution', 'total_agent_contribution',
-        'start_date', 'principal_amount', 'down_payment', 'interest_rate', 'interest_amount',
-        'total_payable', 'installment_amount', 'number_of_installments', 'frequency', 'status', 'notes'
+        'agent_contribution_status', 'start_date', 'principal_amount', 'down_payment',
+        'interest_rate', 'interest_amount', 'total_payable', 'remaining_balance',
+        'installment_amount', 'number_of_installments', 'frequency', 'status',
+        'completed_at', 'next_due_date', 'customer_standing', 'completed_verified_by', 'notes'
     ];
 
     protected $casts = [
@@ -19,14 +32,13 @@ class InstallmentAccount extends Model
         'appliances_agent_contribution' => 'decimal:2',
         'furniture_agent_contribution' => 'decimal:2',
         'total_agent_contribution' => 'decimal:2',
+        'remaining_balance' => 'decimal:2',
+        'completed_at' => 'datetime',
+        'next_due_date' => 'date:Y-m-d',
     ];
 
     protected $appends = ['total_paid', 'balance', 'remaining_balance'];
 
-    /**
-     * Canonical financial breakdown: counts only confirmed/completed payments,
-     * avoids double-counting down payment, and tracks pending verifications separately.
-     */
     public function financialBreakdown(): array
     {
         $payments = $this->relationLoaded('payments')
@@ -64,6 +76,15 @@ class InstallmentAccount extends Model
         ];
     }
 
+    public function isFullyPaid(): bool
+    {
+        $st = strtolower(trim((string) $this->status));
+        if (in_array($st, ['fully paid', 'completed', 'complete payment'], true)) {
+            return true;
+        }
+        return (float) $this->total_payable > 0 && $this->balance <= 0.0;
+    }
+
     public function getTotalPaidAttribute(): float
     {
         return $this->financialBreakdown()['paid'];
@@ -76,14 +97,32 @@ class InstallmentAccount extends Model
 
     public function getRemainingBalanceAttribute(): float
     {
+        if (in_array(strtolower(trim((string) $this->status)), ['fully paid', 'completed', 'complete payment'], true)) {
+            return 0.0;
+        }
         return $this->balance;
     }
 
-    public function syncCompletionStatus(): bool
+    public function syncCompletionStatus(?int $verifiedByUserId = null): bool
     {
         if ((float) $this->total_payable > 0 && $this->balance <= 0) {
-            if ($this->status !== 'Complete Payment') {
-                $this->status = 'Complete Payment';
+            $wasCompleted = strtolower(trim((string) $this->status)) === strtolower(self::STATUS_FULLY_PAID)
+                && $this->completed_at !== null
+                && $this->next_due_date === null
+                && $this->customer_standing === self::STANDING_CLEARED;
+
+            if (!$wasCompleted) {
+                $this->remaining_balance = 0.00;
+                $this->status = self::STATUS_FULLY_PAID;
+                $this->completed_at = $this->completed_at ?: now();
+                $this->next_due_date = null;
+                $this->customer_standing = self::STANDING_CLEARED;
+                if ($this->has_agent) {
+                    $this->agent_contribution_status = self::AGENT_CONTRIBUTION_SETTLED;
+                }
+                if ($verifiedByUserId && !$this->completed_verified_by) {
+                    $this->completed_verified_by = $verifiedByUserId;
+                }
                 $this->saveQuietly();
                 return true;
             }
@@ -111,6 +150,11 @@ class InstallmentAccount extends Model
         return $this->belongsTo(Employee::class, 'agent_id', 'employee_id');
     }
 
+    public function completedVerifiedBy()
+    {
+        return $this->belongsTo(User::class, 'completed_verified_by', 'user_id');
+    }
+
     public function paymentSchedules()
     {
         return $this->hasMany(PaymentSchedule::class, 'installment_id', 'installment_id');
@@ -131,7 +175,7 @@ class InstallmentAccount extends Model
         static::saved(function ($installment) {
             try {
                 if ($installment->customer_id && \Illuminate\Support\Facades\Schema::hasTable('statements')) {
-                    Statement::syncCustomerStatements((int)$installment->customer_id);
+                    Statement::syncCustomerStatements((int) $installment->customer_id);
                 }
             } catch (\Throwable $e) {}
         });

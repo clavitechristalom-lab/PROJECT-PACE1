@@ -12,7 +12,7 @@ import {
   Table, TR, TD, SearchBar, PageHeader, StatCard, Card, CardHeader, Pagination, showToast,
   LoadingState, ErrorAlert, TableSkeleton, EmptyState, showLoading, closeLoading, confirmDelete, unifiedAlert
 } from '../components/ui'
-import { fmt, fmtDate, fastDeepEqual } from '../lib/utils'
+import { fmt, fmtDate, fastDeepEqual, summarizePaymentNotes } from '../lib/utils'
 import { useAuth } from '../context/AuthContext'
 import api, { downloadCsv, peekApiCache } from '../lib/api'
 import { useRealtimeSync, triggerDataSync, SyncButton } from '../lib/realtimeSync'
@@ -772,7 +772,7 @@ export default function PaymentsPage() {
     showLoading('Receiving payment...');
     try {
       await api.payments.receive(p.payment_id);
-      showToast('Payment received and credited successfully! 🎉', 'success');
+      showToast('Payment received and credited successfully!', 'success');
       triggerDataSync('payments');
     } catch (err) {
       showToast(err.message || 'Failed to receive payment', 'error');
@@ -1302,7 +1302,7 @@ export default function PaymentsPage() {
 
               {viewReceipt.notes && (
                 <div className="text-[11px] text-muted-foreground bg-muted/30 p-2.5 rounded-xl border border-border">
-                  <strong>Remarks:</strong> {viewReceipt.notes}
+                  <strong>Remarks:</strong> {summarizePaymentNotes(viewReceipt.notes)}
                 </div>
               )}
 
@@ -2110,7 +2110,7 @@ export default function PaymentsPage() {
                         </div>
                         {isFullPayment && (
                           <div className="text-[10px] text-emerald-600 dark:text-emerald-400 font-semibold bg-emerald-500/10 p-1.5 rounded-lg text-center">
-                            🎉 This payment will completely pay off and close this installment account!
+                            This payment will completely pay off and close this installment account!
                           </div>
                         )}
                       </div>
@@ -2628,7 +2628,7 @@ export default function PaymentsPage() {
 
               {viewPayment.notes && (
                 <div className="text-[11px] text-muted-foreground bg-muted/30 p-2.5 rounded-xl border border-border">
-                  <strong>Remarks:</strong> {viewPayment.notes}
+                  <strong>Remarks:</strong> {summarizePaymentNotes(viewPayment.notes)}
                 </div>
               )}
 
@@ -2777,7 +2777,7 @@ export default function PaymentsPage() {
                   {receipt.notes && (
                     <tr className="border-b border-gray-200">
                       <td className="py-2 text-gray-600 font-medium">Remarks:</td>
-                      <td className="py-2 italic text-gray-700">{receipt.notes}</td>
+                      <td className="py-2 italic text-gray-700">{summarizePaymentNotes(receipt.notes)}</td>
                     </tr>
                   )}
                 </tbody>

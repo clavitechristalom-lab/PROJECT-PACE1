@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Modal, LoadingState, EmptyState, Badge, StatusBadge, showToast, showSuccess, showError, showWarning, confirmDelete } from '../ui';
 import { api } from '../../lib/api';
-import { fmt, formatProductMeasurements } from '../../lib/utils';
+import { fmt, formatProductMeasurements, summarizePaymentNotes } from '../../lib/utils';
 import { FiPackage, FiCalendar, FiClock, FiCreditCard, FiAlertCircle, FiCheckCircle, FiFileText, FiMessageCircle, FiChevronLeft, FiChevronRight, FiShoppingCart, FiX, FiTrash2, FiPrinter, FiSearch, FiRefreshCw, FiMaximize2, FiMinimize2, FiZoomIn, FiUser, FiPhone, FiMail, FiMapPin, FiTag } from 'react-icons/fi';
 import { TbCurrencyPeso } from 'react-icons/tb';
 import { useAuth } from '../../context/AuthContext';
@@ -1351,7 +1351,7 @@ export function InstallmentAccountDetailsModal({ isOpen, onClose, installmentId 
                           <div className="text-[10px] font-mono text-muted-foreground">Ref: {p.reference_no}</div>
                         )}
                         {p.notes && (
-                          <div className="text-[10px] text-muted-foreground line-clamp-1" title={p.notes}>{p.notes}</div>
+                          <div className="text-[10px] text-muted-foreground line-clamp-1" title={summarizePaymentNotes(p.notes)}>{summarizePaymentNotes(p.notes)}</div>
                         )}
                       </td>
                       <td className="py-2.5 px-3 text-muted-foreground">{p.received_by || 'Staff'}</td>
@@ -1498,7 +1498,7 @@ export function StatementModal({ isOpen, onClose, installments = [], user = null
             reference: p.receipt_no || ('REC-' + p.payment_id),
             type: 'Payment',
             category: 'Credit',
-            description: p.notes || `Payment for ${inst.account_no} (${inst.product})`,
+            description: summarizePaymentNotes(p.notes) || `Payment for ${inst.account_no} (${inst.product})`,
             payment_method: p.payment_method || 'Payment',
             amount: Number(p.amount || 0),
             status: p.status || 'Completed',
@@ -1642,7 +1642,7 @@ export function StatementModal({ isOpen, onClose, installments = [], user = null
         <td style="padding: 8px; border-bottom: 1px solid #e5e7eb; font-family: monospace;">${s.date}</td>
         <td style="padding: 8px; border-bottom: 1px solid #e5e7eb; font-family: monospace; font-weight: bold; color: #176B87;">${s.reference || '—'}</td>
         <td style="padding: 8px; border-bottom: 1px solid #e5e7eb;">
-          <div style="font-weight: 600;">${s.description || '—'}</div>
+          <div style="font-weight: 600;">${summarizePaymentNotes(s.description) || '—'}</div>
           ${s.account_no ? `<div style="font-size: 11px; color: #6b7280; font-family: monospace;">Acct: ${s.account_no}</div>` : ''}
         </td>
         <td style="padding: 8px; border-bottom: 1px solid #e5e7eb;">${s.payment_method || '—'}</td>
@@ -1890,8 +1890,8 @@ export function StatementModal({ isOpen, onClose, installments = [], user = null
                         <td className="py-2.5 px-3 font-mono text-muted-foreground whitespace-nowrap">{s.date}</td>
                         <td className="py-2.5 px-3 font-mono font-bold text-primary whitespace-nowrap">{s.reference || '—'}</td>
                         <td className="py-2.5 px-3 max-w-[220px]">
-                          <div className="font-medium text-foreground truncate" title={s.description}>
-                            {s.description || '—'}
+                          <div className="font-medium text-foreground truncate" title={summarizePaymentNotes(s.description)}>
+                            {summarizePaymentNotes(s.description) || '—'}
                           </div>
                           {s.account_no && (
                             <div className="font-mono text-[10px] text-muted-foreground">Acct: {s.account_no}</div>

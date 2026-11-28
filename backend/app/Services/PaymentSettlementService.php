@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Events\InstallmentCompleted;
 use App\Http\Controllers\SyncController;
 use App\Models\BranchProfile;
 use App\Models\Customer;
@@ -16,6 +17,7 @@ use App\Models\User;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 
 class PaymentSettlementService
 {
@@ -92,10 +94,10 @@ class PaymentSettlementService
         return $name ?: 'Main Branch';
     }
 
-    public static function applyConfirmedInstallmentSettlement(Payment $payment): ?array
+    public static function applyConfirmedInstallmentSettlement(Payment $payment, ?User $verifier = null): ?array
     {
         $inst = $payment->installment_id
-            ? InstallmentAccount::with(['customer', 'sale', 'paymentSchedules'])->lockForUpdate()->find($payment->installment_id)
+            ? InstallmentAccount::with(['customer', 'sale.branch', 'sale.processedBy.employee', 'paymentSchedules'])->lockForUpdate()->find($payment->installment_id)
             : null;
 
         if (!$inst) {
@@ -114,14 +116,34 @@ class PaymentSettlementService
             return null;
         }
 
+        $wasAlreadyFullyPaid = strtolower(trim((string) $inst->status)) === strtolower(InstallmentAccount::STATUS_FULLY_PAID)
+            && $inst->completed_at !== null;
+
         $payAmount = (float) $payment->amount;
         $payDate = $payment->payment_date ?: now()->toDateString();
         $remainingPayment = $payAmount;
 
-        $schedules = PaymentSchedule::where('installment_id', $inst->installment_id)
+        $payment->loadMissing('ewalletDeposit');
+        $gwResp = is_array($payment->ewalletDeposit?->gateway_response) ? $payment->ewalletDeposit->gateway_response : [];
+        $selectedScheduleIds = array_values(array_unique(array_filter(array_map(
+            'intval',
+            is_array($gwResp['selected_schedule_ids'] ?? null)
+                ? $gwResp['selected_schedule_ids']
+                : ($payment->schedule_id ? [(int) $payment->schedule_id] : [])
+        ))));
+
+        $allUnpaidSchedules = PaymentSchedule::where('installment_id', $inst->installment_id)
             ->where('balance_due', '>', 0)
             ->orderBy('installment_no')
             ->get();
+
+        if (!empty($selectedScheduleIds)) {
+            $prioritized = $allUnpaidSchedules->filter(fn ($s) => in_array((int) $s->schedule_id, $selectedScheduleIds, true));
+            $others = $allUnpaidSchedules->reject(fn ($s) => in_array((int) $s->schedule_id, $selectedScheduleIds, true));
+            $schedules = $prioritized->concat($others)->values();
+        } else {
+            $schedules = $allUnpaidSchedules;
+        }
 
         $primaryScheduleId = null;
 
@@ -161,16 +183,44 @@ class PaymentSettlementService
         $newTotalPaid = $fin['paid'];
         $newBalance = $fin['balance'];
 
-        if ($newBalance <= 0) {
-            $newAccStatus = 'Completed';
+        $verifierUser = $verifier ?: ($payment->confirmedBy ?: $payment->receivedBy);
+        $verifierId = $verifierUser?->user_id ?? $payment->confirmed_by ?? $payment->received_by;
+        $verifierName = $verifierUser
+            ? ($verifierUser->employee
+                ? trim("{$verifierUser->employee->first_name} {$verifierUser->employee->last_name}")
+                : $verifierUser->username)
+            : 'Store Administrator';
+
+        $justCompleted = false;
+        $completedAt = $inst->completed_at;
+        $customerStanding = $inst->customer_standing;
+        $agentContributionStatus = $inst->agent_contribution_status;
+        $nextDueDate = null;
+
+        if ($newBalance <= 0.0) {
+            $newBalance = 0.00;
+            $newAccStatus = InstallmentAccount::STATUS_FULLY_PAID;
             PaymentSchedule::where('installment_id', $inst->installment_id)
                 ->update([
-                    'balance_due' => 0,
+                    'balance_due' => 0.00,
                     'amount_paid' => DB::raw('amount_due'),
-                    'status' => 'Fully Paid',
+                    'status' => 'Paid',
                     'paid_date' => DB::raw("IFNULL(paid_date, '{$payDate}')"),
                 ]);
+
+            $completedAt = $inst->completed_at ?: now();
+            $customerStanding = InstallmentAccount::STANDING_CLEARED;
+            if ($inst->has_agent) {
+                $agentContributionStatus = InstallmentAccount::AGENT_CONTRIBUTION_SETTLED;
+            }
+            $justCompleted = !$wasAlreadyFullyPaid;
         } else {
+            $nextSched = PaymentSchedule::where('installment_id', $inst->installment_id)
+                ->where('balance_due', '>', 0)
+                ->orderBy('due_date')
+                ->first();
+            $nextDueDate = $nextSched?->due_date;
+
             $hasOverdue = PaymentSchedule::where('installment_id', $inst->installment_id)
                 ->where('due_date', '<', date('Y-m-d'))
                 ->where('balance_due', '>', 0)
@@ -178,7 +228,28 @@ class PaymentSettlementService
             $newAccStatus = $hasOverdue ? 'Overdue' : 'Active';
         }
 
-        $inst->update(['status' => $newAccStatus]);
+        $instUpdates = ['status' => $newAccStatus];
+        if (Schema::hasColumn('installment_accounts', 'remaining_balance')) {
+            $instUpdates['remaining_balance'] = $newBalance;
+        }
+        if (Schema::hasColumn('installment_accounts', 'next_due_date')) {
+            $instUpdates['next_due_date'] = $nextDueDate;
+        }
+        if ($newBalance <= 0.0) {
+            if (Schema::hasColumn('installment_accounts', 'completed_at')) {
+                $instUpdates['completed_at'] = $completedAt;
+            }
+            if (Schema::hasColumn('installment_accounts', 'customer_standing')) {
+                $instUpdates['customer_standing'] = $customerStanding;
+            }
+            if (Schema::hasColumn('installment_accounts', 'completed_verified_by') && $verifierId) {
+                $instUpdates['completed_verified_by'] = $verifierId;
+            }
+            if ($inst->has_agent && Schema::hasColumn('installment_accounts', 'agent_contribution_status')) {
+                $instUpdates['agent_contribution_status'] = $agentContributionStatus;
+            }
+        }
+        $inst->update($instUpdates);
 
         if ($inst->sale_id) {
             $sale = SaleTransaction::find($inst->sale_id);
@@ -193,14 +264,82 @@ class PaymentSettlementService
             }
         }
 
+        $customerName = $inst->customer ? trim("{$inst->customer->first_name} {$inst->customer->last_name}") : 'Customer';
+        $branchId = self::resolvePaymentBranchId($payment)
+            ?? $inst->sale?->branch_id
+            ?? $inst->customer?->branch_id
+            ?? $inst->sale?->processedBy?->employee?->branch_id;
+
+        if ($justCompleted) {
+            $employeeIds = array_filter([
+                $payment->collector_id ? (int) $payment->collector_id : null,
+                $payment->received_by ? (int) $payment->received_by : null,
+                $payment->confirmed_by ? (int) $payment->confirmed_by : null,
+                $verifierId ? (int) $verifierId : null,
+            ]);
+
+            if ($inst->customer_id) {
+                NotificationService::sendToCustomer((int) $inst->customer_id, [
+                    'type' => 'installment_completed',
+                    'title' => 'Installment Fully Paid — Cleared',
+                    'message' => "Congratulations! Your installment account {$inst->account_no} is now Fully Paid (₱0.00 balance). Your Certificate of Full Payment and Final Statement of Account are ready.",
+                    'module' => 'Installments',
+                    'related_id' => $inst->installment_id,
+                    'related_type' => InstallmentAccount::class,
+                    'action_url' => '/customer/dashboard?tab=installments',
+                    'priority' => 'high',
+                ]);
+            }
+
+            if ($branchId) {
+                NotificationService::sendToStoreAdmins([
+                    'type' => 'installment_completed',
+                    'title' => 'Installment Contract Fully Paid',
+                    'message' => "Account {$inst->account_no} ({$customerName}) has reached ₱0.00 balance and transitioned to Fully Paid. Verified by {$verifierName}.",
+                    'module' => 'Installments',
+                    'related_id' => $inst->installment_id,
+                    'related_type' => InstallmentAccount::class,
+                    'action_url' => "/installments?id={$inst->installment_id}",
+                    'priority' => 'high',
+                ], (string) $branchId);
+            }
+
+            RealtimeBroadcaster::dispatch(new InstallmentCompleted([
+                'installment_id' => (int) $inst->installment_id,
+                'account_no' => $inst->account_no,
+                'customer_id' => $inst->customer_id ? (int) $inst->customer_id : null,
+                'customer_name' => $customerName,
+                'payment_id' => (int) $payment->payment_id,
+                'receipt_no' => $payment->receipt_no,
+                'status' => InstallmentAccount::STATUS_FULLY_PAID,
+                'remaining_balance' => 0.00,
+                'total_paid' => round($newTotalPaid, 2),
+                'completed_at' => $completedAt ? $completedAt->toIso8601String() : now()->toIso8601String(),
+                'next_due_date' => null,
+                'customer_standing' => $customerStanding,
+                'agent_contribution_status' => $agentContributionStatus,
+                'verified_by' => $verifierName,
+                'actor_user_id' => $verifierId ? (int) $verifierId : null,
+                'toast_title' => 'Installment Fully Paid',
+                'toast_message' => "Account {$inst->account_no} ({$customerName}) is now Fully Paid & Cleared.",
+            ], $branchId ? (int) $branchId : null, $inst->customer_id ? (int) $inst->customer_id : null, $employeeIds));
+        }
+
         return [
             'installment_id' => $inst->installment_id,
             'account_no' => $inst->account_no,
             'paid' => $newTotalPaid,
             'balance' => $newBalance,
+            'remaining_balance' => $newBalance,
             'status' => $newAccStatus,
+            'completed_at' => $completedAt ? $completedAt->toIso8601String() : null,
+            'next_due_date' => $nextDueDate,
+            'customer_standing' => $customerStanding,
+            'agent_contribution_status' => $agentContributionStatus,
+            'just_completed' => $justCompleted,
+            'verified_by' => $verifierName,
             'customer_id' => $inst->customer_id,
-            'customer_name' => $inst->customer ? trim("{$inst->customer->first_name} {$inst->customer->last_name}") : 'Customer',
+            'customer_name' => $customerName,
         ];
     }
 

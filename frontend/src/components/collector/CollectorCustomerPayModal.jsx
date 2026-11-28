@@ -242,6 +242,18 @@ export default function CollectorCustomerPayModal({ isOpen, onClose, onSuccess }
   }, [isOpen])
 
   useEffect(() => {
+    if (!isOpen) return
+    const onCompleted = (e) => {
+      const completedId = Number(e?.detail?.installment_id || 0)
+      if (!completedId) return
+      setAccounts((prev) => prev.filter((a) => Number(a.installment_id) !== completedId))
+      setSelectedAccountId((prev) => (Number(prev) === completedId ? '' : prev))
+    }
+    window.addEventListener('pace:installment-completed', onCompleted)
+    return () => window.removeEventListener('pace:installment-completed', onCompleted)
+  }, [isOpen])
+
+  useEffect(() => {
     return () => {
       if (proofPreviewUrl) {
         try { URL.revokeObjectURL(proofPreviewUrl) } catch (_) { }
@@ -970,7 +982,7 @@ export default function CollectorCustomerPayModal({ isOpen, onClose, onSuccess }
               {isCashMethod ? (
                 <div className="space-y-1.5">
                   <label className="font-bold uppercase tracking-wide text-[11px] text-foreground flex items-center justify-between">
-                    <span>Cash Tendered (₱) (Optional)</span>
+                    <span>Cash Tendered (₱)</span>
                     <button
                       type="button"
                       onClick={() => {
@@ -1005,7 +1017,7 @@ export default function CollectorCustomerPayModal({ isOpen, onClose, onSuccess }
               ) : (
                 <div className="space-y-1.5">
                   <label className="font-bold uppercase tracking-wide text-[11px] text-foreground flex items-center justify-between">
-                    <span>{paymentMethod} Reference # (Optional)</span>
+                    <span>{paymentMethod} Reference </span>
                   </label>
                   <input
                     type="text"
@@ -1042,7 +1054,7 @@ export default function CollectorCustomerPayModal({ isOpen, onClose, onSuccess }
 
             <div className="space-y-1">
               <label className="font-bold uppercase tracking-wide text-[11px] text-foreground flex items-center justify-between">
-                <span>Collection Remarks (Optional)</span>
+                <span>Collection Remarks</span>
                 <button
                   type="button"
                   onClick={() => {

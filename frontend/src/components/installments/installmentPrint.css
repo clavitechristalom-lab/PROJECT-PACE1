@@ -1,0 +1,59 @@
+@page {
+  size: auto;
+  margin: 12mm;
+}
+
+@media print {
+  body.printing-installment-clearance * {
+    visibility: hidden !important;
+  }
+
+  body.printing-installment-clearance #installment-clearance-printable,
+  body.printing-installment-clearance #installment-clearance-printable * {
+    visibility: visible !important;
+  }
+
+  body.printing-installment-clearance #installment-clearance-printable {
+    position: absolute !important;
+    left: 0 !important;
+    top: 0 !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    background: #ffffff !important;
+    color: #0f172a !important;
+    box-shadow: none !important;
+    border: none !important;
+    overflow: visible !important;
+  }
+
+  body.printing-installment-clearance .clearance-no-print {
+    display: none !important;
+  }
+
+  body.printing-installment-clearance .clearance-sheet {
+    border: 1px solid #cbd5e1 !important;
+    box-shadow: none !important;
+    border-radius: 0 !important;
+    background: #ffffff !important;
+    color: #0f172a !important;
+    padding: 18px !important;
+    page-break-inside: avoid;
+  }
+
+  body.printing-installment-clearance .clearance-page-break {
+    page-break-before: always !important;
+    break-before: page !important;
+    margin-top: 0 !important;
+  }
+
+  body.printing-installment-clearance table {
+    page-break-inside: auto;
+  }
+
+  body.printing-installment-clearance tr {
+    page-break-inside: avoid;
+    page-break-after: auto;
+  }
+}

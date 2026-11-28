@@ -84,10 +84,10 @@ function navByRole(roleOrUser, onOpenConfig, pendingLettersCount = 0) {
       { label: 'My Dashboard', path: '/employee/dashboard', icon: icons.dashboard },
     ]
     if (isCollectorUser(userObj)) {
-      empItems.push({ label: 'Collect Cash', path: '/employee/collect-cash', icon: icons.collectCash })
+      empItems.push({ label: 'Collect Installments', path: '/employee/collect-cash', icon: icons.collectCash })
     }
     if (isCashierUser(userObj)) {
-      empItems.push({ label: 'Receive Cash', path: '/employee/receive-cash', icon: icons.receiveCash })
+      empItems.push({ label: 'Receive Installments', path: '/employee/receive-cash', icon: icons.receiveCash })
     }
     empItems.push(
       { label: 'My Attendance QR', path: '/employee/attendance', icon: icons.attendance },
@@ -1178,8 +1178,8 @@ const ROUTE_TITLES = {
   '/settings': 'Settings',
   '/store-settings': 'Store Settings',
   '/employee/dashboard': 'My Dashboard',
-  '/employee/collect-cash': 'Collect Cash',
-  '/employee/receive-cash': 'Receive Cash',
+  '/employee/collect-cash': 'Collect Installments',
+  '/employee/receive-cash': 'Receive Installments',
   '/employee/excuse-letter': 'Create Excuse / Leave Letter',
   '/employee/notifications': 'Notification Center',
   '/employee/attendance': 'My Attendance',

@@ -14,6 +14,7 @@ const DOMAIN_EVENTS = [
   '.sales.created',
   '.installment.created',
   '.installment.schedule.updated',
+  '.installment.completed',
   '.payment.workflow.updated',
   '.inventory.updated',
   '.attendance.logged',
@@ -164,6 +165,10 @@ export function RealtimeSyncProvider({ children }) {
 
       if (eventName === '.payment.workflow.updated') {
         window.dispatchEvent(new CustomEvent('pace:payment-status-update', { detail: payload }))
+      }
+
+      if (eventName === '.installment.completed') {
+        window.dispatchEvent(new CustomEvent('pace:installment-completed', { detail: payload }))
       }
 
       const isSelfAction =

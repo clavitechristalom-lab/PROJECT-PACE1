@@ -688,7 +688,7 @@ class CustomerController extends Controller
         if ($customer->user) {
             $notifData = [
                 'type' => $allow ? 'installment_approved' : 'installment_revoked',
-                'title' => $allow ? 'Installment Plan Authorized! 🎉' : 'Installment Status Updated',
+                'title' => $allow ? 'Installment Plan Authorized!' : 'Installment Status Updated',
                 'message' => $allow
                     ? "Great news! Your Store Administrator has approved your account for installment purchases."
                     : "Installment purchases are currently restricted by your Store Administrator.",

@@ -334,14 +334,7 @@ export default function StorageManagementTab({ onNavigateToBackups }) {
           </div>
           <div className="mt-3 pt-2.5 border-t border-border/50 flex justify-between items-center text-[10px] text-muted-foreground">
             <span>InnoDB Architecture</span>
-            <button
-              type="button"
-              onClick={() => setActiveSubTab('tables')}
-              className="text-primary font-bold hover:underline shrink-0 ml-1 cursor-pointer flex items-center gap-0.5"
-            >
-              <span>View Tables</span>
-              <FiArrowRight className="w-3 h-3" />
-            </button>
+            <span className="font-mono text-emerald-600 dark:text-emerald-400 font-semibold">{db.table_count || 0} Tables</span>
           </div>
         </Card>
 
@@ -367,67 +360,6 @@ export default function StorageManagementTab({ onNavigateToBackups }) {
           </div>
         </Card>
       </div>
-
-      {/* ─── Maintenance Actions Bar ─── */}
-      <Card className="p-4 sm:p-5 border border-border">
-        <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 pb-4 border-b border-border">
-          <div>
-            <h3 className="font-bold text-foreground text-base flex items-center gap-2">
-              <FiZap className="text-amber-500" /> Storage Cleanup & Server Maintenance
-            </h3>
-            <p className="text-xs text-muted-foreground mt-0.5">
-              Execute safe, real-time maintenance operations to reclaim server space without interrupting active transactions.
-            </p>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5 pt-4">
-          <button
-            type="button"
-            onClick={() => handleCleanAction('cache', 'Application Cache Purge')}
-            disabled={cleaning}
-            className="flex flex-col items-start p-3.5 rounded-xl border border-slate-200 dark:border-border bg-slate-50/80 hover:bg-slate-100 dark:bg-muted/20 dark:hover:bg-muted/40 transition-all text-left cursor-pointer group disabled:opacity-50 shadow-2xs"
-          >
-            <div className="flex items-center justify-between w-full mb-1.5">
-              <span className="font-bold text-xs text-slate-900 dark:text-foreground group-hover:text-primary transition-colors">Clear Cache & Views</span>
-              <span className="text-[10px] font-mono font-bold text-slate-700 dark:text-muted-foreground bg-slate-200/70 dark:bg-muted px-2 py-0.5 rounded-md">{cache.size_formatted || '0 B'}</span>
-            </div>
-            <p className="text-[11px] text-slate-500 dark:text-muted-foreground leading-relaxed">
-              Purges compiled Blade views and framework cache files to release allocated storage.
-            </p>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => handleCleanAction('logs', 'Application Log Purge')}
-            disabled={cleaning}
-            className="flex flex-col items-start p-3.5 rounded-xl border border-slate-200 dark:border-border bg-slate-50/80 hover:bg-slate-100 dark:bg-muted/20 dark:hover:bg-muted/40 transition-all text-left cursor-pointer group disabled:opacity-50 shadow-2xs"
-          >
-            <div className="flex items-center justify-between w-full mb-1.5">
-              <span className="font-bold text-xs text-slate-900 dark:text-foreground group-hover:text-primary transition-colors">Purge Server Logs</span>
-              <span className="text-[10px] font-mono font-bold text-slate-700 dark:text-muted-foreground bg-slate-200/70 dark:bg-muted px-2 py-0.5 rounded-md">{logs.file_size_formatted || '0 B'}</span>
-            </div>
-            <p className="text-[11px] text-slate-500 dark:text-muted-foreground leading-relaxed">
-              Safely truncates <span className="font-mono text-[10px]">laravel.log</span> while keeping file descriptors intact.
-            </p>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => handleCleanAction('temp', 'Stale Temporary Files Cleanup')}
-            disabled={cleaning}
-            className="flex flex-col items-start p-3.5 rounded-xl border border-slate-200 dark:border-border bg-slate-50/80 hover:bg-slate-100 dark:bg-muted/20 dark:hover:bg-muted/40 transition-all text-left cursor-pointer group disabled:opacity-50 shadow-2xs"
-          >
-            <div className="flex items-center justify-between w-full mb-1.5">
-              <span className="font-bold text-xs text-slate-900 dark:text-foreground group-hover:text-primary transition-colors">Clean Temp Sessions</span>
-              <span className="text-[10px] font-mono font-bold text-slate-700 dark:text-muted-foreground bg-slate-200/70 dark:bg-muted px-2 py-0.5 rounded-md">{cache.details?.sessions?.size_formatted || '0 B'}</span>
-            </div>
-            <p className="text-[11px] text-slate-500 dark:text-muted-foreground leading-relaxed">
-              Scans and deletes expired temporary session files older than 7 days.
-            </p>
-          </button>
-        </div>
-      </Card>
 
       {/* ─── Detailed Breakdown Sub-Tabs ─── */}
       <div className="space-y-4">
@@ -456,17 +388,6 @@ export default function StorageManagementTab({ onNavigateToBackups }) {
             <span className="font-mono text-[10px] px-1.5 py-0.2 rounded-full bg-purple-500/10 text-purple-600 dark:text-purple-400 font-bold">
               {uploads.files_count || 0}
             </span>
-          </button>
-          <button
-            type="button"
-            onClick={() => setActiveSubTab('tables')}
-            className={`pb-3 text-xs font-bold border-b-2 transition-all cursor-pointer ${
-              activeSubTab === 'tables'
-                ? 'border-primary text-primary'
-                : 'border-transparent text-muted-foreground hover:text-foreground'
-            }`}
-          >
-            Database Tables Breakdown ({db.table_count || 0})
           </button>
         </div>
 
@@ -539,25 +460,6 @@ export default function StorageManagementTab({ onNavigateToBackups }) {
                   ))}
                 </div>
               )}
-
-              <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800/80 text-[11px] space-y-1.5 shadow-xs">
-                <div className="flex justify-between items-center">
-                  <span className="font-medium text-slate-500 dark:text-slate-400">Server Partition:</span>
-                  <span className="font-semibold text-slate-800 dark:text-slate-100">{disk.partition_name || 'System Disk'}</span>
-                </div>
-                <div className="flex justify-between items-center">
-                  <span className="font-medium text-slate-500 dark:text-slate-400">Host OS:</span>
-                  <span className="font-semibold text-slate-800 dark:text-slate-100">{env.os || 'Windows Host'}</span>
-                </div>
-                <div className="flex justify-between items-center">
-                  <span className="font-medium text-slate-500 dark:text-slate-400">PHP Engine:</span>
-                  <span className="font-semibold font-mono text-emerald-600 dark:text-emerald-400">{env.php_version}</span>
-                </div>
-                <div className="flex justify-between items-center">
-                  <span className="font-medium text-slate-500 dark:text-slate-400">Root Path:</span>
-                  <span className="font-mono text-[10px] font-medium text-slate-700 dark:text-slate-300 truncate max-w-[240px]" title={env.base_path}>{env.base_path}</span>
-                </div>
-              </div>
             </Card>
           </div>
         )}
@@ -894,40 +796,6 @@ export default function StorageManagementTab({ onNavigateToBackups }) {
               </div>
             )}
           </div>
-        )}
-
-        {/* SUBTAB 3: Database Tables */}
-        {activeSubTab === 'tables' && (
-          <Card noPad className="border border-border">
-            <div className="p-3.5 border-b border-border bg-muted/20 flex justify-between items-center text-xs">
-              <span className="font-bold text-muted-foreground uppercase">Top Database Tables by Storage Size</span>
-              <span className="font-mono text-muted-foreground">{db.tables?.length || 0} Total Tables</span>
-            </div>
-            <div className="overflow-x-auto">
-              <table className="w-full text-xs">
-                <thead>
-                  <tr className="border-b border-border bg-muted/30 text-muted-foreground text-left uppercase text-[10px] font-semibold">
-                    <th className="px-4 py-2.5">Table Name</th>
-                    <th className="px-4 py-2.5">Total Size</th>
-                    <th className="px-4 py-2.5">Data Size</th>
-                    <th className="px-4 py-2.5">Index Size</th>
-                    <th className="px-4 py-2.5 text-right">Row Count</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-border font-mono">
-                  {db.tables?.slice(0, 25).map((t, idx) => (
-                    <tr key={idx} className="hover:bg-muted/20">
-                      <td className="px-4 py-2 font-semibold text-foreground">{t.name}</td>
-                      <td className="px-4 py-2 font-bold text-emerald-600 dark:text-emerald-400">{t.size_formatted}</td>
-                      <td className="px-4 py-2 text-muted-foreground">{t.data_formatted}</td>
-                      <td className="px-4 py-2 text-muted-foreground">{t.index_formatted}</td>
-                      <td className="px-4 py-2 text-right text-foreground">{(t.rows ?? 0).toLocaleString()}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </Card>
         )}
       </div>
 

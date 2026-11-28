@@ -7,6 +7,7 @@ use App\Models\Product;
 use App\Models\InstallmentAccount;
 use App\Models\Payment;
 use App\Models\PaymentSchedule;
+use App\Models\SaleTransaction;
 use Illuminate\Support\Facades\DB;
 
 class CustomerDashboardController extends Controller
@@ -99,29 +100,40 @@ class CustomerDashboardController extends Controller
                 ];
             });
 
-        // Financial metrics for this customer
         if ($customerId) {
-            $activeInstallments = InstallmentAccount::where('customer_id', $customerId)
-                ->whereIn('status', ['Active', 'Pending'])
-                ->get();
-                
-            $monthlyPayment = $activeInstallments->sum('installment_amount');
-            
-            // Calculate remaining credit balance
-            $activeInstallments->load('paymentSchedules');
-            $totalCreditBalance = $activeInstallments->reduce(function ($carry, $inst) {
-                if ($inst->status === 'Pending') {
-                    return $carry + (float)$inst->total_payable;
-                }
-                return $carry + (float)$inst->financialBreakdown()['balance'];
-            }, 0);
+            $activeInstallments = InstallmentAccount::with(['payments', 'paymentSchedules'])
+                ->where('customer_id', $customerId)
+                ->whereIn('status', ['Active', 'Pending', 'Overdue'])
+                ->whereNotIn('status', InstallmentAccount::COMPLETED_STATUSES)
+                ->get()
+                ->filter(function ($inst) {
+                    if ($inst->isFullyPaid()) {
+                        return false;
+                    }
+                    if ($inst->status === 'Pending') {
+                        return (float) $inst->total_payable > 0;
+                    }
+                    return (float) $inst->financialBreakdown()['balance'] > 0;
+                })
+                ->values();
 
-            // Overdue count
-            $overdueCount = PaymentSchedule::whereIn('installment_id', $activeInstallments->pluck('installment_id'))
-                ->where('due_date', '<', now()->format('Y-m-d'))
-                ->where('status', 'Pending')
-                ->count();
-            $walletBalance = (float)(\App\Models\Customer::where('customer_id', $customerId)->value('wallet_balance') ?? 0);
+            $monthlyPayment = round((float) $activeInstallments->sum('installment_amount'), 2);
+
+            $totalCreditBalance = round((float) $activeInstallments->reduce(function ($carry, $inst) {
+                if ($inst->status === 'Pending') {
+                    return $carry + (float) $inst->total_payable;
+                }
+                return $carry + (float) $inst->financialBreakdown()['balance'];
+            }, 0), 2);
+
+            $overdueCount = $activeInstallments->isEmpty()
+                ? 0
+                : PaymentSchedule::whereIn('installment_id', $activeInstallments->pluck('installment_id'))
+                    ->where('due_date', '<', now()->format('Y-m-d'))
+                    ->where('balance_due', '>', 0)
+                    ->whereIn('status', ['Pending', 'Overdue', 'Partially Paid'])
+                    ->count();
+            $walletBalance = (float) (\App\Models\Customer::where('customer_id', $customerId)->value('wallet_balance') ?? 0);
         } else {
             $monthlyPayment = 0;
             $totalCreditBalance = 0;
@@ -207,15 +219,34 @@ class CustomerDashboardController extends Controller
         $customerId = self::resolveCustomerId($user);
 
         if (!$customerId) {
-            return response()->json(['installments' => []]);
+            return response()->json([
+                'installments' => [],
+                'cash_payments' => [],
+            ]);
         }
 
-        $installments = InstallmentAccount::with(['sale.items.product', 'payments', 'paymentSchedules'])
+        $resolveUserName = function ($u) {
+            if (!$u) return null;
+            if ($u->employee) {
+                $full = trim("{$u->employee->first_name} {$u->employee->last_name}");
+                if ($full !== '') return $full;
+            }
+            return $u->username ?: null;
+        };
+
+        $installments = InstallmentAccount::with([
+            'sale.items.product',
+            'sale.branch:id,name',
+            'payments.confirmedBy.employee',
+            'payments.receivedBy.employee',
+            'paymentSchedules',
+            'completedVerifiedBy.employee',
+        ])
             ->where('customer_id', $customerId)
             ->orderBy('created_at', 'desc')
             ->get();
 
-        $formatted = $installments->map(function ($inst) {
+        $formatted = $installments->map(function ($inst) use ($resolveUserName) {
             $productName = 'Unknown Product';
             $imageUrl = null;
             if ($inst->sale && $inst->sale->items && $inst->sale->items->count() > 0) {
@@ -228,29 +259,48 @@ class CustomerDashboardController extends Controller
 
             $fin = $inst->financialBreakdown();
             $paidAmount = $fin['paid'];
-            $balance = $fin['balance'];
+            $isFullyPaid = $inst->isFullyPaid() || $fin['balance'] <= 0.0;
+            $balance = $isFullyPaid ? 0.0 : $fin['balance'];
 
-            $nextDue = $inst->paymentSchedules
-                ->where('balance_due', '>', 0)
-                ->sortBy('due_date')
-                ->first();
+            $nextDue = $isFullyPaid
+                ? null
+                : $inst->paymentSchedules
+                    ->where('balance_due', '>', 0)
+                    ->sortBy('due_date')
+                    ->first();
+
+            $verifierUser = $inst->completedVerifiedBy;
+            if (!$verifierUser && $isFullyPaid) {
+                $lastSettled = $inst->payments
+                    ->filter(fn ($p) => Payment::isSettledStatus($p->status))
+                    ->sortByDesc('payment_id')
+                    ->first();
+                $verifierUser = $lastSettled?->confirmedBy ?: $lastSettled?->receivedBy;
+            }
+            $finalVerifierName = $resolveUserName($verifierUser);
 
             return [
                 'account_no' => $inst->account_no,
                 'product' => $productName,
+                'branch_name' => $inst->sale?->branch?->name,
                 'purchase_date' => $inst->start_date,
                 'payment_term' => $inst->number_of_installments ? "{$inst->number_of_installments} " . ($inst->frequency ?: 'Monthly') : null,
-                'down_payment' => (float)$inst->down_payment,
-                'total_payable' => (float)$inst->total_payable,
-                'total_amount' => (float)$inst->total_payable,
-                'monthly_payment' => (float)$inst->installment_amount,
+                'down_payment' => (float) $inst->down_payment,
+                'total_payable' => (float) $inst->total_payable,
+                'total_amount' => (float) $inst->total_payable,
+                'monthly_payment' => (float) $inst->installment_amount,
                 'total_paid' => $paidAmount,
                 'paid_amount' => $paidAmount,
                 'balance' => $balance,
+                'remaining_balance' => $balance,
                 'pending_payments_amount' => $fin['pending_amount'],
                 'pending_payments_count' => $fin['pending_count'],
                 'next_due_date' => $nextDue ? $nextDue->due_date : null,
-                'status' => $balance <= 0 ? 'Complete Payment' : $inst->status,
+                'status' => $isFullyPaid ? InstallmentAccount::STATUS_FULLY_PAID : $inst->status,
+                'completed_at' => $isFullyPaid ? ($inst->completed_at ? $inst->completed_at->toIso8601String() : ($inst->updated_at ? $inst->updated_at->toIso8601String() : null)) : null,
+                'customer_standing' => $isFullyPaid ? ($inst->customer_standing ?: InstallmentAccount::STANDING_CLEARED) : ($inst->customer_standing ?: null),
+                'agent_contribution_status' => $inst->has_agent ? ($isFullyPaid ? ($inst->agent_contribution_status ?: InstallmentAccount::AGENT_CONTRIBUTION_SETTLED) : $inst->agent_contribution_status) : null,
+                'final_verifier_name' => $finalVerifierName,
                 'image_url' => $imageUrl,
                 'installment_id' => $inst->installment_id,
                 'payment_method' => $inst->sale?->payment_method ?? 'Installment',
@@ -259,9 +309,11 @@ class CustomerDashboardController extends Controller
                     return [
                         'payment_id' => $p->payment_id,
                         'receipt_no' => $p->receipt_no,
+                        'receipt_reference' => $p->receipt_reference,
                         'payment_date' => $p->payment_date,
-                        'amount' => (float)$p->amount,
+                        'amount' => (float) $p->amount,
                         'payment_method' => $p->payment_method,
+                        'cash_channel' => $p->cash_channel,
                         'reference_no' => $p->reference_no,
                         'status' => $p->status,
                         'notes' => $p->notes,
@@ -271,15 +323,220 @@ class CustomerDashboardController extends Controller
                     if ($balance <= 0) {
                         $s->balance_due = 0;
                         $s->status = 'Paid';
-                        $s->amount_paid = max((float)$s->amount_paid, (float)$s->amount_due);
+                        $s->amount_paid = max((float) $s->amount_paid, (float) $s->amount_due);
                     }
                     return $s;
                 })
             ];
         });
 
+        $directSales = SaleTransaction::with([
+            'items.product',
+            'branch:id,name',
+            'processedBy.employee',
+        ])
+            ->where('customer_id', $customerId)
+            ->whereDoesntHave('installmentAccount')
+            ->where(function ($q) {
+                $q->whereNull('payment_method')
+                    ->orWhereRaw('LOWER(payment_method) != ?', ['installment']);
+            })
+            ->orderByDesc('sale_date')
+            ->orderByDesc('sale_id')
+            ->get();
+
+        $saleIds = $directSales->pluck('sale_id')->all();
+        $salePaymentsBySaleId = empty($saleIds)
+            ? collect()
+            : Payment::with(['receivedBy.employee', 'confirmedBy.employee'])
+                ->whereIn('sale_id', $saleIds)
+                ->orderByDesc('payment_id')
+                ->get()
+                ->groupBy('sale_id');
+
+        $cashRecords = collect();
+
+        foreach ($directSales as $sale) {
+            $saleItems = $sale->items ?? collect();
+            $firstItem = $saleItems->first();
+            $productName = 'Direct Cash Purchase';
+            $imageUrl = null;
+            if ($saleItems->count() > 0) {
+                $firstName = $firstItem->product?->product_name ?? 'Purchased Item';
+                $productName = $saleItems->count() === 1
+                    ? $firstName
+                    : "{$firstName} (+" . ($saleItems->count() - 1) . ' items)';
+                $imageUrl = $firstItem->product?->image_url ?? $firstItem->product?->image ?? null;
+            }
+
+            $linkedPayments = $salePaymentsBySaleId->get($sale->sale_id, collect());
+            $primaryPayment = $linkedPayments->first();
+            $verifierUser = $primaryPayment?->confirmedBy
+                ?: $primaryPayment?->receivedBy
+                ?: $sale->processedBy;
+
+            $paymentStatus = $primaryPayment?->status ?: ($sale->status ?: 'Completed');
+            $isPending = Payment::isPendingVerificationStatus($paymentStatus);
+            $sortTs = strtotime((string) ($sale->created_at ?? $sale->sale_date ?? now())) ?: 0;
+
+            $cashRecords->push([
+                'record_id' => 'CASH-SALE-' . $sale->sale_id,
+                'sale_id' => $sale->sale_id,
+                'payment_id' => $primaryPayment?->payment_id,
+                'invoice_no' => $sale->invoice_no,
+                'receipt_no' => $primaryPayment?->receipt_no,
+                'official_receipt_no' => $primaryPayment?->receipt_reference,
+                'reference_no' => $primaryPayment?->reference_no,
+                'product' => $productName,
+                'image_url' => $imageUrl,
+                'branch_name' => $sale->branch?->name,
+                'purchase_date' => $sale->sale_date ?: ($primaryPayment?->payment_date),
+                'payment_method' => $primaryPayment?->payment_method ?: ($sale->payment_method ?: 'Cash'),
+                'cash_channel' => $primaryPayment?->cash_channel ?: 'store_cashier',
+                'payment_type' => $primaryPayment?->payment_type ?: 'product_cash',
+                'subtotal' => (float) ($sale->subtotal ?? $sale->total_amount ?? 0),
+                'discount_amount' => (float) ($sale->discount_amount ?? 0),
+                'total_amount' => (float) ($sale->total_amount ?? 0),
+                'amount_paid' => (float) ($sale->amount_paid ?? $primaryPayment?->amount ?? 0),
+                'cash_tendered' => $primaryPayment?->cash_tendered !== null ? (float) $primaryPayment->cash_tendered : null,
+                'change_due' => $primaryPayment?->change_due !== null ? (float) $primaryPayment->change_due : null,
+                'balance' => (float) ($sale->balance_due ?? 0),
+                'status' => $paymentStatus,
+                'is_pending' => $isPending,
+                'verified_by' => $resolveUserName($verifierUser),
+                'confirmed_at' => $primaryPayment?->confirmed_at ? $primaryPayment->confirmed_at->toIso8601String() : null,
+                'notes' => $primaryPayment?->notes ?: $sale->notes,
+                'items' => $saleItems->map(function ($line) {
+                    return [
+                        'product_id' => $line->product_id,
+                        'product_code' => $line->product?->product_code,
+                        'product_name' => $line->product?->product_name ?? 'Purchased Item',
+                        'category' => $line->product?->category,
+                        'quantity' => (int) ($line->quantity ?? 1),
+                        'unit_price' => (float) ($line->unit_price ?? 0),
+                        'line_total' => (float) ($line->line_total ?? 0),
+                        'image_url' => $line->product?->image_url ?? $line->product?->image ?? null,
+                    ];
+                })->values()->all(),
+                '_sort_ts' => $sortTs,
+            ]);
+        }
+
+        $pendingWalkInPayments = Payment::with([
+            'ewalletDeposit',
+            'receivedBy.employee',
+            'confirmedBy.employee',
+        ])
+            ->whereNull('installment_id')
+            ->whereNull('sale_id')
+            ->whereRaw('LOWER(payment_method) = ?', ['cash'])
+            ->whereHas('ewalletDeposit', function ($q) use ($customerId) {
+                $q->where('customer_id', $customerId);
+            })
+            ->orderByDesc('payment_id')
+            ->get();
+
+        if ($pendingWalkInPayments->isNotEmpty()) {
+            $pendingProdIds = [];
+            foreach ($pendingWalkInPayments as $pp) {
+                $gwItems = $pp->ewalletDeposit?->gateway_response['items'] ?? [];
+                if (is_array($gwItems)) {
+                    foreach ($gwItems as $gi) {
+                        if (!empty($gi['product_id'])) {
+                            $pendingProdIds[] = (int) $gi['product_id'];
+                        }
+                    }
+                }
+            }
+            $prodMap = empty($pendingProdIds)
+                ? collect()
+                : Product::whereIn('product_id', array_values(array_unique($pendingProdIds)))
+                    ->get()
+                    ->keyBy('product_id');
+
+            $customerBranchName = \App\Models\Customer::with('branch:id,name')
+                ->where('customer_id', $customerId)
+                ->first()?->branch?->name;
+
+            foreach ($pendingWalkInPayments as $pp) {
+                $statusLower = strtolower(trim((string) ($pp->status ?? '')));
+                if (in_array($statusLower, ['rejected', 'failed', 'cancelled', 'voided'], true)) {
+                    continue;
+                }
+
+                $gw = is_array($pp->ewalletDeposit?->gateway_response) ? $pp->ewalletDeposit->gateway_response : [];
+                $rawItems = is_array($gw['items'] ?? null) ? $gw['items'] : [];
+                $mappedItems = [];
+                foreach ($rawItems as $gi) {
+                    $pid = isset($gi['product_id']) ? (int) $gi['product_id'] : null;
+                    $prod = $pid ? $prodMap->get($pid) : null;
+                    $qty = max(1, (int) ($gi['quantity'] ?? 1));
+                    $unitPrice = (float) ($gi['unit_price'] ?? $prod?->selling_price ?? $pp->amount ?? 0);
+                    $mappedItems[] = [
+                        'product_id' => $pid,
+                        'product_code' => $prod?->product_code,
+                        'product_name' => $gi['product_name'] ?? $prod?->product_name ?? 'Cash Purchase',
+                        'category' => $prod?->category,
+                        'quantity' => $qty,
+                        'unit_price' => $unitPrice,
+                        'line_total' => (float) ($gi['line_total'] ?? ($unitPrice * $qty)),
+                        'image_url' => $prod?->image_url ?? $prod?->image ?? null,
+                    ];
+                }
+
+                $firstMapped = $mappedItems[0] ?? null;
+                $productName = $firstMapped
+                    ? (count($mappedItems) === 1
+                        ? $firstMapped['product_name']
+                        : $firstMapped['product_name'] . ' (+' . (count($mappedItems) - 1) . ' items)')
+                    : 'Walk-in Cash Payment';
+                $isPending = Payment::isPendingVerificationStatus($pp->status);
+                $sortTs = strtotime((string) ($pp->ewalletDeposit?->created_at ?? $pp->payment_date ?? now())) ?: 0;
+
+                $cashRecords->push([
+                    'record_id' => 'CASH-PAY-' . $pp->payment_id,
+                    'sale_id' => null,
+                    'payment_id' => $pp->payment_id,
+                    'invoice_no' => null,
+                    'receipt_no' => $pp->receipt_no,
+                    'official_receipt_no' => $pp->receipt_reference,
+                    'reference_no' => $pp->reference_no ?: $pp->ewalletDeposit?->reference_no,
+                    'product' => $productName,
+                    'image_url' => $firstMapped['image_url'] ?? null,
+                    'branch_name' => $customerBranchName,
+                    'purchase_date' => $pp->payment_date,
+                    'payment_method' => $pp->payment_method ?: 'Cash',
+                    'cash_channel' => $pp->cash_channel ?: 'store_cashier',
+                    'payment_type' => $pp->payment_type ?: 'product_cash',
+                    'subtotal' => (float) $pp->amount,
+                    'discount_amount' => 0.0,
+                    'total_amount' => (float) $pp->amount,
+                    'amount_paid' => $isPending ? 0.0 : (float) $pp->amount,
+                    'cash_tendered' => $pp->cash_tendered !== null ? (float) $pp->cash_tendered : null,
+                    'change_due' => $pp->change_due !== null ? (float) $pp->change_due : null,
+                    'balance' => $isPending ? (float) $pp->amount : 0.0,
+                    'status' => $pp->status ?: 'Pending',
+                    'is_pending' => $isPending,
+                    'verified_by' => $resolveUserName($pp->confirmedBy ?: $pp->receivedBy),
+                    'confirmed_at' => $pp->confirmed_at ? $pp->confirmed_at->toIso8601String() : null,
+                    'notes' => $pp->notes,
+                    'items' => $mappedItems,
+                    '_sort_ts' => $sortTs,
+                ]);
+            }
+        }
+
+        $cashPayments = $cashRecords
+            ->sortByDesc('_sort_ts')
+            ->map(function ($row) {
+                unset($row['_sort_ts']);
+                return $row;
+            })
+            ->values();
+
         return response()->json([
-            'installments' => $formatted
+            'installments' => $formatted,
+            'cash_payments' => $cashPayments,
         ]);
     }
 

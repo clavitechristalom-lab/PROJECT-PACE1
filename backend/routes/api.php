@@ -136,6 +136,7 @@ Route::middleware('auth:sanctum')->group(function () {
     // ─── Installments ───────────────────────────────────────────────────────────
     Route::get('/installments', [InstallmentController::class, 'index']);
     Route::get('/installments/overdue', [InstallmentController::class, 'overdue']);
+    Route::get('/installments/{id}/clearance-document', [InstallmentController::class, 'clearanceDocument']);
     Route::get('/installments/{id}', [InstallmentController::class, 'show']);
     Route::post('/installments', [InstallmentController::class, 'store']);
     Route::put('/installments/{id}', [InstallmentController::class, 'update']);

@@ -25,8 +25,13 @@ export default function SystemAdminDashboard() {
   const [carouselPreview, setCarouselPreview] = useState(null)
   const fileInputRef = useRef(null)
 
-  // Metrics State
   const [metrics, setMetrics] = useState(null)
+  const [activitySeries, setActivitySeries] = useState({
+    audit_events: true,
+    sales: true,
+    payments: true,
+    attendance: true,
+  })
 
   // Users State
   const [users, setUsers] = useState([])
@@ -101,6 +106,18 @@ export default function SystemAdminDashboard() {
   useRealtimeSync((source) => {
     loadData(activeTab, source)
   }, [activeTab], { module: 'system' })
+
+  useRealtimeSync((source) => {
+    if (activeTab === 'metrics') loadData('metrics', source)
+  }, [activeTab], { module: 'sales' })
+
+  useRealtimeSync((source) => {
+    if (activeTab === 'metrics') loadData('metrics', source)
+  }, [activeTab], { module: 'payments' })
+
+  useRealtimeSync((source) => {
+    if (activeTab === 'metrics') loadData('metrics', source)
+  }, [activeTab], { module: 'attendance' })
 
   // --- Handlers ---
   const handleCarouselFileChange = (e) => {
@@ -336,8 +353,33 @@ export default function SystemAdminDashboard() {
     const dbTables = Array.isArray(metrics?.database_tables) ? metrics.database_tables : []
     const branchMetrics = Array.isArray(metrics?.branch_metrics) ? metrics.branch_metrics : []
 
-    const maxTrendOps = Math.max(1, ...activityTrend.map(d => Number(d.total_ops) || 0))
-    const totalWeekOps = activityTrend.reduce((sum, d) => sum + (Number(d.total_ops) || 0), 0)
+    const activityCategories = [
+      { key: 'audit_events', label: 'Audit Logs', colorClass: 'bg-blue-500', textClass: 'text-blue-600 dark:text-blue-400' },
+      { key: 'sales', label: 'Sales', colorClass: 'bg-emerald-500', textClass: 'text-emerald-600 dark:text-emerald-400' },
+      { key: 'payments', label: 'Payments', colorClass: 'bg-amber-500', textClass: 'text-amber-600 dark:text-amber-400' },
+      { key: 'attendance', label: 'Attendance', colorClass: 'bg-purple-500', textClass: 'text-purple-600 dark:text-purple-400' },
+    ]
+
+    const seriesWeekTotals = activityCategories.reduce((acc, cat) => {
+      acc[cat.key] = activityTrend.reduce((sum, d) => sum + (Number(d[cat.key]) || 0), 0)
+      return acc
+    }, {})
+
+    const getVisibleDayTotal = (day) =>
+      activityCategories.reduce((sum, cat) => sum + (activitySeries[cat.key] ? (Number(day[cat.key]) || 0) : 0), 0)
+
+    const maxTrendOps = Math.max(1, ...activityTrend.map(getVisibleDayTotal))
+    const totalWeekOps = activityTrend.reduce((sum, d) => sum + getVisibleDayTotal(d), 0)
+
+    const toggleActivitySeries = (key) => {
+      setActivitySeries((prev) => {
+        const next = { ...prev, [key]: !prev[key] }
+        if (!Object.values(next).some(Boolean)) {
+          return { audit_events: true, sales: true, payments: true, attendance: true }
+        }
+        return next
+      })
+    }
 
     return (
       <div className="space-y-6">
@@ -481,7 +523,6 @@ export default function SystemAdminDashboard() {
               </div>
             </div>
 
-            {/* 7-Day System Load & Operational Activity Chart */}
             <div className="p-4 rounded-2xl bg-card border border-border space-y-4">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div>
@@ -489,36 +530,64 @@ export default function SystemAdminDashboard() {
                     7-Day System Load & Operational Activity ({totalWeekOps} Total Events)
                   </h4>
                   <p className="text-[11px] text-muted-foreground">
-                    Daily breakdown of system audit events, POS sales, payment collections, and attendance scans.
+                    Daily breakdown of system audit events, POS sales, payment collections, and attendance logs.
                   </p>
                 </div>
-                <div className="flex flex-wrap items-center gap-3 text-[11px]">
-                  <span className="inline-flex items-center gap-1.5 text-muted-foreground">
-                    <span className="w-2.5 h-2.5 rounded-xs bg-blue-500 inline-block" /> Audit Logs
-                  </span>
-                  <span className="inline-flex items-center gap-1.5 text-muted-foreground">
-                    <span className="w-2.5 h-2.5 rounded-xs bg-emerald-500 inline-block" /> Sales
-                  </span>
-                  <span className="inline-flex items-center gap-1.5 text-muted-foreground">
-                    <span className="w-2.5 h-2.5 rounded-xs bg-amber-500 inline-block" /> Payments
-                  </span>
-                  <span className="inline-flex items-center gap-1.5 text-muted-foreground">
-                    <span className="w-2.5 h-2.5 rounded-xs bg-purple-500 inline-block" /> Attendance
-                  </span>
+                <div className="flex flex-wrap items-center gap-2 text-[11px]">
+                  {activityCategories.map((cat) => {
+                    const active = Boolean(activitySeries[cat.key])
+                    return (
+                      <button
+                        key={cat.key}
+                        type="button"
+                        onClick={() => toggleActivitySeries(cat.key)}
+                        className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border transition-all cursor-pointer ${
+                          active
+                            ? 'bg-muted/50 border-border text-foreground font-semibold'
+                            : 'bg-transparent border-border/50 text-muted-foreground opacity-50 line-through'
+                        }`}
+                        title={`Toggle ${cat.label}`}
+                      >
+                        <span className={`w-2.5 h-2.5 rounded-xs ${cat.colorClass} inline-block shrink-0`} />
+                        <span>{cat.label}</span>
+                        <span className="font-mono font-bold">{seriesWeekTotals[cat.key] ?? 0}</span>
+                      </button>
+                    )
+                  })}
                 </div>
               </div>
 
               <div className="grid grid-cols-7 gap-2.5 pt-2 items-end h-44">
                 {activityTrend.map((day) => {
-                  const total = Number(day.total_ops) || 0
+                  const total = getVisibleDayTotal(day)
                   const barHeightPct = total > 0 ? Math.max(12, Math.round((total / maxTrendOps) * 100)) : 6
-                  const auditH = total > 0 ? Math.round(((day.audit_events || 0) / total) * 100) : 0
-                  const salesH = total > 0 ? Math.round(((day.sales || 0) / total) * 100) : 0
-                  const payH = total > 0 ? Math.round(((day.payments || 0) / total) * 100) : 0
-                  const attH = Math.max(0, 100 - auditH - salesH - payH)
+                  const visibleSegments = activityCategories
+                    .slice()
+                    .reverse()
+                    .map((cat) => ({
+                      ...cat,
+                      count: activitySeries[cat.key] ? (Number(day[cat.key]) || 0) : 0,
+                    }))
+                    .filter((seg) => seg.count > 0)
 
                   return (
-                    <div key={day.date} className="flex flex-col items-center h-full justify-end group">
+                    <div key={day.date} className="relative flex flex-col items-center h-full justify-end group">
+                      <div className="pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity duration-150 absolute -top-2 left-1/2 -translate-x-1/2 -translate-y-full z-20 w-40 p-2.5 rounded-xl bg-popover text-popover-foreground border border-border shadow-lg text-[10px] space-y-1">
+                        <div className="font-bold text-foreground border-b border-border/60 pb-1 flex items-center justify-between">
+                          <span>{day.day_short}, {day.label}</span>
+                          <span className="font-mono">{total}</span>
+                        </div>
+                        {activityCategories.map((cat) => (
+                          <div key={cat.key} className={`flex items-center justify-between ${activitySeries[cat.key] ? '' : 'opacity-40'}`}>
+                            <span className="inline-flex items-center gap-1.5 text-muted-foreground">
+                              <span className={`w-2 h-2 rounded-xs ${cat.colorClass}`} />
+                              {cat.label}
+                            </span>
+                            <span className="font-mono font-bold text-foreground">{Number(day[cat.key]) || 0}</span>
+                          </div>
+                        ))}
+                      </div>
+
                       <span className="font-mono text-[10px] font-bold text-foreground mb-1">
                         {total}
                       </span>
@@ -526,23 +595,15 @@ export default function SystemAdminDashboard() {
                         <div
                           className="w-full rounded-lg overflow-hidden flex flex-col justify-end transition-all duration-300"
                           style={{ height: `${barHeightPct}%` }}
-                          title={`${day.label}: ${day.audit_events} Audit, ${day.sales} Sales, ${day.payments} Payments, ${day.attendance} Attendance`}
                         >
-                          {total > 0 ? (
-                            <>
-                              {day.attendance > 0 && (
-                                <div className="w-full bg-purple-500" style={{ height: `${Math.max(10, attH)}%` }} />
-                              )}
-                              {day.payments > 0 && (
-                                <div className="w-full bg-amber-500" style={{ height: `${Math.max(10, payH)}%` }} />
-                              )}
-                              {day.sales > 0 && (
-                                <div className="w-full bg-emerald-500" style={{ height: `${Math.max(10, salesH)}%` }} />
-                              )}
-                              {day.audit_events > 0 && (
-                                <div className="w-full bg-blue-500" style={{ height: `${Math.max(15, auditH)}%` }} />
-                              )}
-                            </>
+                          {visibleSegments.length > 0 ? (
+                            visibleSegments.map((seg) => (
+                              <div
+                                key={seg.key}
+                                className={`w-full ${seg.colorClass} min-h-[3px]`}
+                                style={{ flexGrow: seg.count, flexBasis: 0 }}
+                              />
+                            ))
                           ) : (
                             <div className="w-full h-full bg-muted-foreground/20 rounded-lg" />
                           )}

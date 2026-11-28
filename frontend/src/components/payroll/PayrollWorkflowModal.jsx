@@ -281,7 +281,7 @@ export default function PayrollWorkflowModal({
     if (previewData?.employees && Array.isArray(previewData.employees)) {
       return previewData.employees.reduce((acc, emp) => {
         const c = emp.calculation || {}
-        acc.totalHours += Number(c.work_hours || 0)
+        acc.totalHours = Math.round((acc.totalHours + Number(c.work_hours || 0)) * 100) / 100
         acc.totalAbsences += Number(c.absence_days || 0)
         acc.totalAbsenceDeduction += Number(c.absence_deduction || 0)
         acc.totalLateMinutes += Number(c.late_minutes || 0)
@@ -1533,7 +1533,7 @@ export default function PayrollWorkflowModal({
                   <div className="p-3 rounded-xl bg-muted/30 border border-border flex items-baseline justify-between">
                     <div>
                       <span className="font-mono text-2xl font-black text-foreground">
-                        {isAllEmployees ? (batchAttendanceSummary?.totalHours || 0) : clientComputation.workHours}
+                        {Number(isAllEmployees ? (batchAttendanceSummary?.totalHours || 0) : (clientComputation.workHours || 0)).toFixed(2)}
                       </span>
                       <span className="text-xs font-semibold text-muted-foreground ml-1.5">
                         {isAllEmployees ? `total hrs across ${filteredEmployees.length} staff` : 'hours rendered'}
@@ -1547,7 +1547,7 @@ export default function PayrollWorkflowModal({
                   <p className="text-[10px] text-muted-foreground">
                     {isAllEmployees
                       ? `Standard ${isWeekly ? '48h/week' : '104h/semi-month'} per staff • Base pay computed per active time record`
-                      : `Base pay computation: ${isWeekly ? 'standard weekly salary (6 days @ 8h = 48h)' : 'standard semi-monthly (13 days @ 8h = 104h)'} or rendered hours (${clientComputation.workHours}h rendered • ${fmt(clientComputation.periodBasePay)})`}
+                      : `Base pay computation: ${isWeekly ? 'standard weekly salary (6 days @ 8h = 48h)' : 'standard semi-monthly (13 days @ 8h = 104h)'} or rendered hours (${Number(clientComputation.workHours || 0).toFixed(2)}h rendered • ${fmt(clientComputation.periodBasePay)})`}
                   </p>
                 </div>
 
@@ -2126,7 +2126,7 @@ export default function PayrollWorkflowModal({
                       <div>
                         <span className="text-[10px] text-muted-foreground block">Rendered Hours:</span>
                         <span className="font-mono font-bold">
-                          {isAllEmployees ? `${batchAttendanceSummary?.totalHours || 0}h` : `${clientComputation.workHours}h`}
+                          {`${Number(isAllEmployees ? (batchAttendanceSummary?.totalHours || 0) : (clientComputation.workHours || 0)).toFixed(2)}h`}
                         </span>
                       </div>
                       <div>

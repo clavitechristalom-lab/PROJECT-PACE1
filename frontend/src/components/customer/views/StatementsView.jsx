@@ -7,7 +7,7 @@ import {
 } from 'react-icons/fi';
 import { TbCurrencyPeso } from 'react-icons/tb';
 import { api } from '../../../lib/api';
-import { fmt } from '../../../lib/utils';
+import { fmt, summarizePaymentNotes } from '../../../lib/utils';
 import { escapeHtml, formatQty } from '../../../lib/invoicePrint';
 import { Spinner, Badge, Modal } from '../../ui';
 import { useRealtimeSync, fastDeepEqual } from '../../../lib/realtimeSync';
@@ -71,7 +71,7 @@ export default function StatementsView({
             reference: p.receipt_no || (`REC-${p.payment_id}`),
             type: 'Payment',
             category: 'Credit',
-            description: p.notes || `Amortization for ${inst.account_no} (${inst.product})`,
+            description: summarizePaymentNotes(p.notes) || `Amortization for ${inst.account_no} (${inst.product})`,
             payment_method: p.payment_method || 'Cash / E-Wallet',
             amount: Number(p.amount || 0),
             status: p.status || 'Completed',
@@ -256,7 +256,7 @@ export default function StatementsView({
             ${custAddress ? `<div class="row"><span>Address</span><span>${escapeHtml(custAddress)}</span></div>` : ''}
             <div class="box">
               <div class="box-title">Particulars / Remarks</div>
-              <div style="font-size:12px; line-height:1.5;">${escapeHtml(item.description || item.notes || '—')}</div>
+              <div style="font-size:12px; line-height:1.5;">${escapeHtml(summarizePaymentNotes(item.description || item.notes) || '—')}</div>
             </div>
             ${itemsTableHtml}
             ${accountSummaryHtml}
@@ -490,7 +490,7 @@ export default function StatementsView({
                         {refDisplay}
                       </td>
                       <td className="px-5 py-3.5">
-                        <span className="font-semibold text-foreground block">{item.description}</span>
+                        <span className="font-semibold text-foreground block">{summarizePaymentNotes(item.description)}</span>
                         {item.account_no && (
                           <span className="text-[10px] text-muted-foreground font-mono">
                             Acct: {item.account_no}
@@ -717,10 +717,10 @@ export default function StatementsView({
                   {isCredit ? 'Payment Particulars & Remarks' : 'Transaction Description & Notes'}
                 </span>
                 <p className="font-semibold text-foreground leading-relaxed">
-                  {selectedStatement.description || '—'}
+                  {summarizePaymentNotes(selectedStatement.description) || '—'}
                 </p>
-                {selectedStatement.notes && selectedStatement.notes !== selectedStatement.description && (
-                  <p className="text-[11px] text-muted-foreground">{selectedStatement.notes}</p>
+                {selectedStatement.notes && summarizePaymentNotes(selectedStatement.notes) !== summarizePaymentNotes(selectedStatement.description) && (
+                  <p className="text-[11px] text-muted-foreground">{summarizePaymentNotes(selectedStatement.notes)}</p>
                 )}
               </div>
 

@@ -68,6 +68,12 @@ export default function CollectorCashPage() {
     { module: 'payments' }
   )
 
+  useRealtimeSync(
+    () => loadCollections({ silent: true }),
+    [],
+    { module: 'installments' }
+  )
+
   const matchesStatusTab = useCallback((item, tab) => {
     if (tab === 'All') return true
     const st = String(item?.status || '').toLowerCase()
@@ -192,7 +198,7 @@ export default function CollectorCashPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Collect Cash"
+        title="Collect Customer Installment"
         subtitle={`Door-to-Door Cash Installment Collection • ${branchLabel} • ${collectorLabel}`}
         action={
           <div className="flex items-center gap-2 flex-wrap">
@@ -395,7 +401,7 @@ export default function CollectorCashPage() {
                         className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs shadow-xs transition-colors cursor-pointer"
                       >
                         <FiCheckCircle className="w-3.5 h-3.5" />
-                        <span>Collect Cash</span>
+                        <span>Collect Customer Installment</span>
                       </button>
                     )}
                     <button

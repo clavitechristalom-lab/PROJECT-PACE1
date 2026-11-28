@@ -702,6 +702,8 @@ export const api = {
       return request(`/installments/overdue${qs ? `?${qs}` : ''}`, options);
     },
     getById: (id, options = {}) => request(`/installments/${id}`, options),
+    getClearanceDocument: (id, options = {}) =>
+      request(`/installments/${id}/clearance-document`, { fresh: true, ...options }),
     create: (data) =>
       request('/installments', {
         method: 'POST',

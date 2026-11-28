@@ -665,12 +665,16 @@ class PaymentController extends Controller
                 }
             }
 
+            if ($inst->isFullyPaid()) {
+                return response()->json(['message' => "Installment account {$inst->account_no} is already Fully Paid and closed to further payments."], 422);
+            }
+
             $fin = $inst->financialBreakdown();
             $currentPaid = (float) $fin['paid'];
             $outstanding = (float) $fin['balance'];
 
             if ($outstanding <= 0) {
-                return response()->json(['message' => 'This installment is already fully paid.'], 422);
+                return response()->json(['message' => "Installment account {$inst->account_no} is already Fully Paid."], 422);
             }
 
             $payAmount = (float)$validated['amount'];
@@ -748,82 +752,17 @@ class PaymentController extends Controller
             $newBalance = $outstanding;
             $newAccStatus = $inst->status;
 
-            // Only apply balances, schedules, and sale totals once payment is settled (not Pending customer submission)
             if ($isSettled) {
-                // 2. Sequentially Apply Payment to Schedules
-                $remainingPayment = $payAmount;
-                $schedules = PaymentSchedule::where('installment_id', $inst->installment_id)
-                    ->where('balance_due', '>', 0)
-                    ->orderBy('installment_no')
-                    ->get();
-
-                $primaryScheduleId = null;
-
-                foreach ($schedules as $sched) {
-                    if ($remainingPayment <= 0) break;
-
-                    $dueOnSchedule = (float)$sched->balance_due;
-                    $applyToSched = min($remainingPayment, $dueOnSchedule);
-
-                    $newPaid = round((float)$sched->amount_paid + $applyToSched, 2);
-                    $newBal = max(0, round((float)$sched->amount_due - $newPaid, 2));
-                    $newStatus = $newBal <= 0 ? 'Paid' : 'Partially Paid';
-
-                    $sched->update([
-                        'amount_paid' => $newPaid,
-                        'balance_due' => $newBal,
-                        'status' => $newStatus,
-                        'paid_date' => $newBal <= 0 ? $payDate : $sched->paid_date,
-                    ]);
-
-                    if (!$primaryScheduleId) {
-                        $primaryScheduleId = $sched->schedule_id;
-                    }
-
-                    $remainingPayment = round($remainingPayment - $applyToSched, 2);
+                if (!$payment->confirmed_by && $user) {
+                    $payment->confirmed_by = $user->user_id;
+                    $payment->confirmed_at = now();
+                    $payment->save();
                 }
-
-                if ($primaryScheduleId && !$payment->schedule_id) {
-                    $payment->update(['schedule_id' => $primaryScheduleId]);
-                }
-
-                // 3. Update Installment Status
-                $newTotalPaid = round($currentPaid + $payAmount, 2);
-                $newBalance = max(0, round((float)$inst->total_payable - $newTotalPaid, 2));
-
-                if ($newBalance <= 0) {
-                    $newAccStatus = 'Completed';
-                    
-                    // The account is completely paid off. Clear any remaining schedule balances and mark all as Fully Paid.
-                    PaymentSchedule::where('installment_id', $inst->installment_id)
-                        ->update([
-                            'balance_due' => 0,
-                            'amount_paid' => DB::raw('amount_due'),
-                            'status' => 'Fully Paid',
-                            'paid_date' => DB::raw("IFNULL(paid_date, '{$payDate}')"),
-                        ]);
-                } else {
-                    $hasOverdue = PaymentSchedule::where('installment_id', $inst->installment_id)
-                        ->where('due_date', '<', date('Y-m-d'))
-                        ->where('balance_due', '>', 0)
-                        ->exists();
-                    $newAccStatus = $hasOverdue ? 'Overdue' : 'Active';
-                }
-
-                $inst->update(['status' => $newAccStatus]);
-
-                // 4. Update Associated Sale Transaction
-                if ($inst->sale_id) {
-                    $sale = SaleTransaction::find($inst->sale_id);
-                    if ($sale) {
-                        $newSalePaid = round((float)$sale->amount_paid + $payAmount, 2);
-                        $newSaleBal = max(0, round((float)$sale->total_amount - $newSalePaid, 2));
-                        $sale->update([
-                            'amount_paid' => $newSalePaid,
-                            'balance_due' => $newSaleBal,
-                            'status' => $newSaleBal <= 0 ? 'Completed' : 'Partially Paid',
-                        ]);
-                    }
+                $settlement = PaymentSettlementService::applyConfirmedInstallmentSettlement($payment, $user);
+                if ($settlement) {
+                    $newTotalPaid = (float) $settlement['paid'];
+                    $newBalance = (float) $settlement['balance'];
+                    $newAccStatus = (string) $settlement['status'];
                 }
             }
 
@@ -1206,6 +1145,13 @@ class PaymentController extends Controller
                 return response()->json(['success' => true, 'message' => 'Payment has already been received.', 'payment' => $payment]);
             }
 
+            if ($payment->installmentAccount && $payment->installmentAccount->isFullyPaid()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => "Installment account {$payment->installmentAccount->account_no} is already Fully Paid.",
+                ], 422);
+            }
+
             $currentStatusLower = strtolower(trim((string) $payment->status));
 
             if ($currentStatusLower === strtolower(Payment::STATUS_PENDING_COLLECTOR)) {
@@ -1247,7 +1193,7 @@ class PaymentController extends Controller
             $payment->save();
 
             $deposit = PaymentSettlementService::syncDepositForConfirmedPayment($payment, $user, $payment->receipt_reference);
-            $settlement = PaymentSettlementService::applyConfirmedInstallmentSettlement($payment);
+            $settlement = PaymentSettlementService::applyConfirmedInstallmentSettlement($payment, $user);
 
             $inst = $payment->installmentAccount;
             $payAmount = (float) $payment->amount;

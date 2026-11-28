@@ -82,6 +82,10 @@ class CashierWalkInController extends Controller
             || ($isCollectorRemittance && in_array($lowerStatus, ['completed', 'rejected'], true) && $cashierForwarded);
 
         $fin = $inst ? $inst->financialBreakdown() : null;
+        $isInstFullyPaid = $inst && ($inst->isFullyPaid() || ($fin && (float) $fin['balance'] <= 0));
+        if ($isInstFullyPaid) {
+            $canConfirm = false;
+        }
         $schedules = $inst && $inst->relationLoaded('paymentSchedules') ? $inst->paymentSchedules : collect();
         $totalTerms = $inst ? (int) ($inst->number_of_installments ?: $schedules->count()) : 0;
         $termsPaid = $schedules->filter(fn($s) => strtolower((string) $s->status) === 'paid' || (float) $s->balance_due <= 0.01)->count();
@@ -263,15 +267,20 @@ class CashierWalkInController extends Controller
             $amt = (float) $item->amount;
             $st = strtolower(trim((string) $item->status));
             $isColl = $item->cash_channel === 'collector' || !empty($item->collector_id);
+            $instCleared = $item->installmentAccount && $item->installmentAccount->isFullyPaid();
 
             if ($isColl && in_array($st, ['collected by collector', 'collected_by_collector'], true)) {
-                $pendingWalkInsCount++;
-                $pendingWalkInsAmount += $amt;
-                $pendingCollectorCount++;
-                $pendingCollectorAmount += $amt;
+                if (!$instCleared) {
+                    $pendingWalkInsCount++;
+                    $pendingWalkInsAmount += $amt;
+                    $pendingCollectorCount++;
+                    $pendingCollectorAmount += $amt;
+                }
             } elseif (!$isColl && in_array($st, ['pending', 'pending_store', 'pending store', 'pending verification'], true)) {
-                $pendingWalkInsCount++;
-                $pendingWalkInsAmount += $amt;
+                if (!$instCleared) {
+                    $pendingWalkInsCount++;
+                    $pendingWalkInsAmount += $amt;
+                }
             } elseif (in_array($st, ['pending store admin approval', 'pending_store_admin_approval'], true)) {
                 $awaitingAdminCount++;
                 $awaitingAdminAmount += $amt;
@@ -472,10 +481,10 @@ class CashierWalkInController extends Controller
 
             if ($payment->installmentAccount) {
                 $currentFin = $payment->installmentAccount->financialBreakdown();
-                if ((float) $currentFin['balance'] <= 0) {
+                if ($payment->installmentAccount->isFullyPaid() || (float) $currentFin['balance'] <= 0) {
                     return response()->json([
                         'success' => false,
-                        'message' => "Installment account {$payment->installmentAccount->account_no} is already fully paid.",
+                        'message' => "Installment account {$payment->installmentAccount->account_no} is already Fully Paid.",
                     ], 422);
                 }
             }
@@ -627,7 +636,7 @@ class CashierWalkInController extends Controller
             $payment->save();
 
             $deposit = PaymentSettlementService::syncDepositForConfirmedPayment($payment, $user, $orNumber);
-            $settlement = PaymentSettlementService::applyConfirmedInstallmentSettlement($payment);
+            $settlement = PaymentSettlementService::applyConfirmedInstallmentSettlement($payment, $user);
 
             $cust = $payment->installmentAccount?->customer ?: ($payment->sale?->customer ?: $deposit?->customer);
             $custName = $settlement['customer_name'] ?? ($cust ? trim("{$cust->first_name} {$cust->last_name}") : 'Walk-In Customer');

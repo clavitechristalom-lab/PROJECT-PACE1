@@ -4,7 +4,7 @@ import {
   FiPlus, FiSearch, FiEye, FiEdit, FiTrash2,
   FiCalendar, FiUser, FiCreditCard, FiAlertTriangle, FiCheckCircle,
   FiX, FiPhone, FiMapPin, FiPackage, FiPercent, FiFileText,
-  FiClock, FiPrinter, FiFilter, FiInfo, FiLayers
+  FiClock, FiPrinter, FiFilter, FiInfo, FiLayers, FiAward, FiShield
 } from 'react-icons/fi'
 import {
   Btn, Badge, StatusBadge, Modal, PageHeader, StatCard, Card,
@@ -19,6 +19,12 @@ import { TbCurrencyPeso } from 'react-icons/tb'
 import { FiDownload } from 'react-icons/fi'
 import AgentAssignmentSection from '../components/AgentAssignmentSection'
 import { summarizeAgentContributions, resolveCategoryDomain } from '../lib/agentContribution'
+import InstallmentClearanceModal from '../components/installments/InstallmentClearanceModal'
+
+const isFullyPaidAccount = (inst) => {
+  const st = String(inst?.status || '').trim().toLowerCase()
+  return st === 'fully paid' || st === 'completed' || st === 'complete payment' || Number(inst?.balance ?? 1) <= 0
+}
 
 const formatInstallmentProof = (path) => {
   if (!path) return null
@@ -156,7 +162,8 @@ export default function InstallmentsPage({ branchFilter: propBranchFilter, embed
   const isStoreAdmin = user?.role === 'Store Administrator' || user?.role === 'Store Admin'
   const isAdmin = user?.role === 'Administrator'
 
-  const [activeTab, setActiveTab] = useState(searchParams.get('tab') || 'all')
+  const [activeTab, setActiveTab] = useState(searchParams.get('tab') || 'active')
+  const [clearanceModal, setClearanceModal] = useState(null)
   const [installments, setInstallments] = useState(() => {
     const cached = peekApiCache('/installments')
     return Array.isArray(cached?.installments) ? cached.installments : []
@@ -646,25 +653,29 @@ export default function InstallmentsPage({ branchFilter: propBranchFilter, embed
     }
   }
 
-  // ─── FILTER & SEARCH LOGIC ──────────────────────────────────────────────────
   const filteredInstallments = useMemo(() => {
     return installments.filter(inst => {
-      // Tab filter
-      if (activeTab === 'overdue' && inst.status !== 'Overdue') {
+      const fullyPaid = isFullyPaidAccount(inst)
+
+      if (activeTab === 'active' && fullyPaid) {
+        return false
+      }
+      if (activeTab === 'completed' && !fullyPaid) {
+        return false
+      }
+      if (activeTab === 'overdue' && (fullyPaid || inst.status !== 'Overdue')) {
         return false
       }
 
-      // Status filter
       if (statusFilter !== 'All') {
-        const effectiveStatus = Number(inst.balance) <= 0 ? 'Complete Payment' : inst.status
-        if (statusFilter === 'Complete Payment' || statusFilter === 'Completed') {
-          if (effectiveStatus !== 'Complete Payment' && effectiveStatus !== 'Completed') return false
+        const effectiveStatus = fullyPaid ? 'Fully Paid' : inst.status
+        if (statusFilter === 'Fully Paid' || statusFilter === 'Complete Payment' || statusFilter === 'Completed') {
+          if (!fullyPaid) return false
         } else if (effectiveStatus !== statusFilter) {
           return false
         }
       }
 
-      // Search query (Account #, Customer name/code, phone, invoice, product, branch)
       if (deferredSearch.trim()) {
         const q = deferredSearch.toLowerCase().trim()
         const matchAcc = (inst.account_no || '').toLowerCase().includes(q)
@@ -675,7 +686,8 @@ export default function InstallmentsPage({ branchFilter: propBranchFilter, embed
         const matchProd = (inst.product_name || '').toLowerCase().includes(q)
         const matchCat = (inst.product_category || '').toLowerCase().includes(q)
         const matchBranch = String(inst.branch_name || inst.branch || '').toLowerCase().includes(q)
-        if (!matchAcc && !matchCust && !matchCode && !matchPhone && !matchInv && !matchProd && !matchCat && !matchBranch) {
+        const matchVerifier = String(inst.final_verifier_name || '').toLowerCase().includes(q)
+        if (!matchAcc && !matchCust && !matchCode && !matchPhone && !matchInv && !matchProd && !matchCat && !matchBranch && !matchVerifier) {
           return false
         }
       }
@@ -684,20 +696,21 @@ export default function InstallmentsPage({ branchFilter: propBranchFilter, embed
     })
   }, [installments, activeTab, statusFilter, deferredSearch])
 
-  // Summary KPI values computed from live state
   const liveSummary = useMemo(() => {
     const totalFinanced = installments.reduce((acc, i) => acc + (i.total_payable || 0), 0)
     const totalPaid = installments.reduce((acc, i) => acc + (i.paid || 0), 0)
-    const totalOutstanding = installments.reduce((acc, i) => acc + (i.balance || 0), 0)
-    const activeCount = installments.filter(i => i.status === 'Active' && Number(i.balance) > 0).length
-    const overdueCount = installments.filter(i => i.status === 'Overdue' && Number(i.balance) > 0).length
-    const completedCount = installments.filter(i => i.status === 'Complete Payment' || i.status === 'Completed' || Number(i.balance) <= 0).length
-    const pendingCount = installments.filter(i => i.status === 'Pending' && Number(i.balance) > 0).length
+    const totalOutstanding = installments.reduce((acc, i) => acc + (isFullyPaidAccount(i) ? 0 : (i.balance || 0)), 0)
+    const ongoingCount = installments.filter(i => !isFullyPaidAccount(i)).length
+    const activeCount = installments.filter(i => !isFullyPaidAccount(i) && i.status === 'Active').length
+    const overdueCount = installments.filter(i => !isFullyPaidAccount(i) && i.status === 'Overdue').length
+    const completedCount = installments.filter(i => isFullyPaidAccount(i)).length
+    const pendingCount = installments.filter(i => !isFullyPaidAccount(i) && i.status === 'Pending').length
 
     return {
       totalFinanced,
       totalPaid,
       totalOutstanding,
+      ongoingCount,
       activeCount,
       overdueCount,
       completedCount,
@@ -966,7 +979,7 @@ export default function InstallmentsPage({ branchFilter: propBranchFilter, embed
           if (item.installment_id === payModalItem.installment_id) {
             const newPaid = Math.round(((item.paid || 0) + amountVal) * 100) / 100
             const newBal = Math.max(0, Math.round(((item.total_payable || 0) - newPaid) * 100) / 100)
-            const newStatus = newBal <= 0 ? 'Complete Payment' : (res.account.status || item.status)
+            const newStatus = newBal <= 0 ? 'Fully Paid' : (res.account.status || item.status)
             return {
               ...item,
               paid: newPaid,
@@ -974,7 +987,10 @@ export default function InstallmentsPage({ branchFilter: propBranchFilter, embed
               balance: newBal,
               remaining_balance: newBal,
               status: newStatus,
-              payment_status: newBal <= 0 ? 'Complete Payment' : 'Partially Paid',
+              completed_at: newBal <= 0 ? new Date().toISOString() : item.completed_at,
+              next_due_date: newBal <= 0 ? null : item.next_due_date,
+              customer_standing: newBal <= 0 ? 'Cleared / Good Standing' : item.customer_standing,
+              payment_status: newBal <= 0 ? 'Paid in Full' : 'Partially Paid',
               progress_percentage: item.total_payable > 0 ? Math.min(100, Math.round((newPaid / item.total_payable) * 100)) : 100,
               payments_history: [
                 {
@@ -1030,12 +1046,27 @@ export default function InstallmentsPage({ branchFilter: propBranchFilter, embed
   }
 
   const tabs = [
-    { id: 'all', label: 'All Customer Accounts', icon: <FiCreditCard className="w-4 h-4" /> },
+    {
+      id: 'active',
+      label: `Active / Ongoing (${liveSummary.ongoingCount})`,
+      icon: <FiCreditCard className="w-4 h-4 text-primary" />,
+    },
+    {
+      id: 'completed',
+      label: `Completed (Fully Paid) (${liveSummary.completedCount})`,
+      icon: <FiAward className="w-4 h-4 text-emerald-600" />,
+      badge: liveSummary.completedCount > 0 ? liveSummary.completedCount : null,
+    },
     {
       id: 'overdue',
       label: `Overdue Accounts (${liveSummary.overdueCount})`,
       icon: <FiAlertTriangle className="w-4 h-4 text-rose-500" />,
-      badge: liveSummary.overdueCount > 0 ? liveSummary.overdueCount : null
+      badge: liveSummary.overdueCount > 0 ? liveSummary.overdueCount : null,
+    },
+    {
+      id: 'all',
+      label: `All Contracts (${liveSummary.totalCount})`,
+      icon: <FiLayers className="w-4 h-4" />,
     },
   ]
 
@@ -1164,12 +1195,11 @@ export default function InstallmentsPage({ branchFilter: propBranchFilter, embed
               <option value="Active">Active ({liveSummary.activeCount})</option>
               <option value="Pending">Pending ({liveSummary.pendingCount})</option>
               <option value="Overdue">Overdue ({liveSummary.overdueCount})</option>
-              <option value="Complete Payment">Complete Payment ({liveSummary.completedCount})</option>
+              <option value="Fully Paid">Fully Paid ({liveSummary.completedCount})</option>
               <option value="Cancelled">Cancelled</option>
             </select>
           </div>
 
-          {/* Branch Filter (if Admin) */}
           <div>
             <select
               value={branchFilter}
@@ -1189,13 +1219,20 @@ export default function InstallmentsPage({ branchFilter: propBranchFilter, embed
         </div>
       </Card>
 
-      {/* ─── CUSTOMER INSTALLMENT ACCOUNTS TABLE ─── */}
       {loading ? (
         <TableSkeleton rows={6} cols={10} />
       ) : (
         <Card noPad className="border border-border overflow-hidden shadow-2xs">
           <CardHeader
-            title={activeTab === 'overdue' ? 'Overdue Installment Accounts' : 'Customer Installment Ledger'}
+            title={
+              activeTab === 'completed'
+                ? 'Completed (Fully Paid) Installments'
+                : activeTab === 'overdue'
+                  ? 'Overdue Installment Accounts'
+                  : activeTab === 'active'
+                    ? 'Active / Ongoing Installments'
+                    : 'Customer Installment Ledger'
+            }
             action={
               <div className="flex items-center gap-2 text-xs text-muted-foreground font-mono">
                 <span>Showing {paginated.length} of {filteredInstallments.length} accounts</span>
@@ -1214,7 +1251,9 @@ export default function InstallmentsPage({ branchFilter: propBranchFilter, embed
                   <th className="w-[9%] py-2.5 px-1.5 text-left">Terms &amp; Monthly</th>
                   <th className="w-[11%] py-2.5 px-1.5 text-left">Paid &amp; Progress</th>
                   <th className="w-[8%] py-2.5 px-1.5 text-left">Balance</th>
-                  <th className="w-[9%] py-2.5 px-1.5 text-left">Next Due</th>
+                  <th className="w-[9%] py-2.5 px-1.5 text-left">
+                    {activeTab === 'completed' ? 'Completed / Verifier' : 'Next Due / Clearance'}
+                  </th>
                   <th className="w-[8%] py-2.5 px-1 text-center">Status</th>
                   <th className="w-[10%] py-2.5 px-1.5 text-center">Actions</th>
                 </tr>
@@ -1226,25 +1265,29 @@ export default function InstallmentsPage({ branchFilter: propBranchFilter, embed
                       <div className="flex flex-col items-center justify-center gap-2">
                         <FiCreditCard className="w-8 h-8 text-muted-foreground/50" />
                         <span className="font-semibold text-foreground">No customer installment found</span>
-                        <span className="text-xs">Try adjusting filters or click &quot;New Installment&quot; to create a credit financing agreement.</span>
+                        <span className="text-xs">Try adjusting filters or switch between Active / Ongoing and Completed (Fully Paid) tabs.</span>
                       </div>
                     </td>
                   </tr>
                 ) : (
                   paginated.map((inst, i) => {
-                    const isOverdue = inst.status === 'Overdue' || inst.days_overdue > 0
+                    const fullyPaid = isFullyPaidAccount(inst)
+                    const isOverdue = !fullyPaid && (inst.status === 'Overdue' || inst.days_overdue > 0)
                     const isOpenContract = Boolean(inst.is_open_contract || String(inst.frequency || '').toLowerCase() === 'open contract')
                     const totalPayableVal = Number(inst.total_payable || ((inst.principal_amount || 0) + (inst.interest_amount || 0)))
                     const totalTerms = inst.total_terms ?? inst.number_of_installments ?? 0
-                    const paidTerms = inst.paid_installments ?? 0
-                    const pendingVerif = Number(inst.pending_payments_amount || 0)
-                    const progressPct = Number(inst.progress_percentage ?? (totalPayableVal > 0 ? Math.min(100, Math.round(((inst.paid || 0) / totalPayableVal) * 1000) / 10) : 0))
+                    const paidTerms = fullyPaid ? totalTerms : (inst.paid_installments ?? 0)
+                    const pendingVerif = fullyPaid ? 0 : Number(inst.pending_payments_amount || 0)
+                    const balanceVal = fullyPaid ? 0 : Number(inst.balance || 0)
+                    const progressPct = fullyPaid
+                      ? 100
+                      : Number(inst.progress_percentage ?? (totalPayableVal > 0 ? Math.min(100, Math.round(((inst.paid || 0) / totalPayableVal) * 1000) / 10) : 0))
                     return (
                       <tr
                         key={inst.installment_id}
                         className={`hover:bg-muted/40 transition-colors ${
                           i % 2 === 1 ? 'bg-muted/10' : ''
-                        } ${isOverdue ? 'bg-rose-50/20 dark:bg-rose-950/10' : ''}`}
+                        } ${isOverdue ? 'bg-rose-50/20 dark:bg-rose-950/10' : fullyPaid ? 'bg-emerald-50/20 dark:bg-emerald-950/10' : ''}`}
                       >
                         <td className="py-2.5 px-2 align-top">
                           <div className="flex items-center gap-1 font-mono font-bold text-foreground min-w-0">
@@ -1276,6 +1319,14 @@ export default function InstallmentsPage({ branchFilter: propBranchFilter, embed
                               {inst.customer_phone}
                             </div>
                           )}
+                          {fullyPaid && (
+                            <div className="mt-1">
+                              <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 text-[9px] font-bold">
+                                <FiShield className="w-2.5 h-2.5 shrink-0" />
+                                <span className="truncate">{inst.customer_standing || 'Cleared / Good Standing'}</span>
+                              </span>
+                            </div>
+                          )}
                         </td>
 
                         <td className="py-2.5 px-1.5 align-top">
@@ -1291,6 +1342,11 @@ export default function InstallmentsPage({ branchFilter: propBranchFilter, embed
                           {inst.start_date && (
                             <div className="text-[10px] text-muted-foreground font-mono mt-0.5 truncate">
                               Started {inst.start_date}
+                            </div>
+                          )}
+                          {fullyPaid && inst.has_agent && (
+                            <div className="text-[9px] font-bold text-teal-700 dark:text-teal-300 mt-0.5">
+                              Agent: {inst.agent_contribution_status || 'Settled'}
                             </div>
                           )}
                         </td>
@@ -1342,12 +1398,16 @@ export default function InstallmentsPage({ branchFilter: propBranchFilter, embed
                         </td>
 
                         <td className="py-2.5 px-1.5 text-left font-mono align-top leading-tight">
-                          <div className={`font-bold ${Number(inst.balance) > 0 ? 'text-rose-600 dark:text-rose-400' : 'text-emerald-600'}`}>
-                            {fmt(inst.balance)}
+                          <div className={`font-bold ${balanceVal > 0 ? 'text-rose-600 dark:text-rose-400' : 'text-emerald-600'}`}>
+                            {fmt(balanceVal)}
                           </div>
-                          {isOpenContract ? (
+                          {fullyPaid ? (
+                            <div className="text-[10px] text-emerald-600 dark:text-emerald-400 mt-0.5 font-sans font-semibold">
+                              Paid in Full
+                            </div>
+                          ) : isOpenContract ? (
                             <div className="text-[10px] text-indigo-600 dark:text-indigo-400 mt-0.5 font-sans">
-                              {Number(inst.balance) > 0 ? 'Open term' : 'Settled'}
+                              Open term
                             </div>
                           ) : totalTerms > 0 && (
                             <div className="text-[10px] text-muted-foreground mt-0.5">
@@ -1357,7 +1417,17 @@ export default function InstallmentsPage({ branchFilter: propBranchFilter, embed
                         </td>
 
                         <td className="py-2.5 px-1.5 align-top leading-tight">
-                          {inst.next_due_date ? (
+                          {fullyPaid ? (
+                            <div className="space-y-0.5">
+                              <div className="flex items-center gap-1 font-mono text-emerald-700 dark:text-emerald-400 font-bold">
+                                <FiCheckCircle className="w-3 h-3 shrink-0" />
+                                <span className="truncate">{inst.completed_at ? fmtDate(inst.completed_at) : 'Settled'}</span>
+                              </div>
+                              <div className="text-[10px] text-muted-foreground truncate" title={inst.final_verifier_name || 'Store Admin'}>
+                                By: <strong className="text-foreground">{inst.final_verifier_name || 'Store Admin'}</strong>
+                              </div>
+                            </div>
+                          ) : inst.next_due_date ? (
                             <div className="font-mono">
                               <div className="flex items-center gap-1">
                                 <FiCalendar className={`w-3 h-3 shrink-0 ${isOverdue ? 'text-rose-500' : 'text-muted-foreground'}`} />
@@ -1384,7 +1454,7 @@ export default function InstallmentsPage({ branchFilter: propBranchFilter, embed
                         </td>
 
                         <td className="py-2.5 px-1 text-center align-top [&>span]:px-1.5 [&>span]:py-0.5 [&>span]:text-[10px] [&>span]:whitespace-normal [&>span]:leading-tight">
-                          <StatusBadge status={Number(inst.balance) <= 0 ? 'Complete Payment' : inst.status} />
+                          <StatusBadge status={fullyPaid ? 'Fully Paid' : inst.status} />
                         </td>
 
                         <td className="py-2.5 px-1.5 text-center align-top">
@@ -1398,7 +1468,18 @@ export default function InstallmentsPage({ branchFilter: propBranchFilter, embed
                               <FiEye className="w-3.5 h-3.5" />
                             </button>
 
-                            {!isAdmin && inst.balance > 0 && (
+                            {fullyPaid && (
+                              <button
+                                type="button"
+                                onClick={() => setClearanceModal({ installmentId: inst.installment_id, view: 'both' })}
+                                title="Certificate of Full Payment & Final SOA"
+                                className="p-1 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-700 dark:bg-emerald-950/50 dark:hover:bg-emerald-900 dark:text-emerald-300 border border-emerald-300 transition-colors cursor-pointer"
+                              >
+                                <FiAward className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+
+                            {!isAdmin && !fullyPaid && balanceVal > 0 && (
                               <button
                                 type="button"
                                 onClick={() => openPaymentModal(inst)}
@@ -2151,33 +2232,68 @@ export default function InstallmentsPage({ branchFilter: propBranchFilter, embed
                 <div className="p-3 bg-muted/20 rounded-xl border border-border flex flex-col justify-between">
                   <div className="text-[10px] text-muted-foreground uppercase font-bold">Contract Status</div>
                   <div className="mt-1">
-                    <StatusBadge status={Number(detailItem.account?.balance) <= 0 ? 'Complete Payment' : detailItem.account?.status} />
+                    <StatusBadge status={isFullyPaidAccount(detailItem.account) ? 'Fully Paid' : detailItem.account?.status} />
                   </div>
                   <div className="text-[10px] text-muted-foreground mt-0.5">
-                    {(detailItem.account?.is_open_contract || String(detailItem.account?.frequency || '').toLowerCase() === 'open contract')
-                      ? 'Open Contract • No fixed term'
-                      : `${detailItem.account?.paid_installments ?? 0}/${detailItem.account?.total_terms ?? detailItem.account?.number_of_installments} terms paid`}
+                    {isFullyPaidAccount(detailItem.account)
+                      ? (detailItem.account?.customer_standing || 'Cleared / Good Standing')
+                      : (detailItem.account?.is_open_contract || String(detailItem.account?.frequency || '').toLowerCase() === 'open contract')
+                        ? 'Open Contract • No fixed term'
+                        : `${detailItem.account?.paid_installments ?? 0}/${detailItem.account?.total_terms ?? detailItem.account?.number_of_installments} terms paid`}
                   </div>
                 </div>
               </div>
 
-              {/* Payment Progress Bar */}
               <div className="p-3.5 bg-muted/30 rounded-xl border border-border space-y-2">
                 <div className="flex justify-between items-center text-xs flex-wrap gap-2">
                   <span className="font-bold text-foreground">
                     Real-Time Repayment Progress ({detailItem.account?.progress_percentage}%)
-                    {Number(detailItem.account?.balance) <= 0 && (
-                      <span className="ml-2 px-2 py-0.5 rounded-full text-[10px] bg-emerald-600 text-white font-bold">Complete Payment</span>
+                    {isFullyPaidAccount(detailItem.account) && (
+                      <span className="ml-2 px-2 py-0.5 rounded-full text-[10px] bg-emerald-600 text-white font-bold">Fully Paid</span>
                     )}
                   </span>
                   <div className="flex gap-4 font-mono flex-wrap">
                     <span>Total Payable: <strong className="text-foreground">{fmt(detailItem.account?.total_payable)}</strong></span>
                     <span>Confirmed Paid: <strong className="text-emerald-600">{fmt(detailItem.account?.paid)}</strong></span>
-                    <span>Remaining: <strong className="text-rose-600">{fmt(detailItem.account?.balance)}</strong></span>
+                    <span>Remaining: <strong className={isFullyPaidAccount(detailItem.account) ? 'text-emerald-600' : 'text-rose-600'}>{fmt(isFullyPaidAccount(detailItem.account) ? 0 : detailItem.account?.balance)}</strong></span>
                   </div>
                 </div>
                 <ProgressBar value={detailItem.account?.progress_percentage || 0} />
               </div>
+
+              {isFullyPaidAccount(detailItem.account) && (
+                <div className="p-3.5 bg-emerald-50/80 dark:bg-emerald-950/30 rounded-xl border border-emerald-300 dark:border-emerald-800 flex flex-wrap justify-between items-center gap-3">
+                  <div className="space-y-0.5">
+                    <div className="text-[10px] uppercase font-bold text-emerald-700 dark:text-emerald-400 flex items-center gap-1.5">
+                      <FiAward className="w-3.5 h-3.5" />
+                      <span>Contract Completed &amp; Cleared</span>
+                    </div>
+                    <div className="text-xs font-semibold text-foreground">
+                      Completed: <strong className="font-mono">{detailItem.account?.completed_at ? fmtDate(detailItem.account.completed_at) : 'Settled'}</strong>
+                      {' '}• Final Verifier: <strong>{detailItem.account?.final_verifier_name || 'Store Administrator'}</strong>
+                      {detailItem.account?.has_agent ? ` • Agent Contribution: ${detailItem.account?.agent_contribution_status || 'Settled'}` : ''}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setClearanceModal({ installmentId: detailItem.account.installment_id, view: 'certificate' })}
+                      className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <FiAward className="w-3.5 h-3.5" />
+                      <span>Certificate</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setClearanceModal({ installmentId: detailItem.account.installment_id, view: 'soa' })}
+                      className="px-3 py-1.5 rounded-xl bg-teal-600 hover:bg-teal-700 text-white text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <FiFileText className="w-3.5 h-3.5" />
+                      <span>Final SOA</span>
+                    </button>
+                  </div>
+                </div>
+              )}
 
               {/* Next Due Amortization Card */}
               {detailItem.next_payment && (
@@ -2309,16 +2425,27 @@ export default function InstallmentsPage({ branchFilter: propBranchFilter, embed
                 )}
               </div>
 
-              {/* Action Buttons */}
-              <div className="flex justify-between items-center pt-3 border-t border-border">
-                <button
-                  type="button"
-                  onClick={() => printInstallmentStatement(detailItem)}
-                  className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl border border-border hover:bg-muted text-foreground font-semibold cursor-pointer"
-                >
-                  <FiPrinter className="w-4 h-4" />
-                  <span>Print Statement</span>
-                </button>
+              <div className="flex justify-between items-center pt-3 border-t border-border flex-wrap gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <button
+                    type="button"
+                    onClick={() => printInstallmentStatement(detailItem)}
+                    className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl border border-border hover:bg-muted text-foreground font-semibold cursor-pointer"
+                  >
+                    <FiPrinter className="w-4 h-4" />
+                    <span>Print Statement</span>
+                  </button>
+                  {isFullyPaidAccount(detailItem.account) && (
+                    <button
+                      type="button"
+                      onClick={() => setClearanceModal({ installmentId: detailItem.account.installment_id, view: 'both' })}
+                      className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold cursor-pointer"
+                    >
+                      <FiAward className="w-4 h-4" />
+                      <span>Certificate &amp; Final SOA</span>
+                    </button>
+                  )}
+                </div>
                 <div className="flex gap-2">
                   <button
                     type="button"
@@ -2328,7 +2455,7 @@ export default function InstallmentsPage({ branchFilter: propBranchFilter, embed
                     <FiX className="w-3.5 h-3.5" />
                     <span>Close</span>
                   </button>
-                  {!isAdmin && detailItem.account?.balance > 0 && (
+                  {!isAdmin && !isFullyPaidAccount(detailItem.account) && detailItem.account?.balance > 0 && (
                     <button
                       type="button"
                       onClick={() => openPaymentModal(detailItem.account)}
@@ -2521,6 +2648,13 @@ export default function InstallmentsPage({ branchFilter: propBranchFilter, embed
           </form>
         </Modal>
       )}
+
+      <InstallmentClearanceModal
+        isOpen={Boolean(clearanceModal?.installmentId)}
+        installmentId={clearanceModal?.installmentId || null}
+        initialView={clearanceModal?.view || 'both'}
+        onClose={() => setClearanceModal(null)}
+      />
     </div>
   )
 }

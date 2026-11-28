@@ -88,6 +88,10 @@ class CollectorCollectionController extends Controller
             || (($isCompleted || $isRejected) && $cashierForwarded);
 
         $fin = $inst ? $inst->financialBreakdown() : null;
+        if ($inst && ($inst->isFullyPaid() || ($fin && (float) $fin['balance'] <= 0))) {
+            $canCollect = false;
+            $isPendingPickup = false;
+        }
 
         return [
             'payment_id' => $p->payment_id,
@@ -221,10 +225,13 @@ class CollectorCollectionController extends Controller
         foreach ($allAssigned as $item) {
             $amt = (float) $item->amount;
             $st = strtolower(trim((string) $item->status));
+            $instCleared = $item->installmentAccount && $item->installmentAccount->isFullyPaid();
 
             if (in_array($st, ['pending', 'pending_collector', 'pending collector'], true)) {
-                $pendingAmount += $amt;
-                $pendingCount++;
+                if (!$instCleared) {
+                    $pendingAmount += $amt;
+                    $pendingCount++;
+                }
             } elseif (in_array($st, ['collected by collector', 'collected_by_collector', 'pending store admin approval', 'pending_store_admin_approval'], true)) {
                 $remittanceAmount += $amt;
                 $remittanceCount++;
@@ -385,6 +392,13 @@ class CollectorCollectionController extends Controller
                 return response()->json([
                     'success' => false,
                     'message' => "Payment {$payment->receipt_no} has already been processed ({$payment->status}).",
+                ], 422);
+            }
+
+            if ($payment->installmentAccount && $payment->installmentAccount->isFullyPaid()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => "Installment account {$payment->installmentAccount->account_no} is already Fully Paid.",
                 ], 422);
             }
 
@@ -553,6 +567,7 @@ class CollectorCollectionController extends Controller
             'agent:employee_id,employee_code,first_name,last_name',
         ])
             ->whereIn('status', ['Active', 'Overdue'])
+            ->whereNotIn('status', InstallmentAccount::COMPLETED_STATUSES)
             ->where(function ($q) use ($branchId) {
                 $q->whereHas('customer', fn($cq) => $cq->where('branch_id', $branchId))
                     ->orWhereHas('sale', fn($sq) => $sq->where('branch_id', $branchId))
@@ -777,10 +792,10 @@ class CollectorCollectionController extends Controller
 
             $fin = $inst->financialBreakdown();
             $outstanding = round((float) $fin['balance'], 2);
-            if ($outstanding <= 0) {
+            if ($inst->isFullyPaid() || $outstanding <= 0) {
                 return response()->json([
                     'success' => false,
-                    'message' => "Installment account {$inst->account_no} is already fully paid.",
+                    'message' => "Installment account {$inst->account_no} is already Fully Paid.",
                 ], 422);
             }
 

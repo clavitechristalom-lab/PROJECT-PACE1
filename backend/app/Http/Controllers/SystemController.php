@@ -1634,29 +1634,64 @@ class SystemController extends Controller
         $totalEmployees = \App\Models\Employee::count();
         $totalCustomers = \App\Models\Customer::count();
 
+        $todayStr = today()->toDateString();
         $totalSales = \App\Models\SaleTransaction::count();
-        $salesToday = \App\Models\SaleTransaction::whereDate('created_at', today())->count();
+        $salesToday = \App\Models\SaleTransaction::whereRaw('DATE(COALESCE(sale_date, created_at)) = ?', [$todayStr])->count();
         $activeInstallments = InstallmentAccount::whereIn('status', ['Active', 'Overdue', 'ACTIVE', 'OVERDUE'])->count();
         $totalPayments = Payment::count();
         $totalLogs = SystemLog::count();
-        $logsToday = SystemLog::whereDate('created_at', today())->count();
+        $logsToday = SystemLog::whereRaw('DATE(COALESCE(created_at, updated_at)) = ?', [$todayStr])->count();
         $totalBackups = BackupLog::count();
         $latestBackupObj = BackupLog::latest('created_at')->first();
         $latestBackup = $latestBackupObj && $latestBackupObj->created_at
             ? date('M d, Y h:i A', strtotime($latestBackupObj->created_at))
             : 'No backups recorded';
 
-        // 5. 7-Day System Activity & Transaction Load Trend
+        $startDate = now()->subDays(6)->toDateString();
+        $endDate = $todayStr;
+
+        $auditByDate = DB::table('system_logs')
+            ->selectRaw('DATE(COALESCE(created_at, updated_at)) as d, COUNT(*) as cnt')
+            ->whereRaw('DATE(COALESCE(created_at, updated_at)) BETWEEN ? AND ?', [$startDate, $endDate])
+            ->groupBy('d')
+            ->pluck('cnt', 'd');
+
+        $salesByDate = DB::table('sale_transactions')
+            ->selectRaw('DATE(COALESCE(sale_date, created_at)) as d, COUNT(*) as cnt')
+            ->whereRaw('DATE(COALESCE(sale_date, created_at)) BETWEEN ? AND ?', [$startDate, $endDate])
+            ->groupBy('d')
+            ->pluck('cnt', 'd');
+
+        $paymentsByDate = DB::table('payments')
+            ->selectRaw('DATE(COALESCE(payment_date, created_at, confirmed_at)) as d, COUNT(*) as cnt')
+            ->whereRaw('DATE(COALESCE(payment_date, created_at, confirmed_at)) BETWEEN ? AND ?', [$startDate, $endDate])
+            ->groupBy('d')
+            ->pluck('cnt', 'd');
+
+        $attendanceByDate = collect();
+        if (\Illuminate\Support\Facades\Schema::hasTable('attendance')) {
+            $attendanceByDate = DB::table('attendance')
+                ->selectRaw('DATE(COALESCE(attendance_date, created_at)) as d, COUNT(*) as cnt')
+                ->whereRaw('DATE(COALESCE(attendance_date, created_at)) BETWEEN ? AND ?', [$startDate, $endDate])
+                ->groupBy('d')
+                ->pluck('cnt', 'd');
+        } elseif (\Illuminate\Support\Facades\Schema::hasTable('attendances')) {
+            $attCol = \Illuminate\Support\Facades\Schema::hasColumn('attendances', 'attendance_date') ? 'attendance_date' : 'date';
+            $attendanceByDate = DB::table('attendances')
+                ->selectRaw("DATE(COALESCE({$attCol}, created_at)) as d, COUNT(*) as cnt")
+                ->whereRaw("DATE(COALESCE({$attCol}, created_at)) BETWEEN ? AND ?", [$startDate, $endDate])
+                ->groupBy('d')
+                ->pluck('cnt', 'd');
+        }
+
         $activityTrend = [];
         for ($i = 6; $i >= 0; $i--) {
             $day = now()->subDays($i);
             $dateStr = $day->toDateString();
-            $auditCnt = SystemLog::whereDate('created_at', $dateStr)->count();
-            $salesCnt = \App\Models\SaleTransaction::whereDate('created_at', $dateStr)->count();
-            $payCnt = Payment::whereDate('created_at', $dateStr)->count();
-            $attCnt = \Illuminate\Support\Facades\Schema::hasTable('attendances')
-                ? DB::table('attendances')->whereDate('date', $dateStr)->count()
-                : 0;
+            $auditCnt = (int) ($auditByDate[$dateStr] ?? 0);
+            $salesCnt = (int) ($salesByDate[$dateStr] ?? 0);
+            $payCnt = (int) ($paymentsByDate[$dateStr] ?? 0);
+            $attCnt = (int) ($attendanceByDate[$dateStr] ?? 0);
             $activityTrend[] = [
                 'date' => $dateStr,
                 'label' => $day->format('M d'),

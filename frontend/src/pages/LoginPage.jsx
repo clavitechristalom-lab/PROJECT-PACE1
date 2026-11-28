@@ -1220,7 +1220,7 @@ export default function LoginPage() {
                 className="inline-flex items-center gap-2.5 px-6 py-3.5 rounded-2xl bg-[#58B947]/10 hover:bg-[#58B947] border border-[#58B947]/30 hover:border-[#58B947] text-[#58B947] hover:text-white text-xs sm:text-sm font-extrabold uppercase tracking-wider shadow-sm hover:shadow-lg hover:shadow-green-500/20 transition-all cursor-pointer group"
               >
                 <FiBriefcase className="w-4 h-4 shrink-0" />
-                <span>Company Profile, Mission &amp; Governance</span>
+                <span>Company Profile</span>
                 <FiArrowRight className="w-4 h-4 shrink-0 group-hover:translate-x-1 transition-transform" />
               </button>
             </div>
@@ -1234,10 +1234,10 @@ export default function LoginPage() {
               <span className="text-xs font-bold uppercase tracking-widest text-[#58B947] mb-3 block">We're Here For You</span>
               <h2 className="text-3xl md:text-4xl font-extrabold text-gray-900 dark:text-white mb-4">Support & Service</h2>
               <p className="text-base md:text-lg max-w-3xl mx-auto leading-relaxed text-gray-500 dark:text-slate-400">
-                From product inquiries to after-sales service, our dedicated team ensures your complete satisfaction — whether it's installments, warranty claims, or product maintenance.
+                From product inquiries to after-sales service, our dedicated team ensures your complete satisfaction — whether it's installments, warranty claims.
               </p>
             </div>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 max-w-4xl mx-auto mb-8">
               {/* Card 1: Warranty Support */}
               <div
                 onClick={() => setServiceModal('warranty')}
@@ -1331,53 +1331,6 @@ export default function LoginPage() {
                   <FiArrowRight className="w-4 h-4 group-hover:translate-x-1.5 transition-transform" />
                 </div>
               </div>
-
-              {/* Card 3: Maintenance */}
-              <div
-                onClick={() => setServiceModal('maintenance')}
-                className="rounded-2xl bg-[#fffdf9] dark:bg-slate-800/90 border border-[#ebe6dc] dark:border-slate-700 p-6 sm:p-7 shadow-sm hover:shadow-xl hover:border-orange-500/60 dark:hover:border-orange-400/60 hover:-translate-y-1 transition-all duration-300 flex flex-col justify-between cursor-pointer group"
-                role="button"
-                tabIndex={0}
-                aria-label="View Maintenance details"
-                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setServiceModal('maintenance'); }}
-              >
-                <div className="space-y-4">
-                  <div className="flex items-center justify-between">
-                    <div className="w-12 h-12 rounded-xl bg-orange-50 dark:bg-orange-950/70 border border-orange-100 dark:border-orange-800/60 flex items-center justify-center text-orange-600 dark:text-orange-400 group-hover:scale-110 transition-transform">
-                      <FiTool className="w-6 h-6" />
-                    </div>
-                    <span className="text-[11px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-full bg-orange-50 dark:bg-orange-900/40 text-orange-700 dark:text-orange-300 border border-orange-200 dark:border-orange-800/60">
-                      Certified Techs
-                    </span>
-                  </div>
-                  <div>
-                    <h3 className="font-bold text-gray-900 dark:text-white text-lg group-hover:text-orange-600 dark:group-hover:text-orange-400 transition-colors">
-                      Maintenance
-                    </h3>
-                    <p className="text-gray-600 dark:text-slate-300 text-sm mt-1.5 leading-relaxed">
-                      Professional preventive servicing, deep cleaning, and on-site to prolong the lifespan of your appliances and home furniture.
-                    </p>
-                  </div>
-                  <ul className="space-y-2 pt-3 border-t border-gray-100 dark:border-slate-700/60 text-xs text-gray-600 dark:text-slate-300">
-                    <li className="flex items-center gap-2">
-                      <FiCheck className="w-4 h-4 text-[#58B947] shrink-0" />
-                      <span>TESDA-Certified Service Technicians</span>
-                    </li>
-                    <li className="flex items-center gap-2">
-                      <FiCheck className="w-4 h-4 text-[#58B947] shrink-0" />
-                      <span>Scheduled On-Site Home Visits</span>
-                    </li>
-                    <li className="flex items-center gap-2">
-                      <FiCheck className="w-4 h-4 text-[#58B947] shrink-0" />
-                      <span>24–48h Rapid Dispatch & 30-Day Guarantee</span>
-                    </li>
-                  </ul>
-                </div>
-                <div className="pt-4 mt-5 border-t border-gray-100 dark:border-slate-700/60 flex items-center justify-between text-xs font-bold text-orange-600 dark:text-orange-400 group-hover:text-orange-700 dark:group-hover:text-orange-300">
-                  <span>View Services & Booking</span>
-                  <FiArrowRight className="w-4 h-4 group-hover:translate-x-1.5 transition-transform" />
-                </div>
-              </div>
             </div>
             <div className="text-center flex flex-wrap gap-4 justify-center">
               <button
@@ -1402,16 +1355,13 @@ export default function LoginPage() {
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-12 gap-10 mb-12">
               {/* Brand & Overview */}
               <div className="lg:col-span-4 space-y-4">
-                <div className="flex items-center gap-3">
-                  {companyLogo ? (
-                    <img src={getLogoUrl(companyLogo)} alt={companyName} style={{ height: '40px', width: 'auto', objectFit: 'contain' }} />
-                  ) : (
-                    <div className="w-10 h-10 rounded-xl bg-white flex items-center justify-center text-blue-600 font-black text-xl shadow-md shrink-0">Z</div>
-                  )}
-                  <div>
-                    <span className="text-lg font-extrabold tracking-tight block leading-tight">{companyName || 'Z-LICZ Furniture & Appliances Trading'}</span>
-                    <span className="text-[11px] uppercase tracking-widest text-[#58B947] font-bold">Furniture &amp; Home Appliances</span>
-                  </div>
+                <div className="flex items-center">
+                  <img
+                    src={companyLogo ? getLogoUrl(companyLogo) : zliczLogo}
+                    onError={(e) => { e.currentTarget.src = zliczLogo }}
+                    alt={companyName || 'Z-LICZ Furniture & Appliances Trading'}
+                    className="w-full max-w-[216px] h-24 sm:h-28 object-contain drop-shadow-md transition-transform duration-300 hover:scale-105 select-none"
+                  />
                 </div>
                 <p className="text-sm text-white/65 leading-relaxed">
                   Your trusted retail and installment partner for quality living, bedroom, dining, and office furniture alongside energy-efficient major and small home appliances.
@@ -1455,11 +1405,6 @@ export default function LoginPage() {
                   <li>
                     <button type="button" onClick={() => setServiceModal('installment')} className="hover:text-white transition-colors flex items-center gap-2 cursor-pointer">
                       <FiCreditCard className="w-3.5 h-3.5 text-purple-400" /> Installment Plans
-                    </button>
-                  </li>
-                  <li>
-                    <button type="button" onClick={() => setServiceModal('maintenance')} className="hover:text-white transition-colors flex items-center gap-2 cursor-pointer">
-                      <FiTool className="w-3.5 h-3.5 text-orange-400" /> Servicing
                     </button>
                   </li>
                 </ul>
@@ -3498,7 +3443,7 @@ export default function LoginPage() {
                 </div>
                 <div>
                   <h3 className="font-extrabold text-base sm:text-lg text-gray-900 dark:text-white">
-                    Company Profile, Mission &amp; Governance
+                    Company Profile
                   </h3>
                   <p className="text-xs text-gray-500 dark:text-slate-400">
                     {companyName || 'Z-LICZ Furniture & Appliances Trading'} • Corporate &amp; Administrative Overview
@@ -3522,7 +3467,7 @@ export default function LoginPage() {
                 <div className="lg:col-span-7 space-y-3">
                   <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-[#58B947]/10 border border-[#58B947]/20 text-[11px] font-bold uppercase tracking-wider text-[#58B947]">
                     <FiBriefcase className="w-3.5 h-3.5" />
-                    <span>Company Profile, Mission &amp; Governance</span>
+                    <span>Company Profile</span>
                   </div>
                   <h4 className="text-xl sm:text-2xl font-extrabold text-gray-900 dark:text-white leading-snug">
                     Dedicated Retail Excellence &amp; Direct Administrative Oversight

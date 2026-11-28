@@ -38,49 +38,111 @@ export default function DepositModal({
   const [orderItems, setOrderItems] = useState([]);
   const [amount, setAmount] = useState('');
   const [selectedInstallmentId, setSelectedInstallmentId] = useState(defaultInstallmentId || '');
+  const [selectedScheduleIds, setSelectedScheduleIds] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [isSelectProductModalOpen, setIsSelectProductModalOpen] = useState(false);
 
-  // Check if current payment flow is paying an existing installment account
-  const isInstallmentPayment = Boolean(selectedInstallmentId || defaultInstallmentId);
+  const isSettledInstallment = (inst) => {
+    if (!inst) return false;
+    const st = String(inst.status || '').trim().toLowerCase();
+    if (st === 'fully paid' || st === 'completed' || st === 'complete payment') return true;
+    if (inst.balance !== undefined && inst.balance !== null && Number(inst.balance) <= 0) return true;
+    if (inst.remaining_balance !== undefined && inst.remaining_balance !== null && Number(inst.remaining_balance) <= 0) return true;
+    return false;
+  };
 
-  // Look up selected installment account details from props
+  const unsettledInstallments = useMemo(
+    () => (installments || []).filter((inst) => !isSettledInstallment(inst)),
+    [installments]
+  );
+
   const selectedInstallment = useMemo(() => {
     const id = selectedInstallmentId || defaultInstallmentId;
     if (initialInstallment && (!id || String(initialInstallment.installment_id) === String(id))) {
-      return initialInstallment;
+      const fromList = (installments || []).find(
+        (inst) => String(inst.installment_id) === String(initialInstallment.installment_id)
+      );
+      const merged = fromList ? { ...initialInstallment, ...fromList } : initialInstallment;
+      return isSettledInstallment(merged) ? null : merged;
     }
     if (!id) return null;
-    return (installments || []).find(
+    const found = (installments || []).find(
       inst => String(inst.installment_id) === String(id)
     );
+    return found && !isSettledInstallment(found) ? found : null;
   }, [installments, selectedInstallmentId, defaultInstallmentId, initialInstallment]);
 
-  // Fallback API lookup if installment product image is missing
+  const isInstallmentPayment = Boolean(selectedInstallment);
+
   const [extraAccountData, setExtraAccountData] = useState(null);
 
   useEffect(() => {
-    const id = selectedInstallmentId || defaultInstallmentId;
-    if (isOpen && id && !selectedInstallment?.image_url) {
+    const id = selectedInstallment?.installment_id;
+    const missingImg = !selectedInstallment?.image_url;
+    const missingSchedules = !Array.isArray(selectedInstallment?.paymentSchedules) || selectedInstallment.paymentSchedules.length === 0;
+    if (isOpen && id && (missingImg || missingSchedules)) {
       api.installments.getById(id).then(res => {
         const item = res?.sale_items?.[0] || res?.sale?.items?.[0];
         const acc = res?.installment || res?.account || res;
         const img = item?.product?.image_url || item?.image_url || item?.image || acc?.image_url;
         const prod = item?.product?.product_name || item?.product_name || acc?.product;
-        if (img || prod) {
-          setExtraAccountData({ image_url: img, product: prod });
+        const scheds = res?.schedules || res?.payment_schedules || acc?.payment_schedules || acc?.paymentSchedules;
+        const patch = {};
+        if (img) patch.image_url = img;
+        if (prod) patch.product = prod;
+        if (Array.isArray(scheds) && scheds.length > 0) patch.paymentSchedules = scheds;
+        if (Object.keys(patch).length > 0) {
+          setExtraAccountData(patch);
         }
       }).catch(() => { });
-    } else {
+    } else if (!id) {
       setExtraAccountData(null);
     }
-  }, [isOpen, selectedInstallmentId, defaultInstallmentId, selectedInstallment?.image_url]);
+  }, [isOpen, selectedInstallmentId, defaultInstallmentId, selectedInstallment?.installment_id, selectedInstallment?.image_url, selectedInstallment?.paymentSchedules?.length]);
 
   const activeInstallment = useMemo(() => {
     if (!selectedInstallment && !extraAccountData) return null;
     return { ...selectedInstallment, ...extraAccountData };
   }, [selectedInstallment, extraAccountData]);
+
+  const unpaidSchedules = useMemo(() => {
+    const raw = Array.isArray(activeInstallment?.paymentSchedules)
+      ? activeInstallment.paymentSchedules
+      : (Array.isArray(activeInstallment?.payment_schedules) ? activeInstallment.payment_schedules : []);
+    return raw
+      .filter((s) => {
+        const st = String(s?.status || '').trim().toLowerCase();
+        const bal = Number(s?.balance_due ?? s?.amount_due ?? 0);
+        return st !== 'paid' && bal > 0;
+      })
+      .slice()
+      .sort((a, b) => {
+        const noA = Number(a.installment_no ?? a.installment_number ?? a.schedule_number ?? 0);
+        const noB = Number(b.installment_no ?? b.installment_number ?? b.schedule_number ?? 0);
+        if (noA !== noB) return noA - noB;
+        return new Date(a.due_date || 0) - new Date(b.due_date || 0);
+      });
+  }, [activeInstallment]);
+
+  useEffect(() => {
+    if (!isOpen || !isInstallmentPayment) return;
+    if (unpaidSchedules.length === 0) {
+      setSelectedScheduleIds([]);
+      return;
+    }
+    const validIds = new Set(unpaidSchedules.map((s) => String(s.schedule_id ?? s.id)));
+    const stillValid = selectedScheduleIds.filter((id) => validIds.has(String(id)));
+    if (stillValid.length === 0) {
+      const first = unpaidSchedules[0];
+      const firstId = String(first.schedule_id ?? first.id);
+      setSelectedScheduleIds([firstId]);
+      const firstBal = Math.round(Number(first.balance_due ?? first.amount_due ?? 0) * 100) / 100;
+      if (firstBal > 0) {
+        setAmount(firstBal.toFixed(2));
+      }
+    }
+  }, [isOpen, isInstallmentPayment, activeInstallment?.installment_id, unpaidSchedules]);
 
   const installmentImageUrl = activeInstallment?.image_url || activeInstallment?.image || null;
 
@@ -135,17 +197,22 @@ export default function DepositModal({
       setSelectedMethod('GCash');
       setCashChannel('store');
       setSelectedCollectorId('');
-      setSelectedInstallmentId(defaultInstallmentId || '');
+      const resolvedInitInst = initialInstallment && !isSettledInstallment(initialInstallment)
+        ? initialInstallment
+        : (defaultInstallmentId
+          ? ((installments || []).find(i => String(i.installment_id) === String(defaultInstallmentId) && !isSettledInstallment(i)) || null)
+          : null);
+      setSelectedInstallmentId(resolvedInitInst ? String(resolvedInitInst.installment_id) : '');
+      setSelectedScheduleIds([]);
       setCheckoutData(null);
       setError('');
       setPollingStatus('waiting');
-      setPaymentTerm('full');
+      setPaymentTerm(initialPaymentTerm === 'installment' && allowInstallment ? 'installment' : 'full');
       setInstallmentTermMonths(3);
       setCustomerRef('');
       setProofFile(null);
       setProofPreview(null);
 
-      // Normalize items
       const formattedItems = (initialProducts || []).map(p => ({
         product_id: p.product_id,
         product_name: p.product_name,
@@ -159,13 +226,16 @@ export default function DepositModal({
 
       setOrderItems(formattedItems);
 
-      // Compute total dynamically from products
       if (formattedItems.length > 0) {
         const total = formattedItems.reduce((sum, item) => sum + (item.price * item.quantity), 0);
         setAmount(String(total));
+      } else if (resolvedInitInst) {
+        const bal = Number(resolvedInitInst.balance ?? resolvedInitInst.remaining_balance ?? 0);
+        const instDue = resolvedInitInst.monthly_payment || resolvedInitInst.monthly_due || resolvedInitInst.balance_due || bal;
+        const cappedDue = bal > 0 && instDue > bal ? bal : instDue;
+        setAmount(initialAmount ? String(initialAmount) : (cappedDue ? String(cappedDue) : ''));
       } else {
-        const instDue = initialInstallment?.monthly_payment || initialInstallment?.monthly_due || initialInstallment?.balance_due;
-        setAmount(initialAmount ? String(initialAmount) : (instDue ? String(instDue) : ''));
+        setAmount(initialAmount && !defaultInstallmentId ? String(initialAmount) : '');
       }
     } else {
       if (pollTimerRef.current) clearInterval(pollTimerRef.current);
@@ -299,29 +369,6 @@ export default function DepositModal({
     }
   }, [step, checkoutData, pollingStatus, onSuccess]);
 
-  if (!isOpen) return null;
-
-  const handleAmountChange = (e) => {
-    const val = e.target.value.replace(/[^0-9.]/g, '');
-    setAmount(val);
-    if (error) setError('');
-  };
-
-  // Request Store Admin approval for installment
-  const handleRequestInstallment = async () => {
-    setRequestingApproval(true);
-    try {
-      const res = await api.customerApp.requestInstallment({
-        notes: `Customer requested installment authorization for ${orderItems.length} selected item(s) totalling ${fmt(totalCashPrice)}.`,
-      });
-      showSuccess('Request Sent', res.message || 'Your Store Administrator has been notified to review and allow your account for installment.');
-    } catch (err) {
-      showInfo('Installment Request', err.message || 'Please contact your store administrator to enable installment for your account.');
-    } finally {
-      setRequestingApproval(false);
-    }
-  };
-
   useEffect(() => {
     if (!isOpen || selectedMethod !== 'Cash') return;
     let active = true;
@@ -350,11 +397,96 @@ export default function DepositModal({
     return () => { active = false; };
   }, [isOpen, selectedMethod, selectedInstallmentId]);
 
+  if (!isOpen) return null;
+
+  const handleAmountChange = (e) => {
+    const val = e.target.value.replace(/[^0-9.]/g, '');
+    setAmount(val);
+    if (error) setError('');
+  };
+
+  // Request Store Admin approval for installment
+  const handleRequestInstallment = async () => {
+    setRequestingApproval(true);
+    try {
+      const res = await api.customerApp.requestInstallment({
+        notes: `Customer requested installment authorization for ${orderItems.length} selected item(s) totalling ${fmt(totalCashPrice)}.`,
+      });
+      showSuccess('Request Sent', res.message || 'Your Store Administrator has been notified to review and allow your account for installment.');
+    } catch (err) {
+      showInfo('Installment Request', err.message || 'Please contact your store administrator to enable installment for your account.');
+    } finally {
+      setRequestingApproval(false);
+    }
+  };
+
+  const sumScheduleBalances = (ids) => {
+    const idSet = new Set((ids || []).map(String));
+    const total = unpaidSchedules.reduce((sum, s) => {
+      const sid = String(s.schedule_id ?? s.id);
+      return idSet.has(sid) ? sum + Number(s.balance_due ?? s.amount_due ?? 0) : sum;
+    }, 0);
+    return Math.round(total * 100) / 100;
+  };
+
+  const formatSchedDate = (val) => {
+    if (!val) return '—';
+    const d = new Date(val);
+    if (Number.isNaN(d.getTime())) return String(val);
+    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  };
+
+  const handleToggleSchedule = (sched) => {
+    const sid = String(sched.schedule_id ?? sched.id);
+    const exists = selectedScheduleIds.includes(sid);
+    const nextIds = exists
+      ? selectedScheduleIds.filter((id) => id !== sid)
+      : [...selectedScheduleIds, sid];
+
+    const orderedNextIds = unpaidSchedules
+      .map((s) => String(s.schedule_id ?? s.id))
+      .filter((id) => nextIds.includes(id));
+
+    setSelectedScheduleIds(orderedNextIds);
+    const sum = sumScheduleBalances(orderedNextIds);
+    setAmount(sum > 0 ? sum.toFixed(2) : '');
+    if (error) setError('');
+  };
+
+  const handleSelectAllSchedules = () => {
+    if (unpaidSchedules.length === 0) return;
+    const allSelected = selectedScheduleIds.length === unpaidSchedules.length;
+    if (allSelected) {
+      const firstId = String(unpaidSchedules[0].schedule_id ?? unpaidSchedules[0].id);
+      setSelectedScheduleIds([firstId]);
+      const sum = sumScheduleBalances([firstId]);
+      setAmount(sum > 0 ? sum.toFixed(2) : '');
+    } else {
+      const allIds = unpaidSchedules.map((s) => String(s.schedule_id ?? s.id));
+      setSelectedScheduleIds(allIds);
+      const sum = sumScheduleBalances(allIds);
+      setAmount(sum > 0 ? sum.toFixed(2) : '');
+    }
+    if (error) setError('');
+  };
+
+  const handleSwitchInstallmentAccount = (nextInstId) => {
+    setSelectedInstallmentId(String(nextInstId));
+    setExtraAccountData(null);
+    setSelectedScheduleIds([]);
+    if (error) setError('');
+  };
+
   const handleContinue = async (e) => {
     if (e) e.preventDefault();
     const numAmount = parseFloat(amount);
     if (!amount || isNaN(numAmount) || numAmount < 1) {
       setError('Please enter a valid payment amount (minimum ₱1.00)');
+      return;
+    }
+
+    if (isInstallmentPayment && unpaidSchedules.length > 0 && selectedScheduleIds.length === 0) {
+      setError('Please select at least one installment due schedule to pay.');
       return;
     }
 
@@ -367,6 +499,9 @@ export default function DepositModal({
     setLoading(true);
     try {
       const isInstallment = paymentTerm === 'installment' && isInstallmentAllowed && orderItems.length > 0;
+      const numericScheduleIds = isInstallmentPayment
+        ? selectedScheduleIds.map((id) => Number(id)).filter((n) => Number.isFinite(n) && n > 0)
+        : [];
       const payload = {
         amount: numAmount,
         payment_method: selectedMethod,
@@ -376,6 +511,8 @@ export default function DepositModal({
           ? 'installment_order'
           : (orderItems.length > 0 ? 'product_order' : (selectedInstallmentId ? 'installment_payment' : 'deposit')),
         installment_id: selectedInstallmentId || null,
+        schedule_id: numericScheduleIds[0] || null,
+        schedule_ids: numericScheduleIds.length > 0 ? numericScheduleIds : null,
         items: orderItems.map(item => ({
           product_id: item.product_id,
           quantity: item.quantity,
@@ -503,31 +640,34 @@ export default function DepositModal({
       }
     } catch (err) {
       console.error(err);
+      let recovered = false;
       try {
         const checkRes = await api.ewallet.checkStatus(checkoutData.transaction_reference);
         if (checkRes?.is_paid) {
+          recovered = true;
           if (pollTimerRef.current) clearInterval(pollTimerRef.current);
           setPollingStatus('paid');
-        } else {
-          setPollingStatus('pending');
-        }
-        if (checkRes?.deposit) {
-          setCheckoutData(prev => ({
-            ...prev,
-            ...checkRes.deposit,
-            customer_reference: checkRes.customer_reference || checkRes.deposit.customer_reference || customerRef,
-            proof_of_payment_url: checkRes.proof_of_payment_url || proofPreview,
-            payment_status: checkRes.is_paid ? 'paid' : 'pending',
-          }));
-        }
-        setStep(3);
-        if (onSuccess) {
-          onSuccess(checkRes);
-        } else {
-          triggerDataSync('customers');
+          if (checkRes?.deposit) {
+            setCheckoutData(prev => ({
+              ...prev,
+              ...checkRes.deposit,
+              customer_reference: checkRes.customer_reference || checkRes.deposit.customer_reference || customerRef,
+              proof_of_payment_url: checkRes.proof_of_payment_url || proofPreview,
+              payment_status: 'paid',
+            }));
+          }
+          setStep(3);
+          if (onSuccess) {
+            onSuccess(checkRes);
+          } else {
+            triggerDataSync('customers');
+          }
         }
       } catch (e) {
         console.error(e);
+      }
+      if (!recovered) {
+        showError('Payment Submission Failed', err?.message || 'Unable to submit payment. Please check your details and try again.');
       }
     } finally {
       setVerifyingManually(false);
@@ -650,8 +790,35 @@ export default function DepositModal({
                 {/* ─── 1. Installment Due Payment Banner with Product Image ─── */}
                 {isInstallmentPayment ? (
                   <div className="rounded-2xl border border-purple-200/90 dark:border-purple-800/80 bg-gradient-to-br from-purple-50/70 via-background to-purple-50/30 dark:from-purple-950/30 dark:via-background dark:to-purple-950/10 p-4 space-y-3.5 shadow-sm">
+                    {unsettledInstallments.length > 1 && (
+                      <div className="pb-2.5 border-b border-purple-200/60 dark:border-purple-800/40 space-y-1.5">
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground block">
+                          Select Installment Account ({unsettledInstallments.length})
+                        </span>
+                        <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5">
+                          {unsettledInstallments.map((instItem) => {
+                            const activeAcc = String(instItem.installment_id) === String(activeInstallment?.installment_id);
+                            return (
+                              <button
+                                key={instItem.installment_id}
+                                type="button"
+                                onClick={() => handleSwitchInstallmentAccount(instItem.installment_id)}
+                                className={`px-2.5 py-1 rounded-xl text-[11px] font-bold border transition-all shrink-0 cursor-pointer ${
+                                  activeAcc
+                                    ? 'bg-purple-600 text-white border-purple-600 shadow-xs'
+                                    : 'bg-background/80 text-muted-foreground hover:text-foreground border-border'
+                                }`}
+                              >
+                                <span className="font-mono">{instItem.account_no}</span>
+                                {instItem.product ? ` • ${String(instItem.product).slice(0, 18)}${String(instItem.product).length > 18 ? '…' : ''}` : ''}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+
                     <div className="flex items-center gap-3.5">
-                      {/* Product Image Thumbnail */}
                       <div className="w-16 h-16 rounded-2xl bg-white dark:bg-card border border-purple-200 dark:border-purple-800/80 overflow-hidden shrink-0 shadow-xs flex items-center justify-center p-1 relative">
                         {installmentImageUrl ? (
                           <img
@@ -672,38 +839,128 @@ export default function DepositModal({
                         </div>
                       </div>
 
-                      {/* Installment Account Title & Product Info */}
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2 flex-wrap">
                           <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-purple-600 text-white shadow-2xs">
                             {activeInstallment?.account_no || 'INSTALLMENT'}
                           </span>
                           <span className="text-[10px] font-bold uppercase tracking-wider text-purple-700 dark:text-purple-300">
-                            Monthly Installment Due
+                            {selectedScheduleIds.length > 1
+                              ? `${selectedScheduleIds.length} Installment Dues`
+                              : 'Monthly Installment Due'}
                           </span>
                         </div>
                         <h4 className="text-sm font-black text-foreground truncate mt-1">
                           {activeInstallment?.product || 'Installment Product Account'}
                         </h4>
                         <p className="text-[11px] text-muted-foreground mt-0.5">
-                          Account reference for due settlement
+                          {unpaidSchedules.length > 0
+                            ? `${selectedScheduleIds.length} of ${unpaidSchedules.length} remaining schedule${unpaidSchedules.length === 1 ? '' : 's'} selected`
+                            : 'Account reference for due settlement'}
                         </p>
                       </div>
 
-                      {/* Due Amount Highlight */}
-                      {(activeInstallment?.monthly_payment || amount) && (
+                      {(amount || activeInstallment?.monthly_payment) && (
                         <div className="text-right shrink-0 pl-1">
                           <span className="text-[10px] uppercase font-bold text-muted-foreground tracking-wide block">
                             Due Amount
                           </span>
                           <span className="font-mono font-black text-base text-purple-700 dark:text-purple-300">
-                            {fmt(activeInstallment?.monthly_payment || parseFloat(amount) || 0)}
+                            {fmt(parseFloat(amount) || activeInstallment?.monthly_payment || 0)}
                           </span>
                         </div>
                       )}
                     </div>
 
-                    {/* Financial Metrics Strip */}
+                    {unpaidSchedules.length > 0 && (
+                      <div className="pt-3 border-t border-purple-200/60 dark:border-purple-800/40 space-y-2.5">
+                        <div className="flex items-center justify-between gap-2 flex-wrap">
+                          <span className="text-[11px] font-bold text-purple-700 dark:text-purple-300 uppercase tracking-wider">
+                            Select Payment Schedules
+                          </span>
+
+                          {unpaidSchedules.length > 1 && (
+                            <button
+                              type="button"
+                              onClick={handleSelectAllSchedules}
+                              className="px-2.5 py-1 rounded-lg text-[11px] font-bold bg-purple-500/10 hover:bg-purple-500/20 text-purple-700 dark:text-purple-300 border border-purple-500/25 transition-colors cursor-pointer"
+                            >
+                              {selectedScheduleIds.length === unpaidSchedules.length
+                                ? 'Select 1st Due Only'
+                                : `Select All (${unpaidSchedules.length})`}
+                            </button>
+                          )}
+                        </div>
+
+                        <div className="rounded-xl border border-border/80 bg-background/80 overflow-hidden">
+                          <div className="grid grid-cols-12 px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-muted-foreground bg-muted/40 border-b border-border/70">
+                            <div className="col-span-6">Due Date</div>
+                            <div className="col-span-3 text-right">Balance</div>
+                            <div className="col-span-3 text-right">Status</div>
+                          </div>
+
+                          <div className="divide-y divide-border/60 max-h-44 overflow-y-auto">
+                            {unpaidSchedules.map((sched, idx) => {
+                              const sid = String(sched.schedule_id ?? sched.id ?? idx);
+                              const isSelected = selectedScheduleIds.includes(sid);
+                              const schedBal = Number(sched.balance_due ?? sched.amount_due ?? 0);
+                              const schedNo = sched.installment_no ?? sched.installment_number ?? sched.schedule_number ?? (idx + 1);
+                              const isOverdue = String(sched.status || '').toLowerCase() === 'overdue';
+
+                              return (
+                                <button
+                                  key={sid}
+                                  type="button"
+                                  onClick={() => handleToggleSchedule(sched)}
+                                  className={`w-full grid grid-cols-12 items-center px-3 py-2 text-xs text-left transition-colors cursor-pointer ${
+                                    isSelected
+                                      ? 'bg-purple-500/10 dark:bg-purple-500/15'
+                                      : 'hover:bg-muted/40'
+                                  }`}
+                                >
+                                  <div className="col-span-6 flex items-center gap-2 min-w-0">
+                                    <span
+                                      className={`w-4 h-4 rounded flex items-center justify-center border shrink-0 transition-colors ${
+                                        isSelected
+                                          ? 'border-purple-600 bg-purple-600 text-white'
+                                          : 'border-muted-foreground/40 bg-background'
+                                      }`}
+                                    >
+                                      {isSelected && <FiCheck className="w-2.5 h-2.5 stroke-[3]" />}
+                                    </span>
+                                    <div className="min-w-0">
+                                      <span className="font-semibold text-foreground block truncate">
+                                        {formatSchedDate(sched.due_date)}
+                                      </span>
+                                      <span className="text-[10px] text-muted-foreground">
+                                        Schedule #{schedNo}
+                                      </span>
+                                    </div>
+                                  </div>
+
+                                  <div className="col-span-3 text-right font-mono font-bold text-foreground">
+                                    {fmt(schedBal)}
+                                  </div>
+
+                                  <div className="col-span-3 text-right">
+                                    <span
+                                      className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-bold border ${
+                                        isOverdue
+                                          ? 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/30'
+                                          : 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/30'
+                                      }`}
+                                    >
+                                      {sched.status || 'Pending'}
+                                    </span>
+                                  </div>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
                     <div className="pt-2.5 border-t border-purple-200/60 dark:border-purple-800/40 grid grid-cols-2 gap-2 text-xs">
                       <div>
                         <span className="text-[10px] text-muted-foreground block">Remaining Balance:</span>
@@ -1117,71 +1374,6 @@ export default function DepositModal({
                           }`}>
                           {selectedMethod === 'Cash' && cashChannel === 'store' && <div className="w-2 h-2 rounded-full bg-white"></div>}
                         </div>
-                      </div>
-
-                      <div
-                        onClick={() => {
-                          setSelectedMethod('Cash');
-                          setCashChannel('collector');
-                        }}
-                        className={`p-3.5 rounded-2xl border-2 transition-all cursor-pointer space-y-3 group ${selectedMethod === 'Cash' && cashChannel === 'collector'
-                          ? 'border-amber-600 bg-amber-50/50 dark:bg-amber-950/20 shadow-md ring-2 ring-amber-500/20'
-                          : 'border-border hover:border-border/80 bg-background hover:bg-muted/30'
-                          }`}
-                      >
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-3.5">
-                            <div className="w-11 h-11 rounded-2xl bg-gradient-to-tr from-amber-600 to-orange-500 text-white flex items-center justify-center font-black text-xl shrink-0 shadow-md">
-                              <FiTruck className="w-5 h-5" />
-                            </div>
-                            <div>
-                              <div className="flex items-center gap-2">
-                                <span className="font-bold text-sm text-foreground">Pay via Collector (Door-to-Door)</span>
-                                <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-700 dark:bg-amber-900/60 dark:text-amber-300">
-                                  Field Collector
-                                </span>
-                              </div>
-                              <p className="text-xs text-muted-foreground mt-0.5">Pay physical cash when your branch Collector visits</p>
-                            </div>
-                          </div>
-
-                          <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center transition-colors ${selectedMethod === 'Cash' && cashChannel === 'collector' ? 'border-amber-600 bg-amber-600' : 'border-muted-foreground/40'
-                            }`}>
-                            {selectedMethod === 'Cash' && cashChannel === 'collector' && <div className="w-2 h-2 rounded-full bg-white"></div>}
-                          </div>
-                        </div>
-
-                        {cashChannel === 'collector' && (
-                          <div
-                            onClick={(e) => e.stopPropagation()}
-                            className="pt-2 border-t border-amber-200 dark:border-amber-900/50 space-y-1.5"
-                          >
-                            <label className="text-[11px] font-bold text-foreground uppercase tracking-wide flex items-center gap-1.5">
-                              <FiUser className="w-3.5 h-3.5 text-amber-600" />
-                              <span>Select Assigned Branch Collector *</span>
-                            </label>
-                            {collectorsLoading ? (
-                              <p className="text-xs text-muted-foreground py-1">Loading branch collectors...</p>
-                            ) : cashCollectors.length === 0 ? (
-                              <p className="text-xs text-rose-600 dark:text-rose-400 font-medium py-1">
-                                No active Collectors found for your branch. Please select Pay at Store instead.
-                              </p>
-                            ) : (
-                              <select
-                                value={selectedCollectorId}
-                                onChange={(e) => setSelectedCollectorId(e.target.value)}
-                                className="w-full px-3 py-2 text-xs rounded-xl bg-background border border-border focus:border-amber-600 text-foreground outline-none font-medium"
-                              >
-                                <option value="">-- Choose Branch Collector --</option>
-                                {cashCollectors.map(c => (
-                                  <option key={c.collector_id} value={c.collector_id}>
-                                    {c.name} ({c.employee_code}){c.branch_name ? ` • ${c.branch_name}` : ''}
-                                  </option>
-                                ))}
-                              </select>
-                            )}
-                          </div>
-                        )}
                       </div>
                     </div>
                   )}
@@ -1687,7 +1879,7 @@ export default function DepositModal({
 
                   <div>
                     <h3 className="text-2xl font-black text-foreground tracking-tight">
-                      {isPaid ? 'Payment Confirmed & Paid! 🎉' : 'Payment Submitted! ⏳'}
+                      {isPaid ? 'Payment Confirmed & Paid!' : 'Payment Submitted!'}
                     </h3>
                     <p className="text-xs text-muted-foreground mt-1 font-medium max-w-md mx-auto">
                       {isPaid

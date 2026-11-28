@@ -105,22 +105,26 @@ class InstallmentController extends Controller
 
         $branchInfo = $this->resolveBranchInfo($inst);
 
-        // Next Due Schedule
-        $nextSchedule = $inst->paymentSchedules
-            ->where('balance_due', '>', 0)
-            ->sortBy('due_date')
-            ->first();
+        $isFullyPaid = $inst->isFullyPaid() || $balance <= 0.0;
+        if ($isFullyPaid) {
+            $balance = 0.0;
+        }
 
-        // Check if there are overdue schedules
-        $hasOverdue = $balance > 0 && $inst->paymentSchedules
+        $nextSchedule = $isFullyPaid
+            ? null
+            : $inst->paymentSchedules
+                ->where('balance_due', '>', 0)
+                ->sortBy('due_date')
+                ->first();
+
+        $hasOverdue = !$isFullyPaid && $balance > 0 && $inst->paymentSchedules
             ->where('due_date', '<', $today)
             ->where('balance_due', '>', 0)
             ->isNotEmpty();
 
-        // Computed Status
         $computedStatus = $inst->status;
-        if ($balance <= 0) {
-            $computedStatus = 'Complete Payment';
+        if ($isFullyPaid) {
+            $computedStatus = InstallmentAccount::STATUS_FULLY_PAID;
         } elseif ($hasOverdue) {
             $computedStatus = 'Overdue';
         } elseif ($computedStatus === 'Overdue' && !$hasOverdue) {
@@ -170,6 +174,28 @@ class InstallmentController extends Controller
 
         $isOpenContract = strtolower(trim((string) $inst->frequency)) === 'open contract';
 
+        $verifierUser = $inst->relationLoaded('completedVerifiedBy') ? $inst->completedVerifiedBy : null;
+        $finalVerifiedAt = $inst->completed_at;
+        if ($isFullyPaid && !$verifierUser && $inst->relationLoaded('payments')) {
+            $lastSettled = $inst->payments
+                ->filter(fn ($p) => Payment::isSettledStatus($p->status))
+                ->sortByDesc('payment_id')
+                ->first();
+            if ($lastSettled) {
+                $verifierUser = ($lastSettled->relationLoaded('confirmedBy') ? $lastSettled->confirmedBy : null)
+                    ?: ($lastSettled->relationLoaded('receivedBy') ? $lastSettled->receivedBy : null);
+                if (!$finalVerifiedAt) {
+                    $finalVerifiedAt = $lastSettled->confirmed_at ?: ($lastSettled->payment_date ?: $inst->updated_at);
+                }
+            }
+        }
+        $finalVerifierName = $verifierUser
+            ? ($verifierUser->employee
+                ? trim("{$verifierUser->employee->first_name} {$verifierUser->employee->last_name}")
+                : $verifierUser->username)
+            : null;
+        $finalVerifierRole = $verifierUser?->role ?: null;
+
         return [
             'installment_id' => $inst->installment_id,
             'account_no' => $inst->account_no,
@@ -196,29 +222,43 @@ class InstallmentController extends Controller
             'appliances_agent_contribution' => (float) ($inst->appliances_agent_contribution ?? $inst->sale?->appliances_agent_contribution ?? 0),
             'furniture_agent_contribution' => (float) ($inst->furniture_agent_contribution ?? $inst->sale?->furniture_agent_contribution ?? 0),
             'total_agent_contribution' => (float) ($inst->total_agent_contribution ?? $inst->sale?->total_agent_contribution ?? 0),
+            'agent_contribution_status' => ($inst->has_agent ?? $inst->sale?->has_agent ?? false)
+                ? ($isFullyPaid ? ($inst->agent_contribution_status ?: InstallmentAccount::AGENT_CONTRIBUTION_SETTLED) : ($inst->agent_contribution_status ?: 'Pending'))
+                : null,
             'start_date' => $inst->start_date,
-            'principal_amount' => (float)$inst->principal_amount,
-            'down_payment' => (float)$inst->down_payment,
-            'financed_amount' => max(0, (float)$inst->principal_amount - (float)$inst->down_payment),
-            'interest_rate' => (float)$inst->interest_rate,
-            'interest_amount' => (float)$inst->interest_amount,
+            'principal_amount' => (float) $inst->principal_amount,
+            'down_payment' => (float) $inst->down_payment,
+            'financed_amount' => max(0, (float) $inst->principal_amount - (float) $inst->down_payment),
+            'interest_rate' => (float) $inst->interest_rate,
+            'interest_amount' => (float) $inst->interest_amount,
             'total_payable' => $totalPayable,
-            'installment_amount' => (float)$inst->installment_amount,
-            'number_of_installments' => (int)$inst->number_of_installments,
+            'installment_amount' => (float) $inst->installment_amount,
+            'number_of_installments' => (int) $inst->number_of_installments,
             'is_open_contract' => $isOpenContract,
-            'paid_installments' => $paidTermsCount,
+            'paid_installments' => $isFullyPaid ? $totalTermsCount : $paidTermsCount,
             'total_terms' => $totalTermsCount,
             'frequency' => $inst->frequency ?: 'Monthly',
             'paid' => round($paid, 2),
             'balance' => $balance,
+            'remaining_balance' => $balance,
             'pending_payments_amount' => $fin['pending_amount'],
             'pending_payments_count' => $fin['pending_count'],
-            'progress_percentage' => $totalPayable > 0 ? min(100, round(($paid / $totalPayable) * 100, 1)) : 0,
-            'next_due_date' => $nextSchedule ? $nextSchedule->due_date : null,
-            'next_amount_due' => $nextSchedule ? (float)$nextSchedule->balance_due : 0,
-            'days_overdue' => $daysOverdue,
-            'payment_status' => $balance <= 0 ? 'Paid in Full' : ($hasOverdue ? 'Overdue' : ($paid > 0 ? 'Partially Paid' : 'Unpaid')),
+            'progress_percentage' => $isFullyPaid ? 100 : ($totalPayable > 0 ? min(100, round(($paid / $totalPayable) * 100, 1)) : 0),
+            'next_due_date' => $isFullyPaid ? null : ($nextSchedule ? $nextSchedule->due_date : null),
+            'next_amount_due' => $isFullyPaid ? 0 : ($nextSchedule ? (float) $nextSchedule->balance_due : 0),
+            'days_overdue' => $isFullyPaid ? 0 : $daysOverdue,
+            'payment_status' => $isFullyPaid ? 'Paid in Full' : ($hasOverdue ? 'Overdue' : ($paid > 0 ? 'Partially Paid' : 'Unpaid')),
             'status' => $computedStatus,
+            'completed_at' => $isFullyPaid
+                ? ($inst->completed_at instanceof \Carbon\CarbonInterface
+                    ? $inst->completed_at->toIso8601String()
+                    : ($finalVerifiedAt instanceof \Carbon\CarbonInterface
+                        ? $finalVerifiedAt->toIso8601String()
+                        : ($finalVerifiedAt ? (string) $finalVerifiedAt : ($inst->updated_at ? $inst->updated_at->toIso8601String() : null))))
+                : null,
+            'customer_standing' => $isFullyPaid ? ($inst->customer_standing ?: InstallmentAccount::STANDING_CLEARED) : ($inst->customer_standing ?: null),
+            'final_verifier_name' => $finalVerifierName,
+            'final_verifier_role' => $finalVerifierRole,
             'notes' => $inst->notes,
         ];
     }
@@ -249,11 +289,13 @@ class InstallmentController extends Controller
             }
         }
 
-        // Automatically update overdue schedule statuses (shared 5-minute lock across Dashboard & Installments)
         if (\Illuminate\Support\Facades\Cache::add('sync_overdue_schedules_global', true, 300)) {
             PaymentSchedule::where('due_date', '<', $today)
                 ->where('balance_due', '>', 0)
                 ->whereIn('status', ['Pending', 'Partially Paid'])
+                ->whereHas('installmentAccount', function ($q) {
+                    $q->whereNotIn('status', InstallmentAccount::COMPLETED_STATUSES);
+                })
                 ->update(['status' => 'Overdue']);
         }
 
@@ -261,6 +303,8 @@ class InstallmentController extends Controller
             'customer:customer_id,customer_code,first_name,last_name,phone,email,address,branch_id,branch,allow_installment',
             'customer.branch:id,name',
             'agent:employee_id,employee_code,first_name,last_name,position',
+            'completedVerifiedBy:user_id,username,role,employee_id',
+            'completedVerifiedBy.employee:employee_id,first_name,last_name',
             'sale:sale_id,invoice_no,processed_by,branch_id,has_agent,agent_id,appliances_agent_contribution,furniture_agent_contribution,total_agent_contribution',
             'sale.branch:id,name',
             'sale.agent:employee_id,employee_code,first_name,last_name,position',
@@ -269,32 +313,16 @@ class InstallmentController extends Controller
             'sale.processedBy.employee.branch:id,name',
             'sale.items:sale_item_id,sale_id,product_id,quantity,unit_price,discount_amount,line_total,category_domain,agent_commission_rate,agent_contribution',
             'sale.items.product:product_id,product_name,product_code,category,image_url',
-            'payments:payment_id,installment_id,amount,status,reference_no,notes',
+            'payments:payment_id,installment_id,amount,status,reference_no,payment_date,confirmed_by,received_by,confirmed_at,notes',
+            'payments.confirmedBy:user_id,username,role,employee_id',
+            'payments.confirmedBy.employee:employee_id,first_name,last_name',
+            'payments.receivedBy:user_id,username,role,employee_id',
+            'payments.receivedBy.employee:employee_id,first_name,last_name',
             'paymentSchedules:schedule_id,installment_id,due_date,balance_due,amount_due,amount_paid,status'
-        ])->select([
-            'installment_id',
-            'account_no',
-            'customer_id',
-            'sale_id',
-            'has_agent',
-            'agent_id',
-            'appliances_agent_contribution',
-            'furniture_agent_contribution',
-            'total_agent_contribution',
-            'start_date',
-            'principal_amount',
-            'down_payment',
-            'interest_rate',
-            'interest_amount',
-            'total_payable',
-            'installment_amount',
-            'number_of_installments',
-            'frequency',
-            'status',
-            'notes'
         ])->where(function ($q) {
             $q->where('number_of_installments', '>', 0)
               ->orWhere('frequency', 'Open Contract')
+              ->orWhereIn('status', InstallmentAccount::COMPLETED_STATUSES)
               ->orWhere('status', '!=', 'Completed');
         });
 
@@ -381,7 +409,7 @@ class InstallmentController extends Controller
         $totalOutstanding = (float)$installments->sum('balance');
         $activeCount = $installments->where('status', 'Active')->count();
         $overdueCount = $installments->where('status', 'Overdue')->count();
-        $completedCount = $installments->whereIn('status', ['Completed', 'Complete Payment'])->count();
+        $completedCount = $installments->whereIn('status', InstallmentAccount::COMPLETED_STATUSES)->count();
         $pendingCount = $installments->where('status', 'Pending')->count();
 
         $payload = [
@@ -778,10 +806,12 @@ class InstallmentController extends Controller
         $user = $request->user();
         $today = date('Y-m-d');
 
-        // Refresh overdue schedules
         PaymentSchedule::where('due_date', '<', $today)
             ->where('balance_due', '>', 0)
             ->whereIn('status', ['Pending', 'Partially Paid'])
+            ->whereHas('installmentAccount', function ($q) {
+                $q->whereNotIn('status', InstallmentAccount::COMPLETED_STATUSES);
+            })
             ->update(['status' => 'Overdue']);
 
         $query = InstallmentAccount::with([
@@ -795,9 +825,10 @@ class InstallmentController extends Controller
             'paymentSchedules' => function ($q) use ($today) {
                 $q->where('due_date', '<', $today)->where('balance_due', '>', 0)->orderBy('due_date');
             }
-        ])->whereHas('paymentSchedules', function ($q) use ($today) {
-            $q->where('due_date', '<', $today)->where('balance_due', '>', 0);
-        });
+        ])->whereNotIn('status', InstallmentAccount::COMPLETED_STATUSES)
+            ->whereHas('paymentSchedules', function ($q) use ($today) {
+                $q->where('due_date', '<', $today)->where('balance_due', '>', 0);
+            });
 
         $this->applyBranchFilter($query, $user, $request->query('branch'));
 
@@ -881,6 +912,7 @@ class InstallmentController extends Controller
             'customer',
             'customer.branch:id,name',
             'agent:employee_id,employee_code,first_name,last_name,position',
+            'completedVerifiedBy.employee',
             'sale.branch:id,name',
             'sale.agent:employee_id,employee_code,first_name,last_name,position',
             'sale.processedBy.employee',
@@ -892,7 +924,9 @@ class InstallmentController extends Controller
             'payments' => function ($q) {
                 $q->orderByDesc('payment_date')->orderByDesc('payment_id');
             },
-            'payments.receivedBy.employee'
+            'payments.receivedBy.employee',
+            'payments.confirmedBy.employee',
+            'payments.collector.employee',
         ];
 
         $account = InstallmentAccount::with($relations)->find($id);
@@ -1047,8 +1081,27 @@ class InstallmentController extends Controller
             ];
         });
 
-        $paidTermsCount = $schedules->where('balance_due', '<=', 0)->count();
+        $isFullyPaid = $account->isFullyPaid() || $balance <= 0.0;
+        if ($isFullyPaid) {
+            $balance = 0.0;
+        }
+        $paidTermsCount = $isFullyPaid ? max((int) $account->number_of_installments, $schedules->count()) : $schedules->where('balance_due', '<=', 0)->count();
         $totalTermsCount = max((int) $account->number_of_installments, $schedules->count());
+
+        $verifierUser = $account->completedVerifiedBy;
+        if ($isFullyPaid && !$verifierUser) {
+            $lastSettled = $account->payments
+                ->filter(fn ($p) => Payment::isSettledStatus($p->status))
+                ->sortByDesc('payment_id')
+                ->first();
+            $verifierUser = $lastSettled?->confirmedBy ?: $lastSettled?->receivedBy;
+        }
+        $finalVerifierName = $verifierUser
+            ? ($verifierUser->employee
+                ? trim("{$verifierUser->employee->first_name} {$verifierUser->employee->last_name}")
+                : $verifierUser->username)
+            : null;
+        $finalVerifierRole = $verifierUser?->role ?: null;
 
         return response()->json([
             'account' => [
@@ -1075,28 +1128,37 @@ class InstallmentController extends Controller
                 'appliances_agent_contribution' => (float) ($account->appliances_agent_contribution ?? $account->sale?->appliances_agent_contribution ?? 0),
                 'furniture_agent_contribution' => (float) ($account->furniture_agent_contribution ?? $account->sale?->furniture_agent_contribution ?? 0),
                 'total_agent_contribution' => (float) ($account->total_agent_contribution ?? $account->sale?->total_agent_contribution ?? 0),
+                'agent_contribution_status' => ($account->has_agent ?? $account->sale?->has_agent ?? false)
+                    ? ($isFullyPaid ? ($account->agent_contribution_status ?: InstallmentAccount::AGENT_CONTRIBUTION_SETTLED) : ($account->agent_contribution_status ?: 'Pending'))
+                    : null,
                 'start_date' => $account->start_date,
-                'principal_amount' => (float)$account->principal_amount,
-                'down_payment' => (float)$account->down_payment,
-                'financed_amount' => max(0, (float)$account->principal_amount - (float)$account->down_payment),
-                'interest_rate' => (float)$account->interest_rate,
-                'interest_amount' => (float)$account->interest_amount,
+                'principal_amount' => (float) $account->principal_amount,
+                'down_payment' => (float) $account->down_payment,
+                'financed_amount' => max(0, (float) $account->principal_amount - (float) $account->down_payment),
+                'interest_rate' => (float) $account->interest_rate,
+                'interest_amount' => (float) $account->interest_amount,
                 'total_payable' => $totalPayable,
-                'installment_amount' => (float)$account->installment_amount,
-                'number_of_installments' => (int)$account->number_of_installments,
+                'installment_amount' => (float) $account->installment_amount,
+                'number_of_installments' => (int) $account->number_of_installments,
                 'is_open_contract' => strtolower(trim((string) $account->frequency)) === 'open contract',
                 'paid_installments' => $paidTermsCount,
                 'total_terms' => $totalTermsCount,
                 'frequency' => $account->frequency ?: 'Monthly',
                 'paid' => round($paid, 2),
                 'balance' => $balance,
+                'remaining_balance' => $balance,
                 'pending_payments_amount' => $fin['pending_amount'],
                 'pending_payments_count' => $fin['pending_count'],
-                'progress_percentage' => $totalPayable > 0 ? min(100, round(($paid / $totalPayable) * 100, 1)) : 0,
-                'status' => $balance <= 0 ? 'Complete Payment' : $account->status,
+                'progress_percentage' => $isFullyPaid ? 100 : ($totalPayable > 0 ? min(100, round(($paid / $totalPayable) * 100, 1)) : 0),
+                'status' => $isFullyPaid ? InstallmentAccount::STATUS_FULLY_PAID : $account->status,
+                'completed_at' => $isFullyPaid ? ($account->completed_at ? $account->completed_at->toIso8601String() : ($account->updated_at ? $account->updated_at->toIso8601String() : null)) : null,
+                'next_due_date' => $isFullyPaid ? null : ($nextSchedule ? $nextSchedule['due_date'] : null),
+                'customer_standing' => $isFullyPaid ? ($account->customer_standing ?: InstallmentAccount::STANDING_CLEARED) : ($account->customer_standing ?: null),
+                'final_verifier_name' => $finalVerifierName,
+                'final_verifier_role' => $finalVerifierRole,
                 'notes' => $account->notes,
             ],
-            'next_payment' => $nextSchedule ? [
+            'next_payment' => (!$isFullyPaid && $nextSchedule) ? [
                 'due_date' => $nextSchedule['due_date'],
                 'amount_due' => $nextSchedule['balance_due'],
                 'status' => $nextSchedule['status'],
@@ -1105,6 +1167,203 @@ class InstallmentController extends Controller
             'sale_items' => $saleItems,
             'schedules' => $schedules,
             'payments' => $payments,
+        ]);
+    }
+
+    public function clearanceDocument(Request $request, $id)
+    {
+        $user = $request->user();
+        if (!$user) {
+            return response()->json(['message' => 'Unauthorized.'], 401);
+        }
+
+        $relations = [
+            'customer',
+            'customer.branch:id,name,location,contact_number,email',
+            'agent:employee_id,employee_code,first_name,last_name,position',
+            'completedVerifiedBy.employee',
+            'sale.branch:id,name,location,contact_number,email',
+            'sale.agent:employee_id,employee_code,first_name,last_name,position',
+            'sale.processedBy.employee',
+            'sale.processedBy.employee.branch:id,name,location,contact_number,email',
+            'sale.items.product',
+            'paymentSchedules' => fn ($q) => $q->orderBy('installment_no'),
+            'payments' => fn ($q) => $q->orderBy('payment_date')->orderBy('payment_id'),
+            'payments.receivedBy.employee',
+            'payments.confirmedBy.employee',
+            'payments.collector.employee',
+        ];
+
+        $account = InstallmentAccount::with($relations)->find($id)
+            ?: InstallmentAccount::with($relations)->where('account_no', $id)->first();
+
+        if (!$account) {
+            return response()->json(['message' => 'Installment account not found.'], 404);
+        }
+
+        $branchInfo = $this->resolveBranchInfo($account);
+
+        if ($user->role === 'Customer') {
+            $customerId = CustomerDashboardController::resolveCustomerId($user);
+            if (!$customerId || (int) $account->customer_id !== (int) $customerId) {
+                return response()->json(['message' => 'Unauthorized access to clearance document.'], 403);
+            }
+        } elseif (in_array($user->role, ['Store Administrator', 'Store Admin'], true)) {
+            $userBranch = $user->employee?->branch_id ? (int) $user->employee->branch_id : null;
+            if (!$userBranch || (int) $branchInfo['branch_id'] !== $userBranch) {
+                return response()->json(['message' => 'Unauthorized access to installment in another branch.'], 403);
+            }
+        } elseif (!in_array($user->role, ['Administrator', 'Admin'], true)) {
+            return response()->json(['message' => 'Unauthorized access to clearance document.'], 403);
+        }
+
+        $fin = $this->computeFinancials($account);
+        $isFullyPaid = $account->isFullyPaid() || $fin['balance'] <= 0.0;
+        if (!$isFullyPaid) {
+            return response()->json([
+                'message' => 'Certificate of Full Payment and Final SOA are only available for Fully Paid installment contracts.',
+            ], 422);
+        }
+
+        $branchModel = $account->sale?->branch
+            ?: $account->customer?->branch
+            ?: ($branchInfo['branch_id'] ? \App\Models\BranchProfile::find($branchInfo['branch_id']) : null);
+
+        $settledPayments = $account->payments
+            ->filter(fn ($p) => Payment::isSettledStatus($p->status))
+            ->sortBy([['payment_date', 'asc'], ['payment_id', 'asc']])
+            ->values();
+
+        $ledger = $settledPayments->map(function ($p) {
+            $isCollector = $p->cash_channel === 'collector' || !empty($p->collector_id);
+            $channelLabel = $isCollector
+                ? 'Field Collector'
+                : (strtolower((string) $p->payment_method) === 'cash' ? 'Store Cashier' : 'Store Cashier');
+            $methodLabel = "{$p->payment_method} ({$channelLabel})";
+
+            $verifier = $p->confirmedBy ?: $p->receivedBy;
+            $verifiedByName = $verifier
+                ? ($verifier->employee
+                    ? trim("{$verifier->employee->first_name} {$verifier->employee->last_name}")
+                    : $verifier->username)
+                : 'Store Administrator';
+
+            $collectorName = $p->collector
+                ? ($p->collector->employee
+                    ? trim("{$p->collector->employee->first_name} {$p->collector->employee->last_name}")
+                    : $p->collector->username)
+                : null;
+
+            return [
+                'payment_id' => $p->payment_id,
+                'payment_date' => $p->payment_date,
+                'reference_no' => $p->reference_no ?: $p->receipt_no,
+                'method' => $p->payment_method,
+                'channel_label' => $channelLabel,
+                'method_display' => $methodLabel,
+                'official_receipt_no' => $p->receipt_reference ?: $p->receipt_no,
+                'receipt_no' => $p->receipt_no,
+                'amount' => round((float) $p->amount, 2),
+                'verified_by' => $verifiedByName,
+                'collector_name' => $collectorName,
+                'status' => $p->status ?: 'Completed',
+            ];
+        })->values();
+
+        $lastPayment = $settledPayments->last();
+        $finalVerifierUser = $account->completedVerifiedBy ?: ($lastPayment?->confirmedBy ?: $lastPayment?->receivedBy);
+        $finalVerifierName = $finalVerifierUser
+            ? ($finalVerifierUser->employee
+                ? trim("{$finalVerifierUser->employee->first_name} {$finalVerifierUser->employee->last_name}")
+                : $finalVerifierUser->username)
+            : 'Store Administrator';
+        $finalVerifierRole = $finalVerifierUser?->role ?: 'Store Administrator';
+
+        $branchStoreAdmin = null;
+        if ($branchInfo['branch_id']) {
+            $saUser = \App\Models\User::with('employee')
+                ->whereIn('role', ['Store Administrator', 'Store Admin'])
+                ->whereHas('employee', fn ($q) => $q->where('branch_id', $branchInfo['branch_id']))
+                ->orderByDesc('is_active')
+                ->first();
+            if ($saUser) {
+                $branchStoreAdmin = $saUser->employee
+                    ? trim("{$saUser->employee->first_name} {$saUser->employee->last_name}")
+                    : $saUser->username;
+            }
+        }
+
+        $items = ($account->sale?->items ?? collect())->map(function ($item) {
+            return [
+                'product_code' => $item->product?->product_code ?: 'SKU',
+                'product_name' => $item->product?->product_name ?: 'Item',
+                'category' => $item->product?->category ?: '',
+                'quantity' => (int) ($item->quantity ?: 1),
+                'unit_price' => round((float) $item->unit_price, 2),
+                'line_total' => round((float) $item->line_total, 2),
+            ];
+        })->values();
+
+        $completedAt = $account->completed_at
+            ? $account->completed_at->toIso8601String()
+            : ($lastPayment?->confirmed_at
+                ? $lastPayment->confirmed_at->toIso8601String()
+                : ($lastPayment?->payment_date ?: ($account->updated_at ? $account->updated_at->toIso8601String() : now()->toIso8601String())));
+
+        return response()->json([
+            'success' => true,
+            'document' => [
+                'certificate_no' => 'CERT-' . str_replace('ACC-', '', (string) $account->account_no),
+                'soa_no' => 'SOA-' . str_replace('ACC-', '', (string) $account->account_no),
+                'issued_at' => now()->toIso8601String(),
+                'company' => [
+                    'name' => 'Z-LICZ Furniture & Appliances Trading',
+                    'branch_name' => $branchModel?->name ?: $branchInfo['branch_name'],
+                    'branch_address' => $branchModel?->location ?: '',
+                    'branch_contact' => $branchModel?->contact_number ?: '',
+                    'branch_email' => $branchModel?->email ?: '',
+                ],
+                'contract' => [
+                    'installment_id' => $account->installment_id,
+                    'account_no' => $account->account_no,
+                    'invoice_no' => $account->sale?->invoice_no ?: 'N/A',
+                    'start_date' => $account->start_date,
+                    'completed_at' => $completedAt,
+                    'status' => InstallmentAccount::STATUS_FULLY_PAID,
+                    'customer_standing' => $account->customer_standing ?: InstallmentAccount::STANDING_CLEARED,
+                    'frequency' => $account->frequency ?: 'Monthly',
+                    'number_of_installments' => (int) $account->number_of_installments,
+                    'principal_amount' => round((float) $account->principal_amount, 2),
+                    'down_payment' => round((float) $account->down_payment, 2),
+                    'interest_rate' => round((float) $account->interest_rate, 2),
+                    'interest_amount' => round((float) $account->interest_amount, 2),
+                    'total_contract_price' => round((float) $account->total_payable, 2),
+                    'total_paid' => round((float) $fin['paid'], 2),
+                    'remaining_balance' => 0.00,
+                    'has_agent' => (bool) ($account->has_agent ?? $account->sale?->has_agent ?? false),
+                    'agent_name' => ($ag = $account->agent ?: $account->sale?->agent) ? trim("{$ag->first_name} {$ag->last_name}") : null,
+                    'agent_contribution_status' => ($account->has_agent ?? $account->sale?->has_agent ?? false)
+                        ? ($account->agent_contribution_status ?: InstallmentAccount::AGENT_CONTRIBUTION_SETTLED)
+                        : null,
+                    'total_agent_contribution' => round((float) ($account->total_agent_contribution ?? 0), 2),
+                ],
+                'customer' => [
+                    'customer_id' => $account->customer_id,
+                    'customer_code' => $account->customer?->customer_code ?: '',
+                    'full_name' => $account->customer ? trim("{$account->customer->first_name} {$account->customer->last_name}") : 'Customer',
+                    'address' => $account->customer?->address ?: '—',
+                    'phone' => $account->customer?->phone ?: '—',
+                    'email' => $account->customer?->email ?: '—',
+                ],
+                'items' => $items,
+                'ledger' => $ledger,
+                'signatory' => [
+                    'verified_by_name' => $finalVerifierName,
+                    'verified_by_role' => $finalVerifierRole,
+                    'store_admin_name' => $branchStoreAdmin ?: $finalVerifierName,
+                    'branch_name' => $branchModel?->name ?: $branchInfo['branch_name'],
+                ],
+            ],
         ]);
     }
 

@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("ZLics.InstallmentEngine")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+9722a28a4791014d15879394782dadff399171bf")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+31589b41c02206e410891c2cd6a0b42416ec0235")]
 [assembly: System.Reflection.AssemblyProductAttribute("ZLics.InstallmentEngine")]
 [assembly: System.Reflection.AssemblyTitleAttribute("ZLics.InstallmentEngine")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]
